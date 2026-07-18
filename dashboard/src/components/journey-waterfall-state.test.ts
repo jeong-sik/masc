@@ -13,12 +13,37 @@ import {
 } from './journey-waterfall-state'
 
 function trajectory(entries: TrajectoryEntry[]): TrajectoryResponse {
+  const toolEntries = entries.filter(entry => entry.type !== 'thinking')
+  const thinkingCount = entries.length - toolEntries.length
   return {
     keeper: 'keeper-a',
     trace_id: 'trace-1',
     generation: 1,
     total_entries: entries.length,
+    total_entries_scope: 'tail',
+    total_entries_exact: false,
+    tail_scan_lines: 500,
     showing: entries.length,
+    decode: {
+      tool_call_count: toolEntries.length,
+      thinking_count: thinkingCount,
+      passed_gate_count: toolEntries.filter(entry => entry.gate.status === 'pass').length,
+      rejected_gate_count: toolEntries.filter(entry => entry.gate.status === 'reject').length,
+      skipped_summary_count: 0,
+      invalid_line_count: 0,
+      invalid_reasons: {
+        missing_required_field: 0,
+        invalid_field: 0,
+        unsupported_row_type: 0,
+        missing_gate: 0,
+        invalid_gate_shape: 0,
+        missing_gate_status: 0,
+        unsupported_gate_status: 0,
+        missing_reject_reason: 0,
+        malformed_json: 0,
+      },
+    },
+    io_errors: [],
     entries,
   }
 }
@@ -145,7 +170,7 @@ describe('buildJourneyWaterfall', () => {
           gate: { status: 'pass' },
           result: 'old result',
           duration_ms: 250,
-          cost_usd: 0.001,
+          error: null,
         },
       ]),
       toolCalls: toolCalls([
@@ -169,7 +194,6 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.thinkingCount).toBe(1)
     expect(model.turns[0]?.toolCallCount).toBe(1)
     expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
-    expect(model.summary.totalCostUsd).toBe(0.001)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
     expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })

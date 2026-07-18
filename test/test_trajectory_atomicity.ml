@@ -55,12 +55,12 @@ let make_entry ~tid ~seq : Trajectory.tool_call_entry =
     turn = tid;
     round = seq;
     tool_name = Printf.sprintf "tool_%d" tid;
-    args_json = Printf.sprintf "{\"k\":\"%s\",\"tid\":%d,\"seq\":%d}" kor tid seq;
+    arguments =
+      [("k", `String kor); ("tid", `Int tid); ("seq", `Int seq)];
     gate_decision = Trajectory.Pass;
     result = None;
     duration_ms = 0;
     error = None;
-    cost_usd = 0.0;
     execution_id = None;
   }
 

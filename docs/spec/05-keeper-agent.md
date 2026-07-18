@@ -352,7 +352,7 @@ turn, and latency values remain observations.
 
 ### 7.4 Trajectory (`lib/trajectory.ml`)
 
-Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, cost 추적, entropy 감지, eval 입력.
+Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, 결과/latency 관측, eval 입력. 모델 usage/cost는 OAS inference observation에서만 온다. 상세 `runtime_contract`와 `action_radius`의 영속 SSOT는 `Keeper_tool_call_log`이며 trajectory에 복제하지 않는다.
 
 ---
 
@@ -367,7 +367,7 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 | 검사 | 동작 |
 |------|------|
 | Tool timing | 호출 시작 시각을 기록하고 항상 `Continue`한다. |
-| Tool observation | 호출, 결과, latency, cost를 trajectory/ledger/dashboard에 기록한다. |
+| Tool observation | 호출, 결과, latency를 trajectory/ledger/dashboard에 기록한다. 모델 usage/cost는 OAS inference observation으로 별도 기록한다. |
 | External effect | hook에서 명령 의미를 분류하지 않는다. normalized Gate 경계가 판정한다. |
 
 `pre_tool_use` hook은 tool 이름과 input 의미를 검사하거나
@@ -393,24 +393,16 @@ dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반
 
 ## 9. Configuration
 
-### 9.1 keeper_config.ml 핵심 파라미터
+### 9.1 Keeper configuration authority
 
-모든 환경변수는 `MASC_KEEPER_` 접두사를 사용한다. 전체 목록은 `lib/keeper/keeper_config.ml` 참조.
+Typed Keeper configuration is defined by the owning modules under
+`lib/keeper/`. The generated operator-facing inventory is
+[`docs/runtime-tunables.md`](../runtime-tunables.md); this document does not
+duplicate knob names or defaults.
 
-**Compaction**: `COMPACT_RATIO`(0.5), `COMPACT_MAX_MESSAGES`(240), `COMPACT_MAX_TOKENS`(0), `CONTINUITY_COMPACTION_COOLDOWN_SEC`(90)
-
-**Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
-
-**Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
-
-**Unified Turn**: runtime/provider capabilities determine temperature and output
-token intent. OAS `max_turns = 0` and Keeper `max_idle_turns = 0` are the
-unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
-Keeper work budget.
-
-**Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000), `DELIBERATION_MAX_TOKENS`(1024), `DELIBERATION_DAILY_BUDGET_USD`
-
-**Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
+Cost, turn-count, and Tool-round observations do not stop, pause, or budget a
+Keeper lifecycle. Provider context and output capacities describe runtime
+capabilities and invocation intent; they are not Keeper work gates.
 
 **Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 

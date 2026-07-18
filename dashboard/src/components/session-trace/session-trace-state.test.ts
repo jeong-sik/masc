@@ -22,6 +22,7 @@ import {
   getStatusCounts,
   getTraceLoading,
   getTraceError,
+  getTraceObservationErrors,
   buildTraceEvents,
   scheduleSessionTraceReload,
   traceSlots,
@@ -52,6 +53,32 @@ function emptyTimeline(agent = 'keeper-a') {
       total_events: 0,
     },
   }
+}
+
+const ONE_TOOL_TRAJECTORY_OBSERVATION = {
+  total_entries_scope: 'tail' as const,
+  total_entries_exact: false as const,
+  tail_scan_lines: 500,
+  decode: {
+    tool_call_count: 1,
+    thinking_count: 0,
+    passed_gate_count: 1,
+    rejected_gate_count: 0,
+    skipped_summary_count: 0,
+    invalid_line_count: 0,
+    invalid_reasons: {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unsupported_row_type: 0,
+      missing_gate: 0,
+      invalid_gate_shape: 0,
+      missing_gate_status: 0,
+      unsupported_gate_status: 0,
+      missing_reject_reason: 0,
+      malformed_json: 0,
+    },
+  },
+  io_errors: [],
 }
 
 describe('appendLiveToolCall', () => {
@@ -222,7 +249,30 @@ describe('scheduleSessionTraceReload', () => {
       trace_id: 'trace-1',
       generation: 1,
       total_entries: 1,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_lines: 500,
       showing: 1,
+      decode: {
+        tool_call_count: 0,
+        thinking_count: 1,
+        passed_gate_count: 0,
+        rejected_gate_count: 0,
+        skipped_summary_count: 0,
+        invalid_line_count: 1,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 1,
+          unsupported_row_type: 0,
+          missing_gate: 0,
+          invalid_gate_shape: 0,
+          missing_gate_status: 0,
+          unsupported_gate_status: 0,
+          missing_reject_reason: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [{ path: '/trajectory/trace-1.jsonl', message: 'read fault' }],
       entries: [{
         type: 'thinking',
         ts: 1712400000,
@@ -248,6 +298,10 @@ describe('scheduleSessionTraceReload', () => {
     expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
     expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
     expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+    expect(getTraceObservationErrors('keeper-a')).toEqual([
+      expect.stringContaining('trajectory decode invalid 1 rows'),
+      'trajectory read failed /trajectory/trace-1.jsonl: read fault',
+    ])
   })
 
   it('ignores reload requests for closed trace slots', async () => {
@@ -273,6 +327,7 @@ describe('buildTraceEvents', () => {
     const events = buildTraceEvents(
       { agent: 'test', period: { from: '', to: '' }, events: [{ type: 'broadcast', ts: '2024-04-06T10:00:00Z', detail: { content: 'Starting work on feature X' } }], summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 } },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test', trace_id: 't1', generation: 1, total_entries: 1, showing: 1,
         entries: [{
           ts: 1712397700,
@@ -284,7 +339,6 @@ describe('buildTraceEvents', () => {
           result: 'file contents',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -338,6 +392,7 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
@@ -353,7 +408,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -394,6 +448,7 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
@@ -409,7 +464,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 812,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-duration',
         }],
@@ -492,6 +546,7 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
@@ -507,7 +562,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-002a',
         }],
@@ -553,6 +607,7 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
@@ -568,7 +623,6 @@ describe('buildTraceEvents', () => {
           result: 'a',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-0001',
         }],
@@ -606,6 +660,7 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
@@ -621,7 +676,6 @@ describe('buildTraceEvents', () => {
           result: 'legacy',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -686,12 +740,12 @@ describe('buildTraceEvents', () => {
 })
 
 describe('getTraceSummary', () => {
-  it('counts tool_call events and accumulates cost', () => {
+  it('counts tool_call events without inventing tool costs', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {}, cost_usd: 0.01 },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {}, cost_usd: 0.02 },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -706,7 +760,7 @@ describe('getTraceSummary', () => {
     const summary = getTraceSummary('keeper-a')
     expect(summary.tool_call_count).toBe(2)
     expect(summary.broadcast_count).toBe(1)
-    expect(summary.total_cost_usd).toBeCloseTo(0.03)
+    expect(summary.total_cost_usd).toBe(0)
   })
 
   it('accumulates OAS tokens and cost from lifecycle events', () => {

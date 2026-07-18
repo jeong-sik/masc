@@ -1463,11 +1463,15 @@ let handle_keeper_get_subroutes state req request reqd =
               List.rev coverage_gaps |> List.find_opt (fun _ -> true)
             in
             let health, stale_reason =
-              match latest_gap with
-              | Some gap ->
+              match read_result.Trajectory.io_errors, latest_gap with
+              | _ :: _, _ -> ("coverage_gap", "trajectory_read_failed")
+              | [], Some gap ->
                   ( "coverage_gap",
                     Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-              | None -> (
+              | [], None
+                when read_result.Trajectory.gate_decode.invalid_entry_count > 0 ->
+                  ("coverage_gap", "trajectory_decode_invalid")
+              | [], None -> (
                   match latest_age_s with
                   | None -> ("empty", "no_entries")
                   | Some age when age > freshness_slo_s ->
@@ -1495,13 +1499,11 @@ let handle_keeper_get_subroutes state req request reqd =
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
               ( "gate_decode",
-                `Assoc
-                  [
-                    ( "parsed_gate_count",
-                      `Int read_result.Trajectory.gate_decode.parsed_gate_count );
-                    ( "legacy_default_count",
-                      `Int read_result.Trajectory.gate_decode.legacy_default_count );
-                  ] );
+                Trajectory.gate_decode_summary_to_json
+                  read_result.Trajectory.gate_decode );
+              ( "io_errors",
+                Trajectory.trajectory_read_errors_to_json
+                  read_result.Trajectory.io_errors );
               ("coverage_gaps", `List coverage_gaps);
               ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
@@ -1888,10 +1890,12 @@ let handle_keeper_get_subroutes state req request reqd =
            Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                let masc_root = Workspace.masc_root_dir config in
-               let trajectory_lines =
-                 Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
+               let trajectory_read =
+                 Trajectory.read_recent_lines_result ~masc_root
+                   ~keeper_name:m.name
                    ~trace_id ~max_lines:tail_scan_lines
                in
+               let trajectory_lines = trajectory_read.Trajectory.lines in
                let all_lines =
                  if include_thinking then
                    merge_keeper_trace_lines ~config ~trace_id trajectory_lines
@@ -1921,6 +1925,12 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries_exact", `Bool false);
                  ("tail_scan_lines", `Int tail_scan_lines);
                  ("showing", `Int (List.length recent));
+                 ( "decode",
+                   Trajectory.trajectory_line_decode_summary_to_json
+                     trajectory_read.Trajectory.line_decode );
+                 ( "io_errors",
+                   Trajectory.trajectory_read_errors_to_json
+                     trajectory_read.Trajectory.io_errors );
                  ("entries", `List (List.map
                    (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
                ]))

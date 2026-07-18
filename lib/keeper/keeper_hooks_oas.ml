@@ -113,7 +113,7 @@ include Keeper_hooks_oas_cost_events
     @param meta_ref Mutable ref to keeper metadata
     @param generation Current generation counter
     @param on_tool_executed Optional callback after each tool execution
-    @param trajectory_acc Optional trajectory accumulator for cost attribution
+    @param trajectory_acc Optional trajectory accumulator for tool and thinking observations
 
     Issue #8597 #3-5: dropped [~config], [~session], [~ctx_snapshot]. The
     closure body never read them; the docstring even admitted [ctx_snapshot]
@@ -323,8 +323,11 @@ let make_hooks
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
          | Some acc ->
+           let task_id =
+             Option.map Keeper_id.Task_id.to_string meta.current_task_id
+           in
            emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:meta.name ~task_id:acc.task_id
+             ~agent_name:meta.name ~task_id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens
@@ -521,44 +524,8 @@ let make_hooks
                ~max_len:4000
                output_text
            in
-           let runtime_contract =
-             Keeper_tool_call_log.runtime_observability_contract_json_for_call
-               ~keeper_name
-               ~cell:turn_ctx_cell
-               ()
-           in
-           let action_radius =
-             Keeper_tool_call_log.action_radius_json_for_call
-               ~cell:turn_ctx_cell
-               ~tool_name
-               ~input:safe_input
-               ~success:(outcome = Tool_result.Ok)
-               ~duration_ms
-               ?error:(if outcome = Tool_result.Ok then None else Some safe_output)
-               ()
-           in
-           let now = Time_compat.now () in
-           let entry : Trajectory.tool_call_entry =
-             {
-               ts = now;
-               ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-               turn = acc.Trajectory.turn;
-               round = Trajectory.calls_in_current_turn acc + 1;
-               tool_name;
-               args_json = Yojson.Safe.to_string safe_input;
-               gate_decision = Trajectory.Pass;
-               result = Some safe_output;
-               duration_ms = trajectory_duration_ms duration_ms;
-               error = (if outcome = Tool_result.Ok then None else Some safe_output);
-               cost_usd = Trajectory.tool_cost_estimate tool_name;
-               execution_id =
-                 Some (Ids.Execution_id.to_string execution_id);
-             }
-           in
-           Trajectory.record_entry
-             ~runtime_contract
-             ~action_radius
-             ~on_persist_error:(fun exn ->
+           let report_trajectory_gap ~stale_reason exn =
+             try
                Telemetry_coverage_gap.record
                  ~masc_root:acc.Trajectory.masc_root
                  ~source:"trajectory_tool_call"
@@ -567,13 +534,55 @@ let make_hooks
                    (Trajectory.trajectory_path acc.Trajectory.masc_root
                       acc.Trajectory.keeper_name trace_id)
                  ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-                 ~stale_reason:"trajectory_append_failed"
+                 ~stale_reason
                  ~keeper_name
                  ~trace_id
                  ~exn
-                 ())
-             acc
-             entry);
+                 ()
+             with
+             | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+             | gap_exn ->
+                 Log.Keeper.error ~keeper_name
+                   "trajectory coverage-gap write failed: %s"
+                   (Printexc.to_string gap_exn)
+           in
+           (match safe_input with
+            | `Assoc arguments ->
+                let now = Time_compat.now () in
+                let entry : Trajectory.tool_call_entry =
+                  {
+                    ts = now;
+                    ts_iso = Masc_domain.iso8601_of_unix_seconds now;
+                    turn = acc.Trajectory.turn;
+                    round = Trajectory.calls_in_current_turn acc + 1;
+                    tool_name;
+                    arguments;
+                    gate_decision = Trajectory.Pass;
+                    result = Some safe_output;
+                    duration_ms = trajectory_duration_ms duration_ms;
+                    error =
+                      (if outcome = Tool_result.Ok
+                       then None
+                       else Some safe_output);
+                    execution_id =
+                      Some (Ids.Execution_id.to_string execution_id);
+                  }
+                in
+                Trajectory.record_entry
+                  ~on_persist_error:
+                    (report_trajectory_gap
+                       ~stale_reason:"trajectory_append_failed")
+                  acc
+                  entry
+            | _ ->
+                let exn =
+                  Invalid_argument
+                    "trajectory Tool arguments must be a JSON object"
+                in
+                Log.Keeper.error ~keeper_name "%s" (Printexc.to_string exn);
+                report_trajectory_gap
+                  ~stale_reason:"trajectory_arguments_invalid"
+                  exn));
         (try
            on_tool_executed
              ~tool_name

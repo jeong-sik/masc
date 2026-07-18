@@ -685,10 +685,11 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       let trace_id = "trace-test-" ^ keeper_name in
       let trajectory_entries =
-        Trajectory.read_entries
+        Trajectory.read_entries_result
           ~masc_root
           ~keeper_name
           ~trace_id
+        |> fun read -> read.Trajectory.entries
       in
       check int "trajectory row count" 1 (List.length trajectory_entries);
       let trajectory_entry = List.hd trajectory_entries in
@@ -698,36 +699,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         trajectory_entry.Trajectory.turn;
       check int "trajectory round" 1
         trajectory_entry.Trajectory.round;
-      let trajectory_json =
-        let path =
-          Trajectory.trajectory_path masc_root keeper_name trace_id
-        in
-        let ic = open_in path in
-        let content =
-          Fun.protect
-            ~finally:(fun () -> close_in_noerr ic)
-            (fun () -> really_input_string ic (in_channel_length ic))
-        in
-        content
-        |> String.split_on_char '\n'
-        |> List.find (fun line -> String.trim line <> "")
-        |> Yojson.Safe.from_string
-      in
-      check string "trajectory runtime keeper" keeper_name
-        (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
-         |> U.to_string);
-      check string "trajectory runtime agent"
-        (Masc.Keeper_identity.keeper_agent_name keeper_name)
-        (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
-         |> U.to_string);
-      check bool "trajectory runtime has runtime_profile field" true
-        (match trajectory_json |> U.member "runtime_contract"
-               |> U.member "runtime_profile" with
-         | `String _ | `Null -> true
-         | _ -> false);
-      check string "trajectory action tool" "tool_execute"
-        (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
-         |> U.to_string);
       let sse_payload =
         match !received_sse with
         | Some payload -> extract_json_from_text payload

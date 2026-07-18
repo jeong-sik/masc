@@ -9,7 +9,7 @@ import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
-import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
+import { deriveTokPerSec, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
 import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
 import {
@@ -536,11 +536,9 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           세부 정보가 기록되지 않았습니다.
         </div>
       ` : null}
-      ${'' /* Metadata row */}
-      ${event.cost_usd != null && event.cost_usd > 0 ? html`
-        <div class="flex gap-3 text-3xs text-[var(--color-fg-disabled)]">
-          <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">${formatCost(event.cost_usd)}</span></span>
-          ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span></span>` : null}
+      ${event.duration_ms != null ? html`
+        <div class="text-3xs text-[var(--color-fg-disabled)]">
+          소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span>
         </div>
       ` : null}
     </div>

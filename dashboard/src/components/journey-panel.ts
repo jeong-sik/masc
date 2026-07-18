@@ -11,7 +11,7 @@ import {
   fetchKeeperRuntimeTrace,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { formatCost, formatMsCompact } from '../lib/format-number'
+import { formatMsCompact } from '../lib/format-number'
 import { errorToString } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
@@ -86,6 +86,16 @@ async function fetchWaterfallSources(
   const sourceErrors = [trajectory, toolCalls, runtimeTrace]
     .filter((result): result is Extract<SettledSource<unknown>, { ok: false }> => !result.ok)
     .map(result => `${result.label}: ${result.error}`)
+  if (trajectory.ok) {
+    if (trajectory.data.decode.invalid_line_count > 0) {
+      sourceErrors.push(
+        `trajectory: decode invalid ${trajectory.data.decode.invalid_line_count} rows ${JSON.stringify(trajectory.data.decode.invalid_reasons)}`,
+      )
+    }
+    for (const error of trajectory.data.io_errors) {
+      sourceErrors.push(`trajectory: read failed ${error.path}: ${error.message}`)
+    }
+  }
 
   const hasAnySource = trajectory.ok || toolCalls.ok || runtimeTrace.ok
   if (!hasAnySource) {
@@ -285,7 +295,7 @@ function WaterfallEntryRow({
 
       ${isTool
         ? html`
-            <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+            <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
               <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
                 <div
                   class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]"
@@ -296,7 +306,6 @@ function WaterfallEntryRow({
               <span class="font-mono text-3xs ${entry.durationMs != null ? durationColor(entry.durationMs) : 'text-[var(--color-fg-disabled)]'}">
                 ${formatMaybeDuration(entry.durationMs)}
               </span>
-              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${formatCost(entry.costUsd, '$0')}</span>
             </div>
             ${entry.toolArgs
               ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatArgs(entry.toolArgs)}</div>`
@@ -354,9 +363,6 @@ function WaterfallTurnRow({
           <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
             tool time ${formatMaybeDuration(turn.totalDurationMs)}
           </span>
-          <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-            cost ${formatCost(turn.totalCostUsd, '$0')}
-          </span>
         </div>
       </div>
 
@@ -401,13 +407,12 @@ function WaterfallBody({
     <div class="flex flex-col gap-4">
       <${SourceWarning} errors=${result.sourceErrors} />
 
-      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
         <${MetricCell} label="turns" value=${summary.totalTurns} tone="info" />
         <${MetricCell} label="events" value=${summary.totalEntries} />
         <${MetricCell} label="tools" value=${summary.toolCallCount} tone="ok" />
         <${MetricCell} label="failures" value=${summary.failureCount} tone=${summary.failureCount > 0 ? 'bad' : 'ok'} />
         <${MetricCell} label="tool time" value=${formatMaybeDuration(summary.totalDurationMs)} />
-        <${MetricCell} label="cost" value=${formatCost(summary.totalCostUsd, '$0')} />
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-3xs text-[var(--color-fg-muted)]">

@@ -893,12 +893,14 @@ let trajectory_entry_of_provider_call ~ts ~turn ~round
   ; turn
   ; round
   ; tool_name = call.name
-  ; args_json = Yojson.Safe.to_string call.input
+  ; arguments =
+      (match call.input with
+       | `Assoc fields -> fields
+       | _ -> Alcotest.fail "canonical provider Tool input must be an object")
   ; gate_decision = Trajectory.Pass
   ; result = Some {|{"ok":true}|}
   ; duration_ms = 1
   ; error = None
-  ; cost_usd = Trajectory.tool_cost_estimate call.name
   ; execution_id = Some ("exec-" ^ call.call_id)
   }
 
@@ -1118,8 +1120,9 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
              ; "thinking:complete after evidence"
              ; "tool:keeper_task_done"
              ]
-             (Trajectory.read_all_lines ~masc_root:base_dir ~keeper_name
+             (Trajectory.read_all_lines_result ~masc_root:base_dir ~keeper_name
                 ~trace_id
+              |> fun read -> read.Trajectory.lines
               |> List.map trajectory_interleaving_label))
   | _ -> failf "expected two projected tool calls, got %d" (List.length calls)
 

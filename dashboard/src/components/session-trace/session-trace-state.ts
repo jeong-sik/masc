@@ -101,6 +101,7 @@ interface TraceSlot {
   events: UnifiedTraceEvent[]
   loading: boolean
   error: string | null
+  observationErrors?: string[]
   filter: TraceEventKind | 'all'
   statusFilter: TraceStatus | 'all'
   searchQuery: string
@@ -140,6 +141,10 @@ export function getTraceLoading(agent: string): boolean {
 
 export function getTraceError(agent: string): string | null {
   return getSlot(agent).error
+}
+
+export function getTraceObservationErrors(agent: string): string[] {
+  return getSlot(agent).observationErrors ?? []
 }
 
 export function getTraceEvents(agent: string): UnifiedTraceEvent[] {
@@ -245,7 +250,6 @@ export function getTraceSummary(agent: string): TraceSummary {
     switch (e.kind) {
       case 'tool_call':
         tool_call_count++
-        total_cost_usd += e.cost_usd ?? 0
         break
       case 'oas_tool':
         oas_tool_count++
@@ -705,7 +709,6 @@ function trajectoryEntryToTrace(
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
   const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
-  if (entry.execution_id) detail.execution_id = entry.execution_id
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
@@ -723,6 +726,8 @@ function trajectoryEntryToTrace(
     }
   }
 
+  if (entry.execution_id) detail.execution_id = entry.execution_id
+
   return {
     id: `tj-${ts}-${entry.tool_name ?? 'unknown'}-T${entry.turn}R${entry.round ?? 0}-${index}`,
     ts,
@@ -738,7 +743,6 @@ function trajectoryEntryToTrace(
     gate: entry.gate,
     turn: entry.turn,
     round: entry.round,
-    cost_usd: entry.cost_usd,
     executionId: entry.execution_id,
     error: entry.error,
   }
@@ -809,7 +813,12 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
   const prevSlot = getSlot(agentName)
   const token = prevSlot.fetchToken + 1
-  patchSlot(agentName, { loading: true, error: null, fetchToken: token })
+  patchSlot(agentName, {
+    loading: true,
+    error: null,
+    observationErrors: [],
+    fetchToken: token,
+  })
   ensureLiveTraceSlot(agentName)
 
   try {
@@ -831,11 +840,19 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
     if (getSlot(agentName).fetchToken !== token) return
 
     const deduped = buildTraceEvents(timeline, trajectory, toolCalls)
+    const observationErrors = trajectory === null
+      ? []
+      : [
+          ...(trajectory.decode.invalid_line_count > 0
+            ? [`trajectory decode invalid ${trajectory.decode.invalid_line_count} rows ${JSON.stringify(trajectory.decode.invalid_reasons)}`]
+            : []),
+          ...trajectory.io_errors.map(error => `trajectory read failed ${error.path}: ${error.message}`),
+        ]
 
     // Final stale check before writing
     if (getSlot(agentName).fetchToken !== token) return
 
-    patchSlot(agentName, { events: deduped, loading: false })
+    patchSlot(agentName, { events: deduped, loading: false, observationErrors })
   } catch (err) {
     // Discard if stale
     if (getSlot(agentName).fetchToken !== token) return

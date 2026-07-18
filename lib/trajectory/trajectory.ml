@@ -1,10 +1,12 @@
 (** Trajectory — JSONL-based tool call trajectory logging for Keeper Harness.
 
-    Records every tool call invocation (pre + post) to enable:
+    Records exact tool call invocations (pre + post) to enable:
     - Deterministic replay of agent behavior
-    - Cost accumulation and budget enforcement
-    - Entropy detection (repeated tool calls)
+    - Tool count, result, and latency observation
     - Behavioral evaluation via eval_harness.ml
+
+    Model usage and cost come from OAS inference facts. Tool names are not a
+    pricing signal and are never used to estimate cost or control recurrence.
 
     Each keeper session produces a trajectory file at:
       .masc/trajectories/{keeper_name}/{trace_id}.jsonl
@@ -15,22 +17,30 @@
 (* Types                                                            *)
 (* ================================================================ *)
 
+type rejection_reason = string
+
+let rejection_reason_of_string value =
+  if String.trim value = "" then None else Some value
+
+let rejection_reason_to_string reason = reason
+
 type gate_decision =
   | Pass
-  | Reject of string  (** reason *)
+  | Reject of rejection_reason
 
 type tool_call_entry = {
   ts : float;                       (** Unix timestamp *)
   ts_iso : string;                  (** ISO8601 string *)
   turn : int;                       (** Turn number within session *)
-  round : int;                      (** Tool round within turn (1-3) *)
+  round : int;                      (** Monotonic Tool round within turn *)
   tool_name : string;
-  args_json : string;               (** Raw JSON string of arguments *)
+  arguments : (string * Yojson.Safe.t) list;
+      (** Structured Tool arguments. The association-list type enforces the
+          JSON object invariant without a second string representation. *)
   gate_decision : gate_decision;    (** Pre-execution gate result *)
   result : string option;           (** None if gated/pending, Some output *)
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
-  cost_usd : float;                 (** Estimated cost of this call *)
   execution_id : string option;
       (** RFC-0233 canonical join key minted at the dispatch boundary; the
           tool_calls JSONL row for the same execution carries the identical
@@ -39,40 +49,87 @@ type tool_call_entry = {
           mint site. *)
 }
 
+type invalid_entry_counts = {
+  missing_required_field : int;
+  invalid_field : int;
+  unsupported_row_type : int;
+  missing_gate : int;
+  invalid_gate_shape : int;
+  missing_gate_status : int;
+  unsupported_gate_status : int;
+  missing_reject_reason : int;
+  malformed_json : int;
+}
+
 type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
+  passed_gate_count : int;
+  rejected_gate_count : int;
+  invalid_entry_count : int;
+  invalid_reasons : invalid_entry_counts;
+}
+
+type trajectory_read_error = {
+  path : string;
+  message : string;
 }
 
 type entries_read_result = {
   entries : tool_call_entry list;
   gate_decode : gate_decode_summary;
+  io_errors : trajectory_read_error list;
 }
+
+type gate_decode_error =
+  | Missing_gate
+  | Invalid_gate_shape
+  | Missing_gate_status
+  | Unsupported_gate_status of string
+  | Missing_reject_reason
+
+type entry_field =
+  | Row_type
+  | Timestamp
+  | Timestamp_iso
+  | Turn
+  | Round
+  | Tool_name
+  | Arguments
+  | Result
+  | Duration_ms
+  | Error_message
+  | Execution_id
+  | Content
+  | Content_length
+  | Redacted
+
+type entry_decode_error =
+  | Missing_required_field of entry_field
+  | Invalid_field of entry_field
+  | Unsupported_row_type of string
+  | Invalid_gate of gate_decode_error
+  | Malformed_json
+
+type tool_call_entry_decode =
+  | Decoded_entry of tool_call_entry
+  | Non_entry_row
+  | Invalid_entry of entry_decode_error
 
 type trajectory_outcome =
   | Completed
   | Failed of string
   | Timeout
-  | CostExceeded
   | Gated of string  (** rejected by pre-execution gate *)
 
 type trajectory = {
-  scenario_id : string option;      (** None for live runs, Some for eval *)
   keeper_name : string;
   trace_id : string;
   generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
-  task_id : string option;
-  (** Claimed task ID for cost attribution.
-      Set when keeper claims a task via keeper_task_claim or masc_transition;
-      None if no task claimed.
-      Enables per-task cost aggregation from trajectory summaries. *)
 }
 
 (* ================================================================ *)
@@ -92,25 +149,21 @@ type trajectory_line =
   | Tool_call of tool_call_entry
   | Thinking of thinking_entry
 
-(* ================================================================ *)
-(* Cost estimation                                                  *)
-(* ================================================================ *)
+type trajectory_line_decode_summary = {
+  tool_call_count : int;
+  thinking_count : int;
+  passed_gate_count : int;
+  rejected_gate_count : int;
+  skipped_summary_count : int;
+  invalid_line_count : int;
+  invalid_reasons : invalid_entry_counts;
+}
 
-(* model_token_pricing and estimate_turn_cost removed (#3029).
-   Pricing belongs to OAS runtime, not MASC.
-   MASC records cost_usd from OAS responses via emit_cost_event. *)
-
-(** Rough per-call cost estimates for keeper tools.
-    Most are local/free; only MODEL-calling tools have cost. *)
-let tool_cost_estimate (tool_name : string) : float =
-  match tool_name with
-  (* MODEL-intensive tools *)
-  | "keeper_board_post" -> 0.002
-  | "keeper_board_comment" -> 0.001
-  | "tool_execute" -> 0.0001
-  | "tool_edit_file" | "tool_write_file" -> 0.0001
-  (* Read-only tools are essentially free *)
-  | _ -> 0.0
+type trajectory_lines_read_result = {
+  lines : trajectory_line list;
+  line_decode : trajectory_line_decode_summary;
+  io_errors : trajectory_read_error list;
+}
 
 (* ================================================================ *)
 (* JSON serialization                                               *)
@@ -118,37 +171,29 @@ let tool_cost_estimate (tool_name : string) : float =
 
 let gate_decision_to_json = function
   | Pass -> `Assoc [("status", `String "pass")]
-  | Reject reason -> `Assoc [("status", `String "reject"); ("reason", `String reason)]
+  | Reject reason ->
+      `Assoc
+        [ ("status", `String "reject")
+        ; ("reason", `String (rejection_reason_to_string reason))
+        ]
 
 let outcome_to_json = function
   | Completed -> `String "completed"
   | Failed msg -> `Assoc [("status", `String "failed"); ("reason", `String msg)]
   | Timeout -> `String "timeout"
-  | CostExceeded -> `String "cost_exceeded"
   | Gated reason -> `Assoc [("status", `String "gated"); ("reason", `String reason)]
 
 let outcome_to_string = function
   | Completed -> "completed"
   | Failed msg -> Printf.sprintf "failed: %s" msg
   | Timeout -> "timeout"
-  | CostExceeded -> "cost_exceeded"
   | Gated reason -> Printf.sprintf "gated: %s" reason
 
 (** Default truncation limit for result text in JSONL persistence. *)
 let default_result_truncation = 500
 
 let entry_to_json ?(result_max_len = default_result_truncation)
-    ?runtime_contract ?action_radius (e : tool_call_entry) : Yojson.Safe.t =
-  let runtime_contract_field =
-    match runtime_contract with
-    | Some value -> [ ("runtime_contract", value) ]
-    | None -> []
-  in
-  let action_radius_field =
-    match action_radius with
-    | Some value -> [ ("action_radius", value) ]
-    | None -> []
-  in
+    (e : tool_call_entry) : Yojson.Safe.t =
   `Assoc
     ([
        ("ts", `Float e.ts);
@@ -156,9 +201,7 @@ let entry_to_json ?(result_max_len = default_result_truncation)
        ("turn", `Int e.turn);
        ("round", `Int e.round);
        ("tool_name", `String e.tool_name);
-       ( "args",
-         (try Yojson.Safe.from_string e.args_json with
-          | Yojson.Json_error _ -> `String e.args_json) );
+       ("args", `Assoc e.arguments);
        ("gate", gate_decision_to_json e.gate_decision);
        ( "result",
          (match e.result with
@@ -174,12 +217,10 @@ let entry_to_json ?(result_max_len = default_result_truncation)
               else `String r) );
        ("duration_ms", `Int e.duration_ms);
        ("error", Json_util.string_opt_to_json e.error);
-       ("cost_usd", `Float e.cost_usd);
      ]
-    @ (match e.execution_id with
-       | Some id -> [ ("execution_id", `String id) ]
-       | None -> [])
-    @ runtime_contract_field @ action_radius_field)
+     @ (match e.execution_id with
+        | Some id -> [ ("execution_id", `String id) ]
+        | None -> []))
 
 let default_thinking_truncation = 2000
 
@@ -208,19 +249,59 @@ let trajectory_line_to_json ?(result_max_len = default_result_truncation)
 
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   `Assoc [
-    ("scenario_id", Json_util.string_opt_to_json t.scenario_id);
     ("keeper_name", `String t.keeper_name);
     ("trace_id", `String t.trace_id);
     ("generation", `Int t.generation);
     ("started_at", `Float t.started_at);
     ("ended_at", `Float t.ended_at);
-    ("total_cost_usd", `Float t.total_cost_usd);
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
-    ("task_id", Json_util.string_opt_to_json t.task_id);
     ("entries", `List (List.map entry_to_json t.entries));
   ]
+
+let invalid_entry_counts_to_json (counts : invalid_entry_counts) =
+  `Assoc
+    [ ("missing_required_field", `Int counts.missing_required_field)
+    ; ("invalid_field", `Int counts.invalid_field)
+    ; ("unsupported_row_type", `Int counts.unsupported_row_type)
+    ; ("missing_gate", `Int counts.missing_gate)
+    ; ("invalid_gate_shape", `Int counts.invalid_gate_shape)
+    ; ("missing_gate_status", `Int counts.missing_gate_status)
+    ; ("unsupported_gate_status", `Int counts.unsupported_gate_status)
+    ; ("missing_reject_reason", `Int counts.missing_reject_reason)
+    ; ("malformed_json", `Int counts.malformed_json)
+    ]
+
+let gate_decode_summary_to_json (summary : gate_decode_summary) =
+  `Assoc
+    [ ("passed_gate_count", `Int summary.passed_gate_count)
+    ; ("rejected_gate_count", `Int summary.rejected_gate_count)
+    ; ("invalid_entry_count", `Int summary.invalid_entry_count)
+    ; ("invalid_reasons", invalid_entry_counts_to_json summary.invalid_reasons)
+    ]
+
+let trajectory_line_decode_summary_to_json
+    (summary : trajectory_line_decode_summary) =
+  `Assoc
+    [ ("tool_call_count", `Int summary.tool_call_count)
+    ; ("thinking_count", `Int summary.thinking_count)
+    ; ("passed_gate_count", `Int summary.passed_gate_count)
+    ; ("rejected_gate_count", `Int summary.rejected_gate_count)
+    ; ("skipped_summary_count", `Int summary.skipped_summary_count)
+    ; ("invalid_line_count", `Int summary.invalid_line_count)
+    ; ("invalid_reasons", invalid_entry_counts_to_json summary.invalid_reasons)
+    ]
+
+let trajectory_read_errors_to_json errors =
+  `List
+    (List.map
+       (fun (error : trajectory_read_error) ->
+          `Assoc
+            [ ("path", `String error.path)
+            ; ("message", `String error.message)
+            ])
+       errors)
 
 (* ================================================================ *)
 (* JSON deserialization                                             *)
@@ -231,59 +312,214 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
 let gate_decision_of_json = function
   | `Assoc fields -> (
       match List.assoc_opt "status" fields with
-      | Some (`String status) -> (
-          match String.lowercase_ascii status with
-          | "pass" | "passed" -> (Pass, true)
-          | "reject" | "rejected" | "gated" ->
-              let reason =
-                match List.assoc_opt "reason" fields with
-                | Some (`String value) when String.trim value <> "" -> value
-                | _ -> "persisted gate rejection"
-              in
-              (Reject reason, true)
-          | _ -> (Pass, false))
-      | _ -> (Pass, false))
-  | _ -> (Pass, false)
+      | None -> Error Missing_gate_status
+      | Some (`String status) ->
+          if String.equal status "pass" then Ok Pass
+          else if String.equal status "reject" then
+            (match List.assoc_opt "reason" fields with
+             | Some (`String reason) ->
+                 (match rejection_reason_of_string reason with
+                  | Some reason -> Ok (Reject reason)
+                  | None -> Error Missing_reject_reason)
+             | _ -> Error Missing_reject_reason)
+          else Error (Unsupported_gate_status status)
+      | Some _ -> Error Invalid_gate_shape)
+  | _ -> Error Invalid_gate_shape
 
-let tool_call_entry_of_json (json : Yojson.Safe.t) :
-    (tool_call_entry * bool) option =
-  try
-    match Json_util.assoc_member_opt "type" json with
-    | Some (`String "trajectory_summary") -> None
-    | Some (`String "thinking") -> None
-    | _ ->
-        let gate_decision, parsed_gate =
-          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
-        in
-        Some
-          ( {
-              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
-              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
-              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
-              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
-              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
-              gate_decision;
-              result =
-                (match Json_util.assoc_member_opt "result" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
-              error =
-                (match Json_util.assoc_member_opt "error" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-              execution_id =
-                (match Json_util.assoc_member_opt "execution_id" json with
-                 | Some (`String s) -> Some s
-                 | _ -> None);
-            },
-            parsed_gate )
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+let required_member field key json =
+  match Json_util.assoc_member_opt key json with
+  | Some value -> Ok value
+  | None -> Error (Missing_required_field field)
+
+let decode_finite_number field = function
+  | `Float value when Float.is_finite value -> Ok value
+  | `Int value -> Ok (Float.of_int value)
+  | _ -> Error (Invalid_field field)
+
+let decode_non_blank_string field = function
+  | `String value when String.trim value <> "" -> Ok value
+  | _ -> Error (Invalid_field field)
+
+let decode_string field = function
+  | `String value -> Ok value
+  | _ -> Error (Invalid_field field)
+
+let decode_nonnegative_int field = function
+  | `Int value when value >= 0 -> Ok value
+  | _ -> Error (Invalid_field field)
+
+let decode_nullable_string field = function
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | _ -> Error (Invalid_field field)
+
+let decode_bool field = function
+  | `Bool value -> Ok value
+  | _ -> Error (Invalid_field field)
+
+let decode_arguments = function
+  | `Assoc fields -> Ok fields
+  | _ -> Error (Invalid_field Arguments)
+
+let decode_optional_execution_id json =
+  match Json_util.assoc_member_opt "execution_id" json with
+  | None | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (Invalid_field Execution_id)
+
+let decode_tool_call_entry json =
+  let ( let* ) = Result.bind in
+  let* ts_json = required_member Timestamp "ts" json in
+  let* ts = decode_finite_number Timestamp ts_json in
+  let* ts_iso_json = required_member Timestamp_iso "ts_iso" json in
+  let* ts_iso = decode_non_blank_string Timestamp_iso ts_iso_json in
+  let* turn_json = required_member Turn "turn" json in
+  let* turn = decode_nonnegative_int Turn turn_json in
+  let* round_json = required_member Round "round" json in
+  let* round = decode_nonnegative_int Round round_json in
+  let* tool_name_json = required_member Tool_name "tool_name" json in
+  let* tool_name = decode_non_blank_string Tool_name tool_name_json in
+  let* args_value = required_member Arguments "args" json in
+  let* arguments = decode_arguments args_value in
+  let* gate_json =
+    match Json_util.assoc_member_opt "gate" json with
+    | Some value -> Ok value
+    | None -> Error (Invalid_gate Missing_gate)
+  in
+  let* gate_decision =
+    match gate_decision_of_json gate_json with
+    | Ok decision -> Ok decision
+    | Error error -> Error (Invalid_gate error)
+  in
+  let* result_json = required_member Result "result" json in
+  let* result = decode_nullable_string Result result_json in
+  let* duration_json = required_member Duration_ms "duration_ms" json in
+  let* duration_ms = decode_nonnegative_int Duration_ms duration_json in
+  let* error_json = required_member Error_message "error" json in
+  let* error = decode_nullable_string Error_message error_json in
+  let* execution_id = decode_optional_execution_id json in
+  Ok
+    {
+      ts;
+      ts_iso;
+      turn;
+      round;
+      tool_name;
+      arguments;
+      gate_decision;
+      result;
+      duration_ms;
+      error;
+      execution_id;
+    }
+
+let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry_decode =
+  match Json_util.assoc_member_opt "type" json with
+  | Some (`String "trajectory_summary") -> Non_entry_row
+  | Some (`String "thinking") -> Non_entry_row
+  | Some (`String row_type) -> Invalid_entry (Unsupported_row_type row_type)
+  | Some _ -> Invalid_entry (Invalid_field Row_type)
+  | None ->
+      (match decode_tool_call_entry json with
+       | Ok entry -> Decoded_entry entry
+       | Error error -> Invalid_entry error)
+
+let empty_invalid_entry_counts : invalid_entry_counts =
+  {
+    missing_required_field = 0;
+    invalid_field = 0;
+    unsupported_row_type = 0;
+    missing_gate = 0;
+    invalid_gate_shape = 0;
+    missing_gate_status = 0;
+    unsupported_gate_status = 0;
+    missing_reject_reason = 0;
+    malformed_json = 0;
+  }
+
+let empty_gate_decode_summary : gate_decode_summary =
+  {
+    passed_gate_count = 0;
+    rejected_gate_count = 0;
+    invalid_entry_count = 0;
+    invalid_reasons = empty_invalid_entry_counts;
+  }
+
+type decode_accumulator = {
+  mutable passed_gate_count : int;
+  mutable rejected_gate_count : int;
+  mutable invalid_entry_count : int;
+  mutable missing_required_field : int;
+  mutable invalid_field : int;
+  mutable unsupported_row_type : int;
+  mutable missing_gate : int;
+  mutable invalid_gate_shape : int;
+  mutable missing_gate_status : int;
+  mutable unsupported_gate_status : int;
+  mutable missing_reject_reason : int;
+  mutable malformed_json : int;
+}
+
+let create_decode_accumulator () =
+  {
+    passed_gate_count = 0;
+    rejected_gate_count = 0;
+    invalid_entry_count = 0;
+    missing_required_field = 0;
+    invalid_field = 0;
+    unsupported_row_type = 0;
+    missing_gate = 0;
+    invalid_gate_shape = 0;
+    missing_gate_status = 0;
+    unsupported_gate_status = 0;
+    missing_reject_reason = 0;
+    malformed_json = 0;
+  }
+
+let decode_accumulator_snapshot accumulator : gate_decode_summary =
+  {
+    passed_gate_count = accumulator.passed_gate_count;
+    rejected_gate_count = accumulator.rejected_gate_count;
+    invalid_entry_count = accumulator.invalid_entry_count;
+    invalid_reasons =
+      {
+        missing_required_field = accumulator.missing_required_field;
+        invalid_field = accumulator.invalid_field;
+        unsupported_row_type = accumulator.unsupported_row_type;
+        missing_gate = accumulator.missing_gate;
+        invalid_gate_shape = accumulator.invalid_gate_shape;
+        missing_gate_status = accumulator.missing_gate_status;
+        unsupported_gate_status = accumulator.unsupported_gate_status;
+        missing_reject_reason = accumulator.missing_reject_reason;
+        malformed_json = accumulator.malformed_json;
+      };
+  }
+
+let record_decoded_gate accumulator = function
+  | Pass -> accumulator.passed_gate_count <- accumulator.passed_gate_count + 1
+  | Reject _ ->
+      accumulator.rejected_gate_count <- accumulator.rejected_gate_count + 1
+
+let record_invalid_entry accumulator error =
+  accumulator.invalid_entry_count <- accumulator.invalid_entry_count + 1;
+  match error with
+  | Missing_required_field _ ->
+      accumulator.missing_required_field <-
+        accumulator.missing_required_field + 1
+  | Invalid_field _ -> accumulator.invalid_field <- accumulator.invalid_field + 1
+  | Unsupported_row_type _ ->
+      accumulator.unsupported_row_type <- accumulator.unsupported_row_type + 1
+  | Invalid_gate Missing_gate -> accumulator.missing_gate <- accumulator.missing_gate + 1
+  | Invalid_gate Invalid_gate_shape ->
+      accumulator.invalid_gate_shape <- accumulator.invalid_gate_shape + 1
+  | Invalid_gate Missing_gate_status ->
+      accumulator.missing_gate_status <- accumulator.missing_gate_status + 1
+  | Invalid_gate (Unsupported_gate_status _) ->
+      accumulator.unsupported_gate_status <-
+        accumulator.unsupported_gate_status + 1
+  | Invalid_gate Missing_reject_reason ->
+      accumulator.missing_reject_reason <- accumulator.missing_reject_reason + 1
+  | Malformed_json -> accumulator.malformed_json <- accumulator.malformed_json + 1
 
 (** Single definition of "this tool call counts as a failure" for dashboard
     aggregation. *)
@@ -519,23 +755,21 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("keeper_name", `String traj.keeper_name);
     ("trace_id", `String traj.trace_id);
     ("generation", `Int traj.generation);
-    ("total_cost_usd", `Float traj.total_cost_usd);
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
-    ("task_id", Json_util.string_opt_to_json traj.task_id);
     ("started_at", `Float traj.started_at);
     ("ended_at", `Float traj.ended_at);
   ] in
   Fs_compat.append_jsonl path summary
 
-let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
+let append_entry ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  let json = entry_to_json ?runtime_contract ?action_radius entry in
+  let json = entry_to_json entry in
   Fs_compat.append_jsonl path json
 
 (* ================================================================ *)
@@ -548,7 +782,6 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
@@ -556,10 +789,6 @@ type accumulator = {
   generation : int;
   started_at : float;
   masc_root : string;
-  mutable task_id : string option;
-  (** Claimed task ID for cost attribution.
-      Starts as None; set via [set_task_id] when keeper claims a task.
-      Propagated to trajectory record on [finalize]. *)
   pending_queue : pending_entry Queue.t;
   pending_mu : Stdlib.Mutex.t;
   mutable last_flush : float;
@@ -582,7 +811,6 @@ let unregister_accumulator (acc : accumulator) =
 let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
   let acc = {
     entries = [];
-    total_cost = 0.0;
     total_calls = 0;
     turn = 0;
     keeper_name;
@@ -590,7 +818,6 @@ let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~genera
     generation;
     started_at = Time_compat.now ();
     masc_root;
-    task_id = None;
     pending_queue = Queue.create ();
     pending_mu = Stdlib.Mutex.create ();
     last_flush = 0.0;
@@ -599,28 +826,19 @@ let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~genera
   register_accumulator acc;
   acc
 
-(** Bind a claimed task to this trajectory for cost attribution. *)
-let set_task_id (acc : accumulator) (id : string) : unit =
-  acc.task_id <- Some id
-
-(** Clear task binding (e.g., after masc_transition action=done). *)
-let clear_task_id (acc : accumulator) : unit =
-  acc.task_id <- None
-
 let increment_turn (acc : accumulator) : unit =
   acc.turn <- acc.turn + 1
 
-let record_entry ?runtime_contract ?action_radius ?on_persist_error
+let record_entry ?on_persist_error
     (acc : accumulator) (entry : tool_call_entry) : unit =
   acc.entries <- entry :: acc.entries;
-  acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
   (* Store on_persist_error for use during batch flush *)
   (match on_persist_error, acc.on_flush_error with
    | Some cb, None -> acc.on_flush_error <- Some cb
    | _ -> ());
   (* Enqueue for batched write instead of synchronous disk I/O *)
-  let json = entry_to_json ?runtime_contract ?action_radius entry in
+  let json = entry_to_json entry in
   Stdlib.Mutex.protect acc.pending_mu (fun () ->
     Queue.push { pe_json = json } acc.pending_queue)
 
@@ -674,49 +892,20 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   flush_pending acc;
   unregister_accumulator acc;
   let traj = {
-    scenario_id = None;
     keeper_name = acc.keeper_name;
     trace_id = acc.trace_id;
     generation = acc.generation;
     started_at = acc.started_at;
     ended_at = Time_compat.now ();
     entries = List.rev acc.entries;
-    total_cost_usd = acc.total_cost;
     total_turns = acc.turn;
     total_tool_calls = acc.total_calls;
     outcome;
-    task_id = acc.task_id;
   } in
   (try append_summary ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id traj
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Keeper.error "Failed to persist summary for %s: %s" acc.trace_id (Printexc.to_string exn));
   traj
-
-(* ================================================================ *)
-(* Entropy detection                                                *)
-(* ================================================================ *)
-
-(** Detect whether the current candidate call would make a consecutive streak of
-    calls to [tool_name] reach or exceed [threshold]. The count includes the
-    candidate call being checked, so rejection can occur before executing the
-    threshold-th call.
-    If [args_json] is provided, only consecutive calls with the same tool name
-    and the same raw [args_json] string are counted; this is string equality,
-    not semantic JSON equality. *)
-let detect_entropy ?(threshold = 3) ?args_json (acc : accumulator) (tool_name : string) : (string * int) option =
-  let recent =
-    acc.entries
-    |> List.to_seq
-    |> Seq.take_while (fun e ->
-         e.tool_name = tool_name &&
-         match args_json with
-         | Some args -> e.args_json = args
-         | None -> true)
-    |> List.of_seq
-  in
-  let count = List.length recent + 1 in  (* +1 for the upcoming call *)
-  if count >= threshold then Some (tool_name, count)
-  else None
 
 (** Count tool calls in current turn. *)
 let calls_in_current_turn (acc : accumulator) : int =
@@ -734,7 +923,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 
@@ -753,7 +941,7 @@ let p95_of_sorted (durations : int array) : int =
     durations.(idx)
 
 let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
-  let tbl : (string, int list * int * int * float * float * string) Hashtbl.t =
+  let tbl : (string, int list * int * int * float * string) Hashtbl.t =
     Hashtbl.create 32
   in
   List.iter (fun (e : tool_call_entry) ->
@@ -763,15 +951,15 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       let succ = if is_failure then 0 else 1 in
       let fail = if is_failure then 1 else 0 in
       Hashtbl.replace tbl e.tool_name
-        ([e.duration_ms], succ, fail, e.cost_usd, e.ts, e.ts_iso)
-    | Some (durations, succ, fail, cost, max_ts, max_iso) ->
+        ([e.duration_ms], succ, fail, e.ts, e.ts_iso)
+    | Some (durations, succ, fail, max_ts, max_iso) ->
       let succ' = if is_failure then succ else succ + 1 in
       let fail' = if is_failure then fail + 1 else fail in
       let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
       Hashtbl.replace tbl e.tool_name
-        (e.duration_ms :: durations, succ', fail', cost +. e.cost_usd, ts', iso')
+        (e.duration_ms :: durations, succ', fail', ts', iso')
   ) entries;
-  let stats = Hashtbl.fold (fun name (durations, succ, fail, cost, _max_ts, last_iso) acc ->
+  let stats = Hashtbl.fold (fun name (durations, succ, fail, _max_ts, last_iso) acc ->
     let count = succ + fail in
     let total_dur = List.fold_left (+) 0 durations in
     let avg = if count > 0 then total_dur / count else 0 in
@@ -785,7 +973,6 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       avg_duration_ms = avg;
       p95_duration_ms = p95_of_sorted sorted;
       max_duration_ms = max_d;
-      total_cost_usd = cost;
       last_used_at = last_iso;
     } :: acc
   ) tbl [] in
@@ -820,7 +1007,6 @@ let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
     ("avg_duration_ms", `Int s.avg_duration_ms);
     ("p95_duration_ms", `Int s.p95_duration_ms);
     ("max_duration_ms", `Int s.max_duration_ms);
-    ("total_cost_usd", `Float s.total_cost_usd);
     ("last_used_at", `String s.last_used_at);
   ]
 
@@ -836,167 +1022,324 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
 let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
     ~(since : float) : entries_read_result =
   let dir = trajectories_dir masc_root keeper_name in
-  if not (Sys.file_exists dir) then
-    { entries = []; gate_decode = { parsed_gate_count = 0; legacy_default_count = 0 } }
-  else
-    let files = Sys.readdir dir in
-    let all_entries = ref [] in
-    let parsed_gate_count = ref 0 in
-    let legacy_default_count = ref 0 in
-    Array.iter (fun fname ->
-      if Filename.check_suffix fname ".jsonl" then begin
-        let path = Filename.concat dir fname in
-        (try
-           let content = Fs_compat.load_file path in
-           String.split_on_char '\n' content
-           |> List.iter (fun line ->
-             if String.trim line <> "" then
-               try
-                 let json = Yojson.Safe.from_string line in
-                 (match tool_call_entry_of_json json with
-                  | Some (entry, parsed_gate) when entry.ts >= since ->
-                      if parsed_gate then incr parsed_gate_count
-                      else incr legacy_default_count;
-                      all_entries := entry :: !all_entries
-                  | _ -> ())
-               with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
-         with Sys_error _ -> ())
-      end
-    ) files;
-    {
-      entries =
-        List.sort
-          (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
-          !all_entries;
-      gate_decode =
+  let empty_result io_errors =
+    { entries = []; gate_decode = empty_gate_decode_summary; io_errors }
+  in
+  match Fs_compat.path_kind dir with
+  | exception Sys_error message -> empty_result [{ path = dir; message }]
+  | exception (Unix.Unix_error _ as exn) ->
+      empty_result [{ path = dir; message = Printexc.to_string exn }]
+  | Fs_compat.Missing -> empty_result []
+  | Fs_compat.Other ->
+      empty_result
+        [{ path = dir; message = "trajectory path is not a directory" }]
+  | Fs_compat.Directory ->
+    match Fs_compat.read_dir dir with
+    | exception Sys_error message ->
+        empty_result [{ path = dir; message }]
+    | exception (Unix.Unix_error _ as exn) ->
+        empty_result [{ path = dir; message = Printexc.to_string exn }]
+    | files ->
+        let all_entries = ref [] in
+        let gate_decode = create_decode_accumulator () in
+        let io_errors = ref [] in
+        let row_may_be_in_window json =
+          match Json_util.assoc_member_opt "ts" json with
+          | Some (`Float value) -> value >= since
+          | Some (`Int value) -> Float.of_int value >= since
+          | _ -> true
+        in
+        List.iter
+          (fun fname ->
+             if Filename.check_suffix fname ".jsonl" then
+               let path = Filename.concat dir fname in
+               let record_io_error message =
+                 io_errors := { path; message } :: !io_errors
+               in
+               let decode_file content =
+                 String.split_on_char '\n' content
+                 |> List.iter (fun line ->
+                        if String.trim line <> "" then
+                          match Yojson.Safe.from_string line with
+                          | exception
+                              (Yojson.Json_error _
+                              | Yojson.Safe.Util.Type_error _) ->
+                              record_invalid_entry gate_decode Malformed_json
+                          | json ->
+                              match tool_call_entry_of_json json with
+                              | Decoded_entry entry when entry.ts >= since ->
+                                  record_decoded_gate gate_decode
+                                    entry.gate_decision;
+                                  all_entries := entry :: !all_entries
+                              | Decoded_entry _ | Non_entry_row -> ()
+                              | Invalid_entry error
+                                when row_may_be_in_window json ->
+                                  record_invalid_entry gate_decode error
+                              | Invalid_entry _ -> ())
+               in
+               match Fs_compat.exact_path_kind path with
+               | exception Sys_error message -> record_io_error message
+               | exception (Unix.Unix_error _ as exn) ->
+                   record_io_error (Printexc.to_string exn)
+               | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
+                   (match Fs_compat.load_file path with
+                    | content -> decode_file content
+                    | exception Sys_error message -> record_io_error message
+                    | exception (Unix.Unix_error _ as exn) ->
+                        record_io_error (Printexc.to_string exn))
+               | Fs_compat.Exact_missing ->
+                   record_io_error "trajectory file disappeared during read"
+               | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+                   record_io_error "trajectory path is not a regular file")
+          files;
         {
-          parsed_gate_count = !parsed_gate_count;
-          legacy_default_count = !legacy_default_count;
-        };
-    }
-
-let read_entries_since ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : tool_call_entry list =
-  (read_entries_since_result ~masc_root ~keeper_name ~since).entries
+          entries =
+            List.sort
+              (fun (a : tool_call_entry) (b : tool_call_entry) ->
+                 compare a.ts b.ts)
+              !all_entries;
+          gate_decode = decode_accumulator_snapshot gate_decode;
+          io_errors = List.rev !io_errors;
+        }
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)
 (* ================================================================ *)
 
-let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    : tool_call_entry list =
+let read_entries_result ~(masc_root : string) ~(keeper_name : string)
+    ~(trace_id : string) : entries_read_result =
   let path = trajectory_path masc_root keeper_name trace_id in
-  if not (Sys.file_exists path) then []
-  else
-    let content = Fs_compat.load_file path in
-    String.split_on_char '\n' content
-    |> List.filter (fun line -> String.trim line <> "")
-    |> List.filter_map (fun line ->
-        try
-          let json = Yojson.Safe.from_string line in
-          match tool_call_entry_of_json json with
-          | Some (entry, _parsed_gate) -> Some entry
-          | None -> None
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+  let empty_result io_errors =
+    { entries = []; gate_decode = empty_gate_decode_summary; io_errors }
+  in
+  let decode content =
+      let gate_decode = create_decode_accumulator () in
+      let entries_rev =
+        String.split_on_char '\n' content
+        |> List.filter (fun line -> String.trim line <> "")
+        |> List.fold_left
+             (fun entries line ->
+                match Yojson.Safe.from_string line with
+                | exception
+                    (Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) ->
+                    record_invalid_entry gate_decode Malformed_json;
+                    entries
+                | json ->
+                    match tool_call_entry_of_json json with
+                    | Decoded_entry entry ->
+                        record_decoded_gate gate_decode entry.gate_decision;
+                        entry :: entries
+                    | Non_entry_row -> entries
+                    | Invalid_entry error ->
+                        record_invalid_entry gate_decode error;
+                        entries)
+             []
+      in
+      {
+        entries = List.rev entries_rev;
+        gate_decode = decode_accumulator_snapshot gate_decode;
+        io_errors = [];
+      }
+  in
+  match Fs_compat.exact_path_kind path with
+  | exception Sys_error message -> empty_result [{ path; message }]
+  | exception (Unix.Unix_error _ as exn) ->
+      empty_result [{ path; message = Printexc.to_string exn }]
+  | Fs_compat.Exact_missing -> empty_result []
+  | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
+      (match Fs_compat.load_file path with
+       | content -> decode content
+       | exception Sys_error message -> empty_result [{ path; message }]
+       | exception (Unix.Unix_error _ as exn) ->
+           empty_result [{ path; message = Printexc.to_string exn }])
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      empty_result
+        [{ path; message = "trajectory path is not a regular file" }]
 
 type trajectory_line_decode_result =
   | Parsed_line of trajectory_line
   | Skipped_line
-  | Malformed_line
+  | Invalid_line of entry_decode_error
+
+let decode_thinking_entry json =
+  let ( let* ) = Result.bind in
+  let* ts_json = required_member Timestamp "ts" json in
+  let* ts = decode_finite_number Timestamp ts_json in
+  let* ts_iso_json = required_member Timestamp_iso "ts_iso" json in
+  let* ts_iso = decode_non_blank_string Timestamp_iso ts_iso_json in
+  let* turn_json = required_member Turn "turn" json in
+  let* turn = decode_nonnegative_int Turn turn_json in
+  let* content_json = required_member Content "content" json in
+  let* content = decode_string Content content_json in
+  let* content_length_json = required_member Content_length "content_length" json in
+  let* content_length = decode_nonnegative_int Content_length content_length_json in
+  let* redacted_json = required_member Redacted "redacted" json in
+  let* redacted = decode_bool Redacted redacted_json in
+  Ok { ts; ts_iso; turn; content; content_length; redacted }
 
 let trajectory_line_of_json json =
   match Json_util.assoc_member_opt "type" json with
   | Some (`String "trajectory_summary") -> Skipped_line
   | Some (`String "thinking") ->
-      Parsed_line
-        (Thinking
-           { ts =
-               (match Json_util.assoc_member_opt "ts" json with
-                | Some (`Float f) -> f
-                | Some (`Int n) -> Float.of_int n
-                | _ -> 0.0)
-           ; ts_iso =
-               (match Json_util.assoc_member_opt "ts_iso" json with
-                | Some (`String s) -> s
-                | _ -> "")
-           ; turn =
-               (match Json_util.assoc_member_opt "turn" json with
-                | Some (`Int n) -> n
-                | _ -> 0)
-           ; content =
-               (match Json_util.assoc_member_opt "content" json with
-                | Some (`String s) -> s
-                | _ -> "")
-           ; content_length =
-               (match Json_util.assoc_member_opt "content_length" json with
-                | Some (`Int n) -> n
-                | _ -> 0)
-           ; redacted =
-               (match Json_util.assoc_member_opt "redacted" json with
-                | Some (`Bool b) -> b
-                | _ -> false)
-           })
-  | _ ->
+      (match decode_thinking_entry json with
+       | Ok entry -> Parsed_line (Thinking entry)
+       | Error error -> Invalid_line error)
+  | Some (`String row_type) -> Invalid_line (Unsupported_row_type row_type)
+  | Some _ -> Invalid_line (Invalid_field Row_type)
+  | None ->
       (match tool_call_entry_of_json json with
-       | Some (entry, _parsed_gate) -> Parsed_line (Tool_call entry)
-       | None -> Malformed_line)
+       | Decoded_entry entry -> Parsed_line (Tool_call entry)
+       | Non_entry_row -> Skipped_line
+       | Invalid_entry error -> Invalid_line error)
 ;;
 
-(* Rows that fail to parse or decode here are silently dropped from the
-   dashboard's /trajectory response with no signal at all -- unlike the
-   internal_history merge path (see
-   [Server_dashboard_http_keeper_api_trace.log_internal_history_skips]),
-   which already tracks skipped/total and logs a per-read summary. Follow
-   the same summarized-WARN pattern rather than warn-per-row: a busy trace
-   file re-read on every dashboard poll would otherwise flood the log the
-   same way the internal_history path did before that fix. *)
-let log_trajectory_line_skips ~trace_id ~skipped ~total =
-  if skipped > 0 then
-    Log.Keeper.warn
-      "trajectory trace %s: %d of %d rows did not decode to a trajectory \
-       line (malformed JSON or unrecognized shape)"
-      trace_id skipped total
-;;
+type line_decode_accumulator = {
+  mutable tool_call_count : int;
+  mutable thinking_count : int;
+  mutable skipped_summary_count : int;
+  invalid : decode_accumulator;
+}
 
-let trajectory_lines_of_jsonl_lines ~trace_id lines =
-  let lines_rev, skipped, total =
+let create_line_decode_accumulator () =
+  {
+    tool_call_count = 0;
+    thinking_count = 0;
+    skipped_summary_count = 0;
+    invalid = create_decode_accumulator ();
+  }
+
+let line_decode_accumulator_snapshot accumulator
+    : trajectory_line_decode_summary =
+  let invalid = decode_accumulator_snapshot accumulator.invalid in
+  {
+    tool_call_count = accumulator.tool_call_count;
+    thinking_count = accumulator.thinking_count;
+    passed_gate_count = invalid.passed_gate_count;
+    rejected_gate_count = invalid.rejected_gate_count;
+    skipped_summary_count = accumulator.skipped_summary_count;
+    invalid_line_count = invalid.invalid_entry_count;
+    invalid_reasons = invalid.invalid_reasons;
+  }
+
+let empty_trajectory_line_decode_summary : trajectory_line_decode_summary =
+  {
+    tool_call_count = 0;
+    thinking_count = 0;
+    passed_gate_count = 0;
+    rejected_gate_count = 0;
+    skipped_summary_count = 0;
+    invalid_line_count = 0;
+    invalid_reasons = empty_invalid_entry_counts;
+  }
+
+let trajectory_lines_of_jsonl_lines lines =
+  let decode_summary = create_line_decode_accumulator () in
+  let lines_rev =
     List.fold_left
-      (fun (acc, skipped, total) line ->
-         let decode =
-           try Yojson.Safe.from_string line |> trajectory_line_of_json with
-           | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Malformed_line
-         in
-         match decode with
-         | Parsed_line parsed -> parsed :: acc, skipped, total + 1
-         | Skipped_line -> acc, skipped, total + 1
-         | Malformed_line -> acc, skipped + 1, total + 1)
-      ([], 0, 0)
+      (fun acc line ->
+         if String.trim line = "" then acc
+         else
+           let decode =
+             try Yojson.Safe.from_string line |> trajectory_line_of_json with
+             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+                 Invalid_line Malformed_json
+           in
+           match decode with
+           | Parsed_line (Tool_call entry as parsed) ->
+               decode_summary.tool_call_count <-
+                 decode_summary.tool_call_count + 1;
+               record_decoded_gate decode_summary.invalid entry.gate_decision;
+               parsed :: acc
+           | Parsed_line (Thinking _ as parsed) ->
+               decode_summary.thinking_count <- decode_summary.thinking_count + 1;
+               parsed :: acc
+           | Skipped_line ->
+               decode_summary.skipped_summary_count <-
+                 decode_summary.skipped_summary_count + 1;
+               acc
+           | Invalid_line error ->
+               record_invalid_entry decode_summary.invalid error;
+               acc)
+      []
       lines
   in
-  log_trajectory_line_skips ~trace_id ~skipped ~total;
-  List.rev lines_rev, skipped, total
+  {
+    lines = List.rev lines_rev;
+    line_decode = line_decode_accumulator_snapshot decode_summary;
+    io_errors = [];
+  }
 ;;
 
 (** Read all trajectory lines including thinking entries. *)
-let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    : trajectory_line list =
+let read_all_lines_result ~(masc_root : string) ~(keeper_name : string)
+    ~(trace_id : string) : trajectory_lines_read_result =
   let path = trajectory_path masc_root keeper_name trace_id in
-  if not (Sys.file_exists path) then []
-  else
-    let content = Fs_compat.load_file path in
-    String.split_on_char '\n' content
-    |> List.filter (fun line -> String.trim line <> "")
-    |> trajectory_lines_of_jsonl_lines ~trace_id
-    |> fun (lines, _skipped, _total) -> lines
+  let empty_result io_errors =
+    {
+      lines = [];
+      line_decode = empty_trajectory_line_decode_summary;
+      io_errors;
+    }
+  in
+  match Fs_compat.exact_path_kind path with
+  | exception Sys_error message -> empty_result [{ path; message }]
+  | exception (Unix.Unix_error _ as exn) ->
+      empty_result [{ path; message = Printexc.to_string exn }]
+  | Fs_compat.Exact_missing -> empty_result []
+  | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
+    (match Fs_compat.load_file path with
+    | exception Sys_error message -> empty_result [{ path; message }]
+    | exception (Unix.Unix_error _ as exn) ->
+        empty_result [{ path; message = Printexc.to_string exn }]
+    | content ->
+        String.split_on_char '\n' content
+        |> List.filter (fun line -> String.trim line <> "")
+        |> trajectory_lines_of_jsonl_lines)
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      empty_result
+        [{ path; message = "trajectory path is not a regular file" }]
 
-let read_recent_lines
+let read_recent_lines_result
       ~(masc_root : string)
       ~(keeper_name : string)
       ~(trace_id : string)
       ~(max_lines : int)
-  : trajectory_line list
+  : trajectory_lines_read_result
   =
   let path = trajectory_path masc_root keeper_name trace_id in
-  Dated_jsonl.load_tail_lines path ~max_lines
-  |> trajectory_lines_of_jsonl_lines ~trace_id
-  |> fun (lines, _skipped, _total) -> lines
+  let empty_result io_errors =
+    {
+      lines = [];
+      line_decode = empty_trajectory_line_decode_summary;
+      io_errors;
+    }
+  in
+  match Fs_compat.exact_path_kind path with
+  | exception Sys_error message -> empty_result [{ path; message }]
+  | exception (Unix.Unix_error _ as exn) ->
+      empty_result [{ path; message = Printexc.to_string exn }]
+  | Fs_compat.Exact_missing -> empty_result []
+  | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
+    (match Dated_jsonl.load_tail_lines path ~max_lines with
+    | exception Sys_error message ->
+        empty_result [{ path; message }]
+    | exception (Unix.Unix_error _ as exn) ->
+        empty_result [{ path; message = Printexc.to_string exn }]
+    | lines ->
+        if lines <> [] then trajectory_lines_of_jsonl_lines lines
+        else
+          (match Fs_compat.exact_path_kind path with
+           | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
+               trajectory_lines_of_jsonl_lines lines
+           | Fs_compat.Exact_missing ->
+               empty_result
+                 [{ path; message = "trajectory file disappeared during read" }]
+           | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+               empty_result
+                 [{ path; message = "trajectory path changed during read" }]
+           | exception Sys_error message -> empty_result [{ path; message }]
+           | exception (Unix.Unix_error _ as exn) ->
+               empty_result [{ path; message = Printexc.to_string exn }]))
+  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+      empty_result
+        [{ path; message = "trajectory path is not a regular file" }]

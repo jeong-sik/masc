@@ -330,74 +330,56 @@ let record_runtime_mcp_keeper_trajectory
     Observability_redact.redact_preview ~max_len:4000 message
   in
   let turn = Option.value ~default:0 ctx.turn in
-  let round =
-    Trajectory.next_round
-      ~masc_root
-      ~keeper_name:ctx.keeper_name
-      ~trace_id
-      ~turn
-  in
-  let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
-      ~keeper_name:ctx.keeper_name
-      ?agent_name:ctx.agent_name
-      ?trace_id:ctx.trace_id
-      ?session_id:ctx.session_id
-      ?generation:ctx.generation
-      ?keeper_turn_id:ctx.keeper_turn_id
-      ?task_id:ctx.task_id
-      ?goal_ids:ctx.goal_ids
-      ?sandbox_profile:ctx.sandbox_profile
-      ?sandbox_root:ctx.sandbox_root
-      ?allowed_paths:ctx.allowed_paths
-      ?network_mode:ctx.network_mode
-      ?runtime_profile:ctx.runtime_profile
-      ()
-  in
   let error = if success then None else Some safe_output in
-  let action_radius =
-    Keeper_runtime_contract.action_radius_json
-      ~tool_name
-      ~input:safe_input
-      ~success
-      ~duration_ms:(float_of_int duration_ms)
-      ?error
-      ?sandbox_target:ctx.sandbox_profile
-      ()
-  in
-  let now = Time_compat.now () in
-  let entry : Trajectory.tool_call_entry =
-    {
-      ts = now;
-      ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-      turn;
-      round;
-      tool_name;
-      args_json = Yojson.Safe.to_string safe_input;
-      gate_decision = Trajectory.Pass;
-      result = Some safe_output;
-      duration_ms;
-      error;
-      cost_usd = Trajectory.tool_cost_estimate tool_name;
-      execution_id = Some (Ids.Execution_id.to_string execution_id);
-    }
-  in
-  try
-    Trajectory.append_entry
-      ~runtime_contract
-      ~action_radius
-      ~masc_root
-      ~keeper_name:ctx.keeper_name
-      ~trace_id
-      entry
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  match safe_input with
+  | `Assoc arguments ->
+    let round =
+      Trajectory.next_round
+        ~masc_root
+        ~keeper_name:ctx.keeper_name
+        ~trace_id
+        ~turn
+    in
+    let now = Time_compat.now () in
+    let entry : Trajectory.tool_call_entry =
+      {
+        ts = now;
+        ts_iso = Masc_domain.iso8601_of_unix_seconds now;
+        turn;
+        round;
+        tool_name;
+        arguments;
+        gate_decision = Trajectory.Pass;
+        result = Some safe_output;
+        duration_ms;
+        error;
+        execution_id = Some (Ids.Execution_id.to_string execution_id);
+      }
+    in
+    (try
+       Trajectory.append_entry
+         ~masc_root
+         ~keeper_name:ctx.keeper_name
+         ~trace_id
+         entry
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       record_runtime_mcp_trajectory_coverage_gap
+         ~masc_root
+         ~keeper_name:ctx.keeper_name
+         ~trace_id
+         ~stale_reason:"runtime_mcp_trajectory_append_failed"
+         exn)
+  | _ ->
+      let exn =
+        Invalid_argument "trajectory Tool arguments must be a JSON object"
+      in
       record_runtime_mcp_trajectory_coverage_gap
         ~masc_root
         ~keeper_name:ctx.keeper_name
         ~trace_id
-        ~stale_reason:"runtime_mcp_trajectory_append_failed"
+        ~stale_reason:"runtime_mcp_trajectory_arguments_invalid"
         exn
 
 let record_runtime_mcp_keeper_tool_trace

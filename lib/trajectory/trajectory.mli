@@ -1,13 +1,19 @@
-(** Trajectory — Tool call recording, cost telemetry, and entropy gates for keeper sessions.
+(** Trajectory — Tool call recording for keeper sessions.
 
-    Tracks tool calls per turn, accumulated cost telemetry, and detects stuck loops
-    via entropy checking. Persists trajectory data as JSONL for post-hoc analysis. *)
+    Tracks exact tool-call observations per turn and persists them as JSONL for
+    post-hoc analysis. Model usage and cost are observed from OAS inference
+    facts; Trajectory does not estimate either from Tool names. *)
 
 (** {1 Types} *)
 
+type rejection_reason
+
+val rejection_reason_of_string : string -> rejection_reason option
+val rejection_reason_to_string : rejection_reason -> string
+
 type gate_decision =
   | Pass
-  | Reject of string
+  | Reject of rejection_reason
 
 type tool_call_entry = {
   ts : float;
@@ -15,48 +21,100 @@ type tool_call_entry = {
   turn : int;
   round : int;
   tool_name : string;
-  args_json : string;
+  arguments : (string * Yojson.Safe.t) list;
+      (** Structured Tool arguments. The association-list type makes the JSON
+          object invariant explicit and prevents a parallel string form. *)
   gate_decision : gate_decision;
   result : string option;
   duration_ms : int;
   error : string option;
-  cost_usd : float;
   execution_id : string option;
       (** RFC-0233 canonical join key shared with the tool_calls JSONL row
-          for the same execution. [None] only for rows written by paths
-          that have not adopted the id yet (and historical rows). *)
+          for the same execution. [None] is an explicit source value, never a
+          fabricated identifier. *)
+}
+
+type invalid_entry_counts = {
+  missing_required_field : int;
+  invalid_field : int;
+  unsupported_row_type : int;
+  missing_gate : int;
+  invalid_gate_shape : int;
+  missing_gate_status : int;
+  unsupported_gate_status : int;
+  missing_reject_reason : int;
+  malformed_json : int;
 }
 
 type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
+  passed_gate_count : int;
+  rejected_gate_count : int;
+  invalid_entry_count : int;
+  invalid_reasons : invalid_entry_counts;
+}
+
+type trajectory_read_error = {
+  path : string;
+  message : string;
 }
 
 type entries_read_result = {
   entries : tool_call_entry list;
   gate_decode : gate_decode_summary;
+  io_errors : trajectory_read_error list;
 }
+
+type gate_decode_error =
+  | Missing_gate
+  | Invalid_gate_shape
+  | Missing_gate_status
+  | Unsupported_gate_status of string
+  | Missing_reject_reason
+
+type entry_field =
+  | Row_type
+  | Timestamp
+  | Timestamp_iso
+  | Turn
+  | Round
+  | Tool_name
+  | Arguments
+  | Result
+  | Duration_ms
+  | Error_message
+  | Execution_id
+  | Content
+  | Content_length
+  | Redacted
+
+type entry_decode_error =
+  | Missing_required_field of entry_field
+  | Invalid_field of entry_field
+  | Unsupported_row_type of string
+  | Invalid_gate of gate_decode_error
+  | Malformed_json
+
+type tool_call_entry_decode =
+  | Decoded_entry of tool_call_entry
+  | Non_entry_row
+  | Invalid_entry of entry_decode_error
 
 type trajectory_outcome =
   | Completed
   | Failed of string
   | Timeout
-  | CostExceeded
   | Gated of string
 
 type trajectory = {
-  scenario_id : string option;
   keeper_name : string;
   trace_id : string;
   generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
-  task_id : string option;
 }
 
 (** {1 Thinking entries}
@@ -78,10 +136,21 @@ type trajectory_line =
   | Tool_call of tool_call_entry
   | Thinking of thinking_entry
 
-(** {1 Cost estimation} *)
+type trajectory_line_decode_summary = {
+  tool_call_count : int;
+  thinking_count : int;
+  passed_gate_count : int;
+  rejected_gate_count : int;
+  skipped_summary_count : int;
+  invalid_line_count : int;
+  invalid_reasons : invalid_entry_counts;
+}
 
-val tool_cost_estimate : string -> float
-(** Rough per-call cost estimate for keeper tools. *)
+type trajectory_lines_read_result = {
+  lines : trajectory_line list;
+  line_decode : trajectory_line_decode_summary;
+  io_errors : trajectory_read_error list;
+}
 
 (** {1 JSON serialization} *)
 
@@ -92,21 +161,26 @@ val default_result_truncation : int
 val default_thinking_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
   tool_call_entry ->
   Yojson.Safe.t
 
 val tool_call_entry_of_json :
-  Yojson.Safe.t -> (tool_call_entry * bool) option
+  Yojson.Safe.t -> tool_call_entry_decode
 (** Decode one persisted JSONL row back into a [tool_call_entry].
-    Returns [None] for non-entry rows (summary/thinking) and malformed
-    JSON. The [bool] is true when the gate field parsed from a
-    persisted value rather than the legacy default. Exposed for
-    RFC-0233 consumers that join rows on [execution_id]. *)
+    Gate status is a closed codec: only exact [pass] and [reject] values are
+    accepted, and [reject] requires a non-blank reason. Invalid gate data is a
+    row-local [Invalid_entry]; it never defaults to [Pass], never masquerades
+    as an explicit [Reject], and does not stop
+    other rows from decoding. *)
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
+val invalid_entry_counts_to_json : invalid_entry_counts -> Yojson.Safe.t
+val gate_decode_summary_to_json : gate_decode_summary -> Yojson.Safe.t
+val trajectory_line_decode_summary_to_json :
+  trajectory_line_decode_summary -> Yojson.Safe.t
+val trajectory_read_errors_to_json :
+  trajectory_read_error list -> Yojson.Safe.t
 
 (** {1 Persistence} *)
 
@@ -114,8 +188,6 @@ val trajectories_dir : string -> string -> string
 val trajectory_path : string -> string -> string -> string
 
 val append_entry :
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry -> unit
 
@@ -127,9 +199,12 @@ val append_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   thinking_entry -> unit
 
-val read_entries :
+val read_entries_result :
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  tool_call_entry list
+  entries_read_result
+(** Read one trace without collapsing read failures or invalid rows into a
+    false empty trajectory. Missing trace files are a legitimate empty result;
+    I/O failures are preserved in [io_errors]. *)
 
 (** Get the next round number for a (keeper_name, trace_id, turn) without
     reading the entire trajectory file. Lazily hydrates from disk on first
@@ -145,22 +220,23 @@ val reset_round_counters_for_testing : unit -> unit
     known state and force re-hydration from disk. *)
 
 val trajectory_lines_of_jsonl_lines :
-  trace_id:string -> string list -> trajectory_line list * int * int
-(** Decode JSONL lines into parsed trajectory lines, the number of malformed
-    or unrecognized rows, and the total number of non-empty rows seen.
-    Intentionally skipped rows such as [trajectory_summary] do not count as
-    malformed. *)
+  string list -> trajectory_lines_read_result
+(** Decode JSONL rows using the closed Tool/Thinking/summary discriminator.
+    Invalid rows are excluded from [lines] and counted by typed reason in
+    [line_decode]; summaries are explicitly counted as skipped. *)
 
-val read_all_lines :
+val read_all_lines_result :
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory_line list
-(** Read all entries (tool calls + thinking) from JSONL. *)
+  trajectory_lines_read_result
+(** Read all entries (tool calls + thinking) from JSONL with decode and I/O
+    observations. *)
 
-val read_recent_lines :
+val read_recent_lines_result :
   masc_root:string -> keeper_name:string -> trace_id:string -> max_lines:int ->
-  trajectory_line list
+  trajectory_lines_read_result
 (** Read a bounded tail of entries (tool calls + thinking) from JSONL.
-    Returns entries chronologically, oldest first. *)
+    [lines] are chronological, oldest first; decode and I/O failures remain
+    explicit in the result. *)
 
 (** {1 Accumulator}
 
@@ -172,7 +248,6 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
@@ -180,7 +255,6 @@ type accumulator = {
   generation : int;
   started_at : float;
   masc_root : string;
-  mutable task_id : string option;
   pending_queue : pending_entry Queue.t;
   pending_mu : Mutex.t;
   mutable last_flush : float;
@@ -192,12 +266,8 @@ val create_accumulator :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   generation:int -> unit -> accumulator
 
-val set_task_id : accumulator -> string -> unit
-val clear_task_id : accumulator -> unit
 val increment_turn : accumulator -> unit
 val record_entry :
-  ?runtime_contract:Yojson.Safe.t ->
-  ?action_radius:Yojson.Safe.t ->
   ?on_persist_error:(exn -> unit) ->
   accumulator ->
   tool_call_entry ->
@@ -214,17 +284,12 @@ val flush_all_pending : unit -> unit
     accumulators. Called by the background flush fiber in
     server_runtime_bootstrap. *)
 
-val detect_entropy :
-  ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option
-(** Detect if [tool_name] has been called [threshold]+ times consecutively.
-    If [args_json] is provided, only consecutive IDENTICAL calls (same tool and same args) are counted. *)
-
 val calls_in_current_turn : accumulator -> int
 
 (** {1 Tool stats aggregation}
 
     Server-side aggregation for the keeper tool telemetry dashboard.
-    Computes per-tool call counts, latency percentiles, cost, and
+    Computes per-tool call counts, latency percentiles, and
     hourly activity buckets from raw trajectory entries. *)
 
 type tool_stat = {
@@ -235,7 +300,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 
@@ -255,14 +319,10 @@ val hourly_timeline : tool_call_entry list -> hourly_bucket list
 val tool_stat_to_json : tool_stat -> Yojson.Safe.t
 val hourly_bucket_to_json : hourly_bucket -> Yojson.Safe.t
 
-val read_entries_since :
-  masc_root:string -> keeper_name:string -> since:float ->
-  tool_call_entry list
-(** Read entries from all trace files for a keeper with ts >= [since].
-    Results sorted chronologically. *)
-
 val read_entries_since_result :
   masc_root:string -> keeper_name:string -> since:float ->
   entries_read_result
-(** Like {!read_entries_since}, plus whether the persisted gate object was
-    parsed or defaulted for legacy rows that had no readable gate payload. *)
+(** Read entries from all trace files for a keeper with [ts >= since]. Results
+    are sorted chronologically. Explicit gate rejection is a valid decoded
+    entry; malformed/unsupported rows and file failures are observed
+    separately and never stop other files or rows. *)

@@ -167,7 +167,7 @@ type scenario = {
 
 ### 5.4 Trajectory (lib/trajectory.ml)
 
-Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원한다.
+Keeper Tool/Thinking의 JSONL 기반 궤적 로깅. 결정적 재생, 정확한 호출·결과·latency 관측, eval_harness 연동을 지원한다. 모델 usage/cost는 OAS inference observation이 소유하며 trajectory는 Tool 이름으로 이를 추정하지 않는다.
 
 **기록 위치**: `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`
 
@@ -176,15 +176,22 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `ts` | float | Unix 타임스탬프 |
+| `ts_iso` | string | ISO 8601 타임스탬프 |
 | `turn` | int | 세션 내 턴 번호 |
-| `round` | int | 턴 내 도구 라운드 (1-3) |
+| `round` | int | 턴 내 단조 증가 도구 라운드 |
 | `tool_name` | string | 호출된 도구 |
-| `gate_decision` | Pass/Reject | 사전 게이트 결과 |
+| `args` | object | 구조화된 도구 입력 |
+| `gate` | Pass/Reject | 사전 게이트 결과. Reject는 명시적 reason 필수 |
 | `result` | string option | 실행 결과 (게이트 차단 시 None) |
 | `duration_ms` | int | 실행 시간 |
-| `cost_usd` | float | 추정 비용 |
+| `error` | string option | 실행 오류 |
+| `execution_id` | string option | tool-call ledger와의 typed join key |
 
-**trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
+**trajectory_outcome**: `Completed | Failed | Timeout | Gated`.
+
+Tool/Thinking/summary 이외의 row, 필수 필드 누락, 잘못된 gate 및 malformed
+JSON은 기본값으로 복구하지 않는다. 유효 row는 계속 읽고, row별 decode 실패와
+file별 I/O 실패는 구조화된 관측으로 함께 반환한다.
 
 ### 5.5 Judgment boundary tests
 

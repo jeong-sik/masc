@@ -12,6 +12,7 @@ import { evaluateProcessTrace, type ProcessCriticFinding, type ProcessCriticSeve
 import {
   getTraceLoading,
   getTraceError,
+  getTraceObservationErrors,
   getTraceEvents,
   getFilteredEvents,
   getTraceSummary,
@@ -179,6 +180,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   const loading = getTraceLoading(agentName)
   const error = getTraceError(agentName)
+  const observationErrors = getTraceObservationErrors(agentName)
   const processEvents = getTraceEvents(agentName)
   const events = getFilteredEvents(agentName)
   const summary = getTraceSummary(agentName)
@@ -234,6 +236,11 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   return html`
     <div class="v2-monitoring-trace-surface flex flex-col gap-3">
+      ${observationErrors.length > 0 ? html`
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
+          ${observationErrors.map(observation => html`<div class="break-all">${observation}</div>`)}
+        </div>
+      ` : null}
       ${'' /* Filter + Refresh */}
       <div class="flex items-center justify-between gap-3">
         <${SessionTraceFilter} agentName=${agentName} />

@@ -21,6 +21,7 @@ import {
   parseDashboardKeeperWaitingSource,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperTrajectory,
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
@@ -314,6 +315,23 @@ describe('keeper tool telemetry fetchers', () => {
         keeper: 'keeper-alpha',
         window_hours: 24,
         total_entries: 0,
+        gate_decode: {
+          passed_gate_count: 0,
+          rejected_gate_count: 0,
+          invalid_entry_count: 0,
+          invalid_reasons: {
+            missing_required_field: 0,
+            invalid_field: 0,
+            unsupported_row_type: 0,
+            missing_gate: 0,
+            invalid_gate_shape: 0,
+            missing_gate_status: 0,
+            unsupported_gate_status: 0,
+            missing_reject_reason: 0,
+            malformed_json: 0,
+          },
+        },
+        io_errors: [],
         source: 'trajectory_tool_call',
         health: 'coverage_gap',
         stale_reason: 'trajectory_append_failed',
@@ -344,6 +362,12 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolStats('keeper-alpha')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
+    expect(result.gate_decode).toMatchObject({
+      passed_gate_count: 0,
+      rejected_gate_count: 0,
+      invalid_entry_count: 0,
+    })
+    expect(result.io_errors).toEqual([])
     expect(result.coverage_gap_count).toBe(1)
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_hooks_oas.post_tool_use',
@@ -353,6 +377,175 @@ describe('keeper tool telemetry fetchers', () => {
       trace_id: 'trace-tool-stats-gap',
       error: 'append denied',
     })
+  })
+
+  it('rejects invalid tool-stat children instead of fabricating zero values', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      window_hours: 24,
+      total_entries: 1,
+      gate_decode: {
+        passed_gate_count: 1,
+        rejected_gate_count: 0,
+        invalid_entry_count: 0,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 0,
+          unsupported_row_type: 0,
+          missing_gate: 0,
+          invalid_gate_shape: 0,
+          missing_gate_status: 0,
+          unsupported_gate_status: 0,
+          missing_reject_reason: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [],
+      tools: [{
+        name: 'tool_execute',
+        call_count: 'invalid',
+        success_count: 1,
+        failure_count: 0,
+        avg_duration_ms: 1,
+        p95_duration_ms: 1,
+        max_duration_ms: 1,
+        last_used_at: '2026-07-18T00:00:00Z',
+      }],
+      timeline: [{ hour: '2026-07-18T00:00:00Z', call_count: 1, error_count: 0 }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperToolStats('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper tool stats payload',
+    )
+  })
+
+  it('rejects malformed thinking rows instead of fabricating trajectory fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      trace_id: 'trace-1',
+      generation: 1,
+      total_entries: 1,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_lines: 500,
+      showing: 1,
+      decode: {
+        tool_call_count: 0,
+        thinking_count: 1,
+        passed_gate_count: 0,
+        rejected_gate_count: 0,
+        skipped_summary_count: 0,
+        invalid_line_count: 0,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 0,
+          unsupported_row_type: 0,
+          missing_gate: 0,
+          invalid_gate_shape: 0,
+          missing_gate_status: 0,
+          unsupported_gate_status: 0,
+          missing_reject_reason: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [],
+      entries: [{
+        type: 'thinking',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        turn: 1,
+        content: 'thought',
+        content_length: 7,
+        redacted: 'false',
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+  })
+
+  it('preserves exact strings and rejects whitespace-only gate reasons', async () => {
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unsupported_row_type: 0,
+      missing_gate: 0,
+      invalid_gate_shape: 0,
+      missing_gate_status: 0,
+      unsupported_gate_status: 0,
+      missing_reject_reason: 0,
+      malformed_json: 0,
+    }
+    const response = (entry: Record<string, unknown>, decode: Record<string, unknown>) =>
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        total_entries_scope: 'tail',
+        total_entries_exact: false,
+        tail_scan_lines: 500,
+        showing: 1,
+        decode: {
+          skipped_summary_count: 0,
+          invalid_line_count: 0,
+          invalid_reasons: invalidReasons,
+          ...decode,
+        },
+        io_errors: [],
+        entries: [entry],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        type: 'thinking',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        turn: 1,
+        content: '  thought  ',
+        content_length: 11,
+        redacted: false,
+      }, {
+        tool_call_count: 0,
+        thinking_count: 1,
+        passed_gate_count: 0,
+        rejected_gate_count: 0,
+      }))
+      .mockResolvedValueOnce(response({
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        turn: 1,
+        round: 1,
+        tool_name: 'tool_execute',
+        args: {},
+        gate: { status: 'reject', reason: ' \t ' },
+        result: null,
+        duration_ms: 0,
+        error: null,
+      }, {
+        tool_call_count: 1,
+        thinking_count: 0,
+        passed_gate_count: 0,
+        rejected_gate_count: 1,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const exact = await fetchKeeperTrajectory('keeper-alpha')
+    expect(exact.entries[0]).toMatchObject({ content: '  thought  ' })
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
   })
 
   it('preserves tool-call coverage gap rows', async () => {

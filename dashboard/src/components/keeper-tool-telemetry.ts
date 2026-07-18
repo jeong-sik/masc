@@ -8,7 +8,7 @@ import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { lastEvent } from '../sse'
 import { toolCategory, durationColor, normalizeToolName } from './tool-call-shared'
-import { formatCost, formatMsCompact } from '../lib/format-number'
+import { formatMsCompact } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
@@ -25,6 +25,56 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
   timeline: HourlyBucket[]
   totalEntries: number
   windowHours: number
+  gateDecode: ToolStatsResponse['gate_decode']
+  ioErrors: ToolStatsResponse['io_errors']
+}
+
+const EMPTY_GATE_DECODE: ToolStatsResponse['gate_decode'] = {
+  passed_gate_count: 0,
+  rejected_gate_count: 0,
+  invalid_entry_count: 0,
+  invalid_reasons: {
+    missing_required_field: 0,
+    invalid_field: 0,
+    unsupported_row_type: 0,
+    missing_gate: 0,
+    invalid_gate_shape: 0,
+    missing_gate_status: 0,
+    unsupported_gate_status: 0,
+    missing_reject_reason: 0,
+    malformed_json: 0,
+  },
+}
+
+const INVALID_REASON_LABELS = {
+  missing_required_field: 'missing required field',
+  invalid_field: 'invalid field',
+  unsupported_row_type: 'unsupported row type',
+  missing_gate: 'missing gate',
+  invalid_gate_shape: 'invalid gate shape',
+  missing_gate_status: 'missing gate status',
+  unsupported_gate_status: 'unsupported gate status',
+  missing_reject_reason: 'missing reject reason',
+  malformed_json: 'malformed JSON',
+} satisfies Record<keyof ToolStatsResponse['gate_decode']['invalid_reasons'], string>
+
+function DecodeObservation({ state }: { state: TelemetryState }) {
+  const invalidReasons = Object.entries(state.gateDecode.invalid_reasons)
+    .filter(([, count]) => count > 0)
+    .map(([reason, count]) => `${INVALID_REASON_LABELS[reason as keyof typeof INVALID_REASON_LABELS]} ${count.toLocaleString()}`)
+  if (state.gateDecode.invalid_entry_count === 0 && state.ioErrors.length === 0) return null
+  return html`
+    <div class="mt-1 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
+      ${state.gateDecode.invalid_entry_count > 0
+        ? html`<div>decode invalid ${state.gateDecode.invalid_entry_count.toLocaleString()} rows · ${invalidReasons.join(' · ')}</div>`
+        : null}
+      ${state.ioErrors.map(error => html`
+        <div key=${`${error.path}:${error.message}`} class="break-all">
+          trajectory read failed · ${error.path} · ${error.message}
+        </div>
+      `)}
+    </div>
+  `
 }
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
@@ -161,6 +211,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     timeline: [],
     totalEntries: 0,
     windowHours: 24,
+    gateDecode: EMPTY_GATE_DECODE,
+    ioErrors: [],
   })
   const [query, setQuery] = useState('')
 
@@ -185,6 +237,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       timeline: data.timeline,
       totalEntries: data.total_entries,
       windowHours: data.window_hours,
+      gateDecode: data.gate_decode,
+      ioErrors: data.io_errors,
     }
   }, [keeperName])
 
@@ -213,6 +267,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     timeline: [],
     totalEntries: 0,
     windowHours: 24,
+    gateDecode: EMPTY_GATE_DECODE,
+    ioErrors: [],
   }
 
   // Loading stays quiet; an empty result still renders source freshness so
@@ -226,12 +282,12 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-card/30 v2-monitoring-panel">
         <div class="text-xs text-[var(--color-fg-muted)]">도구 텔레메트리 데이터 없음</div>
+        <${DecodeObservation} state=${s} />
         <${FreshnessLine} data=${s} />
       </div>
     `
   }
 
-  const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
   const maxCount = s.tools[0]?.call_count ?? 1
 
   // Find tools with highest p95
@@ -254,16 +310,17 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1">
           <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.totalEntries}</span> 호출
         <//>
-        ${totalCost > 0 ? html`
-          <${StatusChip} tone="info" uppercase=${false} class="gap-1 py-1">
-            <span class="font-mono font-medium text-[var(--color-accent-fg)]">${formatCost(totalCost)}</span>
-          <//>
-        ` : null}
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1 text-[var(--color-fg-disabled)]">
           ${s.windowHours}h 기간
         <//>
+        ${s.gateDecode.rejected_gate_count > 0 ? html`
+          <${StatusChip} tone="warn" uppercase=${false} class="gap-1 py-1">
+            gate rejected ${s.gateDecode.rejected_gate_count.toLocaleString()}
+          <//>
+        ` : null}
       </div>
       <${FreshnessLine} data=${s} />
+      <${DecodeObservation} state=${s} />
 
       ${'' /* Hourly timeline sparkline */}
       ${s.timeline.length > 1 ? html`

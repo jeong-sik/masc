@@ -176,10 +176,7 @@ let trajectory_line_to_chat_trace_step = function
               | Some _ -> Some Keeper_chat_blocks.Trace_tool_err
               | None -> Some Keeper_chat_blocks.Trace_tool_ok)
          ; dur = Some (Printf.sprintf "%dms" entry.duration_ms)
-         ; args =
-             Some
-               (try Yojson.Safe.from_string entry.args_json with
-                | Yojson.Json_error _ -> `String entry.args_json)
+         ; args = Some (`Assoc entry.arguments)
          ; result
          ; ts = Some entry.ts_iso
          ; oas_block_index = None
@@ -191,6 +188,22 @@ let allowed_trace_id_set trace_ids =
     (fun acc trace_id -> Set_util.StringSet.add trace_id acc)
     Set_util.StringSet.empty
     trace_ids
+;;
+
+let log_trajectory_read_observation ~trace_id
+    (read : Trajectory.trajectory_lines_read_result) =
+  if read.line_decode.invalid_line_count > 0 then
+    Log.Keeper.warn
+      "trajectory trace %s: %d rows failed the closed trajectory codec (%s)"
+      trace_id
+      read.line_decode.invalid_line_count
+      (Trajectory.invalid_entry_counts_to_json read.line_decode.invalid_reasons
+       |> Yojson.Safe.to_string);
+  List.iter
+    (fun (error : Trajectory.trajectory_read_error) ->
+       Log.Keeper.error "trajectory trace %s: read failed for %s: %s"
+         trace_id error.path error.message)
+    read.io_errors
 ;;
 
 let chat_trace_block_by_turn_ref ~max_lines ~max_internal_lines
@@ -209,10 +222,12 @@ let chat_trace_block_by_turn_ref ~max_lines ~max_internal_lines
       match Hashtbl.find_opt cache trace_id with
       | Some lines -> Some lines
       | None ->
-        let trajectory_lines =
-          Trajectory.read_recent_lines ~masc_root ~keeper_name ~trace_id
+        let trajectory_read =
+          Trajectory.read_recent_lines_result ~masc_root ~keeper_name ~trace_id
             ~max_lines
         in
+        log_trajectory_read_observation ~trace_id trajectory_read;
+        let trajectory_lines = trajectory_read.lines in
         let all_lines =
           merge_keeper_trace_lines_bounded ~config ~trace_id ~max_internal_lines
             trajectory_lines

@@ -270,7 +270,7 @@ let append_provider_overflow_manifest
         ~turn_state
         ~site:"provider_overflow_compaction"
         ~status
-        ?runtime_id:evidence.selected_runtime_id
+        ~runtime_id:evidence.selected_runtime_id
         ~compaction_source:"provider_overflow"
         ~checkpoint_path
         ~decision:

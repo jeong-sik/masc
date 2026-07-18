@@ -36,15 +36,13 @@ type compaction_recovery =
   } [@@warning "-69"]
 
 type compaction_recovery_error =
-  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
+  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
+  | Checkpoint_structure_invalid of Keeper_compaction_unit.structural_error
+  | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
-  | Checkpoint_superseded of
-      { incoming_turn_count : int
-      ; known_turn_count : int
-      }
-  | Checkpoint_save_failed of string
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
 val compaction_recovery_error_to_string : compaction_recovery_error -> string

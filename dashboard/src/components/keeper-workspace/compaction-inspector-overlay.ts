@@ -514,7 +514,7 @@ export function CompactionInspectorOverlay({
           <div class="turn-sec">
             <h4>유지 · 요약 · 폐기</h4>
             ${ev.summarizedCount != null || ev.droppedCount != null
-              ? html`<div class="cmp-trigger"><span class="sub-k">LLM plan</span><span class="mono">summarized=${ev.summarizedCount ?? '—'} · dropped=${ev.droppedCount ?? '—'}${ev.pairRepairDroppedCount != null ? ` · pair_repair_dropped=${ev.pairRepairDroppedCount}` : ''}</span></div>`
+              ? html`<div class="cmp-trigger"><span class="sub-k">LLM plan</span><span class="mono">summarized=${ev.summarizedCount ?? '—'} · dropped=${ev.droppedCount ?? '—'}</span></div>`
               : null}
             ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
               ? html`<${DataGapNote}>현재 백엔드 projection은 kept / summarized / dropped 목록을 노출하지 않습니다. 이 snapshot은 "컴팩션 이벤트 발생"과 가능한 token 계측만 증명합니다.</${DataGapNote}>`

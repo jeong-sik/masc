@@ -229,9 +229,6 @@ export type KeeperCompactionExactEvidence = {
   readonly after_message_count: number
   readonly summarized_message_count: number
   readonly dropped_message_count: number
-  /** Messages additionally removed by tool-pair repair (#25037). Null for
-   *  rows persisted before the field existed. */
-  readonly pair_repair_dropped_message_count: number | null
   readonly before_tool_use_count: number
   readonly after_tool_use_count: number
   readonly before_tool_result_count: number
@@ -593,15 +590,7 @@ function decodeCompactionExactEvidence(raw: unknown): KeeperCompactionExactEvide
     after_tool_result_count: asNumber(raw.after_tool_result_count),
   }
   if (Object.values(evidence).some(value => value === undefined)) return undefined
-  // Optional: absent on rows persisted before #25037; must not void the row.
-  const pairRepairDropped =
-    typeof raw.pair_repair_dropped_message_count === 'number'
-      ? raw.pair_repair_dropped_message_count
-      : null
-  return {
-    ...evidence,
-    pair_repair_dropped_message_count: pairRepairDropped,
-  } as KeeperCompactionExactEvidence
+  return evidence as KeeperCompactionExactEvidence
 }
 
 const COMPACTION_REINJECTION_STATES: readonly KeeperCompactionReinjectionState[] = [

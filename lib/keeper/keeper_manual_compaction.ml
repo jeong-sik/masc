@@ -55,7 +55,7 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     Keeper_runtime_manifest.make_for_context
       context
       ~event:Keeper_runtime_manifest.Context_compacted
-      ?runtime_id:recovery.evidence.selected_runtime_id
+      ~runtime_id:recovery.evidence.selected_runtime_id
       ~status:"compacted"
       ~decision:
         (Keeper_runtime_manifest.with_clock_refs

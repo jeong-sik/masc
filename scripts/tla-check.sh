@@ -165,10 +165,6 @@ run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
-# Checkpoint message trim must preserve tool-use/tool-result pairing.
-run_tlc "$REPO_ROOT/specs/checkpoint-trim" "CheckpointTrim.tla"
-run_tlc_buggy "$REPO_ROOT/specs/checkpoint-trim" "CheckpointTrim.tla"
-
 # Server lifecycle product invariants across lifecycle/backend/readiness axes.
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
 run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"

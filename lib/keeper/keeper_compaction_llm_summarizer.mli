@@ -2,27 +2,17 @@
     produces a structured {!compaction_plan}; unavailable providers and invalid
     plans fail explicitly as [None]. *)
 
-(** A validated compaction plan over a working set of [n] messages. Every
-    index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
-    pairwise disjoint, and together they cover every index exactly once. For
-    non-empty inputs, at least one [kept] or [summarized] index is required so
-    applying the plan cannot erase the entire working set. At least one
-    [summarized] or [dropped] index is required, so all-kept no-ops are invalid. *)
-type compaction_plan = private
-  { summary : string
-  ; kept : int list
-  ; summarized : int list
-  ; dropped : int list
-  ; selected_runtime_id : string option
-    (** Exact Runtime candidate that produced this plan. [None] only for a
-        plan parsed directly through {!plan_of_json} before provider binding. *)
-  }
+(** A validated immutable plan bound to the exact source units from which it
+    was parsed. Protected units cannot be named by a provider decision, and a
+    plan cannot be applied to a different source. *)
+type compaction_plan
 
-(** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (provider error, empty
+(** [summarizer ~units] returns [Some plan] when the LLM produced a valid plan
+    over [units], or [None] on any failure (provider error, empty
     or invalid structured response). Total and synchronous; the effect is
     hidden in the closure captured by {!make}. *)
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
+type summarizer =
+  units:Keeper_compaction_unit.closed_unit list -> compaction_plan option
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)
@@ -47,27 +37,27 @@ val make
   -> unit
   -> summarizer option
 
-(** Parse+validate a raw structured response into a plan over [message_count]
-    messages. Exposed for tests. Returns [Error] with a reason on any
-    structural violation (out-of-range / negative / duplicate / non-covering
-    indices, empty output for a non-empty working set, or a missing/empty
-    summary). *)
+(** Whether [units] contains at least one structurally eligible ordinary
+    Assistant text message. System, User, Tool, metadata-bearing, non-text,
+    closed-tool-cycle, and open-suffix units are never eligible. *)
+val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
+
+(** Parse and validate a raw structured response against the exact [units] and
+    bind the non-empty [runtime_id] that produced it. Every eligible source
+    index must appear exactly once; every other index is rejected. Unknown
+    fields, duplicate fields, invalid action/summary pairs, all-kept no-ops,
+    and output-erasing plans fail explicitly. *)
 val plan_of_json
-  :  message_count:int
+  :  runtime_id:string
+  -> units:Keeper_compaction_unit.closed_unit list
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
-(** [apply plan ~messages] rebuilds the working set from a validated [plan]:
-    [kept] indices survive verbatim, the [summarized] indices are replaced by a
-    single assistant memory-summary message ([plan.summary]), and [dropped]
-    indices are removed. Original message order is preserved; the summary is
-    inserted at the position of the first summarized index. [plan] is assumed
-    to have been validated against [List.length messages] (it partitions the
-    index space), so this is total. *)
-val apply
-  :  compaction_plan
-  -> messages:Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
+val apply : compaction_plan -> Agent_sdk.Types.message list
+val selected_runtime_id : compaction_plan -> string
+val summarized_indices : compaction_plan -> int list
+val dropped_indices : compaction_plan -> int list
+val has_changes : compaction_plan -> bool
 
 module For_testing : sig
   val with_make_override
@@ -87,6 +77,11 @@ module For_testing : sig
     :  keeper_name:string
     -> runtime_id:string
     -> string list option
+  (** Exact provider request constructed from eligible units. Exposed only to
+      prove that protected source content never crosses the provider boundary. *)
+  val messages_for_plan
+    :  units:Keeper_compaction_unit.closed_unit list
+    -> Agent_sdk.Types.message list
 
   (** Eligible Runtime ids across a priority-ordered list of seed
       Runtime/Lane assignments, in exact seed-then-declaration order, with

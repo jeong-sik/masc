@@ -95,8 +95,8 @@ Plain literals set at a single (or few) site(s). Examples: `project_snapshot`,
 `keeper_chat_appended`, `keeper_composite_changed`, `keeper_phase_changed`,
 `keeper_heartbeat`, `keeper_compaction`, `keeper_handoff`, `keeper_tool_skipped`,
 `keeper_turn_complete`, `keeper_tool_call`, `approval:pending`,
-`approval:resolved`, `fusion_run_status`, `gate_configuration_changed`,
-`dashboard_yjs_update`. These close into fixed variants directly.
+`approval:resolved`, `fusion_run_status`, and `gate_configuration_changed`.
+These close into fixed variants directly.
 
 Some literals are emitted from **multiple sites** (`keeper_heartbeat` ×2,
 `keeper_tool_call` ×2, `gate_configuration_changed` ×2, and the

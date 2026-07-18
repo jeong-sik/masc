@@ -148,8 +148,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_descriptor_resolution.mli` - tool-surface-policy
 - `lib/keeper_tool_name/keeper_tool_name.ml` - tool-surface-policy
 - `lib/keeper_tool_name/keeper_tool_name.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_query.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_query.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_emission_hook.ml` - tool-surface-policy

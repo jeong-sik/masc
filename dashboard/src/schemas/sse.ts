@@ -87,10 +87,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // lib/task/tool_task_handlers.ml. Routed by the 'masc/task_' PREFIX_ROUTES
   // entry in sse-store.ts.
   'masc/task_claimed',
-  // Yjs WebSocket projection layer for live telemetry. Emitted by
-  // lib/dashboard/dashboard_yjs.ml. `payload` here is a JSON-stringified
-  // string, not a record — see the dedicated payload-shape exception below.
-  'dashboard_yjs_update',
   'project_snapshot',
   'namespace_truth_snapshot',
   'execution_snapshot',
@@ -156,10 +152,7 @@ const STRING_FIELDS = new Set([
   'previous_mode',
   'actor',
   'changed_at',
-  // dashboard_yjs_update
   'kind',
-  'frame_base64',
-  'encoding',
 ])
 
 const NUMBER_FIELDS = new Set([
@@ -179,8 +172,6 @@ const NUMBER_FIELDS = new Set([
   'cost_usd',
   'tool_calls_made',
   'total_turns',
-  // dashboard_yjs_update
-  'payload_len',
   // masc/task_claimed
   'timestamp',
 ])
@@ -336,15 +327,10 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
   }
 
-  // dashboard_yjs_update carries a JSON-stringified inner event as `payload`
-  // (see lib/dashboard/dashboard_yjs.ml broadcast_update) — a string, not a
-  // record, so it is excepted from the generic payload-object rule below and
-  // validated in its own dedicated block instead.
   if (
     value.payload != null
     && !isRecord(value.payload)
     && !value.type.startsWith(OAS_EVENT_PREFIX)
-    && value.type !== 'dashboard_yjs_update'
   ) {
     return fail('payload', 'Expected payload object')
   }
@@ -384,24 +370,6 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
     if (typeof value.agent_name !== 'string' || value.agent_name.trim() === '') {
       return fail('agent_name', 'Expected non-empty agent_name')
-    }
-  }
-
-  if (value.type === 'dashboard_yjs_update') {
-    if (typeof value.kind !== 'string' || value.kind.trim() === '') {
-      return fail('kind', 'Expected non-empty kind')
-    }
-    if (typeof value.payload !== 'string') {
-      return fail('payload', 'Expected dashboard_yjs_update payload to be a JSON-encoded string')
-    }
-    if (!Number.isSafeInteger(value.payload_len) || (value.payload_len as number) < 0) {
-      return fail('payload_len', 'Expected non-negative integer payload_len')
-    }
-    if (typeof value.frame_base64 !== 'string' || value.frame_base64.trim() === '') {
-      return fail('frame_base64', 'Expected non-empty frame_base64')
-    }
-    if (typeof value.encoding !== 'string' || value.encoding.trim() === '') {
-      return fail('encoding', 'Expected non-empty encoding')
     }
   }
 

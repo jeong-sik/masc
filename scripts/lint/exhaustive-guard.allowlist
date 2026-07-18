@@ -42,7 +42,6 @@ lib/auth.ml:292
 lib/auth.ml:387
 lib/auth.ml:559
 lib/auth.ml:602
-lib/autonomous/autonomous_bridge.ml:101
 lib/autonomous/stimulus.ml:38
 lib/backend/backend.ml:639
 lib/backend/backend.ml:643
@@ -139,10 +138,6 @@ lib/runtime/runtime_transport.ml:790
 lib/runtime/runtime_transport.ml:1069
 lib/runtime/runtime_transport.ml:1248
 lib/runtime/runtime_transport.ml:1281
-lib/chronicle_ingest.ml:42
-lib/chronicle_ingest.ml:224
-lib/chronicle_ingest.ml:230
-lib/chronicle_validate.ml:44
 lib/config/env_config_runtime.ml:343
 lib/workspace_assertions.ml:58
 lib/workspace_goals.ml:220
@@ -192,12 +187,6 @@ lib/dashboard_tool_source_freshness.ml:40
 lib/dashboard_utils/dashboard_utils.ml:10
 lib/dashboard.ml:84
 lib/dashboard.ml:211
-lib/dashboard/dashboard_branches.ml:48
-lib/dashboard/dashboard_branches.ml:61
-lib/dashboard/dashboard_branches.ml:85
-lib/dashboard/dashboard_branches.ml:93
-lib/dashboard/dashboard_branches.ml:101
-lib/dashboard/dashboard_branches.ml:148
 lib/dashboard/dashboard_cache.ml:98
 lib/dashboard/dashboard_cache.ml:115
 lib/dashboard/dashboard_cache.ml:163
@@ -245,12 +234,6 @@ lib/dashboard/dashboard_mission_assembly.ml:198
 lib/dashboard/dashboard_mission.ml:339
 lib/dashboard/dashboard_mission.ml:728
 lib/dashboard/dashboard_oas_bridge.ml:188
-lib/dashboard/dashboard_operator_nudges.ml:29
-lib/dashboard/dashboard_operator_nudges.ml:47
-lib/dashboard/dashboard_operator_nudges.ml:53
-lib/dashboard/dashboard_operator_nudges.ml:59
-lib/dashboard/dashboard_operator_nudges.ml:97
-lib/dashboard/dashboard_operator_nudges.ml:159
 lib/dashboard/dashboard_workspaces.ml:28
 lib/dashboard/dashboard_workspaces.ml:53
 lib/dashboard/dashboard_verification.ml:47
@@ -689,8 +672,6 @@ lib/session.ml:614
 lib/spawn.ml:122
 lib/spawn.ml:214
 lib/sse.ml:248
-lib/streamable_http.ml:95
-lib/streamable_http.ml:99
 lib/subscriptions.ml:241
 lib/supervisor.ml:171
 lib/telemetry_observe.ml:18

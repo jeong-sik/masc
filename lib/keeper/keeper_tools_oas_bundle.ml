@@ -41,9 +41,6 @@ let make_tool_bundle
       ()
   : tool_bundle
   =
-  (* Phase B baseline (wise-nibbling-lerdorf plan): timestamp before the
-     bundle assembly work begins; observed at function exit. *)
-  let __t0 = Mtime_clock.now () in
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
@@ -126,17 +123,11 @@ let make_tool_bundle
                    input)))
       model_visible_descriptors
   in
-  let bundle =
-      { tools = descriptor_tools
-      ; cleanup =
-          (fun () ->
-            Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
-      }
-  in
-  Otel_metric_hotpath.observe
-    ~metric:Otel_metric_hotpath.metric_oas_make_tool_bundle_sec
-    ~start:__t0;
-  bundle
+  { tools = descriptor_tools
+  ; cleanup =
+      (fun () ->
+        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+  }
 ;;
 
 let make_tools

@@ -324,42 +324,6 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('accepts a dashboard_yjs_update event with a string payload', () => {
-    const r = SSEMessageSchema.safeParse({
-      type: 'dashboard_yjs_update',
-      kind: 'keeper_update',
-      payload: '{"kind":"keeper_update","keeper_name":"k1"}',
-      payload_len: 42,
-      frame_base64: 'AAEAAAAAAAA=',
-      encoding: 'yjs_update_v1_base64',
-    })
-    expect(r.success).toBe(true)
-  })
-
-  it.each([
-    // record payload instead of the required JSON-encoded string
-    {
-      type: 'dashboard_yjs_update',
-      kind: 'keeper_update',
-      payload: { kind: 'keeper_update' },
-      payload_len: 10,
-      frame_base64: 'AA==',
-      encoding: 'yjs_update_v1_base64',
-    },
-    // missing frame_base64
-    { type: 'dashboard_yjs_update', kind: 'keeper_update', payload: '{}', payload_len: 2 },
-    // negative payload_len
-    {
-      type: 'dashboard_yjs_update',
-      kind: 'keeper_update',
-      payload: '{}',
-      payload_len: -1,
-      frame_base64: 'AA==',
-      encoding: 'yjs_update_v1_base64',
-    },
-  ])('rejects a malformed dashboard_yjs_update event: %o', value => {
-    expect(SSEMessageSchema.safeParse(value).success).toBe(false)
-  })
 })
 
 describe('parseSSEMessage', () => {
@@ -391,25 +355,6 @@ describe('parseSSEMessage', () => {
     })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('fusion_run_status')
-    expect(warnSpy).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
-  })
-
-  it('keeps dashboard_yjs_update events instead of dropping them as schema drift', () => {
-    // Regression: before this fix, `payload` here (a JSON-stringified string)
-    // tripped the generic "payload must be a record" rule and every Yjs
-    // telemetry frame was silently dropped.
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const msg = parseSSEMessage({
-      type: 'dashboard_yjs_update',
-      kind: 'keeper_update',
-      payload: '{"kind":"keeper_update","keeper_name":"k1"}',
-      payload_len: 42,
-      frame_base64: 'AAEAAAAAAAA=',
-      encoding: 'yjs_update_v1_base64',
-    })
-    expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('dashboard_yjs_update')
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })

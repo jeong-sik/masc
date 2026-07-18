@@ -154,11 +154,6 @@
   ;; semantics.  PR-2 onwards: runtime_event_bridge arms call into
   ;; Sse_event.<event>_constructor instead of inline `Assoc.
   masc.sse_event
-  ;; RFC-0056 Phase 1G — Chronicle_event leaf module extracted to
-  ;; lib/chronicle_event/. 460+170 LoC, deps: stdlib + Yojson only.
-  ;; Chronicle wire format (Actor / Target / Content / Event records
-  ;; + to_yojson / of_yojson serializers).
-  masc.chronicle_event
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark + scoring closure
   ;; extracted to lib/tool_call_quality_benchmark/. 6 diagnostic-only
   ;; benchmark modules, ~2065 LoC, deps: stdlib + Yojson + masc_core +

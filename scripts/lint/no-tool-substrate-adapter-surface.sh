@@ -9,9 +9,9 @@
 #   3. Internal web MCP names appearing in keeper-facing prompts or workflow
 #      guidance where the model-facing aliases are WebSearch / WebFetch.
 #
-# The scan is intentionally narrow. It does not scan timeout/runtime plumbing
-# such as Timeout_policy.Layer.Oas_bridge, and it does not scan dashboard
-# reporting metrics that use PR review as a work category.
+# The scan is intentionally narrow. It does not scan timeout/runtime
+# plumbing, and it does not scan dashboard reporting metrics that use PR
+# review as a work category.
 
 set -euo pipefail
 

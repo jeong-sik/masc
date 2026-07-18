@@ -32,7 +32,6 @@
   set_util
   atomic_util
   read_drop_reason
-  tool_name_alias_axis
   eval_tool_selector)
  (libraries
   yojson

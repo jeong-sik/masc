@@ -139,8 +139,8 @@ OAS  ──does not know──→ MASC
   Channel Gate turn stats follow the same rule: keeper response parsing keeps
   duration/token counts and collapses the legacy model slot to `runtime`, while
   outbound wire JSON emits `model_used: null`.
-  Dashboard harness wake-payload telemetry and Yjs keeper updates keep the
-  legacy `model_id` key but emit the neutral `runtime` lane.
+  Dashboard harness wake-payload telemetry keeps the legacy `model_id` key but
+  emits the neutral `runtime` lane.
   The OAS dashboard telemetry bridge accepts provider/model compatibility
   fields at ingress, but normalizes samples, provider-error counters, filters,
   and SSE/REST projections to the neutral `runtime` lane before MASC stores

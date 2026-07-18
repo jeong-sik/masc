@@ -26,6 +26,13 @@ type inbound_outcome =
   | Reply_sent
   | Reply_send_error
 
+type ambient_outcome =
+  | Ambient_recorded
+  | Ambient_binding_store_error
+  | Ambient_dropped_unbound
+  | Ambient_dropped_empty
+  | Ambient_dropped_too_long
+
 type reply_outcome =
   | Reply_empty
   | Reply_send_ok
@@ -51,6 +58,13 @@ let inbound_outcome_label = function
   | Reply_sent -> "reply_sent"
   | Reply_send_error -> "reply_send_error"
 
+let ambient_outcome_label = function
+  | Ambient_recorded -> "recorded"
+  | Ambient_binding_store_error -> "binding_store_error"
+  | Ambient_dropped_unbound -> "dropped_unbound"
+  | Ambient_dropped_empty -> "dropped_empty"
+  | Ambient_dropped_too_long -> "dropped_too_long"
+
 let reply_outcome_label = function
   | Reply_empty -> "empty"
   | Reply_send_ok -> "sent"
@@ -71,6 +85,11 @@ let record_inbound_dispatch outcome =
   inc
     Otel_transport_metric_names.metric_slack_inbound_dispatch
     ~labels:[ "outcome", inbound_outcome_label outcome ]
+
+let record_ambient outcome =
+  inc
+    Otel_transport_metric_names.metric_slack_ambient_record
+    ~labels:[ "outcome", ambient_outcome_label outcome ]
 
 let record_reply outcome =
   inc

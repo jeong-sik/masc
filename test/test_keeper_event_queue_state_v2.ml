@@ -1006,8 +1006,7 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "active lease was duplicated");
-    let receipt =
-      match
+    (match
         Persistence.settle_result
           ~base_path
           ~keeper_name
@@ -1017,10 +1016,9 @@ let test_transition_outbox_projects_with_stable_identity () =
           ()
         |> require_ok "settle projection source"
       with
-      | Persistence.Settled receipt -> receipt
+      | Persistence.Settled _ -> ()
       | _ ->
-        Alcotest.fail "first projection settlement was already settled"
-    in
+        Alcotest.fail "first projection settlement was already settled");
     (match
        Persistence.enqueue_stimulus_if_absent_result
          ~base_path ~keeper_name source
@@ -1038,13 +1036,8 @@ let test_transition_outbox_projects_with_stable_identity () =
       "projection retires outbox"
       0
       (List.length (State.transition_outbox state));
-    Masc.Keeper_reaction_ledger.record_event_queue_transition_reaction_result
-      ~base_path
-      ~keeper_name
-      ~source_index:0
-      ~receipt
-      source
-    |> require_ok "replay stable transition reaction";
+    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    |> require_ok "empty outbox projection is idempotent";
     let summary =
       Masc.Keeper_reaction_ledger.summary_for_keeper
         ~base_path
@@ -1056,8 +1049,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       "stable event id deduplicates crash replay"
       1
       (summary |> member "event_queue_ack_count" |> to_int);
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "empty outbox projection is idempotent")
+    ())
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =

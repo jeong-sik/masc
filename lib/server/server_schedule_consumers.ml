@@ -291,17 +291,6 @@ let accept_keeper_wake_occurrence
          "keeper reaction ledger evidence quarantined for occurrence %s: %s"
          stimulus_id
          (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
-  | Ok
-      (Keeper_reaction_ledger.Evidence_incomplete
-        { evidence; _ }) ->
-    retryable_dispatch_failure
-      (Printf.sprintf
-         "keeper reaction ledger evidence incomplete for occurrence %s: \
-          unattributed_syntax_error_count=%d \
-          unattributed_identity_quarantine_count=%d"
-         stimulus_id
-         evidence.unattributed_syntax_error_count
-         evidence.unattributed_identity_quarantine_count)
   | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
     when evidence.event_queue_ack_seen ->
     (* The transition projector appends this exact-id ACK before retiring its

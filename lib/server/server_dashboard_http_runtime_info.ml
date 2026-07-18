@@ -2681,10 +2681,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   ; "matched_record_count", `Int evidence.matched_record_count
                   ; ( "quarantined_record_count"
                     , `Int evidence.quarantined_record_count )
-                  ; ( "unattributed_syntax_error_count"
-                    , `Int evidence.unattributed_syntax_error_count )
-                  ; ( "unattributed_identity_quarantine_count"
-                    , `Int evidence.unattributed_identity_quarantine_count )
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
                       | None -> `Null
@@ -2772,45 +2768,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
                     (Keeper_reaction_ledger.row_quarantine_reason_to_string
                        first_reason)
                   "quarantined"
-                  evidence
-              | Ok
-                  (Keeper_reaction_ledger.Evidence_incomplete
-                    { evidence
-                    ; first_syntax_error
-                    ; first_identity_quarantine_reason
-                    ; first_matching_quarantine_reason
-                    }) ->
-                let reason_json = function
-                  | Some reason ->
-                    `String
-                      (Keeper_reaction_ledger.row_quarantine_reason_to_string
-                         reason)
-                  | None -> `Null
-                in
-                let syntax_error_json =
-                  match first_syntax_error with
-                  | None -> `Null
-                  | Some error ->
-                    `Assoc
-                      [ "path", `String error.path
-                      ; ( "line_number"
-                        , match error.line_number with
-                          | Some value -> `Int value
-                          | None -> `Null )
-                      ; "detail", `String error.detail
-                      ]
-                in
-                projection_json
-                  ~reason:
-                    "unattributed ledger rows prevent exact occurrence evidence"
-                  ~extra_fields:
-                    [ "first_syntax_error", syntax_error_json
-                    ; ( "first_identity_quarantine_reason"
-                      , reason_json first_identity_quarantine_reason )
-                    ; ( "first_matching_quarantine_reason"
-                      , reason_json first_matching_quarantine_reason )
-                    ]
-                  "incomplete"
                   evidence))))
 ;;
 

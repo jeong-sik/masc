@@ -30,7 +30,7 @@ export type QueueDrainState =
   | 'drained' // left the queue AND the keeper reacted — healthy completion
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
-  | 'evidence_invalid' // reaction ledger is quarantined or incomplete
+  | 'evidence_invalid' // the exact occurrence row is quarantined
   | 'indeterminate' // receipt / stimulus / ledger completeness cannot be correlated
 
 export interface QueueDrainStatus {
@@ -75,9 +75,9 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     title: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가',
   },
   evidence_invalid: {
-    label: '증거 불완전',
+    label: '증거 격리',
     tone: 'warn',
-    title: 'reaction ledger가 격리 또는 불완전 상태라 정확한 드레인 판정 불가',
+    title: '해당 occurrence의 reaction ledger 행이 격리되어 정확한 드레인 판정 불가',
   },
   indeterminate: {
     label: '확인 불가',
@@ -104,8 +104,8 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
       if (reaction != null && REACTED.has(reaction)) return 'drained'
       if (reaction === 'not_found') return 'missed'
       if (reaction === 'read_error') return 'read_error'
-      if (reaction === 'quarantined' || reaction === 'incomplete') return 'evidence_invalid'
-      // quarantine / incomplete / missing identity / unrecognized / absent:
+      if (reaction === 'quarantined') return 'evidence_invalid'
+      // quarantine / missing identity / unrecognized / absent:
       // exact negative evidence is unavailable, so this can never be a miss.
       return 'indeterminate'
     }

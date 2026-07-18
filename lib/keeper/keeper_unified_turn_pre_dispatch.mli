@@ -39,7 +39,9 @@ val build_runtime_execution
     Failure modes (returned as [Error]):
     - [Keeper_types_support.ensure_api_keys_for_labels] missing required keys.
     - [ensure_local_discovery_ready] local-runtime discovery fail.
+    - The exact [runtime_id] has no configured context window.
+    - [meta.max_context_override] is not positive.
 
     OAS alone owns provider/model ceiling validation and envelope-specific
-    clamping. The function is total over its two failure modes plus the [Ok]
-    case; no exceptions cross the boundary. *)
+    clamping. No context-window default or ordered-label fallback is applied at
+    this turn-admission boundary. *)

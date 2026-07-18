@@ -67,10 +67,13 @@ val context_overflow_event_of_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_state_machine.event option
 
-(** Resolve the initial keeper turn context budget from the keeper's routed
-    runtime, so lifecycle context math matches the provider that will receive
-    the first request. Exposed for regression tests. *)
-val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> int
+(** Project the initial keeper turn context budget from the routed runtime's
+    prevalidated resolution, so lifecycle context math matches the provider
+    that will receive the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> Keeper_context_runtime.max_context_resolution
+  -> int
 
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. Exposed for targeted tests. *)

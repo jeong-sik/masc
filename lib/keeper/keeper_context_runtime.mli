@@ -93,6 +93,10 @@ type max_context_resolution =
   ; effective_budget : int
   }
 
+type max_context_resolution_error =
+  | Invalid_requested_context_override of int
+  | Runtime_context_window_unavailable of { runtime_id : string }
+
 type context_budget_source =
   | Runtime_provider_cap
   | Requested_override
@@ -192,6 +196,15 @@ val resolve_max_context_resolution
   -> max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
+
+val resolve_max_context_resolution_for_runtime_id
+  :  requested_override:int option
+  -> runtime_id:string
+  -> (max_context_resolution, max_context_resolution_error) result
+
+val max_context_resolution_error_to_string
+  :  max_context_resolution_error
+  -> string
 
 val context_budget_source_of_resolution
   :  max_context_resolution

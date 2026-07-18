@@ -30,6 +30,20 @@ type escalation_reason =
       ; rationale : string
       }
 
+type no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+
+type no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
+val no_compaction_reason_label : no_compaction_reason -> string
+val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
+
 val escalation_reason_requests_external_input : escalation_reason -> bool
 (** [true] only when the LLM judgment explicitly reports that the Keeper must
     await unavailable external input. A judgment-boundary failure remains a
@@ -37,6 +51,7 @@ val escalation_reason_requests_external_input : escalation_reason -> bool
 
 type settlement =
   | Ack
+  | No_compaction of no_compaction
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason

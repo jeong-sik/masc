@@ -27,6 +27,98 @@ let claim_head state =
   |> require_ok "claim head"
 ;;
 
+let checkpoint_source ~turn_count =
+  let trace_id =
+    Keeper_id.Trace_id.of_string "trace-no-compaction-source"
+    |> require_ok "parse no-compaction trace"
+  in
+  Keeper_checkpoint_ref.of_persisted
+    ~trace_id
+    ~generation:3
+    ~turn_count
+    ~sha256:(String.make 64 'a')
+  |> Result.get_ok
+;;
+
+let no_compaction ~turn_count reason : State.no_compaction =
+  { source = checkpoint_source ~turn_count; reason }
+;;
+
+let test_stochastic_reasons_have_no_terminal_codec () =
+  (* Stochastic planner failures (invalid plan, malformed evidence) and
+     planner invariant violations are retryable/escalated outcomes — they
+     must not be expressible as a durable terminal no-compaction reason,
+     or a flaky LLM could permanently retire a compaction operation. *)
+  List.iter
+    (fun label ->
+       match State.no_compaction_reason_of_label label with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.failf
+           "stochastic/invariant outcome %S encodable as terminal no-compaction"
+           label)
+    [ "invalid_compaction_plan"
+    ; "invalid_structural_evidence"
+    ; "compaction_invariant_violation"
+    ]
+;;
+
+let test_no_compaction_terminal_consumes_exact_request () =
+  let request =
+    stimulus
+      ~payload:Queue.Manual_compaction_requested
+      Queue.manual_compaction_post_id
+      1.0
+  in
+  let peer_work = stimulus "peer-work" 2.0 in
+  let claimed, lease =
+    State.with_pending (queue [ request; peer_work ]) State.empty |> claim_head
+  in
+  let lease = require_some "no-compaction lease" lease in
+  let terminal = no_compaction ~turn_count:7 State.No_eligible_history in
+  let settled, result =
+    State.settle
+      ~settled_at:11.0
+      ~lease
+      ~settlement:(State.No_compaction terminal)
+      claimed
+    |> require_ok "settle no-compaction terminal"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first no-compaction was already settled"
+  in
+  Alcotest.(check string)
+    "typed transition identity"
+    "lease:1:no_compaction"
+    receipt.transition_id;
+  Alcotest.(check (list string))
+    "request is terminal while unrelated work remains runnable"
+    [ "peer-work" ]
+    (post_ids (State.pending settled));
+  let decoded =
+    State.transition_receipt_to_yojson receipt
+    |> State.transition_receipt_of_yojson
+    |> require_ok "no-compaction receipt roundtrip"
+  in
+  Alcotest.(check bool)
+    "source-bound receipt roundtrips exactly"
+    true
+    (State.transition_receipt_equal receipt decoded);
+  match
+    State.settle
+      ~settled_at:12.0
+      ~lease
+      ~settlement:
+        (State.No_compaction
+           (no_compaction ~turn_count:8 State.No_eligible_history))
+      settled
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "different checkpoint source reused a settled request"
+;;
+
 let test_claim_codec_ack_idempotency () =
   let first = stimulus "first" 1.0 in
   let state = State.with_pending (queue [ first ]) State.empty in
@@ -587,6 +679,55 @@ let cycle_meta () =
   with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "cycle meta fixture: %s" message
+;;
+
+let test_manual_and_overflow_no_compaction_are_terminal () =
+  let lease =
+    lease_for
+      (stimulus
+         ~payload:Queue.Manual_compaction_requested
+         Queue.manual_compaction_post_id
+         1.0)
+  in
+  let source = checkpoint_source ~turn_count:7 in
+  let no_compaction : Masc.Keeper_post_turn.no_compaction =
+    { source; reason = State.No_eligible_history }
+  in
+  let expect_terminal = function
+    | Masc.Keeper_registry_event_queue.No_compaction terminal ->
+      Alcotest.(check bool)
+        "exact checkpoint source is retained"
+        true
+        (Keeper_checkpoint_ref.equal source terminal.source);
+      Alcotest.(check string)
+        "typed reason is retained"
+        "no_eligible_history"
+        (State.no_compaction_reason_label terminal.reason)
+    | _ -> Alcotest.fail "no-compaction source was requeued"
+  in
+  expect_terminal
+    (Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+       ~base_path:"/tmp/no-compaction-manual"
+       ~settled_at:2.0
+       ~stop_requested:false
+       ~lease
+       (Some
+          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
+             { meta = cycle_meta (); no_compaction })));
+  let overflow_failure =
+    { (turn_failure
+         (Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Capacity_backpressure
+            ; retry_after = None
+            })) with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Acknowledge_after_no_compaction no_compaction
+    }
+  in
+  expect_terminal
+    (Masc.Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:3.0
+       overflow_failure)
 ;;
 
 let test_applied_compaction_settles_followup_atomically () =
@@ -1179,6 +1320,10 @@ let () =
             `Quick
             test_receipt_codec_is_closed_and_finite
         ; Alcotest.test_case
+            "no-compaction terminal consumes exact request"
+            `Quick
+            test_no_compaction_terminal_consumes_exact_request
+        ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
@@ -1192,6 +1337,14 @@ let () =
             "applied compaction settles follow-up atomically"
             `Quick
             test_applied_compaction_settles_followup_atomically
+        ; Alcotest.test_case
+            "manual and overflow no-compaction are terminal"
+            `Quick
+            test_manual_and_overflow_no_compaction_are_terminal
+        ; Alcotest.test_case
+            "stochastic reasons have no terminal codec"
+            `Quick
+            test_stochastic_reasons_have_no_terminal_codec
         ; Alcotest.test_case
             "cancelled and skipped cycles requeue"
             `Quick

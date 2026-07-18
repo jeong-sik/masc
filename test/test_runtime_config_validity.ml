@@ -1761,7 +1761,16 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
             (option int)
             (Printf.sprintf "%s provider_config max_concurrent_requests" id)
             expected
-            rt.Runtime.provider_config.max_concurrent_requests
+            rt.Runtime.provider_config.max_concurrent_requests;
+          let selected_provider_config =
+            Runtime_candidate.of_provider_config rt.Runtime.provider_config
+            |> Runtime_candidate.provider_cfg
+          in
+          check
+            (option int)
+            (Printf.sprintf "%s selected provider config admission" id)
+            expected
+            selected_provider_config.max_concurrent_requests
       in
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))

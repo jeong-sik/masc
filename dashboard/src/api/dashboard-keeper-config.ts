@@ -3,7 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post } from './core'
-import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
@@ -36,6 +36,14 @@ function asLooseNumber(value: unknown): number | undefined {
 
 function asLooseNullableNumber(value: unknown): number | null {
   return asLooseNumber(value) ?? null
+}
+
+function decodeMaxContextOverride(value: unknown): number | null {
+  if (value === null) return null
+  if (isPositiveSafeInteger(value)) return value
+  throw new Error(
+    'Invalid keeper config response: max_context_override must be a positive safe integer or null',
+  )
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -167,7 +175,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     name: asNullableString(data.name) ?? requestedName,
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
-    max_context_override: asInt(data.max_context_override) ?? null,
+    max_context_override: decodeMaxContextOverride(data.max_context_override),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),

@@ -39,23 +39,46 @@ let max_oas_history_retained = 12
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
 
+(* A name below the session root ([leaf] of a session_dir, or a
+   [snapshot_id] appended by [oas_history_path]) must denote exactly one
+   directory entry. An empty, ".", ".." or separator-bearing name makes
+   [Filename.concat parent name] (and the [^ ".checkpoint.lock"] sibling
+   derived from a session location) resolve outside the session root, so
+   every downstream consumer would inherit the escape. A NUL byte would
+   truncate the path at the syscall boundary, so it is rejected here before
+   any filesystem side effect. *)
+let leaf_is_real_segment leaf =
+  (not (String.equal leaf ""))
+  && (not (String.equal leaf Filename.current_dir_name))
+  && (not (String.equal leaf Filename.parent_dir_name))
+  && not
+       (String.exists
+          (fun c -> String.contains Filename.dir_sep c || Char.equal c '\000')
+          leaf)
+
 (* Checkpoint payloads serialize to 0.7-1.4MB (see the [~pretty:false] note on
    [Keeper_fs.save_json_durable_atomic]). Encoding or decoding one on the
    calling fiber stalls every other fiber on the single-domain scheduler for
    the whole conversion (issue #25077; same class as the board_attention
-   ledger re-parse hangs). Route the pure conversions through the executor
-   pool: [submit_or_inline] runs them on a worker domain when the pool is
-   installed and inline otherwise (tests, pre-init), and re-raises
-   [Eio.Cancel.Cancelled]. *)
+   ledger re-parse hangs). Route the pure conversions through
+   [Domain_pool_ref.submit_cpu_or_inline] — the typed CPU-weight policy layer
+   keeper call sites are documented to prefer over the raw
+   [Executor_pool_ref]; it re-raises job exceptions instead of rerunning the
+   closure inline on failure. The pool submit is only legal from an Eio
+   fiber: the store is also reachable from raw Domains (see the stale-guard
+   "raw Domain saves through Unix context" test), where the conversion runs
+   inline exactly as before. *)
+let offload_checkpoint_cpu (f : unit -> 'a) : 'a =
+  if Eio_guard.is_eio_fiber () then Domain_pool_ref.submit_cpu_or_inline f
+  else f ()
+
 let decode_checkpoint_off_scheduler (content : string) :
     (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    Agent_sdk.Checkpoint.of_string content)
+  offload_checkpoint_cpu (fun () -> Agent_sdk.Checkpoint.of_string content)
 
 let encode_checkpoint_string_off_scheduler (ckpt : Agent_sdk.Checkpoint.t) :
     string =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    Agent_sdk.Checkpoint.to_string ckpt)
+  offload_checkpoint_cpu (fun () -> Agent_sdk.Checkpoint.to_string ckpt)
 
 let keeper_generation_context_key = "keeper_generation"
 
@@ -137,6 +160,13 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     : string list * string list =
   List.fold_left
     (fun (deleted, missing) snapshot_id ->
+      (* [snapshot_ids] arrive verbatim from the dashboard POST body; a
+         non-segment id ("../..") would aim [Sys.remove] outside the
+         session directory. Such an id can never name a history entry, so
+         it is reported [missing] without touching the filesystem. *)
+      if not (leaf_is_real_segment snapshot_id) then
+        (deleted, snapshot_id :: missing)
+      else
       let path = oas_history_path ~session_dir ~snapshot_id in
       if Fs_compat.file_exists path then (
         try
@@ -211,7 +241,42 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
-  let path = oas_history_path ~session_dir ~snapshot_id in
+  (* [snapshot_id] reaches this entry point from the dashboard HTTP
+     surface; a non-segment id ("../..") would read outside the session
+     directory, so it is refused as absent before any filesystem access. *)
+  if not (leaf_is_real_segment snapshot_id) then Error Not_found
+  else (
+    let path = oas_history_path ~session_dir ~snapshot_id in
+    if Fs_compat.file_exists path then
+      try
+        match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
+        | Ok ckpt -> Ok ckpt
+        | Error e -> Error (classify_sdk_error e)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Error (Io_error (Printexc.to_string exn))
+    else Error Not_found)
+
+let load_oas ~(session_dir : string) ~(session_id : string) :
+    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+  (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
+     [Fs_compat.file_exists] answers cold-start absence as a [bool] before
+     any read, so a missing checkpoint is never inferred from a stringified
+     error detail and [classify_sdk_error] keeps no [Not_found] arm.
+
+     One read path for Eio and non-Eio contexts: [Fs_compat.load_file] is
+     Eio-native when the fs capability is installed, and the decode is
+     routed off the calling fiber (#25077). The previous
+     [Agent_sdk.Checkpoint_store.load] branch read the same file but
+     decoded the 0.7-1.4MB payload inline in the SDK on the calling fiber
+     (oas#2676), and its [create] could mkdir on a pure read. The SDK
+     branch also validated [session_id] (empty / separator / NUL); the
+     segment check below keeps that rejection, mapped to [Store_error]
+     exactly as the SDK's ValidationFailed was via [classify_sdk_error]. *)
+  if not (leaf_is_real_segment session_id) then
+    Error (Store_error "session_id is not a real path segment")
+  else
+  let path = oas_checkpoint_path ~session_dir ~session_id in
   if Fs_compat.file_exists path then
     try
       match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
@@ -221,41 +286,6 @@ let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Error (Io_error (Printexc.to_string exn))
   else Error Not_found
-
-let load_oas ~(session_dir : string) ~(session_id : string) :
-    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
-  let fallback () =
-    let path = oas_checkpoint_path ~session_dir ~session_id in
-    if Fs_compat.file_exists path then
-      try
-        match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
-        | Ok ckpt -> Ok ckpt
-        | Error e -> Error (classify_sdk_error e)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Error (Io_error (Printexc.to_string exn))
-    else Error Not_found
-  in
-  match Fs_compat.get_fs_opt () with
-  | Some fs when Eio_guard.is_eio_fiber () ->
-      let dir = Eio.Path.(fs / session_dir) in
-      (match Agent_sdk.Checkpoint_store.create dir with
-       | Ok store ->
-           (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
-              [exists] returns a [bool] so a missing checkpoint never has to
-              be inferred from a stringified exception detail. The SDK-side
-              [load] is only reached when the file is present, so any error
-              returned is a genuine I/O / parse / SDK failure (not cold-start
-              absence). *)
-           if not (Agent_sdk.Checkpoint_store.exists store session_id) then
-             Error Not_found
-           else (
-             match Agent_sdk.Checkpoint_store.load store session_id with
-             | Ok ckpt -> Ok ckpt
-             | Error e -> Error (classify_sdk_error e))
-       | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
-  | Some _ | None ->
-      fallback ()
 
 (* ── RFC-0225 §3.2: disk-SSOT monotonic checkpoint transaction ──────
    One stable per-session lock covers canonical disk load, comparison,
@@ -322,17 +352,6 @@ let save_oas_error_to_string = function
   | Transaction_lock_failed error ->
     "checkpoint transaction lock failed: "
     ^ File_lock_eio.durable_lock_error_to_string error
-
-(* [leaf] must denote exactly one directory entry under the canonical parent.
-   An empty, ".", ".." or root leaf makes [Filename.concat parent leaf] (and
-   the [^ ".checkpoint.lock"] sibling derived from it) resolve outside the
-   session root, so every downstream consumer of the canonical location would
-   inherit the escape. *)
-let leaf_is_real_segment leaf =
-  not (String.equal leaf "")
-  && not (String.equal leaf Filename.current_dir_name)
-  && not (String.equal leaf Filename.parent_dir_name)
-  && not (String.exists (fun c -> Char.equal c '/') leaf)
 
 let canonical_session_location session_dir =
   (* Containment boundary for every checkpoint path (issue #25077).
@@ -461,6 +480,12 @@ let load_canonical_bytes_and_checkpoint_strict path =
   | Error _ as error -> error
   | Ok None -> Ok None
   | Ok (Some content) ->
+    (* This decode runs inside the durable session lock, so the caller now
+       waits on worker-pool capacity while holding it (the submit is a
+       rendezvous at CPU weight). Accepted trade-off: the wait is bounded
+       by pool job runtimes and only delays this one session's
+       transaction, whereas the previous inline parse stalled every fiber
+       on the scheduler domain for the whole conversion. *)
     (match decode_checkpoint_off_scheduler content with
      | Ok checkpoint -> Ok (Some (content, checkpoint))
      | Error error -> Error (classify_sdk_error error))
@@ -641,7 +666,7 @@ let save_oas_if_source
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_sdk.Checkpoint.t) =
   let candidate_bytes =
-    Executor_pool_ref.submit_or_inline (fun () ->
+    offload_checkpoint_cpu (fun () ->
       Yojson.Safe.to_string (Agent_sdk.Checkpoint.to_json candidate))
   in
   match checkpoint_ref_of_canonical_bytes candidate_bytes candidate with

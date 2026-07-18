@@ -248,6 +248,7 @@ let test_session_leaf_containment () =
               (Filename.concat base Filename.parent_dir_name))
            msg);
       reject "'.' leaf" (Filename.concat base Filename.current_dir_name);
+      reject "NUL leaf" (Filename.concat base "abc\000def");
       (* A symlink leaf would redirect every checkpoint and lock write
          through its target. *)
       Unix.mkdir target 0o755;
@@ -259,6 +260,41 @@ let test_session_leaf_containment () =
       with
       | Ok () -> ()
       | Error e -> fail ("real session leaf rejected: " ^ e))
+
+(* Issue #25077: history snapshot ids arrive verbatim from the dashboard
+   HTTP surface. A non-segment id must never reach the filesystem — delete
+   reports it [missing], load reports [Not_found] — and a file outside the
+   session directory must stay unreachable through either entry point. *)
+let test_history_snapshot_id_containment () =
+  let session_dir = temp_dir () in
+  let outside = Filename.concat (Filename.dirname session_dir) "victim.json" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink outside with Unix.Unix_error _ -> ());
+      cleanup_dir session_dir)
+    (fun () ->
+      Fs_compat.save_file outside "outside-session";
+      let escape = "../victim.json" in
+      (match
+         Keeper_checkpoint_store.delete_oas_history_files ~session_dir
+           ~snapshot_ids:[ escape ]
+       with
+       | [], [ missing ] ->
+         check string "escaping id is reported missing" escape missing
+       | deleted, missing ->
+         fail
+           (Printf.sprintf "unexpected delete outcome: deleted=%d missing=%d"
+              (List.length deleted) (List.length missing)));
+      check bool "file outside the session dir survives" true
+        (Sys.file_exists outside);
+      match
+        Keeper_checkpoint_store.load_oas_history_file ~session_dir
+          ~snapshot_id:escape
+      with
+      | Error Keeper_checkpoint_store.Not_found -> ()
+      | Ok _ -> fail "escaping snapshot_id load succeeded"
+      | Error _ ->
+        fail "escaping snapshot_id load returned a non-Not_found error")
 
 let test_invalid_existing_checkpoint_fails_closed () =
   let session_dir = temp_dir () in
@@ -555,6 +591,8 @@ let () =
             test_empty_session_id_rejected;
           test_case "session leaf escapes and symlink leaves are refused" `Quick
             test_session_leaf_containment;
+          test_case "history snapshot ids cannot reach outside the session" `Quick
+            test_history_snapshot_id_containment;
           test_case "invalid canonical checkpoint fails closed" `Quick
             test_invalid_existing_checkpoint_fails_closed;
           test_case "multi-domain writers leave max turn on disk" `Quick

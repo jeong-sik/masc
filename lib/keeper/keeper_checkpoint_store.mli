@@ -45,7 +45,10 @@ val save_oas_history :
 
 (** Delete OAS history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
-    every snapshot id whose file was absent OR removal failed. *)
+    every snapshot id whose file was absent OR removal failed. An id
+    that is not one real path segment (empty / "." / ".." / separator /
+    NUL) can never name a history entry and is reported [missing]
+    without touching the filesystem. *)
 val delete_oas_history_files :
   session_dir:string ->
   snapshot_ids:string list ->
@@ -101,23 +104,27 @@ type checkpoint_load_error =
 
     RFC-0089 G4: this no longer classifies [Not_found] from string-matched
     [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
-    the OS boundary via [Agent_sdk.Checkpoint_store.exists] *before* the
-    SDK [load] call, so any [sdk_error] reaching this function is a real
+    the OS boundary via a typed [Fs_compat.file_exists] check *before* any
+    load, so any [sdk_error] reaching this function is a real
     I/O / parse / SDK fault and routes accordingly. *)
 val classify_sdk_error :
   Agent_sdk.Error.sdk_error -> checkpoint_load_error
 
 (** Load a single OAS history archive entry. Returns [Not_found]
-    when the file does not exist; classifies SDK errors via
-    [classify_sdk_error]. *)
+    when the file does not exist or [snapshot_id] is not one real path
+    segment (such an id can never name a history entry); classifies SDK
+    errors via [classify_sdk_error]. *)
 val load_oas_history_file :
   session_dir:string ->
   snapshot_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
 
-(** Load the canonical OAS checkpoint for [session_id]. Uses the
-    OAS Checkpoint_store when Eio FS is available; falls back to a
-    direct atomic-file read otherwise. *)
+(** Load the canonical OAS checkpoint for [session_id]. One read path
+    for Eio and non-Eio contexts: presence is a typed
+    [Fs_compat.file_exists] check, the read is Eio-native when the fs
+    capability is installed, and the JSON decode runs off the calling
+    fiber. A [session_id] that is not one real path segment is refused
+    as [Store_error] (the same rejection the SDK store applied). *)
 val load_oas :
   session_dir:string ->
   session_id:string ->

@@ -10,7 +10,7 @@
     [string_member] / [int_member] / [bool_member] /
     [bool_option_member] yojson lookups, [stale_of_updated_at],
     [connector_state_label], [list_assoc_field],
-    [find_assoc_by_string_field], and [rollback_bindings]) are
+    [find_assoc_by_string_field], and binding transaction helpers) are
     hidden — only the {!Channel_gate_connector.S} surface is
     public. *)
 
@@ -71,7 +71,7 @@ type keeper_binding_resolution = {
 }
 
 type binding_lookup_error =
-  | Binding_store_read_failed of string
+  | Binding_store_read_failed of Channel_gate_binding_store.binding_store_error
 
 val pp_binding_lookup_error : Format.formatter -> binding_lookup_error -> unit
 val binding_lookup_error_to_string : binding_lookup_error -> string

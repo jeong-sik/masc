@@ -50,16 +50,17 @@ let binding_store =
 
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
-let save_bindings bindings = Store.save_bindings binding_store bindings
-let append_audit_event event = Store.append_audit_event binding_store event
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 type binding_lookup_error =
-  | Binding_store_read_failed of string
+  | Binding_store_read_failed of Store.binding_store_error
 
 let pp_binding_lookup_error formatter = function
   | Binding_store_read_failed detail ->
-    Format.fprintf formatter "Discord binding store read failed: %s" detail
+    Format.fprintf
+      formatter
+      "Discord binding store read failed: %s"
+      (Store.binding_store_error_to_string detail)
 
 let binding_lookup_error_to_string error =
   Format.asprintf "%a" pp_binding_lookup_error error
@@ -404,19 +405,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("observed_channel", observed_channel);
     ]
 
-let rollback_bindings original_bindings =
-  try
-    save_bindings original_bindings;
-    Ok ()
-  with
-  | Sys_error detail -> Error detail
-
-let mutation_error ~primary ~rollback =
-  match rollback with
-  | Ok () -> primary
-  | Error rollback_detail ->
-    Printf.sprintf "%s; rollback failed: %s" primary rollback_detail
-
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in
   let keeper_name = String.trim keeper_name in
@@ -425,95 +413,86 @@ let bind ~channel_id ~keeper_name ~actor_name =
   else if keeper_name = "" then
     Error "keeper_name is required"
   else
-    match read_bindings_result () with
-    | Error detail -> Error ("binding store read failed: " ^ detail)
-    | Ok original_bindings ->
-    let previous_keeper =
-      original_bindings
-      |> List.find_map (fun (binding : binding) ->
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+      let previous_keeper =
+        original_bindings
+        |> List.find_map (fun (binding : binding) ->
              if String.equal binding.channel_id channel_id then
                Some binding.keeper_name
-             else
-               None)
-      |> Option.value ~default:""
-    in
-    let updated_bindings =
-      (({ channel_id; keeper_name } : binding)
-       :: List.filter
-            (fun (binding : binding) ->
-              not (String.equal binding.channel_id channel_id))
-            original_bindings)
-      |> List.sort (fun (a : binding) (b : binding) ->
-             String.compare a.channel_id b.channel_id)
-    in
-    try
-      save_bindings updated_bindings;
-      let guild_id =
-        Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+             else None)
+        |> function
+        | Some keeper_name -> keeper_name
+        | None ->
+          (* DET-OK: the audit wire contract uses an empty string to represent
+             that this channel had no previous binding; it does not affect the
+             mutation decision. *)
+          ""
       in
-      append_audit_event
-        Store.{
-          timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
-          action = "bind";
-          guild_id = Some guild_id;
-          channel_id;
-          keeper_name;
-          actor_id = actor_name;
-          actor_name;
-          previous_keeper;
-        };
-      Ok (status_json ())
-    with
-    | Sys_error msg ->
-      Error
-        (mutation_error
-           ~primary:msg
-           ~rollback:(rollback_bindings original_bindings))
+      let updated_bindings =
+        (({ channel_id; keeper_name } : binding)
+         :: List.filter
+              (fun (binding : binding) ->
+                not (String.equal binding.channel_id channel_id))
+              original_bindings)
+        |> List.sort (fun (a : binding) (b : binding) ->
+             String.compare a.channel_id b.channel_id)
+      in
+      let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
+      Ok
+        ( updated_bindings
+        , Store.{
+            (* NDT-OK: wall-clock time is persisted as operator-facing audit
+               evidence only; mutation ordering comes from the durable lock. *)
+            timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
+            action = "bind";
+            guild_id;
+            channel_id;
+            keeper_name;
+            actor_id = actor_name;
+            actor_name;
+            previous_keeper;
+          }
+        , () ))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 let unbind ~channel_id ~actor_name =
   let channel_id = String.trim channel_id in
   if channel_id = "" then
     Error "channel_id is required"
   else
-    match read_bindings_result () with
-    | Error detail -> Error ("binding store read failed: " ^ detail)
-    | Ok original_bindings ->
-    match
-      original_bindings
-      |> List.find_opt (fun (binding : binding) ->
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+      match
+        original_bindings
+        |> List.find_opt (fun (binding : binding) ->
              String.equal binding.channel_id channel_id)
-    with
-    | None -> Error "binding not found"
-    | Some (removed_binding : binding) ->
+      with
+      | None -> Error "binding not found"
+      | Some (removed_binding : binding) ->
         let updated_bindings =
           List.filter
             (fun (binding : binding) ->
               not (String.equal binding.channel_id channel_id))
             original_bindings
         in
-        try
-          save_bindings updated_bindings;
-          let guild_id =
-            Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
-          in
-          append_audit_event
-            Store.{
+        let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
+        Ok
+          ( updated_bindings
+          , Store.{
+              (* NDT-OK: wall-clock time is persisted as operator-facing audit
+                 evidence only; mutation ordering comes from the durable lock. *)
               timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id = Some guild_id;
+              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;
               actor_name;
               previous_keeper = removed_binding.keeper_name;
-            };
-          Ok (status_json ())
-        with
-        | Sys_error msg ->
-          Error
-            (mutation_error
-               ~primary:msg
-               ~rollback:(rollback_bindings original_bindings))
+            }
+          , () ))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 (* ---------------------------------------------------------------- *)
 (* In-process gateway support — replaces sidecars/discord-bot/      *)

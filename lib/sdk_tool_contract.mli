@@ -12,8 +12,7 @@
     [assoc_field] / [json_string], [dedupe_strings],
     [find_property] / [assoc_members] / [int_member],
     [schema_type] / [label_or_default],
-    [validate_json_value] / [validate_input_json],
-    [param_type_of_schema_opt] / [tool_params_of_input_schema], and
+    [validate_json_value] / [validate_input_json], and
     [build_operation_arguments]) are hidden — callers consume the
     typed records, the lookup helpers, the canonical operation list,
     and the resolver entry points only. *)
@@ -73,7 +72,7 @@ val resolve_requested_tool_call :
       [arg_bindings] into the canonical-operation argument shape.
     - [Error msg] surfaces schema validation failures verbatim. *)
 
-(** {1 Schema introspection (used by tests + dashboard)} *)
+(** {1 Schema introspection} *)
 
 val required_names : Yojson.Safe.t -> string list
 (** Top-level [required] array as a string list (empty when missing). *)
@@ -85,13 +84,6 @@ val property_map : Yojson.Safe.t -> (string * Yojson.Safe.t) list
 val string_member : string -> Yojson.Safe.t -> string option
 (** Lookup a top-level string field on a JSON object; [None] when
     absent or wrong type. *)
-
-val param_type_of_schema_opt :
-  Yojson.Safe.t -> Agent_sdk.Types.param_type option
-(** Strict JSON-Schema [type] classifier: [Some param_type] only for
-    documented vocabulary ([string] / [integer] / [number] /
-    [boolean] / [array] / [object]); [None] for non-vocabulary
-    values like [null] / typos / tuple variants (#8832). *)
 
 (** {1 Discovery payload} *)
 

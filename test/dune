@@ -963,7 +963,6 @@
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
   test_memory_horizon_classifier
-  test_param_type_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1127,7 +1126,6 @@
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
   test_memory_horizon_classifier
-  test_param_type_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage

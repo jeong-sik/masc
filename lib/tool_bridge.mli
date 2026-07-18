@@ -42,13 +42,10 @@ val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
 
 (** {1 Schema Conversion} *)
 
-val param_type_of_string : string -> Agent_sdk.Types.param_type
-(** Map JSON Schema type string to OAS [param_type].
-    Unknown types default to [String]. *)
-
 val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
-(** Extract OAS [tool_param list] from a MASC [input_schema] JSON object.
-    Reads ["properties"] and ["required"] fields. *)
+(** Convert a MASC [input_schema] with the OAS schema-conversion SSOT.
+    Raises [Invalid_argument] when a property type is missing, unsupported, or
+    ambiguous; no local default or union-member selection is applied. *)
 
 (** {1 OAS Tool.t Creation} *)
 

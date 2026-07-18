@@ -247,41 +247,6 @@ let rec validate_json_value ?label schema value =
 let validate_input_json schema json =
   validate_json_value ~label:"input" schema json
 
-(* Strict classifier: returns [None] for unknown JSON Schema types so
-   callers can distinguish "rule fired" from "fall-through default"
-   (see #8832). Delegates to the OAS SSOT
-   [Agent_sdk.Types.param_type_of_string] ([Error _ -> None]) so a
-   param_type added upstream stays in sync without editing this table.
-   NB: not [Tool_bridge.param_type_of_string] / [Mcp.json_schema_type_to_param_type],
-   whose permissive [_ -> String] default would erase the strict [None]. *)
-let param_type_of_schema_opt schema : Agent_sdk.Types.param_type option =
-  Agent_sdk.Types.param_type_of_string (schema_type schema) |> Result.to_option
-
-let tool_params_of_input_schema schema =
-  let required = required_names schema in
-  property_map schema
-  |> List.map (fun (name, property_schema) ->
-         let description =
-           string_member "description" property_schema
-           |> Option.value ~default:(Printf.sprintf "%s parameter" name)
-         in
-         let param : Agent_sdk.Types.tool_param =
-           {
-             name;
-             description;
-             param_type =
-               (match param_type_of_schema_opt property_schema with
-               | Some t -> t
-               | None ->
-                   Log.Misc.warn
-                     "tool_params_of_input_schema: unknown JSON Schema type %S -> String (drift; see #8832)"
-                     (schema_type property_schema);
-                   Agent_sdk.Types.String);
-             required = List.mem name required;
-           }
-         in
-         param)
-
 let build_operation_arguments ~agent_name binding json =
   match validate_input_json binding.input_schema json with
   | Error _ as error -> error

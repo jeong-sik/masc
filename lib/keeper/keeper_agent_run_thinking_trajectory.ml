@@ -43,6 +43,12 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string ThinkingPersistFailures)
                  ~labels:[ "keeper", keeper_name ] ())
-        | _ -> ())
+        | Agent_sdk.Types.Text _
+        | Agent_sdk.Types.ToolUse _
+        | Agent_sdk.Types.ToolResult _
+        | Agent_sdk.Types.Image _
+        | Agent_sdk.Types.Document _
+        | Agent_sdk.Types.Audio _ ->
+          ())
       content
 ;;

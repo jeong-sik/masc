@@ -141,7 +141,7 @@ val close : t -> unit
 | 파일 | 변경 |
 |---|---|
 | `lib/masc_log/log.ml:286-294` | `output_string + output_char + flush` 3-syscall → `Jsonl_atomic.append` 1 호출. mutex 추가가 사이드 이펙트. |
-| `lib/trajectory/trajectory.ml:229-269` | 3 함수 (`append_entry`, `append_thinking`, `append_summary`) 가 `Fs_compat.append_file` → `Jsonl_atomic.append` 로 swap. Stdlib.Mutex 간접 의존 제거. |
+| `lib/trajectory/trajectory.ml` | Tool, Thinking, terminal summary 모두 단일 `append_jsonl_rows` 경계를 거쳐 `Fs_compat.append_private_jsonl_durable_locked_result` 로 저장. trajectory-local writer와 행별 저장 함수는 제거. |
 | `lib/dated_jsonl/dated_jsonl.ml:256-272` | `Fs_compat.append_jsonl` → `Jsonl_atomic.append`. 외부 시그니처 변경 없음. |
 | `lib/runtime/runtime_event_bridge.ml:992` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
 | `lib/keeper/keeper_reaction_ledger.ml:135-137` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |

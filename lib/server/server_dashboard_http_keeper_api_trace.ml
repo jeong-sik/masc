@@ -8,7 +8,12 @@ let trajectory_line_to_chat_trace_step = function
       | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
           Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
       | Agent_sdk.Types.RedactedThinking _ -> "[redacted]"
-      | _ ->
+      | Agent_sdk.Types.Text _
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.ToolResult _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ ->
           invalid_arg
             "Trajectory.Thinking contained a non-reasoning OAS content block"
     in

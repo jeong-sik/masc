@@ -326,7 +326,8 @@ let make_hooks
            let task_id =
              Option.map Keeper_id.Task_id.to_string meta.current_task_id
            in
-           emit_cost_event ~masc_root:acc.masc_root
+           emit_cost_event
+             ~masc_root:(Trajectory.accumulator_masc_root acc)
              ~agent_name:meta.name ~task_id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing

@@ -178,6 +178,13 @@ val load_tail_lines : string -> max_lines:int -> string list
     Reads backwards in chunks. Returns chronologically (oldest first). A
     missing file is an empty tail; other open and read errors are exceptions. *)
 
+val load_tail_lines_result :
+  string -> max_lines:int -> (string list, read_error) result
+(** Strict counterpart of {!load_tail_lines}. It accepts only a stable regular
+    file identity and preserves inspect/open/read failures as typed
+    {!read_error} values. Callers that have already classified a missing path
+    use this function to distinguish a later storage race from an empty tail. *)
+
 module For_testing : sig
   val mutex : t -> Eio.Mutex.t
   (** Expose the internal mutex so tests can verify sharing. *)

@@ -194,7 +194,13 @@ let make_thinking_entry ~ts ~ts_iso ~turn ~block_index ~block =
       | Agent_sdk.Types.ReasoningDetails _
       | Agent_sdk.Types.RedactedThinking _) as block ->
         Ok { ts; ts_iso; turn; block_index; block }
-    | _ -> Error (Invalid_field Thinking_block)
+    | Agent_sdk.Types.Text _
+    | Agent_sdk.Types.ToolUse _
+    | Agent_sdk.Types.ToolResult _
+    | Agent_sdk.Types.Image _
+    | Agent_sdk.Types.Document _
+    | Agent_sdk.Types.Audio _ ->
+        Error (Invalid_field Thinking_block)
 
 type trajectory_line =
   | Tool_call of tool_call_entry
@@ -576,11 +582,8 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
   Filename.concat (trajectories_dir masc_root keeper_name)
     (Printf.sprintf "%s.jsonl" trace_id)
 
-(* RFC-0108: the inline per-path Stdlib.Mutex + fresh-fd helper
-   (PR-4 #15926) is removed here. [Fs_compat.append_jsonl] (post-RFC-0108
-   #15936) now provides the equivalent per-path cross-domain guarantee
-   via its own registry, so the trajectory-local copy is redundant.
-   Calls below delegate directly. *)
+(* All trajectory rows cross [append_jsonl_rows], which delegates to the
+   private, durable, per-path locked append boundary in [Fs_compat]. *)
 
 (* ── In-memory round counter ──────────────────────────────────────
    Key: (masc_root, keeper_name, trace_id, turn) -> last issued Tool round.
@@ -1301,9 +1304,19 @@ let decode_thinking_entry json =
     | Some
         ((Agent_sdk.Types.Thinking _
          | Agent_sdk.Types.ReasoningDetails _
-         | Agent_sdk.Types.RedactedThinking _) as block)
-      when Agent_sdk.Api.content_block_to_json block = block_json -> Ok block
-    | Some _ | None -> Error (Invalid_field Thinking_block)
+         | Agent_sdk.Types.RedactedThinking _) as block) ->
+        if Agent_sdk.Api.content_block_to_json block = block_json
+        then Ok block
+        else Error (Invalid_field Thinking_block)
+    | Some
+        (Agent_sdk.Types.Text _
+        | Agent_sdk.Types.ToolUse _
+        | Agent_sdk.Types.ToolResult _
+        | Agent_sdk.Types.Image _
+        | Agent_sdk.Types.Document _
+        | Agent_sdk.Types.Audio _)
+    | None ->
+        Error (Invalid_field Thinking_block)
   in
   make_thinking_entry ~ts ~ts_iso ~turn ~block_index ~block
 

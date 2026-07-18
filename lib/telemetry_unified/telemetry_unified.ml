@@ -368,6 +368,14 @@ let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   | other ->
     `Assoc [("source", `String (source_to_string source)); ("data", other)]
 
+let tag_trajectory_entry ~keeper_name json =
+  let scoped =
+    match json with
+    | `Assoc fields -> `Assoc (("keeper_name", `String keeper_name) :: fields)
+    | other -> other
+  in
+  tag_entry Trajectory_tool_call scoped
+
 (* ── Keeper/agent name extraction for filtering ─────── *)
 
 let matches_keeper name (json : Yojson.Safe.t) : bool =
@@ -628,7 +636,7 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
   let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
     List.concat_map
-      (fun (_name, dir) ->
+      (fun (name, dir) ->
         protect_source_read Trajectory_tool_call
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
@@ -636,15 +644,16 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
           |> List.filter (fun name ->
                Filename.check_suffix name ".jsonl"
                && trace_file_within_since ~since_ts (Filename.concat dir name))
-          |> List.concat_map (fun name ->
+          |> List.concat_map (fun trace_file ->
                read_trajectory_file
-                 (Filename.concat dir name)
-                 ~max_lines ?since_ts ?until_ts ())))
+                 (Filename.concat dir trace_file)
+                 ~max_lines ?since_ts ?until_ts ())
+          |> List.map (tag_trajectory_entry ~keeper_name:name)))
       dirs
   in
   let entries = sort_newest_first entries in
   let entries = if n <= 0 then entries else take_first n entries in
-  List.map (tag_entry Trajectory_tool_call) entries
+  entries
 
 let goal_events_path ~masc_root =
   Filename.concat masc_root "goal_events.jsonl"

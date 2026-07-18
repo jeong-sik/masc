@@ -715,28 +715,29 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_read_tool_lanes" in
   let root = masc_root dir in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
-  Fs_compat.mkdir_p trajectory_dir;
-  Fs_compat.append_file
-    (Filename.concat trajectory_dir "trace-1.jsonl")
-    (Yojson.Safe.to_string
-       (`Assoc
-          [
-            ("ts", `Float 2000.0);
-            ("ts_iso", `String "1970-01-01T00:33:20Z");
-            ("turn", `Int 1);
-            ("round", `Int 1);
-            ("tool_name", `String "tool_execute");
-            ("args", `Assoc []);
-            ( "outcome",
-              `Assoc
-                [ ("status", `String "succeeded")
-                ; ("output", `String "ok")
-                ] );
-            ("duration_ms", `Int 7);
-            ("execution_id", `String "exec-telemetry-read-1");
-          ])
-     ^ "\n");
+  let trajectory_entry =
+    match
+      Trajectory.make_tool_call_entry
+        ~ts:2000.0
+        ~ts_iso:"1970-01-01T00:33:20Z"
+        ~turn:1
+        ~round:1
+        ~tool_name:"tool_execute"
+        ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "ok")
+        ~duration_ms:7
+        ~execution_id:"exec-telemetry-read-1"
+    with
+    | Ok entry -> entry
+    | Error error ->
+      Alcotest.failf "canonical trajectory fixture rejected: %s"
+        (Trajectory.entry_decode_error_to_string error)
+  in
+  Trajectory.record_tool_call
+    ~masc_root:root
+    ~keeper_name:"alice"
+    ~trace_id:"trace-1"
+    trajectory_entry;
   let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
   Fs_compat.mkdir_p receipt_dir;
   write_jsonl receipt_dir

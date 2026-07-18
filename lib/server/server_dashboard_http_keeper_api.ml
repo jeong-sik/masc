@@ -1073,7 +1073,6 @@ let keeper_chat_history_json config name =
       Some
         (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
            ~max_lines:trajectory_max_limit
-           ~max_internal_lines:trajectory_max_limit
            ~config
            ~keeper_name:name
            ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))

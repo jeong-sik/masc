@@ -236,26 +236,15 @@ let make_hooks
           | Some { ttfrc_ms = Some _; _ } -> Some true
           | _ -> None
         in
-        (* Cache-token tracking uses OAS-reported counters only. *)
-        let cc = cache_creation_input_tokens in
-        let cr = cache_read_input_tokens in
-        if cc > 0 then
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_provider_prefix_cache_creation_tokens
-               ~delta:(Float.of_int cc) ();
-        if cr > 0 then begin
-          Otel_metric_store.inc_counter
-            Otel_metric_store.metric_provider_prefix_cache_read_tokens
-            ~delta:(Float.of_int cr) ();
-          (* Per-provider/model cache-read counter for Otel_metric_store
-             dashboards.  The legacy unlabelled counter above
-             remains for backward compatibility. *)
+        (* Cache-token tracking uses OAS-reported counters only. Cache
+           creation is represented by the GenAI usage-detail event below;
+           cache reads additionally have one labeled provider metric. *)
+        if cache_read_input_tokens > 0 then
           Otel_metric_store.inc_counter
             Otel_metric_store.metric_llm_provider_cache_read_tokens
             ~labels:[ ("provider", provider_label); ("model", model) ]
-            ~delta:(Float.of_int cr)
-            ()
-        end;
+            ~delta:(Float.of_int cache_read_input_tokens)
+            ();
         (* Per-provider/model reasoning-token counter.  Available via
            [inference_telemetry.reasoning_tokens] on select providers
            (Anthropic extended thinking, DeepSeek, etc.). *)

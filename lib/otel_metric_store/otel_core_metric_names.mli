@@ -47,8 +47,6 @@ val metric_goal_attainment_measured : string
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
 val metric_sse_rejects : string
-val metric_provider_prefix_cache_creation_tokens : string
-val metric_provider_prefix_cache_read_tokens : string
 val metric_tool_input_validation : string
 val metric_llm_provider_http_status : string
 val metric_llm_provider_request_latency : string

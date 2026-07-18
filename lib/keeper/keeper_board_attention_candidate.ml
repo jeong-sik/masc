@@ -716,7 +716,11 @@ let serialize_candidates candidates =
   String.concat "" (List.map append_row candidates)
 ;;
 
-let update_ledger ~base_path ~keeper_name decide =
+let ledger_rewrite_observer : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+;;
+
+let update_ledger_many ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
   (* Compact on write: a committed change rewrites the ledger as the deduped
      latest-per-id set (via [latest_candidates]) instead of appending one row.
@@ -726,6 +730,7 @@ let update_ledger ~base_path ~keeper_name decide =
      ledger before writing. Rewriting keeps the file bounded to the number of
      distinct candidates. *)
   try
+    (Atomic.get ledger_rewrite_observer) ();
     match
       Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
         match load_candidates_from_content content with
@@ -734,8 +739,8 @@ let update_ledger ~base_path ~keeper_name decide =
           (match decide candidates with
            | Error _ as error -> None, error
            | Ok (None, result) -> None, Ok result
-           | Ok (Some candidate, result) ->
-             let compacted = latest_candidates (candidates @ [ candidate ]) in
+           | Ok (Some updated, result) ->
+             let compacted = latest_candidates (candidates @ updated) in
              Some (serialize_candidates compacted), Ok result))
     with
     | Error error -> Error error
@@ -748,6 +753,14 @@ let update_ledger ~base_path ~keeper_name decide =
          "Board attention ledger update failed path=%s: %s"
          path
          (Printexc.to_string exn))
+;;
+
+let update_ledger ~base_path ~keeper_name decide =
+  update_ledger_many ~base_path ~keeper_name (fun candidates ->
+    match decide candidates with
+    | Error _ as error -> error
+    | Ok (None, result) -> Ok (None, result)
+    | Ok (Some candidate, result) -> Ok (Some [ candidate ], result))
 ;;
 
 let find_candidate candidates candidate_id =
@@ -784,8 +797,78 @@ let update_candidate ~base_path candidate_id keeper_name transition =
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
+let update_candidate_batch ~base_path ~keeper_name candidates transition =
+  let requested =
+    List.fold_left
+      (fun result candidate ->
+         let* ids = result in
+         if Id_set.mem candidate.candidate_id ids
+         then Error ("duplicate candidate in atomic batch: " ^ candidate.candidate_id)
+         else Ok (Id_set.add candidate.candidate_id ids))
+      (Ok Id_set.empty)
+      candidates
+  in
+  let* requested = requested in
+  update_ledger_many ~base_path ~keeper_name (fun current_rows ->
+    let found, updated_rows, selected =
+      List.fold_left
+        (fun (found, updated_rows, selected) current ->
+           if not (Id_set.mem current.candidate_id requested)
+           then found, updated_rows, selected
+           else
+             let next = transition current in
+             ( Id_set.add current.candidate_id found
+             , (if next = current then updated_rows else next :: updated_rows)
+             , Candidate_map.add current.candidate_id next selected ))
+        (Id_set.empty, [], Candidate_map.empty)
+        current_rows
+    in
+    if not (Id_set.equal requested found)
+    then
+      let missing = Id_set.diff requested found |> Id_set.elements in
+      Error
+        (Printf.sprintf
+           "Board attention candidates not found for atomic batch: [%s]"
+           (String.concat "," missing))
+    else
+      let* selected_in_request_order =
+        List.fold_left
+          (fun result candidate ->
+             let* selected_rows = result in
+             match Candidate_map.find_opt candidate.candidate_id selected with
+             | Some current -> Ok (current :: selected_rows)
+             | None ->
+               Error ("atomic batch result missing candidate " ^ candidate.candidate_id))
+          (Ok [])
+          candidates
+        |> Result.map List.rev
+      in
+      Ok
+        ( (match updated_rows with
+           | [] -> None
+           | _ -> Some (List.rev updated_rows))
+        , selected_in_request_order ))
+;;
+
 let same_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
+;;
+
+let candidate_with_retryable_failure current failure =
+  match current.status with
+  | Pending pending ->
+    (match pending.last_failure with
+     | Some existing when same_failure existing failure -> current
+     | Some _ | None ->
+       { current with status = Pending { last_failure = Some failure } })
+  | Judged judged ->
+    (match judged.last_failure with
+     | Some existing when same_failure existing failure -> current
+     | Some _ | None ->
+       { current with
+         status = Judged { judged with last_failure = Some failure }
+       })
+  | Consumed _ -> current
 ;;
 
 let record_retryable_failure ~base_path candidate failure =
@@ -794,21 +877,8 @@ let record_retryable_failure ~base_path candidate failure =
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
-       match current.status with
-       | Pending pending ->
-         (match pending.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some { current with status = Pending { last_failure = Some failure } })
-       | Judged judged ->
-         (match judged.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some
-              { current with
-                status = Judged { judged with last_failure = Some failure }
-              })
-       | Consumed _ -> None)
+       let updated = candidate_with_retryable_failure current failure in
+       if updated = current then None else Some updated)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -1179,30 +1249,142 @@ let run_judge_batch ~base_path candidates =
 
 (* ── Owner-lane batch drain ───────────────────────────── *)
 
-let apply_judgment ~base_path candidate judgment =
-  process_with_judge ~base_path ~judge:(fun _ -> Ok judgment) candidate
-;;
-
-let record_batch_failure ~base_path candidate failure =
-  match record_retryable_failure ~base_path candidate failure with
-  | Ok _ -> Ok ()
-  | Error detail ->
-    Error
-      (Printf.sprintf
-         "Board attention batch failure evidence could not be persisted keeper=%s \
-          candidate=%s: %s"
-         candidate.keeper_name
-         candidate.candidate_id
-         detail)
-;;
-
 let record_batch_failures ~base_path candidates failure =
+  match candidates with
+  | [] -> Ok ()
+  | first :: _ ->
+    (match
+       update_candidate_batch
+         ~base_path
+         ~keeper_name:first.keeper_name
+         candidates
+         (fun current -> candidate_with_retryable_failure current failure)
+     with
+     | Ok _ -> Ok ()
+     | Error detail ->
+       Error
+         (Printf.sprintf
+            "Board attention batch failure evidence could not be persisted keeper=%s: %s"
+            first.keeper_name
+            detail))
+;;
+
+let record_batch_judgments ~base_path candidates judgments =
+  match candidates with
+  | [] -> Ok []
+  | first :: _ ->
+    update_candidate_batch
+      ~base_path
+      ~keeper_name:first.keeper_name
+      candidates
+      (fun current ->
+         match current.status with
+         | Pending _ ->
+           (match Candidate_map.find_opt current.candidate_id judgments with
+            | Some judgment ->
+              { current with
+                status = Judged { judgment; last_failure = None }
+              }
+            | None -> current)
+         | Judged _ | Consumed _ -> current)
+;;
+
+let delivery_of_judgment judgment =
+  match judgment.verdict.decision with
+  | Keeper_board_attention_judgment.Not_relevant -> Not_relevant
+  | Keeper_board_attention_judgment.Relevant -> Enqueued_to_keeper_lane
+;;
+
+let enqueue_batch_deliveries ~base_path candidates =
   List.fold_left
     (fun result candidate ->
        let* () = result in
-       record_batch_failure ~base_path candidate failure)
+       match candidate.status with
+       | Judged judged ->
+         (match judged.judgment.verdict.decision with
+          | Keeper_board_attention_judgment.Not_relevant -> Ok ()
+          | Keeper_board_attention_judgment.Relevant ->
+            let stimulus = board_attention_stimulus candidate in
+            (match
+               Keeper_registry_event_queue.enqueue_if_missing_durable_result
+                 ~base_path
+                 ~event_id:candidate.candidate_id
+                 candidate.keeper_name
+                 stimulus
+             with
+             | Keeper_registry_event_queue.Enqueued
+             | Keeper_registry_event_queue.Already_present -> Ok ()
+             | Keeper_registry_event_queue.Identity_conflict detail
+             | Keeper_registry_event_queue.Storage_error detail -> Error detail))
+       | Pending _ ->
+         Error
+           (Printf.sprintf
+              "candidate %s was not durably judged before batch delivery"
+              candidate.candidate_id)
+       | Consumed _ -> Ok ())
     (Ok ())
     candidates
+;;
+
+(* The candidate ledger and Keeper event queue are separate durable files, so
+   pretending they share one atomic transaction would create an unprovable
+   exactly-once boundary. The caller first commits every verdict as [Judged].
+   This function then performs idempotent event enqueues and commits every
+   [Consumed] row together. A crash between those steps replays from [Judged];
+   event identity makes the enqueue replay safe. *)
+let consume_judged_batch ~base_path candidates =
+  match candidates with
+  | [] -> Ok (0, 0)
+  | first :: _ ->
+    (match enqueue_batch_deliveries ~base_path candidates with
+     | Error detail ->
+       let delivery_failure = failure ~kind:Durable_delivery_unavailable detail in
+       let* () = record_batch_failures ~base_path candidates delivery_failure in
+       Ok (0, List.length candidates)
+     | Ok () ->
+       let consumed_at = Time_compat.now () in
+       let* current =
+         update_candidate_batch
+           ~base_path
+           ~keeper_name:first.keeper_name
+           candidates
+           (fun candidate ->
+              match candidate.status with
+              | Judged judged ->
+                { candidate with
+                  status =
+                    Consumed
+                      { judgment = judged.judgment
+                      ; delivery = delivery_of_judgment judged.judgment
+                      ; consumed_at
+                      }
+                }
+              | Pending _ | Consumed _ -> candidate)
+       in
+       let consumed, remaining, wake_candidate =
+         List.fold_left
+           (fun (consumed, remaining, wake_candidate) candidate ->
+              match candidate.status with
+              | Consumed { delivery = Enqueued_to_keeper_lane; _ } ->
+                ( consumed + 1
+                , remaining
+                , (match wake_candidate with
+                   | Some _ -> wake_candidate
+                   | None -> Some candidate) )
+              | Consumed { delivery = Not_relevant; _ } ->
+                consumed + 1, remaining, wake_candidate
+              | Pending _ | Judged _ -> consumed, remaining + 1, wake_candidate)
+           (0, 0, None)
+           current
+       in
+       (match wake_candidate with
+        | None -> ()
+        | Some candidate ->
+          let (_ : Keeper_registry.wakeup_outcome) =
+            request_owner_wake ~site:"durable_batch_delivery" ~base_path candidate
+          in
+          ());
+       Ok (consumed, remaining))
 ;;
 
 let validate_batch_coverage batch judgments =
@@ -1245,20 +1427,9 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
       candidates
   in
   (* Already-judged verdicts deliver without new model calls. *)
+  let judged_candidates = List.map fst judged_ready in
   let* judged_consumed, judged_remaining =
-    List.fold_left
-      (fun result (candidate, judged) ->
-         match result with
-         | Error _ -> result
-         | Ok (consumed, remaining) ->
-           (match consume_judged ~base_path candidate judged with
-            | Ok current ->
-              (match current.status with
-               | Consumed _ -> Ok (consumed + 1, remaining)
-               | Pending _ | Judged _ -> Ok (consumed, remaining + 1))
-            | Error detail -> Error detail))
-      (Ok (0, 0))
-      judged_ready
+    consume_judged_batch ~base_path judged_candidates
   in
   (* A single owner admission performs at most one provider call, and that
      call contains one exact persisted Keeper context. Other contexts and
@@ -1286,21 +1457,8 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
               ; remaining = List.length batch + List.length deferred
               }
           | Ok () ->
-            let* consumed, remaining =
-              List.fold_left
-                (fun result candidate ->
-                   let* consumed, remaining = result in
-                   match Candidate_map.find_opt candidate.candidate_id judgments with
-                   | None ->
-                     Error "validated batch verdict disappeared before application"
-                   | Some judgment ->
-                     let* current = apply_judgment ~base_path candidate judgment in
-                     (match current.status with
-                      | Consumed _ -> Ok (consumed + 1, remaining)
-                      | Pending _ | Judged _ -> Ok (consumed, remaining + 1)))
-                (Ok (0, 0))
-                batch
-            in
+            let* judged = record_batch_judgments ~base_path batch judgments in
+            let* consumed, remaining = consume_judged_batch ~base_path judged in
             Ok
               { attempted = List.length batch
               ; consumed
@@ -1322,6 +1480,14 @@ let drain_pending_on_owner_lane ~base_path ~keeper_name =
 ;;
 
 module For_testing = struct
+  let set_ledger_rewrite_observer observer =
+    Atomic.set ledger_rewrite_observer observer
+  ;;
+
+  let reset_ledger_rewrite_observer () =
+    Atomic.set ledger_rewrite_observer (fun () -> ())
+  ;;
+
   let drain_pending_with_judge_batch = drain_pending_with_judge_batch
 
   let drain_pending_with_judge ~base_path ~keeper_name ~judge =

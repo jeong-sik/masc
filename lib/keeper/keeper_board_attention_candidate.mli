@@ -156,6 +156,10 @@ val drain_pending_on_owner_lane :
     - The response must cover the exact requested candidate-id set. Unknown,
       duplicate, or missing identities fail the whole attempted batch and
       persist retryable response-contract evidence for every attempted row.
+    - A successful fresh batch commits every [Judged] row in one candidate
+      ledger rewrite, performs idempotent relevant-event delivery, then commits
+      every [Consumed] row in one candidate ledger rewrite. The rewrite count
+      is therefore two regardless of batch cardinality.
     - Pending rows never expire from wall-clock age. Supersession or operator
       discard requires a separate typed lifecycle operation. *)
 
@@ -165,6 +169,11 @@ val batch_max_candidates : int
 module Candidate_map : Map.S with type key = string
 
 module For_testing : sig
+  val set_ledger_rewrite_observer : (unit -> unit) -> unit
+  val reset_ledger_rewrite_observer : unit -> unit
+  (** Observe ledger-rewrite transaction calls in focused tests. Production
+      installs no observer. *)
+
   val drain_pending_with_judge :
     base_path:string ->
     keeper_name:string ->

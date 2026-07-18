@@ -201,12 +201,6 @@ let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
     ]
 ;;
 
-let next_sequence_unlocked ~base_path =
-  match SMap.find_opt base_path (Atomic.get next_sequences) with
-  | Some sequence -> sequence
-  | None -> first_sequence
-;;
-
 let persist_snapshot_with_sequence_unlocked
       ~base_path
       ~next_sequence
@@ -231,12 +225,36 @@ let persist_snapshot_with_sequence_unlocked
      | exn -> Error { path; reason = Printexc.to_string exn })
 ;;
 
+type store_lifecycle =
+  | Uninstalled
+  | Ready of int
+  | Unavailable of storage_error
+
+let next_sequence_lifecycle ~base_path =
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some error -> Unavailable error
+  | None ->
+    (match SMap.find_opt base_path (Atomic.get next_sequences) with
+     | Some sequence -> Ready sequence
+     | None -> Uninstalled)
+;;
+
 let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
-  persist_snapshot_with_sequence_unlocked
-    ~base_path
-    ~next_sequence:(next_sequence_unlocked ~base_path)
-    ~pending_map
-    ~delivery_map
+  match next_sequence_lifecycle ~base_path with
+  | Ready next_sequence ->
+    persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  | Uninstalled ->
+    Error
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; install_persistence must \
+           complete before publishing"
+      }
+  | Unavailable error -> Error error
 ;;
 
 let reject_unknown_fields ~surface ~allowed fields =
@@ -614,11 +632,61 @@ let snapshot_of_yojson ~base_path json =
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
+let snapshot_version_of_yojson = function
+  | `Assoc fields -> (
+    match List.assoc_opt "version" fields with
+    | Some (`Int version) -> Some version
+    | Some _ | None -> None)
+  | _ -> None
+;;
+
+let quarantine_path ~path ~version =
+  let base = Printf.sprintf "%s.v%d.quarantine" path version in
+  let rec find_free k =
+    let candidate =
+      if k = 0 then base else Printf.sprintf "%s.%d" base k
+    in
+    if Sys.file_exists candidate then find_free (k + 1) else candidate
+  in
+  find_free 0
+;;
+
+(* An unsupported snapshot version is a generational boundary, not
+   corruption: the durable file is preserved verbatim at a visible
+   quarantine path and the store starts a fresh generation. Only a rename
+   failure keeps the old fail-closed behavior — starting fresh while the
+   old file is still in place would let the next [put] overwrite the very
+   evidence the quarantine exists to preserve. *)
+let quarantine_snapshot_unlocked ~path ~version =
+  let target = quarantine_path ~path ~version in
+  try
+    Sys.rename path target;
+    Log.Server.error
+      "gate_pending snapshot version %d is unsupported (current %d); \
+       quarantined to %s and starting a fresh store generation"
+      version pending_store_version target;
+    Ok (SMap.empty, SMap.empty, first_sequence)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason =
+      Printf.sprintf
+        "gate_pending snapshot version %d is unsupported and quarantine \
+         rename to %s failed: %s"
+        version target (Printexc.to_string exn)
+    in
+    report_pending_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~path
+      ~detail:reason;
+    Error { path; reason }
+;;
+
 let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty, 1)
+    then Ok (SMap.empty, SMap.empty, first_sequence)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -628,14 +696,18 @@ let load_snapshot_unlocked ~base_path =
           ~detail:reason;
         Error { path; reason }
       | Ok json ->
-        (match snapshot_of_yojson ~base_path json with
-         | Ok snapshot -> Ok snapshot
-         | Error reason ->
-           report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-             ~path
-             ~detail:reason;
-           Error { path; reason }))
+        (match snapshot_version_of_yojson json with
+         | Some version when version <> pending_store_version ->
+           quarantine_snapshot_unlocked ~path ~version
+         | Some _ | None ->
+           (match snapshot_of_yojson ~base_path json with
+            | Ok snapshot -> Ok snapshot
+            | Error reason ->
+              report_pending_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path
+                ~detail:reason;
+              Error { path; reason })))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1723,22 +1795,30 @@ let submit_pending
       | Some id -> Ok (id, None)
       | None ->
         let id = generate_id () in
-        let sequence = next_sequence_unlocked ~base_path in
-        if sequence = max_int
-        then
-          Error
-            { path = pending_store_path ~base_path
-            ; reason = "approval sequence exhausted its integer representation"
-            }
-        else
-          let entry =
-            create_entry
-              ~id
-              ~sequence
-              ~keeper_name
-              ~tool_name
-              ~input
-              ?turn_id
+        (match next_sequence_lifecycle ~base_path with
+         | Uninstalled ->
+           Error
+             { path = pending_store_path ~base_path
+             ; reason =
+                 "gate_pending store is not installed; submit requires a completed install"
+             }
+         | Unavailable error -> Error error
+         | Ready sequence ->
+           if sequence = max_int
+           then
+             Error
+               { path = pending_store_path ~base_path
+               ; reason = "approval sequence exhausted its integer representation"
+               }
+           else
+             let entry =
+               create_entry
+                 ~id
+                 ~sequence
+                 ~keeper_name
+                 ~tool_name
+                 ~input
+                 ?turn_id
               ?request_context
               ?task_id
               ?goal_id
@@ -1762,7 +1842,7 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (id, Some entry)))
+             Ok (id, Some entry))))
   in
   match stored with
   | Error _ as error -> error

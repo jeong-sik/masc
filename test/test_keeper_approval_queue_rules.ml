@@ -252,7 +252,11 @@ let with_gate_fixture f =
       AQ.For_testing.reset_runtime_state ();
       AQ.For_testing.reset_audit_store ();
       cleanup_dir base_path)
-    (fun () -> f base_path)
+    (fun () ->
+       (match AQ.install_persistence ~base_path with
+        | Ok _report -> ()
+        | Error error -> fail (AQ.install_error_to_string error));
+       f base_path)
 ;;
 
 let exact_rule_lookup_failure_count () =

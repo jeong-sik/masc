@@ -126,5 +126,4 @@ module For_testing : sig
 
   val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
   val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
-  val reset_active_auto_judges : unit -> unit
 end

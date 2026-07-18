@@ -2671,33 +2671,20 @@ let schedule_keeper_reaction_evidence_dashboard_json
                 :: ("reason", `String "dispatch receipt predates stimulus_id projection")
                 :: base_fields)
            | Some stimulus_id ->
-             let evidence =
-               Keeper_reaction_ledger.event_queue_reaction_evidence
-                 ~base_path:config.Workspace_utils.base_path
-                 ~keeper_name
-                 ~stimulus_id
-             in
-             let projection_status =
-               if evidence.event_queue_ack_seen
-               then "matched_consumed_ack"
-               else if evidence.turn_started_seen
-               then "matched_turn_started"
-               else if evidence.stimulus_seen
-               then "matched_stimulus"
-               else if evidence.quarantined_record_count > 0
-               then "quarantined"
-               else "not_found"
-             in
-             `Assoc
-               (("projection_status", `String projection_status)
-                :: base_fields
-                @ [ "stimulus_id", `String stimulus_id
+             let evidence_fields
+                   (evidence : Keeper_reaction_ledger.event_queue_reaction_evidence)
+               =
+               [ "stimulus_id", `String stimulus_id
                   ; "stimulus_seen", `Bool evidence.stimulus_seen
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
                   ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; "matched_record_count", `Int evidence.matched_record_count
                   ; ( "quarantined_record_count"
                     , `Int evidence.quarantined_record_count )
+                  ; ( "unattributed_syntax_error_count"
+                    , `Int evidence.unattributed_syntax_error_count )
+                  ; ( "unattributed_identity_quarantine_count"
+                    , `Int evidence.unattributed_identity_quarantine_count )
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
                       | None -> `Null
@@ -2722,7 +2709,109 @@ let schedule_keeper_reaction_evidence_dashboard_json
                       | Some ts -> `Float ts )
                   ; ( "latest_recorded_at_iso"
                     , unix_iso_option_json evidence.latest_recorded_at )
-                  ]))))
+                  ]
+             in
+             let projection_json ?reason ?(extra_fields=[]) status evidence =
+               let reason_fields =
+                 match reason with
+                 | Some value -> [ "reason", `String value ]
+                 | None -> []
+               in
+               `Assoc
+                 (("projection_status", `String status)
+                  :: base_fields
+                  @ evidence_fields evidence
+                  @ reason_fields
+                  @ extra_fields)
+             in
+             (match
+                Keeper_reaction_ledger.event_queue_reaction_evidence_result
+                  ~base_path:config.Workspace_utils.base_path
+                  ~keeper_name
+                  ~stimulus_id
+              with
+              | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id ->
+                let error =
+                  Keeper_reaction_ledger.Evidence_invalid_stimulus_id
+                in
+                `Assoc
+                  (("projection_status", `String "invalid_stimulus_id")
+                   :: ( "reason"
+                      , `String
+                          (Keeper_reaction_ledger
+                           .event_queue_reaction_evidence_error_to_string
+                             error) )
+                   :: base_fields
+                   @ [ "stimulus_id", `String stimulus_id ])
+              | Error (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
+                `Assoc
+                  (("projection_status", `String "read_error")
+                   :: ( "reason"
+                      , `String
+                          (Keeper_reaction_ledger
+                           .event_queue_reaction_evidence_error_to_string
+                             error) )
+                   :: base_fields
+                   @ [ "stimulus_id", `String stimulus_id ])
+              | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+                let projection_status =
+                  if evidence.event_queue_ack_seen
+                  then "matched_consumed_ack"
+                  else if evidence.turn_started_seen
+                  then "matched_turn_started"
+                  else if evidence.stimulus_seen
+                  then "matched_stimulus"
+                  else "not_found"
+                in
+                projection_json projection_status evidence
+              | Ok
+                  (Keeper_reaction_ledger.Evidence_quarantined
+                    { evidence; first_reason }) ->
+                projection_json
+                  ~reason:
+                    (Keeper_reaction_ledger.row_quarantine_reason_to_string
+                       first_reason)
+                  "quarantined"
+                  evidence
+              | Ok
+                  (Keeper_reaction_ledger.Evidence_incomplete
+                    { evidence
+                    ; first_syntax_error
+                    ; first_identity_quarantine_reason
+                    ; first_matching_quarantine_reason
+                    }) ->
+                let reason_json = function
+                  | Some reason ->
+                    `String
+                      (Keeper_reaction_ledger.row_quarantine_reason_to_string
+                         reason)
+                  | None -> `Null
+                in
+                let syntax_error_json =
+                  match first_syntax_error with
+                  | None -> `Null
+                  | Some error ->
+                    `Assoc
+                      [ "path", `String error.path
+                      ; ( "line_number"
+                        , match error.line_number with
+                          | Some value -> `Int value
+                          | None -> `Null )
+                      ; "detail", `String error.detail
+                      ]
+                in
+                projection_json
+                  ~reason:
+                    "unattributed ledger rows prevent exact occurrence evidence"
+                  ~extra_fields:
+                    [ "first_syntax_error", syntax_error_json
+                    ; ( "first_identity_quarantine_reason"
+                      , reason_json first_identity_quarantine_reason )
+                    ; ( "first_matching_quarantine_reason"
+                      , reason_json first_matching_quarantine_reason )
+                    ]
+                  "incomplete"
+                  evidence))))
 ;;
 
 let schedule_signal_projection_limit = 20

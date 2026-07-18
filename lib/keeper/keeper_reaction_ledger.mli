@@ -33,9 +33,11 @@ type reaction_kind =
   | Cursor_ack
 
 type reaction_decode_error = Unknown_reaction_kind of string
+type row_quarantine_reason
 
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
+val row_quarantine_reason_to_string : row_quarantine_reason -> string
 
 val stimulus_kind_of_string : string -> stimulus_kind option
 (** Inverse of {!stimulus_kind_to_string}.  Strings outside the closed sum
@@ -87,21 +89,46 @@ type event_queue_reaction_evidence =
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
+  ; unattributed_syntax_error_count : int
+  ; unattributed_identity_quarantine_count : int
   }
 
-val event_queue_reaction_evidence :
-  base_path:string -> keeper_name:string -> stimulus_id:string -> event_queue_reaction_evidence
-(** Stream the durable reaction ledger for exact rows sharing [stimulus_id].
-    This intentionally does not use a "recent rows" limit, because dashboards
-    use it to prove a specific queue stimulus was observed by the keeper. *)
+type unattributed_syntax_error =
+  { path : string
+  ; line_number : int option
+  ; detail : string
+  }
+
+type event_queue_reaction_evidence_outcome =
+  | Evidence_complete of event_queue_reaction_evidence
+  | Evidence_quarantined of
+      { evidence : event_queue_reaction_evidence
+      ; first_reason : row_quarantine_reason
+      }
+  | Evidence_incomplete of
+      { evidence : event_queue_reaction_evidence
+      ; first_syntax_error : unattributed_syntax_error option
+      ; first_identity_quarantine_reason : row_quarantine_reason option
+      ; first_matching_quarantine_reason : row_quarantine_reason option
+      }
+
+type event_queue_reaction_evidence_error =
+  | Evidence_invalid_stimulus_id
+  | Evidence_read_error of Dated_jsonl.read_error
+
+val event_queue_reaction_evidence_error_to_string :
+  event_queue_reaction_evidence_error -> string
 
 val event_queue_reaction_evidence_result :
   base_path:string ->
   keeper_name:string ->
   stimulus_id:string ->
-  (event_queue_reaction_evidence, string) result
-(** Fail-loud exact-id scan for delivery invariants. Unlike the dashboard
-    projection above, malformed or unreadable ledger rows return [Error]. *)
+  (event_queue_reaction_evidence_outcome, event_queue_reaction_evidence_error) result
+(** Exact-id delivery scan over the complete keeper-local ledger. Matching
+    semantic-invalid rows produce {!Evidence_quarantined}. Syntax-invalid rows
+    and parseable rows without a usable stimulus identity cannot be attributed
+    and therefore produce {!Evidence_incomplete}; they never become negative
+    evidence. Empty query identities and storage failures remain typed errors. *)
 
 val record_board_cursor_ack :
   base_path:string ->
@@ -114,10 +141,6 @@ val record_board_cursor_ack :
 (** Append a durable cursor acknowledgement. Callers should write this before
     advancing the in-memory board cursor so every cursor advance has a replayable
     ack row. *)
-
-val read_recent_for_keeper :
-  base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t list
-(** Read the newest rows for tests and dashboards. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

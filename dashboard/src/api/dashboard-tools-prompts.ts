@@ -99,7 +99,11 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
     | 'matched_turn_started'
     | 'matched_stimulus'
     | 'not_found'
+    | 'quarantined'
+    | 'incomplete'
+    | 'read_error'
     | 'missing_stimulus_id'
+    | 'invalid_stimulus_id'
     | 'unrecognized_receipt'
   source?: string
   keeper_name?: string
@@ -113,6 +117,16 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   turn_started_seen?: boolean
   event_queue_ack_seen?: boolean
   matched_record_count?: number
+  quarantined_record_count?: number
+  unattributed_syntax_error_count?: number
+  unattributed_identity_quarantine_count?: number
+  first_syntax_error?: {
+    path: string
+    line_number: number | null
+    detail: string
+  } | null
+  first_identity_quarantine_reason?: string | null
+  first_matching_quarantine_reason?: string | null
   stimulus_recorded_at?: number | null
   stimulus_recorded_at_iso?: string | null
   turn_started_recorded_at?: number | null

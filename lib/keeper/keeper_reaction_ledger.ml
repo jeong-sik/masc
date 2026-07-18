@@ -402,10 +402,6 @@ let record_board_cursor_ack
   Dated_jsonl.append (store_for_base_path ~base_path ~keeper_name) json
 ;;
 
-let read_recent_for_keeper ~base_path ~keeper_name ~limit =
-  Dated_jsonl.read_recent (store_for_base_path ~base_path ~keeper_name) limit
-;;
-
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
@@ -772,7 +768,38 @@ type event_queue_reaction_evidence =
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
+  ; unattributed_syntax_error_count : int
+  ; unattributed_identity_quarantine_count : int
   }
+
+type unattributed_syntax_error =
+  { path : string
+  ; line_number : int option
+  ; detail : string
+  }
+
+type event_queue_reaction_evidence_outcome =
+  | Evidence_complete of event_queue_reaction_evidence
+  | Evidence_quarantined of
+      { evidence : event_queue_reaction_evidence
+      ; first_reason : row_quarantine_reason
+      }
+  | Evidence_incomplete of
+      { evidence : event_queue_reaction_evidence
+      ; first_syntax_error : unattributed_syntax_error option
+      ; first_identity_quarantine_reason : row_quarantine_reason option
+      ; first_matching_quarantine_reason : row_quarantine_reason option
+      }
+
+type event_queue_reaction_evidence_error =
+  | Evidence_invalid_stimulus_id
+  | Evidence_read_error of Dated_jsonl.read_error
+
+let event_queue_reaction_evidence_error_to_string = function
+  | Evidence_invalid_stimulus_id ->
+    "reaction ledger evidence stimulus_id must be non-empty"
+  | Evidence_read_error error -> Dated_jsonl.read_error_to_string error
+;;
 
 let max_recorded_at current candidate =
   match current, candidate with
@@ -781,7 +808,10 @@ let max_recorded_at current candidate =
   | Some left, Some right -> Some (Float.max left right)
 ;;
 
-let event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id iter =
+let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  if String.equal stimulus_id ""
+  then Error Evidence_invalid_stimulus_id
+  else begin
   let stimulus_seen = ref false in
   let turn_started_seen = ref false in
   let event_queue_ack_seen = ref false in
@@ -791,106 +821,111 @@ let event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id iter =
   let latest_recorded_at = ref None in
   let matched_record_count = ref 0 in
   let quarantined_record_count = ref 0 in
-  let first_quarantine_reason = ref None in
-  let iteration = iter (fun row ->
-    let targets_stimulus =
-      match string_field "stimulus_id" row with
-      | Some row_stimulus_id -> String.equal row_stimulus_id stimulus_id
-      | None -> false
-    in
-    if targets_stimulus
-    then
-      match decode_current_row ~keeper_name row with
-      | Error reason ->
-        incr quarantined_record_count;
-        (match !first_quarantine_reason with
-         | Some _ -> ()
-         | None -> first_quarantine_reason := Some reason)
-      | Ok current_row ->
-        incr matched_record_count;
-        let metadata =
-          match current_row with
-          | Current_stimulus { metadata; _ }
-          | Current_reaction { metadata; _ }
-          | Current_cursor_ack { metadata; _ } -> metadata
-        in
-        let recorded_at = Some metadata.recorded_at in
-        latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
-        (match current_row with
-         | Current_stimulus _ ->
+  let unattributed_syntax_error_count = ref 0 in
+  let unattributed_identity_quarantine_count = ref 0 in
+  let first_matching_quarantine_reason = ref None in
+  let first_syntax_error = ref None in
+  let first_identity_quarantine_reason = ref None in
+  let remember_first slot value =
+    match !slot with
+    | Some _ -> ()
+    | None -> slot := Some value
+  in
+  let note_matching_row row =
+    match decode_current_row ~keeper_name row with
+    | Error reason ->
+      incr quarantined_record_count;
+      remember_first first_matching_quarantine_reason reason
+    | Ok current_row ->
+      incr matched_record_count;
+      let metadata =
+        match current_row with
+        | Current_stimulus { metadata; _ }
+        | Current_reaction { metadata; _ }
+        | Current_cursor_ack { metadata; _ } -> metadata
+      in
+      let recorded_at = Some metadata.recorded_at in
+      latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
+      (match current_row with
+       | Current_stimulus _ ->
          stimulus_seen := true;
          stimulus_recorded_at := max_recorded_at !stimulus_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Turn_started; _ } ->
-            turn_started_seen := true;
-            turn_started_recorded_at
-              := max_recorded_at !turn_started_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-            event_queue_ack_seen := true;
-            event_queue_ack_recorded_at
-              := max_recorded_at !event_queue_ack_recorded_at recorded_at
-         | Current_reaction
-             { reaction_kind = Event_queue_requeued | Event_queue_escalated | Cursor_ack
-             ; _
-             }
-         | Current_cursor_ack _ -> ()))
+       | Current_reaction { reaction_kind = Turn_started; _ } ->
+         turn_started_seen := true;
+         turn_started_recorded_at
+           := max_recorded_at !turn_started_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+         event_queue_ack_seen := true;
+         event_queue_ack_recorded_at
+           := max_recorded_at !event_queue_ack_recorded_at recorded_at
+       | Current_reaction
+           { reaction_kind = Event_queue_requeued | Event_queue_escalated | Cursor_ack
+           ; _
+           }
+       | Current_cursor_ack _ -> ())
   in
-  iteration,
-  { keeper_name
-  ; stimulus_id
-  ; stimulus_seen = !stimulus_seen
-  ; turn_started_seen = !turn_started_seen
-  ; event_queue_ack_seen = !event_queue_ack_seen
-  ; stimulus_recorded_at = !stimulus_recorded_at
-  ; turn_started_recorded_at = !turn_started_recorded_at
-  ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
-  ; latest_recorded_at = !latest_recorded_at
-  ; matched_record_count = !matched_record_count
-  ; quarantined_record_count = !quarantined_record_count
-  },
-  !first_quarantine_reason
-;;
-
-let event_queue_reaction_evidence ~base_path ~keeper_name ~stimulus_id =
+  let note_parsed_row row =
+    let note_unattributed_identity () =
+      incr unattributed_identity_quarantine_count;
+      match decode_current_row ~keeper_name row with
+      | Error reason -> remember_first first_identity_quarantine_reason reason
+      | Ok _ -> ()
+    in
+    match string_field "stimulus_id" row with
+    | Some row_stimulus_id ->
+      if String.equal row_stimulus_id ""
+      then note_unattributed_identity ()
+      else if String.equal row_stimulus_id stimulus_id
+      then note_matching_row row
+    | None -> note_unattributed_identity ()
+  in
   let store = store_for_base_path ~base_path ~keeper_name in
-  let _iteration, evidence, _quarantine =
-    event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id (fun note ->
-      Dated_jsonl.iter_all store note)
+  let iteration =
+    Dated_jsonl.iter_all_entries_result store (function
+      | Dated_jsonl.Parsed row -> note_parsed_row row
+      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+        incr unattributed_syntax_error_count;
+        remember_first first_syntax_error { path; line_number; detail })
   in
-  evidence
-;;
-
-let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
-  let store = store_for_base_path ~base_path ~keeper_name in
-  let iteration, evidence, quarantine =
-    event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id (fun note ->
-      let exception Malformed_row of string * int option * string in
-      try
-        Dated_jsonl.iter_all_entries_result store (function
-          | Dated_jsonl.Parsed row -> note row
-          | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-            raise_notrace (Malformed_row (path, line_number, detail)))
-        |> Result.map_error Dated_jsonl.read_error_to_string
-      with
-      | Malformed_row (path, line_number, detail) ->
-        Error
-          (Printf.sprintf
-             "failed to parse reaction ledger row %s%s: %s"
-             path
-             (match line_number with
-              | Some value -> Printf.sprintf ":%d" value
-              | None -> "")
-             detail))
-  in
-  match iteration, quarantine with
-  | Error _ as error, _ -> error
-  | Ok (), Some reason ->
-    Error
-      (Printf.sprintf
-         "reaction ledger row quarantined keeper=%s stimulus_id=%s reason=%s"
-         keeper_name
-         stimulus_id
-         (row_quarantine_reason_to_string reason))
-  | Ok (), None -> Ok evidence
+  match iteration with
+  | Error error -> Error (Evidence_read_error error)
+  | Ok () ->
+    let evidence =
+      { keeper_name
+      ; stimulus_id
+      ; stimulus_seen = !stimulus_seen
+      ; turn_started_seen = !turn_started_seen
+      ; event_queue_ack_seen = !event_queue_ack_seen
+      ; stimulus_recorded_at = !stimulus_recorded_at
+      ; turn_started_recorded_at = !turn_started_recorded_at
+      ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
+      ; latest_recorded_at = !latest_recorded_at
+      ; matched_record_count = !matched_record_count
+      ; quarantined_record_count = !quarantined_record_count
+      ; unattributed_syntax_error_count = !unattributed_syntax_error_count
+      ; unattributed_identity_quarantine_count =
+          !unattributed_identity_quarantine_count
+      }
+    in
+    if
+      evidence.unattributed_syntax_error_count > 0
+      || evidence.unattributed_identity_quarantine_count > 0
+    then
+      Ok
+        (Evidence_incomplete
+           { evidence
+           ; first_syntax_error = !first_syntax_error
+           ; first_identity_quarantine_reason =
+               !first_identity_quarantine_reason
+           ; first_matching_quarantine_reason =
+               !first_matching_quarantine_reason
+           })
+    else
+      match !first_matching_quarantine_reason with
+      | Some first_reason ->
+        Ok (Evidence_quarantined { evidence; first_reason })
+      | None -> Ok (Evidence_complete evidence)
+  end
 ;;
 
 let nested_string_field outer inner json =
@@ -1103,6 +1138,10 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
   let cursor_swept_stimulus_count = ref 0 in
+  let note_quarantine reason =
+    incr quarantined_row_count;
+    increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
+  in
   let remember_stimulus stimulus_id =
     if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
       Hashtbl.add stimulus_seen stimulus_id false;
@@ -1162,40 +1201,42 @@ let summarize_rows ~keeper_name ~limit rows =
     | (Event_queue_ack | Event_queue_requeued | Event_queue_escalated), None
     | Cursor_ack, Some _ -> ()
   in
+  let note_current_row current_row =
+    let metadata =
+      match current_row with
+      | Current_stimulus { metadata; _ }
+      | Current_reaction { metadata; _ }
+      | Current_cursor_ack { metadata; _ } -> metadata
+    in
+    if Event_id_set.mem metadata.event_id !current_event_ids
+    then ()
+    else begin
+      current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
+      incr row_count;
+      latest_recorded_at := Some metadata.recorded_at;
+      latest_stimulus_id := Some metadata.stimulus_id;
+      match current_row with
+      | Current_stimulus { metadata; stimulus_kind } ->
+        incr stimulus_count;
+        remember_stimulus metadata.stimulus_id;
+        remember_board_stimulus metadata stimulus_kind
+      | Current_reaction { metadata; reaction_kind; transition_receipt } ->
+        incr reaction_count;
+        note_reaction_kind reaction_kind transition_receipt;
+        mark_reacted metadata.stimulus_id
+      | Current_cursor_ack { cursor_token; _ } ->
+        incr reaction_count;
+        incr cursor_ack_count;
+        note_board_cursor cursor_token
+    end
+  in
   List.iter
-    (fun row ->
-      match decode_current_row ~keeper_name row with
-      | Error reason ->
-        incr quarantined_row_count;
-        increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
-      | Ok current_row ->
-        let metadata =
-          match current_row with
-          | Current_stimulus { metadata; _ }
-          | Current_reaction { metadata; _ }
-          | Current_cursor_ack { metadata; _ } -> metadata
-        in
-        if Event_id_set.mem metadata.event_id !current_event_ids
-        then ()
-        else begin
-          current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
-          incr row_count;
-          latest_recorded_at := Some metadata.recorded_at;
-          latest_stimulus_id := Some metadata.stimulus_id;
-          match current_row with
-          | Current_stimulus { metadata; stimulus_kind } ->
-            incr stimulus_count;
-            remember_stimulus metadata.stimulus_id;
-            remember_board_stimulus metadata stimulus_kind
-          | Current_reaction { metadata; reaction_kind; transition_receipt } ->
-            incr reaction_count;
-            note_reaction_kind reaction_kind transition_receipt;
-            mark_reacted metadata.stimulus_id
-          | Current_cursor_ack { cursor_token; _ } ->
-            incr reaction_count;
-            incr cursor_ack_count;
-            note_board_cursor cursor_token
-        end)
+    (function
+      | Dated_jsonl.Malformed_json _ -> note_quarantine Malformed_json_row
+      | Dated_jsonl.Parsed row ->
+        (match decode_current_row ~keeper_name row with
+         | Error reason -> note_quarantine reason
+         | Ok current_row -> note_current_row current_row))
     rows;
   let pending_stimulus_ids =
     !stimulus_order
@@ -1274,8 +1315,17 @@ let error_summary ~keeper_name ~limit error =
 
 let summary_for_keeper ~base_path ~keeper_name ~limit =
   try
-    read_recent_for_keeper ~base_path ~keeper_name ~limit
-    |> summarize_rows ~keeper_name ~limit
+    match
+      Dated_jsonl.read_recent_result
+        (store_for_base_path ~base_path ~keeper_name)
+        limit
+    with
+    | Ok rows -> summarize_rows ~keeper_name ~limit rows
+    | Error error ->
+      error_summary
+        ~keeper_name
+        ~limit
+        (Dated_jsonl.read_error_to_string error)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)

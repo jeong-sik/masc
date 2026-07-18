@@ -160,6 +160,48 @@ let reaction_ledger_store ~base_path ~keeper_name =
     ()
 ;;
 
+let read_recent_rows ~base_path ~keeper_name ~limit =
+  match
+    Dated_jsonl.read_recent_result
+      (reaction_ledger_store ~base_path ~keeper_name)
+      limit
+  with
+  | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  | Ok entries ->
+    List.map
+      (function
+        | Dated_jsonl.Parsed row -> row
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          failf
+            "unexpected malformed test row %s%s: %s"
+            path
+            (match line_number with
+             | Some value -> Printf.sprintf ":%d" value
+             | None -> "")
+            detail)
+      entries
+;;
+
+let require_complete_evidence label = function
+  | Error error ->
+    failf
+      "%s: %s"
+      label
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    failf
+      "%s: quarantined (%s)"
+      label
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Ok (Keeper_reaction_ledger.Evidence_incomplete { evidence; _ }) ->
+    failf
+      "%s: incomplete (syntax=%d identity=%d)"
+      label
+      evidence.unattributed_syntax_error_count
+      evidence.unattributed_identity_quarantine_count
+;;
+
 let latest_row rows =
   match List.rev rows with
   | row :: _ -> row
@@ -179,7 +221,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
     ~keeper_name
     stimulus;
   let rows =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:10
+    read_recent_rows ~base_path ~keeper_name ~limit:10
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
@@ -217,10 +259,11 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     ~keeper_name
     unrelated;
   let stimulus_only =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "stimulus-only evidence"
   in
   check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
   check bool "turn reaction absent" false stimulus_only.turn_started_seen;
@@ -231,10 +274,11 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     ~keeper_name
     stimulus;
   let reacted =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "turn-started evidence"
   in
   check bool "exact stimulus still seen" true reacted.stimulus_seen;
   check bool "turn reaction seen" true reacted.turn_started_seen;
@@ -251,10 +295,11 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     stimulus
   |> require_ok "record event queue ack";
   let acknowledged =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "acknowledged evidence"
   in
   check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
   check int "three exact rows after ack" 3 acknowledged.matched_record_count;
@@ -266,15 +311,26 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check int "current rows are not quarantined" 0
     (summary |> member "quarantined_row_count" |> to_int);
   let missing =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id:"stimulus:missing"
+    |> require_complete_evidence "missing evidence"
   in
   check bool "missing stimulus absent" false missing.stimulus_seen;
   check bool "missing reaction absent" false missing.turn_started_seen;
   check bool "missing ack absent" false missing.event_queue_ack_seen;
-  check int "missing exact rows" 0 missing.matched_record_count
+  check int "missing exact rows" 0 missing.matched_record_count;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:""
+  with
+  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
+  | Error (Keeper_reaction_ledger.Evidence_read_error _) ->
+    fail "empty evidence identity reached storage"
+  | Ok _ -> fail "empty evidence identity was accepted"
 ;;
 
 let test_failure_judgment_external_input_is_typed_history () =
@@ -349,7 +405,7 @@ let test_transition_reactions_distinguish_ordered_sources () =
   record 0 first;
   record 1 second;
   let rows =
-    Keeper_reaction_ledger.read_recent_for_keeper
+    read_recent_rows
       ~base_path
       ~keeper_name
       ~limit:10
@@ -380,7 +436,7 @@ let test_cursor_ack_is_replayable_state_entry () =
     ~post_id:(Some "post-99")
     ();
   let row =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
+    read_recent_rows ~base_path ~keeper_name ~limit:1
     |> latest_row
   in
   check_member_string "cursor ack record kind" "cursor_ack" "record_kind" row;
@@ -833,7 +889,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
         ; "stimulus_id", `String stimulus_id
         ; ( "reaction"
           , `Assoc
-              [ "kind", `String "legacy_custom"
+              [ "kind", `String "unknown_custom"
               ; "source", `String "keeper_event_queue"
               ] )
         ]);
@@ -849,30 +905,29 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
     (summary |> member "reaction_count" |> to_int);
   check int "unknown reaction cannot clear pending" 1
     (summary |> member "pending_stimulus_count" |> to_int);
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
-  in
-  check int "only current stimulus matches" 1 evidence.matched_record_count;
-  check int "matching invalid row is explicit" 1 evidence.quarantined_record_count;
-  check bool "invalid reaction is not a turn" false evidence.turn_started_seen;
-  (match
-     Keeper_reaction_ledger.event_queue_reaction_evidence_result
-       ~base_path
-       ~keeper_name
-       ~stimulus_id
-   with
-   | Error detail ->
-     check string "fail-loud evidence names typed quarantine"
-       (Printf.sprintf
-          "reaction ledger row quarantined keeper=%s stimulus_id=%s \
-           reason=unknown_reaction_kind"
-          keeper_name
-          stimulus_id)
-       detail
-   | Ok _ -> fail "invalid exact-id reaction evidence must fail loud")
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check int "only current stimulus matches" 1 evidence.matched_record_count;
+    check int "matching invalid row is explicit" 1 evidence.quarantined_record_count;
+    check bool "invalid reaction is not a turn" false evidence.turn_started_seen;
+    check string
+      "typed quarantine reason"
+      "unknown_reaction_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "matching invalid row was projected as complete evidence"
+  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
+    fail "matching identified invalid row was misclassified as unattributed"
 ;;
 
 (* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
@@ -956,9 +1011,9 @@ let test_reaction_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Cursor_ack
     ];
-  match Keeper_reaction_ledger.reaction_kind_of_string "legacy_custom" with
+  match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
   | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
-    check string "unknown reaction decoder preserves evidence" "legacy_custom" value
+    check string "unknown reaction decoder preserves evidence" "unknown_custom" value
   | Ok _ -> fail "unknown reaction string must not decode"
 ;;
 
@@ -973,7 +1028,7 @@ let test_retired_schema_rows_are_quarantined_without_double_counting () =
     ~keeper_name
     stimulus;
   let current_event_id =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
+    read_recent_rows ~base_path ~keeper_name ~limit:1
     |> latest_row
     |> member "event_id"
     |> to_string
@@ -1093,10 +1148,18 @@ let test_quarantine_is_keeper_local () =
        ~keeper_name:healthy_keeper
        ~stimulus_id:healthy_stimulus_id
    with
-   | Ok evidence ->
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
      check bool "healthy keeper turn remains visible" true evidence.turn_started_seen;
      check int "healthy keeper has no quarantine" 0 evidence.quarantined_record_count
-   | Error error -> fail ("quarantine leaked across keeper stores: " ^ error));
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "quarantine leaked across keeper stores"
+   | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
+     fail "incompleteness leaked across keeper stores"
+   | Error error ->
+     fail
+       ("healthy keeper read failed: "
+        ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
@@ -1117,32 +1180,92 @@ let test_quarantine_is_keeper_local () =
     (healthy_summary |> member "reaction_count" |> to_int)
 ;;
 
-let test_evidence_result_preserves_first_malformed_failure () =
+let test_syntax_error_makes_evidence_incomplete () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "strict-evidence-keeper" in
   let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
   let malformed_month = Filename.concat ledger_dir "2026-01" in
-  let later_month = Filename.concat ledger_dir "2026-02" in
   mkdir_p malformed_month;
-  mkdir_p later_month;
   let malformed_path = Filename.concat malformed_month "01.jsonl" in
   write_file malformed_path "not-json\n";
-  Unix.mkfifo (Filename.concat later_month "01.jsonl") 0o600;
   match
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id:"schedule:test-occurrence"
   with
-  | Ok _ -> fail "malformed ledger row was accepted as exact evidence"
-  | Error detail ->
-    let expected_prefix =
-      Printf.sprintf "failed to parse reaction ledger row %s:1:" malformed_path
+  | Ok
+      (Keeper_reaction_ledger.Evidence_incomplete
+        { evidence; first_syntax_error = Some syntax_error; _ }) ->
+    check int "one unattributed syntax error" 1
+      evidence.unattributed_syntax_error_count;
+    check int "no identity quarantine" 0
+      evidence.unattributed_identity_quarantine_count;
+    check string "syntax error path retained" malformed_path syntax_error.path;
+    check (option int) "syntax error line retained" (Some 1) syntax_error.line_number;
+    let summary =
+      Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
     in
-    check bool
-      "first malformed row short-circuits before later storage error"
-      true
-      (String.starts_with ~prefix:expected_prefix detail)
+    check int "malformed summary row is quarantined" 1
+      (summary |> member "quarantined_row_count" |> to_int);
+    let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+    check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
+  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
+    fail "incomplete evidence lost syntax error location"
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "syntax-invalid row was projected as complete evidence"
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+    fail "unattributed syntax error was falsely attributed to the occurrence"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
+let test_missing_identity_makes_evidence_incomplete () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "identity-incomplete-keeper" in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v3"
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String "unattributed-event"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1234.0
+        ; ( "stimulus"
+          , `Assoc
+              [ "kind", `String "schedule_due"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_incomplete
+        { evidence
+        ; first_identity_quarantine_reason = Some first_reason
+        ; _
+        }) ->
+    check int "no syntax error" 0 evidence.unattributed_syntax_error_count;
+    check int "one identity quarantine" 1
+      evidence.unattributed_identity_quarantine_count;
+    check string
+      "identity quarantine reason"
+      "missing_stimulus_id"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
+    fail "identity-incomplete evidence lost typed reason"
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "identity-less row was projected as complete evidence"
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+    fail "identity-less row was falsely attributed to the occurrence"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
 ;;
 
 let () =
@@ -1166,9 +1289,13 @@ let () =
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
         ; test_case
-            "evidence preserves first malformed failure"
+            "syntax error makes evidence incomplete"
             `Quick
-            test_evidence_result_preserves_first_malformed_failure
+            test_syntax_error_makes_evidence_incomplete
+        ; test_case
+            "missing identity makes evidence incomplete"
+            `Quick
+            test_missing_identity_makes_evidence_incomplete
         ; test_case
             "failure judgment external input is typed history"
             `Quick

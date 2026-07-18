@@ -254,6 +254,18 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Unix.putenv Env_config_core.base_path_env_key base_path;
   ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
+  (* RFC-checkpoint-pinned-root-containment PR-1 (#25151): pin the physical
+     data root while the tree is trusted — after the config-root bootstrap
+     has ensured the base directory, before keepers or HTTP surfaces write.
+     PR-2 arms the checkpoint path boundary against this pin. An
+     unresolvable root, or an in-process re-bootstrap onto a different
+     root, is not a degradable condition (RFC §6): fail the boot. Test
+     harnesses that boot several server states per process reset the pin
+     via [Masc_data_root.clear_for_tests]. *)
+  (match Masc_data_root.pin base_path with
+   | Ok physical -> Log.Misc.info "data root pinned: %s" physical
+   | Error error ->
+     failwith ("data root pin failed: " ^ Masc_data_root.pin_error_to_string error));
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_oas_model_catalog_env () in

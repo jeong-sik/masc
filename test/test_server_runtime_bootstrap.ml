@@ -3766,6 +3766,7 @@ let test_create_server_state_records_runtime_resolution () =
       in
       Eio.Switch.run @@ fun sw ->
       Server_startup_state.reset ~backend_mode:"filesystem" ();
+      Masc_data_root.clear_for_tests ();
       ignore
         (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
            ~mono_clock ~net ~proc_mgr ~fs ());
@@ -3799,6 +3800,7 @@ let test_create_server_state_preserves_raw_input_base_path () =
       in
       Eio.Switch.run @@ fun sw ->
       Server_startup_state.reset ~backend_mode:"filesystem" ();
+      Masc_data_root.clear_for_tests ();
       ignore
         (Server_runtime_bootstrap.create_server_state ~sw ~base_path:raw_input
            ~clock ~mono_clock ~net ~proc_mgr ~fs ());
@@ -4197,6 +4199,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
         Server_runtime_bootstrap.init_runtime_context env
       in
       Eio.Switch.run @@ fun sw ->
+      Masc_data_root.clear_for_tests ();
       let state =
         Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
           ~mono_clock ~net ~proc_mgr ~fs ()
@@ -4269,6 +4272,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
         Server_runtime_bootstrap.init_runtime_context env
       in
       Eio.Switch.run @@ fun sw ->
+      Masc_data_root.clear_for_tests ();
       let state =
         Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
           ~mono_clock ~net ~proc_mgr ~fs ()

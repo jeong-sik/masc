@@ -1819,7 +1819,7 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
-
+(include stanzas/test_masc_data_root.inc)
 
 (include stanzas/test_keeper_context_isolation.inc)
 

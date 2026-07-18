@@ -22,6 +22,7 @@
   executor_pool_ref
   domain_pool
   domain_pool_ref
+  masc_data_root
   masc_runtime_events
   system_error_class
   executable_path

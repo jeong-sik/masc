@@ -43,7 +43,6 @@ type non_regular_file_kind =
 type read_error =
   | Invalid_offset of { offset : int }
   | Not_a_directory of { path : string }
-  | Dangling_symbolic_link of { path : string }
   | Invalid_layout_entry of
       { parent : string
       ; entry : string
@@ -92,8 +91,6 @@ let read_error_to_string = function
   | Invalid_offset { offset } ->
     Printf.sprintf "dated JSONL recent-read offset must be non-negative: %d" offset
   | Not_a_directory { path } -> "dated JSONL path is not a directory: " ^ path
-  | Dangling_symbolic_link { path } ->
-    "dated JSONL path is a dangling symbolic link: " ^ path
   | Invalid_layout_entry { parent; entry; expected } ->
     Printf.sprintf
       "invalid dated JSONL layout entry %s: expected %s"
@@ -101,7 +98,7 @@ let read_error_to_string = function
       (layout_entry_kind_to_string expected)
   | Non_regular_file { path; kind } ->
     Printf.sprintf
-      "dated JSONL day path is not a regular file: %s (%s)"
+      "dated JSONL path has an unsupported file kind: %s (%s)"
       path
       (non_regular_file_kind_to_string kind)
   | Io_error { operation; path; detail } ->
@@ -231,17 +228,7 @@ let inspect_directory_result ~missing_is_empty path =
   | Some stat ->
     if stat.Unix.st_kind <> Unix.S_LNK
     then directory_presence_of_stat path stat
-    else
-      (match Unix.stat path with
-       | stat -> directory_presence_of_stat path stat
-       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-         Error (Dangling_symbolic_link { path })
-       | exception Unix.Unix_error (error, _, _) ->
-         Error
-           (Io_error
-              { operation = Inspect; path; detail = Unix.error_message error })
-       | exception Sys_error detail ->
-         Error (Io_error { operation = Inspect; path; detail }))
+    else Error (Non_regular_file { path; kind = Symbolic_link })
 ;;
 
 let list_directory_result ~missing_is_empty path =

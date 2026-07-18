@@ -185,6 +185,27 @@ let test_read_recent_result_rejects_month_file () =
   | Ok _ -> fail "month file was treated as an empty strict store"
 ;;
 
+let test_read_recent_result_rejects_month_symlink () =
+  let dir = tmpdir "dated_jsonl_month_symlink" in
+  let base_dir = Filename.concat dir "ledger" in
+  let external_dir = Filename.concat dir "external" in
+  Fs_compat.mkdir_p base_dir;
+  write_dated_file external_dir "2026-01" "01" [ {|{"outside":true}|} ];
+  let month_path = Filename.concat base_dir "2026-01" in
+  Unix.symlink (Filename.concat external_dir "2026-01") month_path;
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Symbolic_link }) ->
+    check string "month symlink path" month_path error_path
+  | Error error ->
+    failf
+      "unexpected month-symlink error: %s"
+      (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "month symlink escaped the strict store boundary"
+;;
+
 let test_read_recent_result_rejects_day_symlink () =
   let base_dir = tmpdir "dated_jsonl_day_symlink" in
   let month_path = Filename.concat base_dir "2026-01" in
@@ -202,19 +223,21 @@ let test_read_recent_result_rejects_day_symlink () =
   | Ok _ -> fail "day symlink was accepted as a strict store file"
 ;;
 
-let test_read_recent_result_rejects_dangling_base_symlink () =
+let test_read_recent_result_rejects_base_symlink () =
   let dir = tmpdir "dated_jsonl_dangling_base" in
   let base_dir = Filename.concat dir "ledger" in
   Unix.symlink (Filename.concat dir "missing-target") base_dir;
   let store = Dated_jsonl.create ~base_dir () in
   match Dated_jsonl.read_recent_result store 1 with
-  | Error (Dated_jsonl.Dangling_symbolic_link { path }) ->
-    check string "dangling base path" base_dir path
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Symbolic_link }) ->
+    check string "base symlink path" base_dir error_path
   | Error error ->
     failf
-      "unexpected dangling-base error: %s"
+      "unexpected base-symlink error: %s"
       (Dated_jsonl.read_error_to_string error)
-  | Ok _ -> fail "dangling base symlink was treated as an empty store"
+  | Ok _ -> fail "base symlink was treated as an empty store"
 ;;
 
 let test_read_recent_result_rejects_invalid_layout () =
@@ -672,10 +695,12 @@ let () =
             test_read_recent_result_rejects_base_file;
           test_case "strict read rejects month file" `Quick
             test_read_recent_result_rejects_month_file;
+          test_case "strict read rejects month symlink" `Quick
+            test_read_recent_result_rejects_month_symlink;
           test_case "strict read rejects day symlink" `Quick
             test_read_recent_result_rejects_day_symlink;
-          test_case "strict read rejects dangling base symlink" `Quick
-            test_read_recent_result_rejects_dangling_base_symlink;
+          test_case "strict read rejects base symlink" `Quick
+            test_read_recent_result_rejects_base_symlink;
           test_case "strict read rejects invalid layout" `Quick
             test_read_recent_result_rejects_invalid_layout;
           test_case "strict read accepts leap day" `Quick

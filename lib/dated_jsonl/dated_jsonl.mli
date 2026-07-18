@@ -28,7 +28,6 @@ type non_regular_file_kind =
 type read_error =
   | Invalid_offset of { offset : int }
   | Not_a_directory of { path : string }
-  | Dangling_symbolic_link of { path : string }
   | Invalid_layout_entry of
       { parent : string
       ; entry : string

@@ -79,21 +79,10 @@ let runtime_health_keys_of_labels labels =
   |> List.filter_map runtime_health_key_of_label
   |> List.sort_uniq String.compare
 
-type context_window_hint =
-  { context_window : int
-  ; is_local_model : bool
-  }
-
 type attempt_timeout_resolution =
   { timeout_s : float option
   ; source : string
   }
-
-(* Collapsed: the deleted version was already a no-op stub (tier-based local
-   classification removed); context window comes from the Runtime model spec. *)
-let context_window_hint_of_labels labels =
-  let _ = labels in
-  { context_window = 0; is_local_model = false }
 
 let runtime_id_of_label label =
   match Provider_kind_resolver.resolve label with

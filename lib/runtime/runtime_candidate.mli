@@ -1,10 +1,5 @@
 type t
 
-type context_window_hint =
-  { context_window : int
-  ; is_local_model : bool
-  }
-
 type attempt_timeout_resolution =
   { timeout_s : float option
   ; source : string
@@ -32,7 +27,6 @@ val is_structurally_unmetered_runtime_provider : string -> bool
 val runtime_label_for_active_id : configured_labels:string list -> active:string -> string
 val runtime_health_keys_of_labels : string list -> string list
 val resolve_reported_runtime_id : labels:string list -> reported_runtime_id:string -> string
-val context_window_hint_of_labels : string list -> context_window_hint
 val threshold_multipliers_of_runtime_id : string -> float * float
 
 val health_key : t -> string

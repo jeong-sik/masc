@@ -171,8 +171,9 @@ end
 
 (** Durably enqueue an exact request without suspending the caller. Returns an
     existing id only when the same Keeper, operation identity, canonical input,
-    turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence. *)
+    exact request context, turn/task/goal identity, and continuation channel are
+    already pending. A deduplicated request does not consume a durable queue
+    sequence. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->

@@ -1631,6 +1631,7 @@ let pending_entry_matches
       ~tool_name
       ~input_hash
       ~turn_id
+      ~request_context
       ~task_id
       ~goal_id
       ~goal_ids
@@ -1641,6 +1642,7 @@ let pending_entry_matches
   && String.equal entry.tool_name tool_name
   && String.equal entry.input_hash input_hash
   && entry.turn_id = turn_id
+  && Option.equal Yojson.Safe.equal entry.request_context request_context
   && entry.task_id = task_id
   && entry.goal_id = goal_id
   && entry.goal_ids = goal_ids
@@ -1656,6 +1658,7 @@ let find_pending_id_in_map
       ~tool_name
       ~input_hash
       ~turn_id
+      ~request_context
       ~task_id
       ~goal_id
       ~goal_ids
@@ -1674,6 +1677,7 @@ let find_pending_id_in_map
              ~tool_name
              ~input_hash
              ~turn_id
+             ~request_context
              ~task_id
              ~goal_id
              ~goal_ids
@@ -1715,6 +1719,7 @@ let submit_pending
           ~tool_name
           ~input_hash
           ~turn_id
+          ~request_context
           ~task_id
           ~goal_id
           ~goal_ids

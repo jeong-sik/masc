@@ -426,6 +426,110 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        reject_and_cleanup ~base_path changed)
 ;;
 
+let test_causal_context_partitions_pending_identity_and_summary () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-causal-context" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let input = `Assoc [ "target", `String "same-effect" ] in
+       let request_context completed_tool_calls =
+         `Assoc
+           [ "initial", `Assoc [ "user_message", `String "perform the effect" ]
+           ; "completed_tool_calls", `List completed_tool_calls
+           ]
+       in
+       let initial_context = request_context [] in
+       let changed_context =
+         request_context
+           [ `Assoc
+               [ "operation", `String "independent-read"
+               ; "input", `Assoc []
+               ; "result", `Assoc [ "value", `String "new causal evidence" ]
+               ; "disposition", `String "completed"
+               ]
+           ]
+       in
+       let first =
+         submit_with_context
+           ~turn_id:31
+           ~request_context:initial_context
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       let same =
+         submit_with_context
+           ~turn_id:31
+           ~request_context:initial_context
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check string) "same causal context deduplicates" first same;
+       check_update "summary marked pending" true (AQ.mark_summary_pending ~id:first);
+       let summary : AQ.hitl_context_summary =
+         { summary_version = 2
+         ; generated_at = Unix.gettimeofday ()
+         ; model_run_id = "judge-initial-context"
+         ; context_summary = "Judgment for the initial causal context only."
+         ; key_questions = []
+         ; judgment = AQ.Approve
+         ; rationale = "The initial exact request context supports it."
+         }
+       in
+       check_update "summary attached" true (AQ.attach_summary ~id:first summary);
+       let changed =
+         submit_with_context
+           ~turn_id:31
+           ~request_context:changed_context
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       let missing =
+         submit_with_context ~turn_id:31 ~base_path ~keeper_name ~input ()
+       in
+       let same_missing =
+         submit_with_context ~turn_id:31 ~base_path ~keeper_name ~input ()
+       in
+       Alcotest.(check bool) "changed causal context gets a new id" true
+         (not (String.equal first changed));
+       Alcotest.(check bool) "missing context cannot reuse exact context" true
+         (not (String.equal first missing));
+       Alcotest.(check bool) "changed and missing contexts remain distinct" true
+         (not (String.equal changed missing));
+       Alcotest.(check string) "same missing context deduplicates" missing same_missing;
+       Alcotest.(check int) "initial context sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int) "changed context sequence" 2 (pending_entry_exn changed).sequence;
+       Alcotest.(check int) "missing context sequence" 3 (pending_entry_exn missing).sequence;
+       let check_summary_states phase =
+         (match (pending_entry_exn first).summary_status with
+          | AQ.Summary_available actual ->
+            Alcotest.(check string)
+              (phase ^ " initial summary")
+              summary.model_run_id
+              actual.model_run_id
+          | AQ.Summary_not_requested | AQ.Summary_pending | AQ.Summary_failed _ ->
+            Alcotest.fail (phase ^ ": initial summary was not preserved"));
+         List.iter
+           (fun (label, id) ->
+              match (pending_entry_exn id).summary_status with
+              | AQ.Summary_not_requested -> ()
+              | AQ.Summary_pending | AQ.Summary_available _ | AQ.Summary_failed _ ->
+                Alcotest.fail (phase ^ ": stale summary reached " ^ label))
+           [ "changed context", changed; "missing context", missing ]
+       in
+       check_summary_states "before restart";
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       check_summary_states "after restart";
+       List.iter (reject_and_cleanup ~base_path) [ first; changed; missing ])
+;;
+
 let test_unversioned_request_context_is_not_replayed_as_exact () =
   let base_path = temp_dir () in
   let keeper_name = "queue-legacy-context" in
@@ -1648,6 +1752,10 @@ let () =
             "unversioned context is never replayed as exact"
             `Quick
             test_unversioned_request_context_is_not_replayed_as_exact
+        ; Alcotest.test_case
+            "causal context partitions pending identity and summary"
+            `Quick
+            test_causal_context_partitions_pending_identity_and_summary
         ; Alcotest.test_case
             "durable sequence survives restart"
             `Quick

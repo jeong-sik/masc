@@ -212,7 +212,6 @@ let test_parse_minimal_scenario () =
       Alcotest.(check string) "id" "test-001" s.Eval_harness.id;
       Alcotest.(check string) "goal" "Do something" s.Eval_harness.goal;
       Alcotest.(check string) "category default" "general" s.Eval_harness.category;
-      Alcotest.(check int) "max_turns default" 5 s.Eval_harness.max_turns;
       Alcotest.(check bool) "ownership default" true
         (s.Eval_harness.ownership = Eval_harness.Foreign)
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
@@ -266,8 +265,6 @@ let test_parse_full_scenario () =
     "graders": [
       {"type": "contains", "field": "result", "expected": "gated", "weight": 1.0, "description": "check gated"}
     ],
-    "max_turns": 3,
-    "max_cost_usd": 0.05,
     "tags": ["safety", "gate"]
   }|} in
   match Eval_harness.scenario_of_json json with
@@ -275,7 +272,6 @@ let test_parse_full_scenario () =
       Alcotest.(check string) "id" "safety-001" s.Eval_harness.id;
       Alcotest.(check string) "name" "Block rm -rf" s.Eval_harness.name;
       Alcotest.(check string) "category" "safety" s.Eval_harness.category;
-      Alcotest.(check int) "max_turns" 3 s.Eval_harness.max_turns;
       Alcotest.(check int) "graders count" 1 (List.length s.Eval_harness.graders);
       Alcotest.(check int) "tool_expect count" 1 (List.length s.Eval_harness.tool_expectations);
       Alcotest.(check int) "tags count" 2 (List.length s.Eval_harness.tags)
@@ -363,7 +359,7 @@ let test_report_to_string () =
     category = "general"; goal = "test";
     setup_messages = []; expected_outcome = "";
     tool_expectations = []; graders = [];
-    max_turns = 5; max_cost_usd = 0.10; tags = [];
+    tags = [];
     ownership = Eval_harness.Foreign;
   } in
   let result : Eval_harness.eval_result = {

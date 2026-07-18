@@ -10,14 +10,15 @@
 
     {v
       Ready -> Running -> Completed -> Settled
-                         -> Deferred
-                         -> Blocked
+      Ready -> Running -> Deferred
+      Ready -> Running -> Blocked
     v}
 
-    [Running] is a process claim, not a time lease. A lane actor recovers it
-    to [Ready] only after the prior actor is known to have ended or on process
-    startup. [Deferred] is resumed only by a new durable lane signal or process
-    startup. *)
+    [Running] is a process claim, not a time lease. It is recovered to [Ready]
+    only at process-worker startup, after the prior process and all of its
+    storage operations are known to have ended. At that boundary, [Deferred]
+    is also recovered. An ordinary candidate signal may run new Ready work but
+    does not retry an unrelated Deferred partition. *)
 
 module Candidate = Keeper_board_attention_candidate
 

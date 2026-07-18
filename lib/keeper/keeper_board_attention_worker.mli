@@ -1,10 +1,12 @@
 (** Process-owned Board-attention partition judgment plane.
 
     Producers synchronously persist candidates and send only coalescing wake
-    hints. One persistent actor may run per durable Keeper lane; therefore a
-    provider wait or failure in one Keeper never occupies that Keeper's normal
-    turn admission and never serializes sibling judgment lanes. Actor count is
-    derived from durable Keeper identities rather than a configured cap.
+    hints. At most one actor runs for a durable Keeper identity at a time;
+    actors are scheduled from durable work rather than kept alive without
+    work. Therefore a provider wait or failure in one Keeper never occupies
+    that Keeper's normal turn admission and never serializes sibling judgment
+    lanes. Concurrent actor count is derived from durable Keeper identities
+    rather than a configured cap.
 
     The partition ledger is the work authority. Process-local wake state may
     coalesce or disappear across restart without losing work because startup

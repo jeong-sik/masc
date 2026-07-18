@@ -164,16 +164,6 @@ let label_matches_runtime_id ~label ~runtime_id =
   (not (String.equal runtime_id "")) && String.equal label_id runtime_id
 ;;
 
-type context_window_hint =
-  { context_window : int
-  ; is_local_model : bool
-  }
-
-let context_window_hint_of_labels labels =
-  let _ = labels in
-  { context_window = 0; is_local_model = false }
-;;
-
 let provider_name_matches_default_local_openai_runtime provider_name =
   match default_local_openai_runtime_provider_id () with
   | Some id -> String.equal (normalize_provider_id provider_name) (normalize_provider_id id)

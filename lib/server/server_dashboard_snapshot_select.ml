@@ -9,45 +9,49 @@ let select_shell_json
     | Some t -> t
     | None -> Server_timing.create ()
   in
+  let with_auth shell =
+    match request with
+    | None -> shell
+    | Some request ->
+      Server_dashboard_http_core.dashboard_shell_with_request_auth_json
+        ~request config shell
+  in
+  let serve_snapshot project =
+    match Dashboard_snapshot.current () with
+    | Some snap ->
+      let shell =
+        Server_timing.measure
+          timing_obj
+          (Server_timing.Custom "snapshot_read")
+          (fun () -> project snap)
+      in
+      with_auth shell
+    | None ->
+      (* Cold window before the first publish: share the single-flight
+         bootstrap instead of paying a per-request synchronous compute
+         (every concurrent panel request used to pay it independently). *)
+      (match
+         (try Some (Dashboard_snapshot.current_or_bootstrap ~config) with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Dashboard.warn
+              "shell fallback bootstrap failed, using direct compute: %s"
+              (Printexc.to_string exn);
+            None)
+       with
+       | Some snap -> with_auth (project snap)
+       | None ->
+         Server_dashboard_http_core.dashboard_shell_http_json
+           ?clock ?request ~timing:timing_obj ~light config)
+  in
   if light
-  then (
+  then
     (* RFC-0204 section 8.3 ("A"): serve the published light projection
        wait-free.  Mirrors the non-light branch below but reads
        [snap.shell_light]; falls back to the (offloaded, timeout-guarded)
        recompute only before the first snapshot publish. *)
-    match Dashboard_snapshot.current () with
-    | Some snap ->
-      let shell =
-        Server_timing.measure
-          timing_obj
-          (Server_timing.Custom "snapshot_read")
-          (fun () -> snap.shell_light)
-      in
-      (match request with
-       | None -> shell
-       | Some request ->
-         Server_dashboard_http_core.dashboard_shell_with_request_auth_json
-           ~request config shell)
-    | None ->
-      Server_dashboard_http_core.dashboard_shell_http_json
-        ?clock ?request ~timing:timing_obj ~light config)
-  else (
-    match Dashboard_snapshot.current () with
-    | Some snap ->
-      let shell =
-        Server_timing.measure
-          timing_obj
-          (Server_timing.Custom "snapshot_read")
-          (fun () -> snap.shell)
-      in
-      (match request with
-       | None -> shell
-       | Some request ->
-         Server_dashboard_http_core.dashboard_shell_with_request_auth_json
-           ~request config shell)
-    | None ->
-      Server_dashboard_http_core.dashboard_shell_http_json
-        ?clock ?request ~timing:timing_obj ~light config)
+    serve_snapshot (fun snap -> snap.shell_light)
+  else serve_snapshot (fun snap -> snap.shell)
 ;;
 let select_tools_json
       ?actor ?timing (config : Workspace.config)
@@ -64,7 +68,24 @@ let select_tools_json
       timing_obj
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.tools)
-  | _ ->
+  | None, None ->
+    (* Cold window before the first publish: share the single-flight
+       bootstrap instead of paying a per-request synchronous compute
+       (every concurrent panel request used to pay it independently). *)
+    (match
+       (try Some (Dashboard_snapshot.current_or_bootstrap ~config) with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Dashboard.warn
+            "tools fallback bootstrap failed, using direct compute: %s"
+            (Printexc.to_string exn);
+          None)
+     with
+     | Some snap -> snap.tools
+     | None ->
+       Server_dashboard_http_runtime_info.dashboard_tools_http_json
+         ?actor ~timing:timing_obj config)
+  | Some _, _ ->
     Server_dashboard_http_runtime_info.dashboard_tools_http_json
       ?actor ~timing:timing_obj config
 ;;

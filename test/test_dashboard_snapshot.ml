@@ -87,6 +87,61 @@ let test_generated_at_recent () =
     true (s.generated_at <= after)
 ;;
 
+(* Single-flight: N concurrent callers share exactly one [compute]
+   invocation and observe the same snapshot; a populated slot never
+   reaches [compute] at all. *)
+let test_single_flight_dedups_concurrent_bootstrap () =
+  Dashboard_snapshot.reset_for_test ();
+  let compute_count = Atomic.make 0 in
+  let snap =
+    Dashboard_snapshot.make_for_test
+      ~shell:(`String "shared") ~tools:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
+  in
+  let results = Array.make 8 None in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let compute () =
+        ignore (Atomic.fetch_and_add compute_count 1);
+        (* Yield so the other fibers run and queue on the in-flight
+           promise; a non-yielding compute would serialize the fibers
+           and measure nothing. *)
+        Eio.Time.sleep env#clock 0.05;
+        snap
+      in
+      Array.iteri
+        (fun i _ ->
+          Eio.Fiber.fork ~sw (fun () ->
+            results.(i) <-
+              Some
+                (Dashboard_snapshot.bootstrap_single_flight ~compute)
+                  .Dashboard_snapshot.generation))
+        results));
+  (* The switch joined every fiber before returning; assertions outside
+     the switch body cannot race the workers. *)
+  Alcotest.(check int) "compute ran exactly once" 1 (Atomic.get compute_count);
+  let generations =
+    Array.to_list results
+    |> List.filter_map Fun.id
+    |> List.sort_uniq compare
+  in
+  Alcotest.(check int) "all callers saw the same snapshot" 1 (List.length generations)
+;;
+
+let test_single_flight_skips_compute_when_populated () =
+  Dashboard_snapshot.reset_for_test ();
+  let snap =
+    Dashboard_snapshot.make_for_test
+      ~shell:`Null ~tools:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
+  in
+  Dashboard_snapshot.publish_for_test snap;
+  let compute () = Alcotest.fail "compute ran despite a live snapshot" in
+  let observed = Dashboard_snapshot.bootstrap_single_flight ~compute in
+  Alcotest.(check int)
+    "returned the published snapshot" snap.generation observed.generation
+;;
+
 let () =
   Alcotest.run "Dashboard_snapshot"
     [
@@ -105,6 +160,13 @@ let () =
             `Quick test_generation_monotonic;
           Alcotest.test_case "generated_at within call window"
             `Quick test_generated_at_recent;
+        ] );
+      ( "single-flight bootstrap",
+        [
+          Alcotest.test_case "concurrent callers share one compute"
+            `Quick test_single_flight_dedups_concurrent_bootstrap;
+          Alcotest.test_case "populated slot skips compute"
+            `Quick test_single_flight_skips_compute_when_populated;
         ] );
     ]
 ;;

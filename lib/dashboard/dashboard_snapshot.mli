@@ -62,10 +62,20 @@ val current : unit -> t option
     successful publish.  Wait-free; total. *)
 
 val current_or_bootstrap : config:Workspace.config -> t
-(** [current ()] if populated; otherwise a single bootstrap value
-    computed synchronously on the calling fiber.  The bootstrap path is
-    taken at most once per process lifetime (first request before the
-    refresh loop has emitted). *)
+(** [current ()] if populated; otherwise the single-flight bootstrap
+    below.  The bootstrap path is taken at most once per process
+    lifetime (first request before the refresh loop has emitted), and
+    concurrent callers share that one compute instead of each paying
+    it (boot-gap dogpile fix). *)
+
+val bootstrap_single_flight : compute:(unit -> t) -> t
+(** {!current} if populated; otherwise one winner runs [compute]
+    (production: offloaded to the CPU pool) while concurrent callers
+    await the shared [(t, exn) result Eio.Promise.t].  A winner failure
+    resolves the promise with [Error exn] so waiters re-raise it in
+    their own context and can fall back to their own compute instead of
+    hanging.  [compute] is a parameter so tests can count invocations
+    without a workspace. *)
 
 val refresh_loop :
   sw:Eio.Switch.t ->

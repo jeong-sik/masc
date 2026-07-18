@@ -139,10 +139,56 @@ let bootstrap ~(config : Workspace.config) : t =
   t
 ;;
 
+(* Single-flight bootstrap.  Before the refresh loop's first publish, every
+   wait-free read path falls back to a synchronous compute — and on a cold
+   server each dashboard panel load fires several of those at once, so N
+   concurrent request fibers used to pay the same 10-40s compute N times
+   (the loser discards it, per the CAS in [bootstrap]).  One winner now
+   computes offloaded to the CPU pool; concurrent callers await the shared
+   promise instead of duplicating the work.  If the winner fails, waiters
+   observe the exception and each retries their own path — no dogpile on
+   the happy path, no hidden failure either. *)
+let bootstrap_in_flight : (t, exn) result Eio.Promise.t option Atomic.t =
+  Atomic.make None
+;;
+
+let rec bootstrap_single_flight ~(compute : unit -> t) : t =
+  match Atomic.get slot with
+  | Some t -> t
+  | None ->
+    (match Atomic.get bootstrap_in_flight with
+     | Some promise ->
+       (match Eio.Promise.await promise with
+        | Ok t -> t
+        | Error exn -> raise exn)
+     | None ->
+       let promise, resolver = Eio.Promise.create () in
+       if not (Atomic.compare_and_set bootstrap_in_flight None (Some promise))
+       then bootstrap_single_flight ~compute
+       else (
+         (* The promise must resolve and the slot must clear on EVERY exit,
+            including cancellation — otherwise waiters hang on an unresolved
+            promise and later callers see a stale in-flight marker.  The
+            exception (cancel or failure) is delivered to waiters as
+            [Error exn] and re-raised here: nothing is swallowed. *)
+         let result =
+           try Ok (compute ()) with
+           | exn -> Error exn
+         in
+         Atomic.set bootstrap_in_flight None;
+         Eio.Promise.resolve resolver result;
+         match result with
+         | Ok t -> t
+         | Error exn -> raise exn))
+;;
+
 let current_or_bootstrap ~config =
   match Atomic.get slot with
   | Some t -> t
-  | None -> bootstrap ~config
+  | None ->
+    bootstrap_single_flight
+      ~compute:(fun () ->
+        Domain_pool_ref.submit_cpu_or_inline (fun () -> bootstrap ~config))
 ;;
 
 (* RFC-0138 Phase 3: refresh loop optionally accepts [~state] so it
@@ -306,4 +352,7 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
   }
 ;;
 
-let reset_for_test () = Atomic.set slot None
+let reset_for_test () =
+  Atomic.set slot None;
+  Atomic.set bootstrap_in_flight None
+;;

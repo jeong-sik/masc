@@ -138,10 +138,6 @@ lib/runtime/runtime_transport.ml:790
 lib/runtime/runtime_transport.ml:1069
 lib/runtime/runtime_transport.ml:1248
 lib/runtime/runtime_transport.ml:1281
-lib/chronicle_ingest.ml:42
-lib/chronicle_ingest.ml:224
-lib/chronicle_ingest.ml:230
-lib/chronicle_validate.ml:44
 lib/config/env_config_runtime.ml:343
 lib/workspace_assertions.ml:58
 lib/workspace_goals.ml:220

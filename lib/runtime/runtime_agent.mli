@@ -194,24 +194,6 @@ val caps_admit_required_modalities :
     media-capable runtimes must use this instead of re-deriving checks from
     individual capability booleans. *)
 
-val first_media_capable_runtime : modality:string -> string option
-(** Runtime id of the first configured runtime that admits [modality] (e.g.
-    ["image"]) as input, in [media_reroute_candidates] order (media_failover then
-    declaration). [None] when none qualifies. Uses the same admit predicate as the
-    RFC-0265 reroute, so the pick matches the dispatch capability gate. *)
-
-val decide_modality_reroute_for_runtime :
-  assigned:Runtime.t ->
-  ?checkpoint_messages:Agent_sdk.Types.message list ->
-  ?initial_messages:Agent_sdk.Types.message list ->
-  Agent_sdk.Types.content_block list ->
-  reroute_decision
-(** Keeper-dispatch convenience: gather candidates from the runtime cache and
-    decide a reroute for [assigned] given the active run view: prior
-    [initial_messages], checkpoint resume messages, plus the current turn's
-    content blocks. Composes [input_capabilities_of_runtime] /
-    [media_reroute_candidates] / [decide_modality_reroute]. *)
-
 val decide_modality_reroute_for_runtime_candidates :
   assigned:Runtime.t ->
   candidates:Runtime.t list ->

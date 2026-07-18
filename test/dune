@@ -176,7 +176,6 @@
   test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
-  test_keeper_token_count
   test_keeper_behavior_trace
   test_keeper_noop_backoff
   test_keeper_chat_store
@@ -491,7 +490,6 @@
   test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
-  test_keeper_token_count
   test_keeper_behavior_trace
   test_keeper_noop_backoff
   test_keeper_chat_store

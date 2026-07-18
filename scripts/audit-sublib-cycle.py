@@ -112,7 +112,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_id",
     "masc.keeper_terminal_reason",
     "masc.keeper_timing",
-    "masc.keeper_token_count",
     "masc.keeper_sandbox_error",
     "masc.keeper_provider_error_class",
     "masc.keeper_failure_taxonomy",

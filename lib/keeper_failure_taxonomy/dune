@@ -16,7 +16,6 @@
   keeper_metric_emit_dropped_site
   keeper_metrics_sse_failure_kind
   keeper_paused_state_persist_phase
-  keeper_post_turn_wirein_failure_site
   keeper_profile_load_failure_site
   keeper_supervisor_cleanup_failure_site
   keeper_turn_cleanup_failure_site

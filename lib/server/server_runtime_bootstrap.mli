@@ -83,7 +83,6 @@ val runtime_path_diagnostics :
   Server_base_path_diagnostics.t
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit
-val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 val bootstrap_prompt_state : Mcp_server.server_state -> unit
 

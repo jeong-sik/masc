@@ -483,7 +483,8 @@ let get_runtime_audit_store store_opt =
           (* Iter 47: tick counter so audit-subsystem health is
              observable.  Audit failure here disables the subsystem
              for the process lifetime — operators need to know. *)
-          Runtime_metrics.on_runtime_audit_failure ~stage:"store_creation";
+          Runtime_metrics.on_runtime_audit_failure
+            ~stage:Runtime_metrics.Store_creation;
           Log.Misc.warn "runtime audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
@@ -546,7 +547,7 @@ let record_runtime_audit store_opt ~now ~keeper_name ~runtime_id ~observation
           (* Iter 47: tick counter per-record append failure rate
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
-          Runtime_metrics.on_runtime_audit_failure ~stage:"append";
+          Runtime_metrics.on_runtime_audit_failure ~stage:Runtime_metrics.Append;
           Log.Misc.warn "runtime audit append failed runtime=%s error=%s"
             runtime_id_string (Printexc.to_string exn))
 

@@ -13,6 +13,8 @@ val metric_mcp_tool_schema_component_bytes : string
 
 val metric_inference_inflight : string
 val metric_inference_started : string
+val metric_runtime_metrics_eviction : string
+val metric_runtime_audit_failure : string
 
 (** {1 Agent health metrics} *)
 

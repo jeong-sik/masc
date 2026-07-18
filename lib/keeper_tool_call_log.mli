@@ -175,8 +175,9 @@ val log_call :
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
-    any truncation. [truncated_to] is present when Tool_output_validation
-    truncated the output. Best-effort (failures logged). *)
+    any observation-only log preview truncation. [truncated_to] records the
+    retained preview size when one exists; it never describes mutation of the
+    Tool result delivered to the Keeper. Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->

@@ -5,9 +5,9 @@
     one of these after the handler completes so the five typed observers
     fire uniformly regardless of which path produced the result. *)
 
-(** [finalize ~outcome r] applies [Tool_dispatch.apply_result_transformer]
-    on the result (when [Some _]) and fires
-    [Tool_dispatch.run_dispatch_observers outcome r'].
+(** [finalize ~outcome r] fires
+    [Tool_dispatch.run_dispatch_observers outcome r] and returns [r]
+    unchanged.
 
     [outcome] should be the typed {!Dispatch_outcome.t} chosen by the
     caller — [Handled] when the handler returned a result, [No_handler] /

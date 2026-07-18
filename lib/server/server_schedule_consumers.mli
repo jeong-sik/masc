@@ -26,3 +26,10 @@ val consumer : Schedule_runner.consumer
 
     The schedule core remains opaque; this adapter is the MASC server layer that
     interprets explicitly supported payload envelopes. *)
+
+module For_testing : sig
+  val with_after_keeper_wake_reaction_read_hook :
+    (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Install a scoped barrier after terminal evidence is read while the
+      queue-owned settlement-projection lock remains held. *)
+end

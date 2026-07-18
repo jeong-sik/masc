@@ -205,21 +205,33 @@ type board_signal_match = {
   matched_targets : string list;
 }
 
-(** Collect board activity after the keeper's durable cursor. A keeper without
-    a cursor starts at the beginning of Board history; no time window may hide
-    undelivered posts.
-    Returns [(events, new_post_count, mention_count)].
-    Used by both the world observation builder and the deliberation triage
-    in keepalive to populate board-related triggers. *)
+(** Recover Board activity after the Keeper's SQLite reaction cursor. A fresh
+    Keeper initializes at the exact current Board head; subsequent process or
+    registry restarts resume strictly after that persisted cursor.
+
+    The potentially large Board scan runs outside the queue coordination lock.
+    Its typed expected/target cursors are reconciled under that per-Keeper lock:
+    an already-advanced concurrent cursor removes the stale prefix before
+    durable queue admission and cursor ACK. Actionable events therefore reach
+    the prompt only through the queue, while schedule/projector lanes are not
+    blocked by Board history or comment I/O. *)
 val collect_board_events :
   base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
+(** Read-only projection after the same durable cursor. Returns actionable
+    events directly and never admits queue work, records candidates, or moves
+    the cursor. *)
 val collect_board_events_without_advancing_cursor :
   base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
+
+module For_testing : sig
+  val with_after_board_scan_before_reconciliation_hook :
+    (unit -> unit) -> (unit -> 'a) -> 'a
+end
 
 val board_signal_match :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -281,19 +293,14 @@ val apply_failure_judgment_guidance :
     the action turn is allowed. Missing or duplicate observations are explicit
     errors. *)
 
-(** Convert a queued Event Layer stimulus back into structured board activity
-    for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
-    [Bootstrap] returns [None] (no prompt injection).
-    [Error unavailable] means the underlying board read for [Board_signal] /
-    [Board_attention] failed (board-unavailable-result). Callers classify via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable} and
-    decide whether to drop or retain the stimulus — this function only
-    reports the read failure, it does not decide. *)
+(** Purely convert a queued Event Layer stimulus into structured prompt input.
+    Board payloads are complete immutable admission snapshots: this function
+    never re-reads the mutable Board. [Error invalid] reports a corrupt
+    in-memory payload; durable queue ingress rejects the same typed error. *)
 val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
-  (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
+  (pending_board_event option, Keeper_event_queue.board_stimulus_error) result
 
 val read_scheduled_automation_observation :
   keeper_name:string option ->

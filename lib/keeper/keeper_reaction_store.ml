@@ -137,6 +137,11 @@ type exact_summary =
   ; latest_stimulus_id : string option
   }
 
+type read_observation =
+  { cursor : cursor option
+  ; exact_summary : exact_summary
+  }
+
 type path_operation =
   | Inspect_parent
   | Prepare_parent
@@ -210,8 +215,12 @@ type discovery =
 let ( let* ) = Result.bind
 module String_set = Set.Make (String)
 
-let database_schema = "keeper.reaction_ledger.sqlite.v3"
-let database_user_version = 3L
+(* v4 is the first mergeable authority for the canonical v2 event-queue
+   stimulus identity. Draft v3 databases used the earlier digest preimage;
+   accepting one here would split a single queued stimulus across two durable
+   identities. There is intentionally no compatibility migration. *)
+let database_schema = "keeper.reaction_ledger.sqlite.v4"
+let database_user_version = 4L
 let database_application_id = 0x4d43524cL
 let database_file = Common.keeper_reaction_database_filename
 let microseconds_per_second = 1_000_000.
@@ -423,6 +432,19 @@ let timestamp_to_microseconds ~field value =
 
 let timestamp_of_microseconds value =
   Int64.to_float value /. microseconds_per_second
+;;
+
+let normalize_cursor (cursor : cursor) =
+  let* cursor_ts_us =
+    timestamp_to_microseconds ~field:"cursor_ts" cursor.cursor_ts
+  in
+  Ok { cursor with cursor_ts = timestamp_of_microseconds cursor_ts_us }
+;;
+
+let compare_normalized_cursor (left : cursor) (right : cursor) =
+  match Float.compare left.cursor_ts right.cursor_ts with
+  | 0 -> Option.compare String.compare left.post_id right.post_id
+  | ordering -> ordering
 ;;
 
 let cursor_identity_id (cursor : cursor) =
@@ -788,6 +810,8 @@ let sqlite_finalize db stmt =
     | exception exn ->
       Error (sqlite_failure Finalize_statement (Printexc.to_string exn))
   in
+  (* See sqlite3 binding lifetime: keep the finalized statement reachable
+     until after the native finalize call has returned. *)
   ignore (Sys.opaque_identity stmt);
   result
 ;;
@@ -846,7 +870,7 @@ let transitions_table_sql =
 ;;
 
 let events_table_sql =
-  "CREATE TABLE events (sequence INTEGER PRIMARY KEY CHECK (sequence > 0), event_id TEXT NOT NULL CHECK (length(event_id) > 0), stimulus_id TEXT NOT NULL CHECK (length(stimulus_id) > 0), record_kind TEXT NOT NULL CHECK (record_kind IN ('stimulus', 'turn_started', 'transition_settlement', 'cursor_ack')), recorded_at_unix_us INTEGER NOT NULL, stimulus_kind TEXT CHECK (stimulus_kind IN ('board_signal', 'bootstrap', 'fusion_completed', 'bg_completed', 'schedule_due', 'connector_attention', 'hitl_resolved', 'failure_judgment', 'manual_compaction', 'goal_assigned')), post_id TEXT, urgency TEXT, arrived_at_unix_us INTEGER, board_updated_at_unix_us INTEGER, reaction_kind TEXT, transition_id TEXT, source_index INTEGER, source_count INTEGER, cursor_ts_unix_us INTEGER, cursor_post_id TEXT, FOREIGN KEY (transition_id, source_count) REFERENCES transitions (transition_id, source_count), CHECK ((record_kind = 'stimulus' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IN ('immediate', 'normal', 'low') AND arrived_at_unix_us IS NOT NULL AND reaction_kind IS NULL AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'turn_started' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind = 'turn_started' AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'transition_settlement' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind IN ('event_queue_ack', 'event_queue_requeued', 'event_queue_escalated') AND transition_id IS NOT NULL AND source_index >= 0 AND source_index < source_count AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'cursor_ack' AND stimulus_kind IS NULL AND post_id IS NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind = 'cursor_ack' AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NOT NULL))) STRICT"
+  "CREATE TABLE events (sequence INTEGER PRIMARY KEY CHECK (sequence > 0), event_id TEXT NOT NULL CHECK (length(event_id) > 0), stimulus_id TEXT NOT NULL CHECK (length(stimulus_id) > 0), record_kind TEXT NOT NULL CHECK (record_kind IN ('stimulus', 'turn_started', 'transition_settlement', 'cursor_ack')), recorded_at_unix_us INTEGER NOT NULL, stimulus_kind TEXT CHECK (stimulus_kind IN ('board_signal', 'bootstrap', 'fusion_completed', 'bg_completed', 'schedule_due', 'connector_attention', 'hitl_resolved', 'failure_judgment', 'manual_compaction', 'goal_assigned')), post_id TEXT, urgency TEXT, arrived_at_unix_us INTEGER, board_updated_at_unix_us INTEGER, reaction_kind TEXT, transition_id TEXT, source_index INTEGER, source_count INTEGER, cursor_ts_unix_us INTEGER, cursor_post_id TEXT, FOREIGN KEY (stimulus_id, stimulus_kind, post_id) REFERENCES stimulus_state (stimulus_id, stimulus_kind, post_id), FOREIGN KEY (transition_id, source_count) REFERENCES transitions (transition_id, source_count), CHECK ((record_kind = 'stimulus' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IN ('immediate', 'normal', 'low') AND arrived_at_unix_us IS NOT NULL AND reaction_kind IS NULL AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'turn_started' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind = 'turn_started' AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'transition_settlement' AND stimulus_kind IS NOT NULL AND post_id IS NOT NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind IN ('event_queue_ack', 'event_queue_requeued', 'event_queue_escalated') AND transition_id IS NOT NULL AND source_index >= 0 AND source_index < source_count AND cursor_ts_unix_us IS NULL AND cursor_post_id IS NULL) OR (record_kind = 'cursor_ack' AND stimulus_kind IS NULL AND post_id IS NULL AND urgency IS NULL AND arrived_at_unix_us IS NULL AND board_updated_at_unix_us IS NULL AND reaction_kind = 'cursor_ack' AND transition_id IS NULL AND source_index IS NULL AND source_count IS NULL AND cursor_ts_unix_us IS NOT NULL))) STRICT"
 ;;
 
 let cursor_state_table_sql =
@@ -897,6 +921,10 @@ let stimulus_state_cursor_sweep_index_sql =
   "CREATE INDEX stimulus_state_cursor_sweep ON stimulus_state (stimulus_kind, board_updated_at_unix_us, post_id) WHERE stimulus_seen = 1 AND latest_handling_sequence IS NULL"
 ;;
 
+let stimulus_state_identity_index_sql =
+  "CREATE UNIQUE INDEX stimulus_state_identity ON stimulus_state (stimulus_id, stimulus_kind, post_id)"
+;;
+
 let stimulus_state_pending_order_index_sql =
   "CREATE INDEX stimulus_state_pending_order ON stimulus_state (current_state, stimulus_sequence, stimulus_id)"
 ;;
@@ -931,6 +959,7 @@ let expected_schema_objects =
   ; "index", "events_stimulus_sequence", events_stimulus_sequence_index_sql
   ; "index", "events_transition_source", events_transition_source_index_sql
   ; "index", "stimulus_state_cursor_sweep", stimulus_state_cursor_sweep_index_sql
+  ; "index", "stimulus_state_identity", stimulus_state_identity_index_sql
   ; "index", "stimulus_state_pending_order", stimulus_state_pending_order_index_sql
   ; "index", "transitions_event_id", transitions_event_id_index_sql
   ; "index", "transitions_identity_cardinality", transitions_cardinality_index_sql
@@ -1062,7 +1091,10 @@ let initialize_database db ~keeper_name ~path =
       (sqlite_exec db ~operation:Rollback_transaction "ROLLBACK")
 ;;
 
+let full_schema_validation_count = Atomic.make 0
+
 let read_schema_objects db =
+  Atomic.incr full_schema_validation_count;
   with_statement db
     "SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
     (fun stmt ->
@@ -1083,74 +1115,119 @@ let read_schema_objects db =
       loop [])
 ;;
 
-let validate_database db ~keeper_name =
+type database_validation_stamp =
+  { sqlite_schema_version : int64
+  ; application_id : int64
+  ; user_version : int64
+  ; keeper_name : string
+  ; store_schema : string
+  }
+
+let read_database_validation_stamp_after_schema_version db ~sqlite_schema_version =
   let* application_id =
     sqlite_single_int64 db ~operation:Validate_schema "PRAGMA application_id"
   in
   let* user_version =
     sqlite_single_int64 db ~operation:Validate_schema "PRAGMA user_version"
   in
-  if not (Int64.equal application_id database_application_id)
+  let* keeper_name =
+    sqlite_single_text
+      db
+      ~operation:Validate_schema
+      "SELECT keeper_name FROM ledger_meta WHERE singleton = 1"
+  in
+  let* store_schema =
+    sqlite_single_text
+      db
+      ~operation:Validate_schema
+      "SELECT schema_version FROM ledger_meta WHERE singleton = 1"
+  in
+  Ok
+    { sqlite_schema_version
+    ; application_id
+    ; user_version
+    ; keeper_name
+    ; store_schema
+    }
+;;
+
+let read_database_validation_stamp db =
+  let* sqlite_schema_version =
+    sqlite_single_int64 db ~operation:Validate_schema "PRAGMA schema_version"
+  in
+  read_database_validation_stamp_after_schema_version db ~sqlite_schema_version
+;;
+
+let equal_database_validation_stamp left right =
+  Int64.equal left.sqlite_schema_version right.sqlite_schema_version
+  && Int64.equal left.application_id right.application_id
+  && Int64.equal left.user_version right.user_version
+  && String.equal left.keeper_name right.keeper_name
+  && String.equal left.store_schema right.store_schema
+;;
+
+let cached_database_stamp_matches db expected =
+  let* sqlite_schema_version =
+    sqlite_single_int64 db ~operation:Validate_schema "PRAGMA schema_version"
+  in
+  if not (Int64.equal sqlite_schema_version expected.sqlite_schema_version)
+  then Ok false
+  else
+    let* observed =
+      read_database_validation_stamp_after_schema_version db ~sqlite_schema_version
+    in
+    Ok (equal_database_validation_stamp observed expected)
+;;
+
+let validate_database db ~keeper_name =
+  let* stamp = read_database_validation_stamp db in
+  if not (Int64.equal stamp.application_id database_application_id)
   then
     Error
       (Application_id_mismatch
-         { expected = database_application_id; actual = application_id })
-  else if not (Int64.equal user_version database_user_version)
+         { expected = database_application_id; actual = stamp.application_id })
+  else if not (Int64.equal stamp.user_version database_user_version)
   then
     Error
       (User_version_mismatch
-         { expected = database_user_version; actual = user_version })
+         { expected = database_user_version; actual = stamp.user_version })
+  else if not (String.equal stamp.keeper_name keeper_name)
+  then
+    Error
+      (Keeper_identity_mismatch { expected = keeper_name; actual = stamp.keeper_name })
+  else if not (String.equal stamp.store_schema database_schema)
+  then Error (Schema_mismatch ("unsupported schema version: " ^ stamp.store_schema))
   else
-    let* stored_keeper =
-      sqlite_single_text
+    let* meta_count =
+      sqlite_single_int64
         db
         ~operation:Validate_schema
-        "SELECT keeper_name FROM ledger_meta WHERE singleton = 1"
+        "SELECT COUNT(*) FROM ledger_meta"
     in
-    if not (String.equal stored_keeper keeper_name)
-    then
-      Error
-        (Keeper_identity_mismatch { expected = keeper_name; actual = stored_keeper })
+    if not (Int64.equal meta_count 1L)
+    then Error (Schema_mismatch "ledger_meta must contain exactly one row")
     else
-      let* schema_version =
-        sqlite_single_text
+      let* summary_count =
+        sqlite_single_int64
           db
           ~operation:Validate_schema
-          "SELECT schema_version FROM ledger_meta WHERE singleton = 1"
+          "SELECT COUNT(*) FROM ledger_summary"
       in
-      if not (String.equal schema_version database_schema)
-      then Error (Schema_mismatch ("unsupported schema version: " ^ schema_version))
+      let* cursor_count =
+        sqlite_single_int64
+          db
+          ~operation:Validate_schema
+          "SELECT COUNT(*) FROM cursor_state"
+      in
+      if not (Int64.equal summary_count 1L)
+      then Error (Schema_mismatch "ledger_summary must contain exactly one row")
+      else if not (Int64.equal cursor_count 1L)
+      then Error (Schema_mismatch "cursor_state must contain exactly one row")
       else
-        let* meta_count =
-          sqlite_single_int64
-            db
-            ~operation:Validate_schema
-            "SELECT COUNT(*) FROM ledger_meta"
-        in
-        if not (Int64.equal meta_count 1L)
-        then Error (Schema_mismatch "ledger_meta must contain exactly one row")
-        else
-          let* summary_count =
-            sqlite_single_int64
-              db
-              ~operation:Validate_schema
-              "SELECT COUNT(*) FROM ledger_summary"
-          in
-          let* cursor_count =
-            sqlite_single_int64
-              db
-              ~operation:Validate_schema
-              "SELECT COUNT(*) FROM cursor_state"
-          in
-          if not (Int64.equal summary_count 1L)
-          then Error (Schema_mismatch "ledger_summary must contain exactly one row")
-          else if not (Int64.equal cursor_count 1L)
-          then Error (Schema_mismatch "cursor_state must contain exactly one row")
-          else
-            let* objects = read_schema_objects db in
-            if objects <> expected_schema_objects
-            then Error (Schema_mismatch "schema objects do not match v3 exactly")
-            else Ok ()
+        let* objects = read_schema_objects db in
+        if objects <> expected_schema_objects
+        then Error (Schema_mismatch "schema objects do not match v3 exactly")
+        else Ok stamp
 ;;
 
 type open_database =
@@ -1158,6 +1235,11 @@ type open_database =
   ; path : string
   ; ownership_root : string
   ; initial_identity : Unix.stats option
+  }
+
+type validated_database =
+  { handle : open_database
+  ; stamp : database_validation_stamp
   }
 
 let fsync_parent ~operation path =
@@ -1205,15 +1287,22 @@ let discard_private_database_files ~operation path =
   if removed then fsync_parent ~operation path else Ok ()
 ;;
 
-let close_database handle =
-  let close_result =
+let close_database_connection handle =
+  let result =
     try
       if Sqlite3.db_close handle.db
       then Ok ()
       else Error (sqlite_failure Close_database "database reported a busy handle")
     with exn -> Error (sqlite_failure Close_database (Printexc.to_string exn))
   in
+  (* See sqlite3 binding lifetime: keep the closed database reachable until
+     after the native close call has returned. *)
   ignore (Sys.opaque_identity handle.db);
+  result
+;;
+
+let close_database handle =
+  let close_result = close_database_connection handle in
   let identity_result =
     let* parent = inspect_owned_parent ~ownership_root:handle.ownership_root handle.path in
     match parent with
@@ -1253,7 +1342,7 @@ let open_existing_database ~ownership_root ~path ~keeper_name =
       validate_database db ~keeper_name
     in
     (match prepared with
-     | Ok () -> Ok (Some handle)
+     | Ok stamp -> Ok (Some { handle; stamp })
      | Error primary ->
        (match close_database handle with
         | Ok () -> Error primary
@@ -1506,7 +1595,8 @@ let with_database ~base_path ~keeper_name ~create body =
             let* handle = open_existing_database ~ownership_root ~path ~keeper_name in
             match handle with
             | None -> Ok None
-            | Some handle ->
+            | Some validated ->
+              let handle = validated.handle in
               let body_result =
                 try Result.map Option.some (body handle.db) with
                 | Eio.Cancel.Cancelled _ as exn ->
@@ -2594,6 +2684,221 @@ let with_read_transaction db body =
   with_transaction db ~begin_sql:"BEGIN" body
 ;;
 
+type read_capability_entry =
+  { mutex : Stdlib.Mutex.t
+  ; path : string
+  ; ownership_root : string
+  ; keeper_name : string
+  ; mutable capability : validated_database option
+  }
+
+type capability_invalidation =
+  | Capability_inode_changed
+  | Capability_validation_stamp_changed
+
+type 'a capability_read =
+  | Capability_value of 'a
+  | Capability_stale of capability_invalidation
+
+let read_capability_pool_mutex = Stdlib.Mutex.create ()
+
+let read_capability_pool
+  : ((string * string * string), read_capability_entry) Hashtbl.t
+  =
+  Hashtbl.create 0
+;;
+
+let read_capability_entry ~ownership_root ~path ~keeper_name =
+  Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
+    let key = ownership_root, path, keeper_name in
+    match Hashtbl.find_opt read_capability_pool key with
+    | Some entry -> entry
+    | None ->
+      let entry =
+        { mutex = Stdlib.Mutex.create ()
+        ; path
+        ; ownership_root
+        ; keeper_name
+        ; capability = None
+        }
+      in
+      Hashtbl.add read_capability_pool key entry;
+      entry)
+;;
+
+let capability_path_matches (database : validated_database) =
+  let handle = database.handle in
+  let* observed =
+    inspect_database_paths ~ownership_root:handle.ownership_root handle.path
+  in
+  match handle.initial_identity, observed with
+  | Some initial, Regular_path current -> Ok (same_regular_identity initial current)
+  | None, Path_absent -> Ok true
+  | None, Regular_path _ | Some _, Path_absent -> Ok false
+;;
+
+let read_from_capability (database : validated_database) body =
+  let* path_matches_before = capability_path_matches database in
+  if not path_matches_before
+  then Ok (Capability_stale Capability_inode_changed)
+  else
+    let* read =
+      with_read_transaction database.handle.db (fun () ->
+        let* stamp_matches =
+          cached_database_stamp_matches database.handle.db database.stamp
+        in
+        if stamp_matches
+        then Result.map (fun value -> Capability_value value) (body database.handle.db)
+        else Ok (Capability_stale Capability_validation_stamp_changed))
+    in
+    match read with
+    | Capability_stale reason -> Ok (Capability_stale reason)
+    | Capability_value value ->
+      let* path_matches_after = capability_path_matches database in
+      if path_matches_after
+      then Ok (Capability_value value)
+      else Ok (Capability_stale Capability_inode_changed)
+;;
+
+let close_read_capability_entry entry =
+  match entry.capability with
+  | None -> Ok ()
+  | Some database ->
+    let* () = close_database_connection database.handle in
+    entry.capability <- None;
+    Ok ()
+;;
+
+let open_read_capability entry =
+  let* database =
+    open_existing_database
+      ~ownership_root:entry.ownership_root
+      ~path:entry.path
+      ~keeper_name:entry.keeper_name
+  in
+  entry.capability <- database;
+  Ok database
+;;
+
+let read_from_new_capability entry body =
+  let* database = open_read_capability entry in
+  match database with
+  | None -> Ok None
+  | Some database ->
+    let* read = read_from_capability database body in
+    (match read with
+     | Capability_value value -> Ok (Some value)
+     | Capability_stale reason ->
+       let* () = close_read_capability_entry entry in
+       (match reason with
+        | Capability_inode_changed -> Error (Database_identity_changed entry.path)
+        | Capability_validation_stamp_changed ->
+          Error
+            (Schema_mismatch
+               "validation stamp changed during strict read capability validation")))
+;;
+
+let read_with_capability_entry entry body =
+  match entry.capability with
+  | None -> read_from_new_capability entry body
+  | Some database ->
+    let* read = read_from_capability database body in
+    (match read with
+     | Capability_value value -> Ok (Some value)
+     | Capability_stale _ ->
+       let* () = close_read_capability_entry entry in
+       read_from_new_capability entry body)
+;;
+
+let with_validated_read_capability ~base_path ~keeper_name body =
+  let* path = database_path ~base_path ~keeper_name in
+  Eio_guard.run_in_systhread (fun () ->
+    let entry =
+      read_capability_entry
+        ~ownership_root:base_path
+        ~path
+        ~keeper_name
+    in
+    Stdlib.Mutex.protect entry.mutex (fun () ->
+      try read_with_capability_entry entry body with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (sqlite_failure Open_database (Printexc.to_string exn))))
+;;
+
+let close_all_read_capabilities () =
+  Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
+    let entries =
+      Hashtbl.fold (fun key entry entries -> (key, entry) :: entries) read_capability_pool []
+    in
+    entries
+    |> List.fold_left
+         (fun errors (key, entry) ->
+            match
+              Stdlib.Mutex.protect entry.mutex (fun () ->
+                close_read_capability_entry entry)
+            with
+            | Ok () ->
+              Hashtbl.remove read_capability_pool key;
+              errors
+            | Error error -> error :: errors)
+         []
+    |> List.rev)
+;;
+
+let release_read_capability ~base_path ~keeper_name =
+  let* path = database_path ~base_path ~keeper_name in
+  Eio_guard.run_in_systhread (fun () ->
+    Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
+      let key = base_path, path, keeper_name in
+      match Hashtbl.find_opt read_capability_pool key with
+      | None -> Ok ()
+      | Some entry ->
+        Stdlib.Mutex.protect entry.mutex (fun () ->
+          let* () = close_read_capability_entry entry in
+          Hashtbl.remove read_capability_pool key;
+          Ok ())))
+;;
+
+let () =
+  Stdlib.at_exit (fun () ->
+    close_all_read_capabilities ()
+    |> List.iter (fun error ->
+      Log.Keeper.error
+        "reaction read capability close failed at process exit: %s"
+        (error_to_string error)))
+;;
+
+let read_current_cursor db =
+  with_statement db
+    "SELECT cursor_ts_unix_us, cursor_post_id FROM cursor_state WHERE singleton = 1"
+    (fun stmt ->
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW ->
+        let* cursor =
+          match optional_int64 stmt 0, optional_text stmt 1 with
+          | None, None -> Ok None
+          | Some cursor_ts_us, post_id ->
+            Ok
+              (Some
+                 { cursor_ts = timestamp_of_microseconds cursor_ts_us
+                 ; post_id
+                 })
+          | None, Some _ ->
+            Error (Integrity_failure "cursor projection has a post id without a timestamp")
+        in
+        let* () =
+          match Sqlite3.step stmt with
+          | Sqlite3.Rc.DONE -> Ok ()
+          | Sqlite3.Rc.ROW ->
+            Error (Integrity_failure "cursor projection singleton is not unique")
+          | rc -> Error (sqlite_rc_failure Step_statement db rc)
+        in
+        Ok cursor
+      | Sqlite3.Rc.DONE ->
+        Error (Integrity_failure "cursor projection singleton is absent")
+      | rc -> Error (sqlite_rc_failure Step_statement db rc))
+;;
+
 let unique_stimulus_ids stimulus_ids =
   let rec loop seen reversed = function
     | [] -> Ok (List.rev reversed)
@@ -2922,25 +3227,45 @@ let empty_exact_summary =
   }
 ;;
 
-let exact_summary ~base_path ~keeper_name ~pending_id_display_limit =
+let read_exact_summary db ~pending_id_display_limit =
+  let* projected = read_projected_summary db in
+  let* pending_stimulus_ids =
+    read_pending_identity_sample db pending_id_display_limit
+  in
+  Ok
+    { projected with
+      pending_stimulus_ids
+    ; pending_ids_truncated =
+        projected.pending_stimulus_count > List.length pending_stimulus_ids
+    }
+;;
+
+let read_observation ~base_path ~keeper_name ~pending_id_display_limit =
   if pending_id_display_limit < 0
   then Error (Invalid_transition "pending identity display limit must be non-negative")
   else
     let body db =
-      with_read_transaction db (fun () ->
-        let* projected = read_projected_summary db in
-        let* pending_stimulus_ids =
-          read_pending_identity_sample db pending_id_display_limit
-        in
-        Ok
-          { projected with
-            pending_stimulus_ids
-          ; pending_ids_truncated =
-              projected.pending_stimulus_count > List.length pending_stimulus_ids
-          })
+      let* cursor = read_current_cursor db in
+      let* exact_summary = read_exact_summary db ~pending_id_display_limit in
+      Ok { cursor; exact_summary }
     in
-    let* result = with_database ~base_path ~keeper_name ~create:false body in
-    Ok (Option.value result ~default:empty_exact_summary)
+    let* result =
+      with_validated_read_capability ~base_path ~keeper_name body
+    in
+    Ok
+      (Option.value
+         result
+         ~default:{ cursor = None; exact_summary = empty_exact_summary })
+;;
+
+let current_cursor ~base_path ~keeper_name =
+  read_observation ~base_path ~keeper_name ~pending_id_display_limit:0
+  |> Result.map (fun observation -> observation.cursor)
+;;
+
+let exact_summary ~base_path ~keeper_name ~pending_id_display_limit =
+  read_observation ~base_path ~keeper_name ~pending_id_display_limit
+  |> Result.map (fun observation -> observation.exact_summary)
 ;;
 
 let recent_events ~base_path ~keeper_name ~limit =
@@ -2971,3 +3296,13 @@ let recent_events ~base_path ~keeper_name ~limit =
      | None -> Ok []
      | Some events -> Ok events)
 ;;
+
+module For_testing = struct
+  let full_schema_validation_count () = Atomic.get full_schema_validation_count
+
+  let close_read_capabilities () =
+    match close_all_read_capabilities () with
+    | [] -> Ok ()
+    | errors -> Error errors
+  ;;
+end

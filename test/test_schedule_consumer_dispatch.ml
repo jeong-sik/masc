@@ -641,6 +641,135 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
          |> Keeper_event_queue.length))
 ;;
 
+let run_terminal_ack_projection_race ~config ~base_path ~keeper_name =
+  let request = create_keeper_wake_schedule config in
+  let initial = tick_ok config ~now:201.0 in
+  let signal =
+    match initial.emitted with
+    | [ signal ] -> signal
+    | signals -> failf "expected one emitted signal, got %d" (List.length signals)
+  in
+  let lease =
+    match
+      Keeper_registry_event_queue.claim_when_result
+        ~base_path
+        keeper_name
+        ~claimed_at:202.0
+        ~ready:(fun _ -> true)
+    with
+    | Ok (Some lease) -> lease
+    | Ok None -> fail "scheduled occurrence was not queued"
+    | Error detail -> fail detail
+  in
+  let stimulus =
+    match Keeper_registry_event_queue.lease_stimuli lease with
+    | [ stimulus ] -> stimulus
+    | stimuli -> failf "expected one leased stimulus, got %d" (List.length stimuli)
+  in
+  (match
+     Keeper_registry_event_queue.settle_result
+       ~base_path
+       keeper_name
+       ~settled_at:203.0
+       ~lease
+       ~settlement:Keeper_registry_event_queue.Ack
+   with
+   | Ok (Keeper_registry_event_queue.Settled _)
+   | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
+   | Ok _ -> fail "scheduled occurrence settlement follow-up failed"
+   | Error detail -> fail detail);
+  (match
+     Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name
+   with
+   | Ok [ _ ] -> ()
+   | Ok entries -> failf "expected one transition outbox entry, got %d" (List.length entries)
+   | Error detail -> fail detail);
+  Eio.Switch.run
+  @@ fun sw ->
+  let retry_read_complete, resolve_retry_read_complete = Eio.Promise.create () in
+  let release_retry, resolve_release_retry = Eio.Promise.create () in
+  let projection_lock_attempted, resolve_projection_lock_attempted =
+    Eio.Promise.create ()
+  in
+  Server_schedule_consumers.For_testing.with_after_keeper_wake_reaction_read_hook
+    (fun () ->
+       Eio.Promise.resolve resolve_retry_read_complete ();
+       Eio.Promise.await release_retry)
+    (fun () ->
+       let retry_result =
+         Eio.Fiber.fork_promise ~sw (fun () ->
+           Server_schedule_consumers.consumer.dispatch
+             config
+             ~now:204.0
+             signal
+             request)
+       in
+       Eio.Promise.await retry_read_complete;
+       Keeper_event_queue_persistence.For_testing
+       .with_before_reaction_coordination_lock_hook
+         (fun () -> Eio.Promise.resolve resolve_projection_lock_attempted ())
+         (fun () ->
+            let projection_result =
+              Eio.Fiber.fork_promise ~sw (fun () ->
+                Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+                  ~base_path
+                  ~keeper_name)
+            in
+            Eio.Promise.await projection_lock_attempted;
+            Eio.Promise.resolve resolve_release_retry ();
+            (match Eio.Promise.await retry_result with
+             | Ok (Ok _) -> ()
+             | Ok
+                 (Error
+                 (Schedule_runner.Retryable_dispatch_failure detail
+                 | Schedule_runner.Terminal_dispatch_rejection detail)) ->
+               fail ("concurrent schedule retry failed: " ^ detail)
+             | Error exn -> raise exn);
+            (match Eio.Promise.await projection_result with
+             | Ok (Ok ()) -> ()
+             | Ok (Error error) ->
+               fail
+                 ("concurrent transition projection failed: "
+                  ^ Keeper_reaction_ledger.ledger_error_to_string error)
+             | Error exn -> raise exn)));
+  check int
+    "terminal ACK is not resurrected as pending"
+    0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match
+     Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name
+   with
+   | Ok [] -> ()
+   | Ok entries -> failf "projected outbox retained %d entries" (List.length entries)
+   | Error detail -> fail detail);
+  let stimulus_id = Keeper_event_queue.stimulus_identity_id stimulus in
+  (match
+     Keeper_reaction_ledger.event_queue_reaction_evidence_result
+       ~base_path
+       ~keeper_name
+       ~stimulus_id
+   with
+   | Ok { latest_reaction = Some (Keeper_reaction_ledger.Latest_event_queue_ack _); _ }
+     -> ()
+   | Ok _ -> fail "terminal ACK was not the causally latest reaction"
+   | Error error ->
+     fail
+       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error))
+;;
+
+let test_terminal_ack_projection_cannot_resurrect_pending_retry () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore
+    (Keeper_registry.register ~base_path keeper_name (keeper_meta_for_name keeper_name));
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () -> run_terminal_ack_projection_race ~config ~base_path ~keeper_name)
+;;
+
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   with_workspace
   @@ fun config ->
@@ -728,6 +857,17 @@ let test_dashboard_live_supported_non_terminal_evidence_matches_supported_reques
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
+  let request_projection = dashboard |> member "request_projection" in
+  check int "one returned schedule row" 1
+    (request_projection |> member "returned_count" |> to_int);
+  check int "one exact schedule row" 1
+    (request_projection |> member "total_count" |> to_int);
+  check int "request projection limit is backend-authored" 20
+    (request_projection |> member "limit" |> to_int);
+  check bool "request projection is complete" false
+    (request_projection |> member "truncated" |> to_bool);
+  check bool "removed request_count field is absent" true
+    (dashboard |> member "request_count" = `Null);
   let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
   check string "live supported evidence matched" "matched_supported_non_terminal"
     (evidence |> member "projection_status" |> to_string);
@@ -1131,6 +1271,8 @@ let () =
             test_keeper_wake_retry_records_committed_arrival
         ; test_case "acked occurrence recovery does not enqueue or wake again" `Quick
             test_acked_occurrence_recovery_does_not_enqueue_or_wake_again
+        ; test_case "terminal ACK projection cannot resurrect pending retry" `Quick
+            test_terminal_ack_projection_cannot_resurrect_pending_retry
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

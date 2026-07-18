@@ -48,7 +48,14 @@ let dashboard_keeper_composite_json
       (entry : Keeper_registry.registry_entry)
   : Yojson.Safe.t
   =
-  Keeper_composite_observer.observe entry
+  let board_cursor_observation =
+    Keeper_reaction_store.read_observation
+      ~base_path:config.base_path
+      ~keeper_name:entry.name
+      ~pending_id_display_limit:0
+    |> Result.map (fun observation -> observation.cursor)
+  in
+  Keeper_composite_observer.observe ~board_cursor_observation entry
   |> Keeper_composite_observer.snapshot_to_json
   |> enrich_composite_snapshot_json ~config entry
 ;;
@@ -74,6 +81,9 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
     (fun () ->
       Domain_pool_ref.submit_io_or_inline (fun () ->
         let entries = Keeper_registry.all ~base_path:config.base_path () in
+        (* Each row captures exactly one typed reaction-store observation at
+           this server request boundary. The pure observer receives the frozen
+           result; it never reopens SQLite while projecting the same row. *)
         let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
         `Assoc
           (* generated_at is a unix-second number (not ISO8601 string) to match the

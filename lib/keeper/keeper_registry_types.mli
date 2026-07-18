@@ -452,8 +452,6 @@ type registry_entry = {
       (** Live turn-scoped switch exposed for operator interrupt.
           [Some sw] while a turn is running; [None] otherwise. *)
   board_wakeups : float StringMap.t;
-  board_cursor_ts : float;
-  board_cursor_post_id : string option;
   tool_usage : Keeper_types.tool_call_entry StringMap.t;
   transition_seq : int;
   waiting_for_inference : bool Atomic.t;

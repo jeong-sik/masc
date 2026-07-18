@@ -488,8 +488,6 @@ let register_with_state_result
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
@@ -695,8 +693,6 @@ let register_restarting ~base_path name meta
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
     ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
@@ -792,7 +788,18 @@ let finish_unregistration entry =
      Removing the map binding therefore must also signal that exact lane. *)
   Atomic.set entry.fiber_stop true;
   Atomic.set entry.fiber_wakeup true;
-  if entry.phase = Running then decr_running_count_clamped ()
+  if entry.phase = Running then decr_running_count_clamped ();
+  match
+    Keeper_reaction_store.release_read_capability
+      ~base_path:entry.base_path
+      ~keeper_name:entry.name
+  with
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.error
+      "registry: reaction read capability release failed keeper=%s: %s"
+      entry.name
+      (Keeper_reaction_store.error_to_string error)
 ;;
 
 let unregister ~base_path name =

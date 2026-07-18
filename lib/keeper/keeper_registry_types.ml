@@ -123,8 +123,6 @@ type registry_entry =
   ; turn_attempt_state : turn_attempt_state option Atomic.t
   ; current_turn_switch : Eio.Switch.t option Atomic.t
   ; board_wakeups : float StringMap.t
-  ; board_cursor_ts : float
-  ; board_cursor_post_id : string option
   ; tool_usage : tool_call_entry StringMap.t
   ; transition_seq : int
   ; waiting_for_inference : bool Atomic.t

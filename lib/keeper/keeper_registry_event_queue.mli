@@ -1,7 +1,7 @@
 (** Per-keeper event-queue access.
 
     SSOT for enqueueing / draining the per-keeper stimulus queue.
-    The MASC-owned v2 envelope is authoritative.  Mutations commit that one
+    The MASC-owned v3 envelope is authoritative.  Mutations commit that one
     durable state first, then publish its pending projection into the
     entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
     registry Atomic is touched. *)
@@ -119,6 +119,12 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present of Keeper_event_queue.stimulus
   | Stimulus_storage_error of string
 
+val with_reaction_coordination_lock_result :
+  base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
+(** Queue-owned per-Keeper durable coordination boundary for operations that
+    span queue state and reaction authority.  It is deliberately distinct
+    from the non-reentrant queue transaction lock. *)
+
 val enqueue_stimulus_durable_result :
   base_path:string
   -> string
@@ -132,6 +138,15 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. Both success variants carry the exact durable
     stimulus so retry callers cannot substitute volatile fields from their
     new candidate for the previously committed value. *)
+
+val enqueue_stimuli_durable_result :
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus list ->
+  (Keeper_event_queue.stimulus list, string) result
+(** Atomically admit a typed stimulus batch through the same full-state
+    identity authority as {!enqueue_stimulus_durable_result}. The result
+    preserves input order and returns each exact durable value. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

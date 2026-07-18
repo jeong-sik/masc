@@ -322,57 +322,37 @@ let wakeup_all_keepers ?base_path () =
       ~base_path:expected
       ()
 
-(* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
-   [reason] is the typed {!Board_wake.wake_reason} that selected this keeper;
-   here it only picks urgency (explicit mentions are [Immediate]). It is not
-   carried in the payload — the next prompt re-derives board context from the
-   typed [Board_signal] payload, not from a wake-reason string. *)
-let queue_reaction_target_of_board = function
-  | Board.Reaction_post -> Keeper_event_queue.Reaction_post
-  | Board.Reaction_comment -> Keeper_event_queue.Reaction_comment
-;;
-
-let queue_reaction_change_of_board
-      (reaction : Board_dispatch.board_reaction_change)
-  : Keeper_event_queue.board_reaction_change
-  =
-  { target_type = queue_reaction_target_of_board reaction.target_type
-  ; target_id = reaction.target_id
-  ; user_id = reaction.user_id
-  ; emoji = reaction.emoji
-  ; reacted = reaction.reacted
-  }
-;;
-
-let board_signal_stimulus
+(* RFC-0020: materialize the complete Keeper-specific Board projection before
+   durable admission. After enqueue, this payload is the sole prompt authority;
+   intake never re-reads the mutable Board or current Keeper mention settings. *)
+let board_signal_stimulus_of_evidence
+      ~(meta : keeper_meta)
       ~(reason : Board_wake.wake_reason)
+      ~(evidence : Board_wake.board_evidence)
       (signal : Board_dispatch.board_signal)
   =
-  let payload : Keeper_event_queue.stimulus_payload =
-    Keeper_event_queue.Board_signal
-      { kind =
-          (match signal.kind with
-           | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
-           | Board_dispatch.Board_reaction_changed reaction ->
-             Keeper_event_queue.Reaction_changed (queue_reaction_change_of_board reaction))
-      ; author = signal.author
-      ; title = signal.title
-      ; content = signal.content
-      ; hearth = signal.hearth
-      ; updated_at = signal.updated_at
-      }
+  let urgency =
+    match reason with
+    | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
+    | Board_wake.Thread_reply_after_self_comment
+    | Board_wake.Reaction_after_self_activity ->
+      Keeper_event_queue.Normal
   in
-  { Keeper_event_queue.post_id = signal.post_id
-  ; urgency =
-      (match reason with
-       | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
-       | Board_wake.Thread_reply_after_self_comment
-       | Board_wake.Reaction_after_self_activity ->
-         Keeper_event_queue.Normal)
-  ; arrived_at = Time_compat.now ()
-  ; payload
-  }
+  match
+    Board_wake.board_stimulus_of_board_evidence
+      ~meta
+      ~signal
+      ~post:evidence.post
+      ~comments:evidence.comments
+  with
+  | Error _ as error -> error
+  | Ok board ->
+    Ok
+      { Keeper_event_queue.post_id = signal.post_id
+      ; urgency
+      ; arrived_at = Time_compat.now ()
+      ; payload = Keeper_event_queue.Board_signal board
+      }
 ;;
 
 let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
@@ -383,25 +363,28 @@ let record_board_attention_candidate
       ~(config : Workspace.config)
       ~(signal_kind_label : string)
       ~(meta : keeper_meta)
+      ~(evidence : Board_wake.board_evidence)
       (signal : Board_dispatch.board_signal)
   =
   match
-    Keeper_board_attention_candidate.of_board_signal
+    Keeper_board_attention_candidate.of_board_evidence
       ~meta
       ~recorded_at:(Time_compat.now ())
-      signal
+      ~signal
+      ~post:evidence.post
+      ~comments:evidence.comments
   with
-  | Keeper_world_observation_board_signal.Unavailable unavailable ->
+  | Error detail ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_evidence_read") ]
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_projection") ]
       ();
     Log.Keeper.warn
-      "board attention evidence unavailable: keeper=%s post=%s error=%s"
+      "board attention projection failed: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-  | Keeper_world_observation_board_signal.Available candidate ->
+      detail
+  | Ok candidate ->
     (match
        Keeper_board_attention_candidate.record_and_wake
          ~base_path:config.base_path
@@ -429,18 +412,21 @@ let deliver_addressed_board_signal
       ~(config : Workspace.config)
       ~(reason : Board_wake.wake_reason)
       ~(signal : Board_dispatch.board_signal)
+      ~(evidence : Board_wake.board_evidence)
       (meta : keeper_meta)
   =
-  let stimulus = board_signal_stimulus ~reason signal in
-  match
-    Keeper_registry_event_queue.enqueue_stimulus_durable_result
-      ~base_path:config.base_path
-      meta.name
-      stimulus
-  with
-  | Keeper_registry_event_queue.Stimulus_enqueued _
-  | Keeper_registry_event_queue.Stimulus_already_present _ -> Ok ()
-  | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
+  match board_signal_stimulus_of_evidence ~meta ~reason ~evidence signal with
+  | Error error -> Error (Board_wake.materialization_error_to_string error)
+  | Ok stimulus ->
+    (match
+       Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ~base_path:config.base_path
+         meta.name
+         stimulus
+     with
+     | Keeper_registry_event_queue.Stimulus_enqueued _
+     | Keeper_registry_event_queue.Stimulus_already_present _ -> Ok ()
+     | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail)
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
@@ -460,111 +446,126 @@ let wakeup_relevant_keeper_for_board_signal
   (* Every lane is independent: persist and signal each addressed Keeper
      without a fleet-wide cap, ordering dependency, or content debounce. *)
   let board_ym = Eio_guard.create_yield_meter () in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       (try
-          match read_meta config entry.name with
-        | Error detail ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_read") ]
-            ();
-          Log.Keeper.warn
-            "board signal Keeper metadata unavailable: keeper=%s error=%s"
-            entry.name
-            detail
-        | Ok None ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_missing") ]
-            ();
-          Log.Keeper.warn
-            "board signal Keeper metadata missing: keeper=%s"
-            entry.name
-        | Ok (Some meta) ->
-          (match
-             Keeper_world_observation.board_signal_wake_reason
-               ~meta
-               ~signal
-           with
-           | Keeper_world_observation_board_signal.Unavailable unavailable ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string KeepaliveSignalFailures)
-               ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
-               ();
-             Log.Keeper.warn
-               "board signal relevance read unavailable: keeper=%s post=%s error=%s"
-               meta.name
-               signal.post_id
-               (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-           | Keeper_world_observation_board_signal.Available None ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
-               ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
-               ();
-             record_board_attention_candidate
-               ~config
-               ~signal_kind_label
-               ~meta
-               signal
-           | Keeper_world_observation_board_signal.Available (Some reason) ->
-             (match deliver_addressed_board_signal ~config ~reason ~signal meta with
-              | Error detail ->
-                Otel_metric_store.inc_counter
-                  Keeper_metrics.(to_string KeepaliveSignalFailures)
-                  ~labels:
-                    [ ("keeper", meta.name); ("phase", "board_signal_delivery") ]
-                  ();
-                Log.Keeper.warn
-                  "board signal durable delivery failed: keeper=%s reason=%s post=%s error=%s"
-                  meta.name
-                  (Board_wake.wake_reason_label reason)
-                  signal.post_id
-                  detail
-              | Ok () ->
-                if meta.paused || entry.phase = Keeper_state_machine.Paused
-                then
-                  Log.Keeper.info
-                    "board signal queued for paused Keeper: keeper=%s reason=%s post=%s"
-                    meta.name
-                    (Board_wake.wake_reason_label reason)
-                    signal.post_id
-                else (
-                  let outcome =
-                    Keeper_registry.wakeup_running
-                      ~intent:Keeper_registry.Reactive_signal
-                      ~base_path:config.base_path
-                      meta.name
-                  in
-                  match outcome with
-                  | Keeper_registry.Signaled ->
-                    Log.Keeper.info
-                      "board signal wakeup: keeper=%s reason=%s post=%s"
-                      meta.name
-                      (Board_wake.wake_reason_label reason)
-                      signal.post_id
-                  | Keeper_registry.Deferred_unregistered
-                  | Keeper_registry.Deferred_not_running _
-                  | Keeper_registry.Deferred_lifecycle _ ->
-                    Log.Keeper.info
-                      "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
-                      meta.name
-                      (Board_wake.wake_reason_label reason)
-                      signal.post_id)))
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
-            ();
-          Log.Keeper.warn
-            "board signal lane failed independently: keeper=%s post=%s error=%s"
-            entry.name
-            signal.post_id
-            (Printexc.to_string exn));
-       Eio_guard.yield_step board_ym)
-    registry_entries
+  let process_lane evidence (entry : Keeper_registry.registry_entry) =
+    (try
+       match read_meta config entry.name with
+       | Error detail ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string KeepaliveSignalFailures)
+           ~labels:[ ("keeper", entry.name); ("phase", "board_meta_read") ]
+           ();
+         Log.Keeper.warn
+           "board signal Keeper metadata unavailable: keeper=%s error=%s"
+           entry.name
+           detail
+       | Ok None ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string KeepaliveSignalFailures)
+           ~labels:[ ("keeper", entry.name); ("phase", "board_meta_missing") ]
+           ();
+         Log.Keeper.warn
+           "board signal Keeper metadata missing: keeper=%s"
+           entry.name
+       | Ok (Some meta) ->
+         (match
+            Board_wake.wake_reason_of_board_evidence
+              ~meta
+              ~signal
+              evidence
+          with
+          | None ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string BoardSignalNoWakeTotal)
+              ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
+              ();
+            record_board_attention_candidate
+              ~config
+              ~signal_kind_label
+              ~meta
+              ~evidence
+              signal
+          | Some reason ->
+            (match
+               deliver_addressed_board_signal
+                 ~config
+                 ~reason
+                 ~signal
+                 ~evidence
+                 meta
+             with
+             | Error detail ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string KeepaliveSignalFailures)
+                 ~labels:
+                   [ ("keeper", meta.name); ("phase", "board_signal_delivery") ]
+                 ();
+               Log.Keeper.warn
+                 "board signal durable delivery failed: keeper=%s reason=%s post=%s error=%s"
+                 meta.name
+                 (Board_wake.wake_reason_label reason)
+                 signal.post_id
+                 detail
+             | Ok () ->
+               if meta.paused || entry.phase = Keeper_state_machine.Paused
+               then
+                 Log.Keeper.info
+                   "board signal queued for paused Keeper: keeper=%s reason=%s post=%s"
+                   meta.name
+                   (Board_wake.wake_reason_label reason)
+                   signal.post_id
+               else (
+                 let outcome =
+                   Keeper_registry.wakeup_running
+                     ~intent:Keeper_registry.Reactive_signal
+                     ~base_path:config.base_path
+                     meta.name
+                 in
+                 match outcome with
+                 | Keeper_registry.Signaled ->
+                   Log.Keeper.info
+                     "board signal wakeup: keeper=%s reason=%s post=%s"
+                     meta.name
+                     (Board_wake.wake_reason_label reason)
+                     signal.post_id
+                 | Keeper_registry.Deferred_unregistered
+                 | Keeper_registry.Deferred_not_running _
+                 | Keeper_registry.Deferred_lifecycle _ ->
+                   Log.Keeper.info
+                     "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
+                     meta.name
+                     (Board_wake.wake_reason_label reason)
+                     signal.post_id)))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string KeepaliveSignalFailures)
+         ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
+         ();
+       Log.Keeper.warn
+         "board signal lane failed independently: keeper=%s post=%s error=%s"
+         entry.name
+         signal.post_id
+         (Printexc.to_string exn));
+    Eio_guard.yield_step board_ym
+  in
+  match Board_wake.read_board_evidence signal with
+  | Board_wake.Available evidence ->
+    List.iter (process_lane evidence) registry_entries
+  | Board_wake.Unavailable unavailable ->
+    List.iter
+      (fun (entry : Keeper_registry.registry_entry) ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string KeepaliveSignalFailures)
+           ~labels:[ ("keeper", entry.name); ("phase", "board_signal_read") ]
+           ();
+         Log.Keeper.warn
+           "board signal evidence unavailable: keeper=%s post=%s error=%s"
+           entry.name
+           signal.post_id
+           (Board_wake.unavailable_to_string unavailable);
+         Eio_guard.yield_step board_ym)
+      registry_entries
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

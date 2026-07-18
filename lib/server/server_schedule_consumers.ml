@@ -6,6 +6,7 @@ let supported_payload_kinds = Schedule_payload_projection.supported_payload_kind
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
+let after_keeper_wake_reaction_read_hook = Atomic.make (fun () -> ())
 
 let ( let* ) = Result.bind
 
@@ -224,13 +225,15 @@ let reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
          (Printexc.to_string exn))
 ;;
 
-let accept_keeper_wake_occurrence
+let accept_keeper_wake_occurrence_locked
       ~base_path
       ~keeper_name
       ~stimulus_id
       stimulus
   =
-  match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id with
+  let evidence_result = reaction_evidence_result ~base_path ~keeper_name ~stimulus_id in
+  Atomic.get after_keeper_wake_reaction_read_hook ();
+  match evidence_result with
   | Error detail -> retryable_dispatch_failure detail
   | Ok
       { latest_reaction =
@@ -264,6 +267,29 @@ let accept_keeper_wake_occurrence
           with
           | Ok () -> Ok Wake_required
           | Error detail -> retryable_dispatch_failure detail))
+;;
+
+let accept_keeper_wake_occurrence
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+      stimulus
+  =
+  match
+    Keeper_registry_event_queue.with_reaction_coordination_lock_result
+      ~base_path
+      ~keeper_name
+      (fun () ->
+         accept_keeper_wake_occurrence_locked
+           ~base_path
+           ~keeper_name
+           ~stimulus_id
+           stimulus)
+  with
+  | Ok result -> result
+  | Error detail ->
+    retryable_dispatch_failure
+      ("scheduled keeper wake settlement coordination failed: " ^ detail)
 ;;
 
 let dispatch_keeper_wake
@@ -372,3 +398,12 @@ let dispatch config ~now signal request =
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch }
+
+module For_testing = struct
+  let with_after_keeper_wake_reaction_read_hook hook f =
+    let previous = Atomic.exchange after_keeper_wake_reaction_read_hook hook in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set after_keeper_wake_reaction_read_hook previous)
+      f
+  ;;
+end

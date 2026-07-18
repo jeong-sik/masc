@@ -8,7 +8,6 @@
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
@@ -63,6 +62,16 @@ val transition_outbox_result :
 (** Read the single pending projection entry for this Keeper lane.  The state
     machine blocks new claims until this list is drained. *)
 
+val with_reaction_coordination_lock_result :
+  base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result
+(** Serialize a compound operation that crosses the queue and its reaction
+    authority for one Keeper lane.  The queue owns this separate durable lock;
+    callers may safely enter ordinary queue transactions from [f] because this
+    is not the queue state owner lock.  Scheduled terminal-check/enqueue and
+    outbox projection/retirement share this boundary so a terminal settlement
+    cannot be retired and then resurrected as pending. Board recovery admission
+    and cursor ACK share it so the cursor never passes non-durable work. *)
+
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
     New live registry code should use {!load_pending} after explicitly
@@ -81,11 +90,6 @@ val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
-
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
@@ -97,11 +101,34 @@ type snapshot_read_error =
   ; message : string
   }
 
-type snapshot_pair_with_errors =
+type snapshot_source_generation =
+  { snapshot_present : bool
+  ; snapshot_revision : int64
+  ; observed_revision : int64
+  ; settlement_wal_end_offset : int
+  ; settlement_wal_row_count : int
+  }
+(** Immutable evidence identifying the exact durable queue generation that an
+    observation projected. [snapshot_revision] is the revision encoded in the
+    primary v3 snapshot (or the empty-state revision when no snapshot exists).
+    [observed_revision] includes a committed settlement WAL replay performed
+    only in memory. The WAL byte boundary and decoded-row count make that
+    distinction explicit without creating another authority. *)
+
+type snapshot_observation =
   { pending : Keeper_event_queue.t
   ; inflight : Keeper_event_queue.t
+  ; source_generation : snapshot_source_generation option
   ; read_errors : snapshot_read_error list
   }
+(** Read-only projection of one Keeper lane. [source_generation = None] iff
+    durable state could not be observed; [read_errors] then carries the typed
+    failure instead of silently substituting an authoritative empty queue. *)
+
+val snapshot_source_generation_to_yojson :
+  snapshot_source_generation -> Yojson.Safe.t
+(** Canonical dashboard/tool evidence encoding. Revisions are strings so the
+    full int64 domain survives JavaScript transport. *)
 
 type snapshot_discovery =
   { keeper_names : string list
@@ -110,9 +137,12 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
-val load_snapshot_pair_with_errors :
-  base_path:string -> keeper_name:string -> snapshot_pair_with_errors
+val observe_snapshot :
+  base_path:string -> keeper_name:string -> snapshot_observation
+(** Read the primary v3 snapshot and complete committed settlement WAL under
+    the lane owner lock, replaying the WAL through the typed state machine only
+    in memory. This function never checkpoints, rewrites, creates, or compacts
+    queue files, so dashboard observation cannot mutate the state it reports. *)
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
@@ -208,22 +238,18 @@ val enqueue_stimulus_if_absent_result :
     value for [Enqueued], or the previously committed value for
     [Already_present]. *)
 
-val persist_snapshot :
-  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-val record_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
-    v3 envelope; it never creates [event-queue-inflight.json]. *)
-
-val ack_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-
-val ack_consumed :
+val enqueue_stimuli_if_absent_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.stimulus list ->
-  (unit, string) result
+  (enqueue_stimulus_result list, string) result
+(** Batch form of {!enqueue_stimulus_if_absent_result}. Every input identity
+    is resolved against pending, active leases, outbox, and earlier items in
+    this batch inside one queue transaction. A conflict commits nothing. *)
+
+val persist_snapshot :
+  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 
 val drop_by_post_id :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -234,3 +260,11 @@ val drop_by_post_id :
   (Keeper_event_queue.stimulus list, string) result
 
 val fleet_summary_json : now:float -> base_path:string -> Yojson.Safe.t
+
+module For_testing : sig
+  val with_before_reaction_coordination_lock_hook :
+    (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Install a scoped hook immediately before durable coordination-lock
+      acquisition.  Tests use it as a barrier; production always observes the
+      default no-op hook. *)
+end

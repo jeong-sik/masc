@@ -6,9 +6,9 @@
     - [last_skip] {ts, reasons} (G5)
     - [board_cursor] {ts, post_id} and [board_wakeups] count (G10)
 
-    Each case drives the registry through its public mutators, then asserts
-    the projected JSON. The observer is a pure projection, so these tests
-    pin the wire shape without exercising the full keepalive loop. *)
+    Each case drives the owning typed authority, then asserts the projected
+    JSON. The observer is pure: lifecycle state comes from the registry while
+    the server-shaped test boundary injects the SQLite Board cursor result. *)
 
 open Alcotest
 module Keeper_registry = Masc.Keeper_registry
@@ -37,13 +37,24 @@ let make_meta name =
   | Error e -> failwith ("make_meta failed: " ^ e)
 ;;
 
+let observe_json ~base ~name entry =
+  let board_cursor_observation =
+    Masc.Keeper_reaction_store.read_observation
+      ~base_path:base
+      ~keeper_name:name
+      ~pending_id_display_limit:0
+    |> Result.map (fun observation -> observation.cursor)
+  in
+  Observer.observe ~board_cursor_observation entry |> Observer.snapshot_to_json
+;;
+
 (* Register a keeper and return the fresh entry after [setup] has run its
    registry mutations, so the observer sees the mutated SSOT. *)
 let observed_json ~base ~name ~setup () =
   ignore (Keeper_registry.register ~base_path:base name (make_meta name));
   setup ();
   match Keeper_registry.get ~base_path:base name with
-  | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
+  | Some entry -> observe_json ~base ~name entry
   | None -> failwith "keeper vanished from registry after register"
 ;;
 
@@ -120,8 +131,19 @@ let test_board_cursor_and_wakeups () =
   let json =
     observed_json ~base ~name
       ~setup:(fun () ->
-        Keeper_registry.set_board_cursor ~base_path:base name 1234.5
-          (Some "post-42");
+        (match
+           Masc.Keeper_reaction_ledger.reconcile_board_scan_result
+             ~base_path:base
+             ~keeper_name:name
+             ~expected_cursor:None
+             ~target_cursor:{ cursor_ts = 1234.5; post_id = Some "post-42" }
+             []
+         with
+         | Ok (Masc.Keeper_reaction_ledger.Board_scan_cursor_advanced _)
+         | Ok Masc.Keeper_reaction_ledger.Board_scan_already_reconciled -> ()
+         | Error error ->
+           fail
+             (Masc.Keeper_reaction_ledger.ledger_error_to_string error));
         ignore
           (Keeper_registry.board_wakeup_allowed ~base_path:base name
              ~dedup_key:"fingerprint-a" ~debounce_sec:60.0);
@@ -135,8 +157,36 @@ let test_board_cursor_and_wakeups () =
     (J.member "ts" cursor |> J.to_float);
   check string "board_cursor.post_id surfaced" "post-42"
     (J.member "post_id" cursor |> J.to_string);
+  check bool "board cursor read succeeded explicitly" true
+    (match J.member "board_cursor_read_error" json with `Null -> true | _ -> false);
   check int "board_wakeups counts distinct dedup keys" 2
     (J.member "board_wakeups" json |> J.to_int)
+;;
+
+let test_board_cursor_read_failure_is_explicit () =
+  let base = temp_base () in
+  let name = "board-cursor-corrupt" in
+  ignore (Keeper_registry.register ~base_path:base name (make_meta name));
+  let database_path =
+    match Masc.Keeper_reaction_store.database_path ~base_path:base ~keeper_name:name with
+    | Ok path -> path
+    | Error error ->
+      fail (Masc.Keeper_reaction_store.error_to_string error)
+  in
+  Fs_compat.mkdir_p (Filename.dirname database_path);
+  (match Fs_compat.save_file_atomic database_path "not-a-sqlite-database" with
+   | Ok () -> ()
+   | Error detail -> fail ("cursor corruption fixture failed: " ^ detail));
+  let json =
+    match Keeper_registry.get ~base_path:base name with
+    | Some entry -> observe_json ~base ~name entry
+    | None -> fail "keeper vanished before corrupt cursor observation"
+  in
+  let read_error = J.member "board_cursor_read_error" json in
+  check bool "SQLite cursor read error is not collapsed to uninitialized" true
+    (match read_error with
+     | `String detail -> String.length detail > 0
+     | _ -> false)
 ;;
 
 (* ── #16 (38-bug campaign PR-5): run_state / wake surfacing ──────────── *)
@@ -200,7 +250,7 @@ let test_run_state_suspended_for_non_running_phase () =
   ignore (Keeper_registry.register_offline ~base_path:base name (make_meta name));
   let json =
     match Keeper_registry.get ~base_path:base name with
-    | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
+    | Some entry -> observe_json ~base ~name entry
     | None -> failwith "keeper vanished from registry after register_offline"
   in
   let rs = J.member "run_state" json in
@@ -227,6 +277,8 @@ let test_idle_defaults_are_null_or_zero () =
     (J.member "ts" cursor |> J.to_float);
   check bool "board_cursor.post_id null before consumption" true
     (match J.member "post_id" cursor with `Null -> true | _ -> false);
+  check bool "uninitialized cursor is not a read error" true
+    (match J.member "board_cursor_read_error" json with `Null -> true | _ -> false);
   check int "board_wakeups defaults to 0" 0
     (J.member "board_wakeups" json |> J.to_int)
 ;;
@@ -259,6 +311,8 @@ let () =
         [
           test_case "surfaces cursor and wakeup cardinality" `Quick
             test_board_cursor_and_wakeups;
+          test_case "surfaces SQLite cursor read failure" `Quick
+            test_board_cursor_read_failure_is_explicit;
         ] );
       ( "defaults",
         [

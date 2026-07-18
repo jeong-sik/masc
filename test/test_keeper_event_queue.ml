@@ -57,6 +57,11 @@ let write_file path contents =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
+let read_file path =
+  match Safe_ops.read_file_safe path with
+  | Ok bytes -> bytes
+  | Error error -> Alcotest.fail ("failed to read test file: " ^ error)
+
 let latest_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | (entry : Log.Ring.entry) :: _ -> entry.seq
@@ -132,8 +137,17 @@ let () =
       ; author = "a"
       ; title = "t"
       ; content = "c"
+      ; preview = "c"
       ; hearth = None
-      ; updated_at = None
+      ; post_kind = Human_post
+      ; updated_at = 1.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; thread_snapshot =
+          { self_commented = false
+          ; new_external_since = 0
+          ; latest_external = None
+          }
       }
   in
 
@@ -143,6 +157,16 @@ let () =
   assert (not (is_board_signal Bootstrap));
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
+  (match
+     queue_of_yojson
+       (`Assoc
+          [ "schema", `String "keeper.event_queue.v2"
+          ; "length", `Int 0
+          ; "items", `List []
+          ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "pre-snapshot Board wire v2 was accepted by v3 hard cut");
 
   let board_attention_payload ?(content = "c") candidate_id =
     Board_attention
@@ -152,8 +176,17 @@ let () =
           ; author = "a"
           ; title = "t"
           ; content
+          ; preview = content
           ; hearth = None
-          ; updated_at = None
+          ; post_kind = Human_post
+          ; updated_at = 1.0
+          ; explicit_mention = false
+          ; matched_targets = []
+          ; thread_snapshot =
+              { self_commented = false
+              ; new_external_since = 0
+              ; latest_external = None
+              }
           }
       }
   in
@@ -194,8 +227,17 @@ let () =
       ; author = "reactor"
       ; title = "parent"
       ; content = "body"
+      ; preview = "body"
       ; hearth = Some "research"
-      ; updated_at = Some 5.0
+      ; post_kind = Human_post
+      ; updated_at = 5.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; thread_snapshot =
+          { self_commented = false
+          ; new_external_since = 0
+          ; latest_external = None
+          }
       }
   in
   (match
@@ -220,7 +262,7 @@ let () =
                 }
           ; author
           ; hearth = Some hearth
-          ; updated_at = Some updated_at
+          ; updated_at
           ; _
           } ->
         assert (String.equal s.post_id "p-reaction");
@@ -490,6 +532,68 @@ let () =
       (String.equal
          (stimulus_identity_id approved_hitl)
          (stimulus_identity_id rejected_hitl)));
+
+  (* Durable equality and digest share one typed numeric projection. Signed
+     zero follows IEEE numeric identity; non-finite input is rejected before
+     it can become a durable replay identity. *)
+  let scheduled_identity due_at =
+    { post_id = "schedule-occurrence:identity-float"
+    ; urgency = Normal
+    ; arrived_at = 0.
+    ; payload =
+        Schedule_due
+          { schedule_id = "schedule-identity-float"
+          ; due_at
+          ; payload_digest = "payload-identity-float"
+          ; title = None
+          ; message = "identity"
+          }
+    }
+  in
+  let positive_zero_schedule = scheduled_identity 0. in
+  let negative_zero_schedule = scheduled_identity (-0.) in
+  assert (stimulus_identity_equal positive_zero_schedule negative_zero_schedule);
+  assert (
+    String.equal
+      (stimulus_identity_id positive_zero_schedule)
+      (stimulus_identity_id negative_zero_schedule));
+  let different_schedule = scheduled_identity 1. in
+  assert (not (stimulus_identity_equal positive_zero_schedule different_schedule));
+  assert (
+    not
+      (String.equal
+         (stimulus_identity_id positive_zero_schedule)
+         (stimulus_identity_id different_schedule)));
+
+  let edited_identity input =
+    let resolution =
+      { approval_id = "approval-identity-float"
+      ; decision = Hitl_edited input
+      ; channel = Keeper_continuation_channel.unrouted "identity-float"
+      }
+    in
+    { post_id = hitl_resolution_post_id resolution
+    ; urgency = Immediate
+    ; arrived_at = 0.
+    ; payload = Hitl_resolved resolution
+    }
+  in
+  let first_nan =
+    edited_identity
+      (`Assoc [ "nested", `List [ `Float Float.nan; `Float (-0.) ] ])
+  in
+  (match validate_stimulus first_nan with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "nested NaN was accepted as durable identity");
+  (match stimulus_identity_id_result first_nan with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "nested NaN produced a durable identity id");
+  (match validate_stimulus (scheduled_identity Float.infinity) with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "infinite schedule due_at was accepted");
+  (match stimulus_of_yojson (stimulus_to_yojson first_nan) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "nested NaN codec input was accepted");
 
   (* --- RFC-0315 P3 W0: Goal_assigned --- *)
   let assignment =
@@ -770,11 +874,8 @@ let () =
       let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
       let before_health_reads = latest_log_seq () in
-      ignore (Keeper_event_queue_persistence.load_snapshot_pair ~base_path ~keeper_name);
-      ignore
-        (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
-           ~base_path
-           ~keeper_name);
+      ignore (Keeper_event_queue_persistence.observe_snapshot ~base_path ~keeper_name);
+      ignore (Keeper_event_queue_persistence.observe_snapshot ~base_path ~keeper_name);
       Alcotest.(check (list string))
         "health snapshot reads do not emit restore log"
         []
@@ -789,8 +890,99 @@ let () =
               ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
            (restored_log_messages_since before_live_load)));
 
-  (* --- durable snapshot load collapses legacy duplicates that differ only by
-         arrival time. --- *)
+  (* --- Invalid typed input is rejected before either a batch admission or a
+         generic state update can publish a new durable generation. --- *)
+  let base_path = temp_dir "keeper-event-queue-invalid-save-boundary" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-invalid-save-boundary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (enqueue empty bootstrap_stim);
+      let path = snapshot_path ~base_path ~keeper_name in
+      let before = read_file path in
+      (match
+         Keeper_event_queue_persistence.enqueue_stimuli_if_absent_result
+           ~base_path
+           ~keeper_name
+           [ ghost_stim; first_nan ]
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "batch admission accepted a non-finite stimulus");
+      Alcotest.(check string)
+        "invalid batch leaves durable snapshot bytes unchanged"
+        before
+        (read_file path);
+      (match
+         Keeper_event_queue_persistence.update_result
+           ~base_path
+           ~keeper_name
+           (fun queue -> enqueue queue first_nan)
+       with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "save boundary accepted a non-finite stimulus");
+      Alcotest.(check string)
+        "invalid generic update leaves durable snapshot bytes unchanged"
+        before
+        (read_file path));
+
+  (* --- Batch admission has no cardinality cap and preserves first-commit
+         outcomes across a large mixed unique/duplicate request. The durable
+         implementation builds one immutable identity index rather than
+         rescanning the growing queue for each candidate. --- *)
+  let base_path = temp_dir "keeper-event-queue-large-batch-admission" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-large-batch-admission-test" in
+      let batch_cardinality = 1024 in
+      let unique =
+        List.init batch_cardinality (fun index ->
+          { bootstrap_stim with
+            post_id = Printf.sprintf "batch-%d" index
+          ; arrived_at = Float.of_int index
+          })
+      in
+      let candidates = unique @ List.rev unique in
+      let outcomes =
+        match
+          Keeper_event_queue_persistence.enqueue_stimuli_if_absent_result
+            ~base_path
+            ~keeper_name
+            candidates
+        with
+        | Ok outcomes -> outcomes
+        | Error error -> Alcotest.fail ("large batch admission failed: " ^ error)
+      in
+      let enqueued, already_present =
+        List.fold_left
+          (fun (enqueued, already_present) -> function
+             | Keeper_event_queue_persistence.Enqueued _ -> enqueued + 1, already_present
+             | Keeper_event_queue_persistence.Already_present _ ->
+               enqueued, already_present + 1)
+          (0, 0)
+          outcomes
+      in
+      Alcotest.(check int)
+        "all unique batch identities are enqueued"
+        batch_cardinality
+        enqueued;
+      Alcotest.(check int)
+        "all repeated batch identities reuse first commit"
+        batch_cardinality
+        already_present;
+      let observed =
+        Keeper_event_queue_persistence.observe_snapshot ~base_path ~keeper_name
+      in
+      Alcotest.(check int)
+        "large batch persists each identity exactly once"
+        batch_cardinality
+        (length observed.pending));
+
+  (* --- durable snapshot load collapses canonical identity duplicates whose
+         observation timestamps differ. --- *)
   let base_path = temp_dir "keeper-event-queue-load-dedup" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
@@ -806,98 +998,6 @@ let () =
       assert (length restored = 1);
       let only, rest = Option.get (dequeue restored) in
       assert (String.equal only.post_id "bootstrap");
-      assert (is_empty rest));
-
-  (* --- durable in-flight store: ack removes only consumed stimuli --- *)
-  let base_path = temp_dir "keeper-event-queue-inflight-partial-ack" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-inflight-partial-ack-test" in
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
-      Keeper_event_queue_persistence.ack_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim ];
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial ack should leave unrelated in-flight stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
-      assert (is_empty rest));
-
-  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
-         is drained from pending and inflight snapshots on the genuine-ack path.
-         [ack_inflight] clears the inflight file only (it is shared with
-         [requeue_front], which must leave the requeued stimulus in pending -
-         covered by the requeue-front test below). Here the stimulus lives in
-         the pending snapshot (event-queue.json), mirroring a bootstrap enqueued
-         by supervisor launch; after ack, [load] must be empty. Without the
-         A-fix this returns length 1 and accumulates across restarts. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-drains-pending-test" in
-      Keeper_event_queue_persistence.persist
-        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
-      (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ bootstrap_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("pending acknowledgement failed: " ^ error));
-      (* Before the A-fix this returned length 1 (pending snapshot untouched);
-         after the fix the pending snapshot is drained. *)
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
-
-  (* --- Genuine consumed-ack handles the realistic mixed state: pending can
-         contain duplicates while inflight still carries the consumed lease.
-         A partial ack removes all matching consumed copies from both snapshots,
-         ignores absent stimuli, and leaves unrelated pending/inflight work
-         replayable exactly once after [load]'s merge. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-mixed-partial" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-mixed-partial-test" in
-      let pending =
-        empty
-        |> fun q -> enqueue q board_stim
-        |> fun q -> enqueue q bootstrap_stim
-        |> fun q -> enqueue q board_stim
-      in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name pending;
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ board_stim; ghost_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("mixed acknowledgement failed: " ^ error));
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial consumed ack should leave unrelated stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
       assert (is_empty rest));
 
   (* --- durable fleet summary: health can see pending, in-flight, and oldest age. --- *)
@@ -918,10 +1018,22 @@ let () =
         ~base_path
         ~keeper_name:pending_keeper
         (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
-      Keeper_event_queue_persistence.record_inflight
+      Keeper_event_queue_persistence.persist
         ~base_path
         ~keeper_name:inflight_keeper
-        [ inflight ];
+        (enqueue empty inflight);
+      (match
+         Keeper_event_queue_persistence.claim_when_result
+           ~base_path
+           ~keeper_name:inflight_keeper
+           ~claimed_at:6.0
+           ~ready:(fun candidate ->
+             Keeper_event_queue.stimulus_identity_equal candidate inflight)
+           ()
+       with
+       | Ok (Some _) -> ()
+       | Ok None -> Alcotest.fail "fleet summary fixture did not create an active lease"
+       | Error error -> Alcotest.fail ("fleet summary fixture claim failed: " ^ error));
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in

@@ -6,6 +6,8 @@ open Keeper_types_profile
 
 module Message_scope = Keeper_world_observation_message_scope
 
+let ( let* ) = Result.bind
+
 type match_result =
   { explicit_mention : bool
   ; matched_targets : string list
@@ -24,6 +26,19 @@ type board_unavailable =
 type 'a board_read =
   | Available of 'a
   | Unavailable of board_unavailable
+
+type board_evidence =
+  { post : Board.post
+  ; comments : Board.comment list
+  }
+
+type board_stimulus_materialization_error =
+  | Source_unavailable of board_unavailable
+  | Post_identity_mismatch of {
+      signal_post_id : string;
+      snapshot_post_id : string;
+    }
+  | Invalid_snapshot of Keeper_event_queue.board_stimulus_error
 
 type comment_state =
   [ `Never
@@ -103,6 +118,16 @@ let unavailable_to_string unavailable =
     (Board.show_board_error unavailable.error)
 ;;
 
+let materialization_error_to_string = function
+  | Source_unavailable unavailable -> unavailable_to_string unavailable
+  | Post_identity_mismatch { signal_post_id; snapshot_post_id } ->
+    Printf.sprintf
+      "Board signal post id %s does not match evidence post id %s"
+      signal_post_id
+      snapshot_post_id
+  | Invalid_snapshot error -> Keeper_event_queue.board_stimulus_error_to_string error
+;;
+
 let board_reaction_target_of_queue = function
   | Keeper_event_queue.Reaction_post -> Board.Reaction_post
   | Keeper_event_queue.Reaction_comment -> Board.Reaction_comment
@@ -137,22 +162,6 @@ let queue_reaction_change_of_board
   }
 ;;
 
-let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
-  { Keeper_event_queue.kind =
-      (match signal.kind with
-       | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-       | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
-       | Board_dispatch.Board_reaction_changed reaction ->
-         Keeper_event_queue.Reaction_changed
-           (queue_reaction_change_of_board reaction))
-  ; author = signal.author
-  ; title = signal.title
-  ; content = signal.content
-  ; hearth = signal.hearth
-  ; updated_at = signal.updated_at
-  }
-;;
-
 (* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
    end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
    the downstream matchers expect from the typed payload, taking the board post
@@ -174,28 +183,53 @@ let board_signal_of_board_stimulus
   ; title = bs.title
   ; content = bs.content
   ; hearth = bs.hearth
-  ; updated_at = bs.updated_at
+  ; updated_at = Some bs.updated_at
   }
 ;;
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
 
 let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
-  let cmp = Float.compare ts_a ts_b in
-  if cmp <> 0 then cmp else String.compare post_id_a post_id_b
+  Keeper_reaction_store.compare_normalized_cursor
+    { cursor_ts = ts_a; post_id = Some post_id_a }
+    { cursor_ts = ts_b; post_id = Some post_id_b }
 ;;
 
-let cursor_token_of_post (post : Board.post) = post.updated_at, post_id_string post
+let normalize_cursor_token (cursor_ts, post_id) =
+  Keeper_reaction_store.normalize_cursor
+    { Keeper_reaction_store.cursor_ts; post_id }
+;;
+
+let cursor_token_of_post (post : Board.post) =
+  let* cursor =
+    normalize_cursor_token (post.updated_at, Some (post_id_string post))
+  in
+  match cursor.Keeper_reaction_store.post_id with
+  | Some post_id -> Ok (cursor.cursor_ts, post_id)
+  | None ->
+    Error
+      (Keeper_reaction_store.Integrity_failure
+         "normalized Board post cursor lost its post id")
+;;
 
 let list_posts_after_cursor (cursor_ts, cursor_post_id) =
-  let cursor_post_id = Option.value ~default:"" cursor_post_id in
-  let is_after_cursor post =
-    compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
+  let* cursor = normalize_cursor_token (cursor_ts, cursor_post_id) in
+  let base_token =
+    cursor.cursor_ts, Option.value ~default:"" cursor.post_id
   in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
-  |> List.filter is_after_cursor
-  |> List.sort (fun (a : Board.post) (b : Board.post) ->
-    compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
+  let rec attach_tokens reversed = function
+    | [] -> Ok reversed
+    | post :: rest ->
+      let* token = cursor_token_of_post post in
+      attach_tokens ((token, post) :: reversed) rest
+  in
+  let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int () in
+  let* with_tokens = attach_tokens [] posts in
+  Ok
+    (with_tokens
+     |> List.filter (fun (token, _) -> compare_cursor_token token base_token > 0)
+     |> List.sort (fun (left, _) (right, _) -> compare_cursor_token left right)
+     |> List.map snd)
 ;;
 
 let text (signal : Board_dispatch.board_signal) =
@@ -252,52 +286,192 @@ let match_signal
     Uses actual comment stream as ground truth (no proxy like reply_count
     or updated_at). A prior response is reconsidered only when a new external
     comment arrives. *)
+let comment_state_of_comments ~self_ids comments : comment_state =
+  let my_comments =
+    List.filter
+      (fun (c : Board.comment) ->
+         Message_scope.is_self_author
+           ~self_ids
+           (Board.Agent_id.to_string c.author))
+      comments
+  in
+  if my_comments = []
+  then `Never
+  else (
+    let my_latest_ts =
+      List.fold_left
+        (fun acc (c : Board.comment) -> max acc c.created_at)
+        0.0
+        my_comments
+    in
+    let external_after =
+      List.filter
+        (fun (c : Board.comment) ->
+           (not
+              (Message_scope.is_self_author
+                 ~self_ids
+                 (Board.Agent_id.to_string c.author)))
+           && c.created_at > my_latest_ts)
+        comments
+    in
+    match external_after with
+    | [] -> `No_new_external
+    | hd :: tl ->
+      let latest =
+        List.fold_left
+          (fun (acc : Board.comment) (c : Board.comment) ->
+             if c.created_at > acc.created_at then c else acc)
+          hd
+          tl
+      in
+      `New_external
+        ( List.length external_after
+        , Board.Agent_id.to_string latest.author
+        , short_preview ~max_len:60 latest.content ))
+;;
+
 let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
   match Board_dispatch.get_comments ~post_id with
   | Error error -> Unavailable { operation = Get_comments; post_id; error }
-  | Ok comments ->
-    let my_comments =
-      List.filter
-        (fun (c : Board.comment) ->
-           Message_scope.is_self_author
-             ~self_ids
-             (Board.Agent_id.to_string c.author))
-        comments
+  | Ok comments -> Available (comment_state_of_comments ~self_ids comments)
+;;
+
+let queue_post_kind_of_board = function
+  | Board.Human_post -> Keeper_event_queue.Human_post
+  | Board.Automation_post -> Keeper_event_queue.Automation_post
+  | Board.System_post -> Keeper_event_queue.System_post
+;;
+
+let board_stimulus_of_projection
+      ~(signal : Board_dispatch.board_signal)
+      ~title
+      ~preview
+      ~hearth
+      ~post_kind
+      ~updated_at
+      ~explicit_mention
+      ~matched_targets
+      ~thread_snapshot
+  =
+  let board =
+    { Keeper_event_queue.kind =
+        (match signal.kind with
+         | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
+         | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
+         | Board_dispatch.Board_reaction_changed reaction ->
+           Keeper_event_queue.Reaction_changed
+             (queue_reaction_change_of_board reaction))
+    ; author = signal.author
+    ; title
+    ; content = signal.content
+    ; preview
+    ; hearth
+    ; post_kind = queue_post_kind_of_board post_kind
+    ; updated_at
+    ; explicit_mention
+    ; matched_targets
+    ; thread_snapshot
+    }
+  in
+  Keeper_event_queue.validate_board_stimulus board
+  |> Result.map (fun () -> board)
+  |> Result.map_error (fun error -> Invalid_snapshot error)
+;;
+
+let thread_snapshot_of_evidence
+      ~self_ids
+      ~(signal : Board_dispatch.board_signal)
+      comments
+  =
+  let latest_external latest_author latest_preview =
+    Some { Keeper_event_queue.latest_author = latest_author; latest_preview }
+  in
+  match signal.kind with
+  | Board_dispatch.Board_post_created ->
+    { Keeper_event_queue.self_commented = false
+    ; new_external_since = 0
+    ; latest_external = None
+    }
+  | Board_dispatch.Board_comment_added ->
+    (match comment_state_of_comments ~self_ids comments with
+     | `Never ->
+       { Keeper_event_queue.self_commented = false
+       ; new_external_since = 1
+       ; latest_external =
+           latest_external signal.author (short_preview ~max_len:60 signal.content)
+       }
+     | `No_new_external ->
+       { Keeper_event_queue.self_commented = true
+       ; new_external_since = 0
+       ; latest_external =
+           latest_external signal.author (short_preview ~max_len:60 signal.content)
+       }
+     | `New_external (count, author, preview) ->
+       { Keeper_event_queue.self_commented = true
+       ; new_external_since = count
+       ; latest_external = latest_external author preview
+       })
+  | Board_dispatch.Board_reaction_changed _ ->
+    let self_commented =
+      match comment_state_of_comments ~self_ids comments with
+      | `Never -> false
+      | `No_new_external | `New_external _ -> true
     in
-    if my_comments = []
-    then Available `Never
-    else (
-      let my_latest_ts =
-        List.fold_left
-          (fun acc (c : Board.comment) -> max acc c.created_at)
-          0.0
-          my_comments
-      in
-      let external_after =
-        List.filter
-          (fun (c : Board.comment) ->
-             (not
-                (Message_scope.is_self_author
-                   ~self_ids
-                   (Board.Agent_id.to_string c.author)))
-             && c.created_at > my_latest_ts)
-          comments
-      in
-      match external_after with
-      | [] -> Available `No_new_external
-      | hd :: tl ->
-        let latest =
-          List.fold_left
-            (fun (acc : Board.comment) (c : Board.comment) ->
-               if c.created_at > acc.created_at then c else acc)
-            hd
-            tl
-        in
-        Available
-          (`New_external
-             ( List.length external_after
-             , Board.Agent_id.to_string latest.author
-             , short_preview ~max_len:60 latest.content )))
+    { Keeper_event_queue.self_commented
+    ; new_external_since = 0
+    ; latest_external = None
+    }
+;;
+
+let board_stimulus_of_board_evidence
+      ~(meta : keeper_meta)
+      ~(signal : Board_dispatch.board_signal)
+      ~(post : Board.post)
+      ~(comments : Board.comment list)
+  =
+  let snapshot_post_id = Board.Post_id.to_string post.id in
+  if not (String.equal signal.post_id snapshot_post_id)
+  then Error (Post_identity_mismatch { signal_post_id = signal.post_id; snapshot_post_id })
+  else
+    let matched = match_signal ~meta ~signal in
+    board_stimulus_of_projection
+      ~signal
+      ~title:post.title
+      ~preview:(short_preview ~max_len:80 post.content)
+      ~hearth:post.hearth
+      ~post_kind:post.post_kind
+      ~updated_at:post.updated_at
+      ~explicit_mention:matched.explicit_mention
+      ~matched_targets:matched.matched_targets
+      ~thread_snapshot:
+        (thread_snapshot_of_evidence
+           ~self_ids:(Message_scope.self_ids meta)
+           ~signal
+           comments)
+;;
+
+let read_board_evidence (signal : Board_dispatch.board_signal) =
+  match Board_dispatch.get_post ~post_id:signal.post_id with
+  | Error error ->
+    Unavailable { operation = Get_post; post_id = signal.post_id; error }
+  | Ok post ->
+    (match signal.kind with
+     | Board_dispatch.Board_post_created ->
+       Available { post; comments = [] }
+     | Board_dispatch.Board_comment_added
+     | Board_dispatch.Board_reaction_changed _ ->
+       (match Board_dispatch.get_comments ~post_id:signal.post_id with
+        | Error error ->
+          Unavailable
+            { operation = Get_comments; post_id = signal.post_id; error }
+        | Ok comments -> Available { post; comments }))
+;;
+
+let materialize_board_stimulus ~(meta : keeper_meta) signal =
+  match read_board_evidence signal with
+  | Unavailable unavailable -> Error (Source_unavailable unavailable)
+  | Available { post; comments } ->
+    board_stimulus_of_board_evidence ~meta ~signal ~post ~comments
 ;;
 
 (** Why a keeper woke for a board signal. Closed set replacing the prior
@@ -323,6 +497,37 @@ let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
+;;
+
+let wake_reason_of_board_evidence
+      ~(meta : keeper_meta)
+      ~(signal : Board_dispatch.board_signal)
+      ({ post; comments } : board_evidence)
+  =
+  let matched = match_signal ~meta ~signal in
+  if matched.explicit_mention
+  then Some Explicit_mention
+  else (
+    let self_ids = Message_scope.self_ids meta in
+    match signal.kind with
+    | Board_dispatch.Board_post_created -> None
+    | Board_dispatch.Board_comment_added ->
+      (match comment_state_of_comments ~self_ids comments with
+       | `New_external _ -> Some Thread_reply_after_self_comment
+       | `Never | `No_new_external -> None)
+    | Board_dispatch.Board_reaction_changed _ ->
+      if Message_scope.is_self_author ~self_ids signal.author
+      then None
+      else if
+        Message_scope.is_self_author
+          ~self_ids
+          (Board.Agent_id.to_string post.author)
+      then Some Reaction_after_self_activity
+      else
+        (match comment_state_of_comments ~self_ids comments with
+         | `Never -> None
+         | `No_new_external | `New_external _ ->
+           Some Reaction_after_self_activity))
 ;;
 
 let self_authored_post ~self_ids ~(post_id : string) =

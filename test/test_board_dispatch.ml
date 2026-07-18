@@ -66,6 +66,59 @@ let seed_legacy_keeper_post () =
   Board_dispatch.init_jsonl ();
   post_id
 
+let board_post_id_exn value =
+  match Board.Post_id.of_string value with
+  | Ok id -> id
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let board_agent_id_exn value =
+  match Board.Agent_id.of_string value with
+  | Ok id -> id
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let normalized_cursor_exn cursor_ts post_id =
+  match
+    Keeper_reaction_store.normalize_cursor
+      Keeper_reaction_store.{ cursor_ts; post_id }
+  with
+  | Ok cursor -> cursor
+  | Error error -> Alcotest.fail (Keeper_reaction_store.error_to_string error)
+;;
+
+let append_board_post_fixture ~post_id ~author ~content ~updated_at =
+  let updated_at = (normalized_cursor_exn updated_at (Some post_id)).cursor_ts in
+  let post : Board.post =
+    { id = board_post_id_exn post_id
+    ; author = board_agent_id_exn author
+    ; title = ""
+    ; body = content
+    ; content
+    ; post_kind = Board.Human_post
+    ; meta_json = None
+    ; visibility = Board.Direct
+    ; created_at = updated_at
+    ; updated_at
+    ; expires_at = 0.
+    ; votes_up = 0
+    ; votes_down = 0
+    ; reply_count = 0
+    ; pinned = false
+    ; hearth = None
+    ; thread_id = None
+    ; origin = None
+    }
+  in
+  let path = Board.persist_path () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.append_file path (Yojson.Safe.to_string (Board.post_to_yojson post) ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  post
+;;
+
 let keeper_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -498,7 +551,7 @@ let board_observation_meta name =
   | Ok meta -> meta
   | Error message -> Alcotest.failf "board observation meta failed: %s" message
 
-let test_first_board_observation_starts_at_current_head () =
+let test_board_cursor_bootstrap_and_registry_restart_resume () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "cursor-bootstrap" in
   let meta = board_observation_meta keeper_name in
@@ -526,42 +579,318 @@ let test_first_board_observation_starts_at_current_head () =
          (List.length events);
        Alcotest.(check int) "historical post is not counted as new" 0 new_count;
        Alcotest.(check int) "historical mention is not counted" 0 mention_count;
-       let cursor_ts, cursor_post_id =
-         Keeper_registry.get_board_cursor ~base_path keeper_name
+       let cursor =
+         match
+           Keeper_reaction_ledger.current_board_cursor_result
+             ~base_path
+             ~keeper_name
+         with
+         | Ok (Some cursor) -> cursor
+         | Ok None -> Alcotest.fail "fresh Board cursor was not initialized"
+         | Error error ->
+           Alcotest.fail (Keeper_reaction_ledger.ledger_error_to_string error)
+       in
+       let expected_old_cursor =
+         normalized_cursor_exn
+           old_post.updated_at
+           (Some (Board.Post_id.to_string old_post.id))
        in
        Alcotest.(check (float 0.0))
          "cursor starts at exact current Board head"
-         old_post.updated_at
-         cursor_ts;
+         expected_old_cursor.cursor_ts
+         cursor.cursor_ts;
        Alcotest.(check (option string))
          "cursor records current head post id"
-         (Some (Board.Post_id.to_string old_post.id))
-         cursor_post_id;
-       Unix.sleepf 0.01;
+         expected_old_cursor.post_id
+         cursor.post_id;
        let new_post =
-         match
-           Board_dispatch.create_post
-             ~author:"external-author"
-             ~content:("@" ^ keeper_name ^ " new post must be observed")
-             ~post_kind:Board.Human_post
-             ()
-         with
-         | Ok post -> post
-         | Error error -> Alcotest.fail (Board.show_board_error error)
+         append_board_post_fixture
+           ~post_id:"cursor-new-a"
+           ~author:"external-author"
+           ~content:("@" ^ keeper_name ^ " new post must be observed")
+           ~updated_at:(old_post.updated_at +. 1.)
        in
        let events, new_count, mention_count =
          Keeper_world_observation.collect_board_events ~base_path ~meta
        in
-       Alcotest.(check int) "new event is observed once" 1 (List.length events);
+       Alcotest.(check int)
+         "live recovery delivers through the durable queue"
+         0
+         (List.length events);
        Alcotest.(check int) "new post count" 1 new_count;
        Alcotest.(check int) "new mention count" 1 mention_count;
-       match events with
-       | [ event ] ->
-         Alcotest.(check string)
-           "new event id"
-           (Board.Post_id.to_string new_post.id)
-           event.Keeper_world_observation.post_id
-       | _ -> Alcotest.fail "expected exactly one new Board event")
+       let queued_after_first_scan =
+         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.to_list
+       in
+       Alcotest.(check (list string))
+         "first new event is durably admitted once"
+         [ Board.Post_id.to_string new_post.id ]
+         (List.map
+            (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+            queued_after_first_scan);
+       let first_cursor =
+         match
+           Keeper_reaction_ledger.current_board_cursor_result
+             ~base_path
+             ~keeper_name
+         with
+         | Ok (Some cursor) -> cursor
+         | Ok None -> Alcotest.fail "cursor disappeared after Board admission"
+         | Error error ->
+           Alcotest.fail (Keeper_reaction_ledger.ledger_error_to_string error)
+       in
+       let expected_first_cursor =
+         normalized_cursor_exn
+           new_post.updated_at
+           (Some (Board.Post_id.to_string new_post.id))
+       in
+       Alcotest.(check (float 0.))
+         "cursor advances only after first durable admission"
+         expected_first_cursor.cursor_ts
+         first_cursor.cursor_ts;
+       Alcotest.(check (option string))
+         "first admitted post owns cursor"
+         expected_first_cursor.post_id
+         first_cursor.post_id;
+       Keeper_registry.unregister ~base_path keeper_name;
+       ignore (Keeper_registry.register ~base_path keeper_name meta);
+       let cursor_after_registry_restart =
+         match
+           Keeper_reaction_ledger.current_board_cursor_result
+             ~base_path
+             ~keeper_name
+         with
+         | Ok (Some cursor) -> cursor
+         | Ok None -> Alcotest.fail "registry restart reset the durable cursor"
+         | Error error ->
+           Alcotest.fail (Keeper_reaction_ledger.ledger_error_to_string error)
+       in
+       Alcotest.(check (float 0.))
+         "registry restart preserves SQLite cursor"
+         expected_first_cursor.cursor_ts
+         cursor_after_registry_restart.cursor_ts;
+       Alcotest.(check (option string))
+         "registry restart preserves cursor post id"
+         expected_first_cursor.post_id
+         cursor_after_registry_restart.post_id;
+       let second_post =
+         append_board_post_fixture
+           ~post_id:"cursor-new-b"
+           ~author:"external-author"
+           ~content:("@" ^ keeper_name ^ " post after registry restart")
+           ~updated_at:(new_post.updated_at +. 1.)
+       in
+       let events, new_count, mention_count =
+         Keeper_world_observation.collect_board_events ~base_path ~meta
+       in
+       Alcotest.(check int) "restart scan still returns queue-owned delivery" 0
+         (List.length events);
+       Alcotest.(check int) "only post after persisted cursor is new" 1 new_count;
+       Alcotest.(check int) "only later mention is counted" 1 mention_count;
+       let queued_after_restart =
+         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.to_list
+       in
+       Alcotest.(check (list string))
+         "restart resumes at persisted cursor plus one without replay or loss"
+         [ Board.Post_id.to_string new_post.id; Board.Post_id.to_string second_post.id ]
+       (List.map
+            (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+            queued_after_restart))
+
+let test_concurrent_board_scan_cannot_resurrect_terminal_stimulus () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-concurrent-lane" in
+  let meta = board_observation_meta keeper_name in
+  ignore (Keeper_registry.register ~base_path keeper_name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () ->
+       ignore
+         (Keeper_world_observation.collect_board_events ~base_path ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       let initial_cursor =
+         match
+           Keeper_reaction_ledger.current_board_cursor_result
+             ~base_path
+             ~keeper_name
+         with
+         | Ok (Some cursor) -> cursor
+         | Ok None -> Alcotest.fail "concurrent scan cursor was not initialized"
+         | Error error ->
+           Alcotest.fail (Keeper_reaction_ledger.ledger_error_to_string error)
+       in
+       let prefix_post =
+         append_board_post_fixture
+           ~post_id:"cursor-concurrent-prefix"
+           ~author:"external-author"
+           ~content:("@" ^ keeper_name ^ " prefix")
+           ~updated_at:(initial_cursor.cursor_ts +. 1.)
+       in
+       Eio.Switch.run
+       @@ fun sw ->
+       let prefix_scan_ready, resolve_prefix_scan_ready = Eio.Promise.create () in
+       let release_prefix_scan, resolve_release_prefix_scan = Eio.Promise.create () in
+       let wider_scan_ready, resolve_wider_scan_ready = Eio.Promise.create () in
+       let release_wider_scan, resolve_release_wider_scan = Eio.Promise.create () in
+       let scan_completions = Atomic.make 0 in
+       Keeper_world_observation.For_testing
+       .with_after_board_scan_before_reconciliation_hook
+         (fun () ->
+            match Atomic.fetch_and_add scan_completions 1 with
+            | 0 ->
+              Eio.Promise.resolve resolve_prefix_scan_ready ();
+              Eio.Promise.await release_prefix_scan
+            | 1 ->
+              Eio.Promise.resolve resolve_wider_scan_ready ();
+              Eio.Promise.await release_wider_scan
+            | _ -> ())
+         (fun () ->
+            let prefix_scan =
+              Eio.Fiber.fork_promise ~sw (fun () ->
+                Keeper_world_observation.collect_board_events
+                  ~base_path
+                  ~meta)
+            in
+            Eio.Promise.await prefix_scan_ready;
+            let suffix_post =
+              append_board_post_fixture
+                ~post_id:"cursor-concurrent-suffix"
+                ~author:"external-author"
+                ~content:("@" ^ keeper_name ^ " suffix")
+                ~updated_at:(initial_cursor.cursor_ts +. 2.)
+            in
+            let wider_scan =
+              Eio.Fiber.fork_promise ~sw (fun () ->
+                Keeper_world_observation.collect_board_events
+                  ~base_path
+                  ~meta)
+            in
+            Eio.Promise.await wider_scan_ready;
+            Eio.Promise.resolve resolve_release_prefix_scan ();
+            (match Eio.Promise.await prefix_scan with
+             | Ok (events, new_count, mention_count) ->
+               Alcotest.(check int) "prefix scan delivers through queue" 0
+                 (List.length events);
+               Alcotest.(check int) "prefix scan sees one post" 1 new_count;
+               Alcotest.(check int) "prefix scan sees one mention" 1 mention_count
+             | Error exn -> raise exn);
+            let lease =
+              match
+                Keeper_registry_event_queue.claim_when_result
+                  ~base_path
+                  keeper_name
+                  ~claimed_at:2101.
+                  ~ready:(fun _ -> true)
+              with
+              | Ok (Some lease) -> lease
+              | Ok None -> Alcotest.fail "prefix Board scan did not admit a lease"
+              | Error detail -> Alcotest.fail detail
+            in
+            let prefix_stimulus =
+              match Keeper_registry_event_queue.lease_stimuli lease with
+              | [ stimulus ] -> stimulus
+              | stimuli ->
+                Alcotest.failf
+                  "expected one prefix stimulus, got %d"
+                  (List.length stimuli)
+            in
+            Alcotest.(check string)
+              "prefix lease identity"
+              (Board.Post_id.to_string prefix_post.id)
+              prefix_stimulus.post_id;
+            (match
+               Keeper_registry_event_queue.settle_result
+                 ~base_path
+                 keeper_name
+                 ~settled_at:2102.
+                 ~lease
+                 ~settlement:Keeper_registry_event_queue.Ack
+             with
+             | Ok (Keeper_registry_event_queue.Settled _)
+             | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
+             | Ok _ -> Alcotest.fail "prefix settlement follow-up failed"
+             | Error detail -> Alcotest.fail detail);
+            (match
+               Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+                 ~base_path
+                 ~keeper_name
+             with
+             | Ok () -> ()
+             | Error error ->
+               Alcotest.fail
+                 (Keeper_reaction_ledger.ledger_error_to_string error));
+            Eio.Promise.resolve resolve_release_wider_scan ();
+            (match Eio.Promise.await wider_scan with
+             | Ok (events, new_count, mention_count) ->
+               Alcotest.(check int) "wider scan has no direct event" 0
+                 (List.length events);
+               Alcotest.(check int) "wider stale scan observed both posts" 2
+                 new_count;
+               Alcotest.(check int) "wider stale scan observed both mentions" 2
+                 mention_count
+             | Error exn -> raise exn);
+            let pending =
+              Keeper_registry_event_queue.snapshot ~base_path keeper_name
+              |> Keeper_event_queue.to_list
+            in
+            Alcotest.(check (list string))
+              "stale prefix is dropped and only suffix is admitted"
+              [ Board.Post_id.to_string suffix_post.id ]
+              (List.map
+                 (fun (stimulus : Keeper_event_queue.stimulus) ->
+                    stimulus.post_id)
+                 pending);
+            (match
+               Keeper_registry_event_queue.transition_outbox_result
+                 ~base_path
+                 keeper_name
+             with
+             | Ok [] -> ()
+             | Ok entries ->
+               Alcotest.failf
+                 "projected prefix outbox retained %d entries"
+                 (List.length entries)
+             | Error detail -> Alcotest.fail detail);
+            let prefix_stimulus_id =
+              Keeper_event_queue.stimulus_identity_id prefix_stimulus
+            in
+            (match
+               Keeper_reaction_ledger.event_queue_reaction_evidence_result
+                 ~base_path
+                 ~keeper_name
+                 ~stimulus_id:prefix_stimulus_id
+             with
+             | Ok
+                 { latest_reaction =
+                     Some (Keeper_reaction_ledger.Latest_event_queue_ack _)
+                 ; _
+                 } -> ()
+             | Ok _ ->
+               Alcotest.fail
+                 "retired prefix ACK is not the latest reaction"
+             | Error error ->
+               Alcotest.fail
+                 (Keeper_reaction_ledger
+                  .event_queue_reaction_evidence_error_to_string
+                    error));
+            let cursor =
+              match
+                Keeper_reaction_ledger.current_board_cursor_result
+                  ~base_path
+                  ~keeper_name
+              with
+              | Ok (Some cursor) -> cursor
+              | Ok None -> Alcotest.fail "Board cursor disappeared"
+              | Error error ->
+                Alcotest.fail
+                  (Keeper_reaction_ledger.ledger_error_to_string error)
+            in
+            Alcotest.(check (option string))
+              "cursor advances through the admitted suffix"
+              (Some (Board.Post_id.to_string suffix_post.id))
+              cursor.post_id))
 
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
@@ -574,7 +903,6 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
        ignore
          (Keeper_world_observation.collect_board_events ~base_path ~meta
            : Keeper_world_observation.pending_board_event list * int * int);
-       Unix.sleepf 0.01;
        (match
           Board_dispatch.create_post
             ~author:"external-author"
@@ -1967,9 +2295,13 @@ let () =
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case
-        "first observation starts at current head"
+        "cursor bootstraps at head and restart resumes"
         `Quick
-        (with_eio test_first_board_observation_starts_at_current_head);
+        (with_eio test_board_cursor_bootstrap_and_registry_restart_resume);
+      Alcotest.test_case
+        "concurrent cursor scan cannot resurrect terminal stimulus"
+        `Quick
+        (with_eio test_concurrent_board_scan_cannot_resurrect_terminal_stimulus);
       Alcotest.test_case
         "dashboard projection does not produce attention candidate"
         `Quick

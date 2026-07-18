@@ -477,7 +477,7 @@ val restore_supervisor_state :
 val board_wakeup_allowed :
   base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
 
-(** Reset tracking state (agent count + board wakeups) for a keeper. *)
+(** Reset volatile board-wakeup and tool-usage tracking for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
 (** Reset tracking only if [entry]'s lane still owns its registry key. *)
@@ -485,13 +485,6 @@ val cleanup_tracking_exact : registry_entry -> exact_update_result
 
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit
-
-(** Get board event cursor token. Returns [(0.0, None)] if not found. *)
-val get_board_cursor : base_path:string -> string -> float * string option
-
-(** Update board event cursor token. No-op if not found. *)
-val set_board_cursor :
-  base_path:string -> string -> float -> string option -> unit
 
 (** Record a tool call for a keeper. No-op if not found. *)
 val record_tool_use :

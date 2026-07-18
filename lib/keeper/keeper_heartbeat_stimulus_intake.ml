@@ -28,46 +28,10 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
     stim
 ;;
 
-(* Board-unavailable-result: the intake layer is where the poison/transient
-   distinction is acted on (Keeper_world_observation only reports the read
-   failure). Both dispositions return [] for this turn — the leased stimulus
-   is treated as consumed either way; see [keeper_heartbeat_loop.ml]'s
-   settlement path, which acks the claimed lease based on the turn outcome,
-   not on whether any one board rendering succeeded. Permanent unavailability
-   (the dominant real cause, e.g. a swept post) must never resurface, so
-   dropping it is the fix. Transient unavailability is logged distinctly so
-   operators can tell the two apart, but — unlike the cursor-based scan path
-   in [Keeper_world_observation.collect_board_events], which can locally
-   retain its cursor — this queued-stimulus path has no per-stimulus
-   requeue lever below the whole-lease Ack/Requeue decision, so a genuine
-   retry for this one stimulus is not wired here. *)
 let pending_board_events_of_stimulus_result ~meta_after_triage stim =
-  match pending_board_event_of_stimulus ~meta_after_triage stim with
-  | Ok events_opt -> Option.to_list events_opt
-  | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ObservationQueryFailures)
-      ~labels:
-        [ ( "operation"
-          , Runtime_observation_query_operation.(to_label Board_stimulus_intake) )
-        ]
-      ();
-    (match Keeper_world_observation_board_signal.disposition_of_unavailable unavailable with
-     | Keeper_world_observation_board_signal.Permanent ->
-       Log.Keeper.warn
-         "stimulus intake: board read permanently unavailable, consuming stimulus \
-          without retry stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-     | Keeper_world_observation_board_signal.Transient ->
-       Log.Keeper.warn
-         "stimulus intake: board read transiently unavailable, dropping this turn's \
-          rendering stimulus_id=%s keeper=%s: %s"
-         stim.Keeper_event_queue.post_id
-         meta_after_triage.name
-         (Keeper_world_observation_board_signal.unavailable_to_string unavailable));
-    []
+  pending_board_event_of_stimulus ~meta_after_triage stim
+  |> Result.map Option.to_list
+  |> Result.map_error Keeper_event_queue.board_stimulus_error_to_string
 ;;
 
 let record_event_queue_stimulus_turn_started
@@ -106,6 +70,28 @@ type heartbeat_event_intake = {
   event_queue_claim_error : string option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
+
+module Pending_board_event_set = Set.Make (struct
+    type t = Keeper_world_observation.pending_board_event
+
+    let compare = Stdlib.compare
+  end)
+
+let merge_queued_board_events ~queued ~scanned =
+  let queued_set =
+    List.fold_left
+      (fun events event -> Pending_board_event_set.add event events)
+      Pending_board_event_set.empty
+      queued
+  in
+  let scan_only_events =
+    List.filter
+      (fun scanned_event ->
+         not (Pending_board_event_set.mem scanned_event queued_set))
+      scanned
+  in
+  queued @ scan_only_events
+;;
 
 let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
   Keeper_external_attention.load_events ~base_path ~keeper_name
@@ -224,12 +210,12 @@ let consume_single_heartbeat_stimulus
     Log.Keeper.info
       "turn entry: manual compaction request delivered (keeper=%s)"
       meta_after_triage.name;
-    []
+    Ok []
   | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
-    []
+    Ok []
   | Keeper_event_queue.Connector_attention ca ->
     (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
        The event_id is a pointer only; the message/surface content stays in
@@ -273,7 +259,7 @@ let consume_single_heartbeat_stimulus
       "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
       ca.event_id
       meta_after_triage.name;
-    pending_events
+    Ok pending_events
   | Keeper_event_queue.Hitl_resolved r ->
     (* The approval has left the queue, so this cycle no longer skips. There is
        no observation to fabricate: the typed resolution itself is threaded as
@@ -284,7 +270,7 @@ let consume_single_heartbeat_stimulus
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
       meta_after_triage.name;
-    []
+    Ok []
 ;;
 
 let consume_board_stimulus_batch ~meta_after_triage batch =
@@ -294,8 +280,9 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
       "turn digest: coalesced %d board signals into one turn (keeper=%s)"
       batch_len
       meta_after_triage.name;
-  List.concat_map
-    (fun (stim : Keeper_event_queue.stimulus) ->
+  let rec consume reversed = function
+    | [] -> Ok (List.rev reversed |> List.concat)
+    | (stim : Keeper_event_queue.stimulus) :: rest ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string StimulusConsumed)
          ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
@@ -306,8 +293,11 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
          stim.post_id
          (stimulus_urgency_to_string stim.urgency)
          meta_after_triage.name;
-       pending_board_events_of_stimulus_result ~meta_after_triage stim)
-    batch
+       (match pending_board_events_of_stimulus_result ~meta_after_triage stim with
+        | Error _ as error -> error
+        | Ok events -> consume (events :: reversed) rest)
+  in
+  consume [] batch
 ;;
 
 let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
@@ -364,42 +354,44 @@ let heartbeat_event_intake
     | Ok None -> [], [], None, None
     | Ok (Some lease) ->
       let stimuli = Keeper_registry_event_queue.lease_stimuli lease in
-      let observations =
+      let observations_result =
         match Keeper_registry_event_queue.lease_kind lease, stimuli with
         | Keeper_event_queue_persistence.Board_batch, batch ->
           consume_board_stimulus_batch ~meta_after_triage batch
-        | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), [ stimulus ] ->
+        | Keeper_event_queue_persistence.Single, [ stimulus ] ->
           consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
-        | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
-          List.concat_map
-            (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
-            stimuli
+        | Keeper_event_queue_persistence.Single, stimuli ->
+          Error
+            (Printf.sprintf
+               "single event queue lease has invalid cardinality: %d"
+               (List.length stimuli))
       in
-      observations, stimuli, Some lease, None
+      (match observations_result with
+       | Ok observations -> observations, stimuli, Some lease, None
+       | Error detail ->
+         Log.Keeper.error
+           "turn entry: event queue payload projection failed keeper=%s: %s"
+           keeper_name
+           detail;
+         [], stimuli, Some lease, Some detail)
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
+  List.iter
+    (fun (event : Keeper_world_observation.pending_board_event) ->
+       Log.Keeper.info
+         "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
+         event.Keeper_world_observation.post_id
+         meta_after_triage.name)
+    queued_observations;
+  (* The durable queued snapshot is authoritative. Keep every distinct queued
+     occurrence, including several event kinds on one post. Drop only an
+     exactly equal scan projection; post_id-only coalescing loses immutable
+     comment/reaction occurrences and is forbidden. *)
   let pending_board_events =
-    List.fold_left
-      (fun acc (event : Keeper_world_observation.pending_board_event) ->
-         if
-           List.exists
-             (fun existing ->
-                String.equal
-                  existing.Keeper_world_observation.post_id
-                  event.Keeper_world_observation.post_id)
-             acc
-         then acc
-         else (
-           Log.Keeper.info
-             "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
-             event.Keeper_world_observation.post_id
-             meta_after_triage.name;
-           event :: acc))
-      pending_board_events
-      (List.rev queued_observations)
+    merge_queued_board_events
+      ~queued:queued_observations
+      ~scanned:pending_board_events
   in
   { pending_board_events
   ; consumed_stimulus_count

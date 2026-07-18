@@ -138,6 +138,9 @@ type board_cursor = {
   bc_post_id : string option;
 }
 
+type board_cursor_observation =
+  (Keeper_reaction_store.cursor option, Keeper_reaction_store.error) result
+
 type fsm_guard_violation_bucket = {
   action : string;
   stage : string;
@@ -164,6 +167,7 @@ type snapshot = {
   last_skip : last_skip option;
   turn_attempt : turn_attempt option;
   board_cursor : board_cursor;
+  board_cursor_read_error : string option;
   board_wakeups : int;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
@@ -541,6 +545,7 @@ let observe
     ?correlation_id
     ?run_id
     ?now
+    ~(board_cursor_observation : board_cursor_observation)
     (entry : Keeper_registry.registry_entry)
     : snapshot =
   let ts = match now with Some t -> t | None -> Time_compat.now () in
@@ -564,6 +569,16 @@ let observe
   let runtime_state = live_runtime_state entry in
   let measurement = live_measurement entry in
   let measurement_captured = Option.is_some measurement in
+  let board_cursor, board_cursor_read_error =
+    match board_cursor_observation with
+    | Ok None -> { bc_ts = 0.0; bc_post_id = None }, None
+    | Ok (Some cursor) ->
+      ( { bc_ts = cursor.cursor_ts; bc_post_id = cursor.post_id }
+      , None )
+    | Error error ->
+      ( { bc_ts = 0.0; bc_post_id = None }
+      , Some (Keeper_reaction_store.error_to_string error) )
+  in
   let invariants =
     compute_invariants
       entry
@@ -630,8 +645,8 @@ let observe
              ta_first_started_at = attempt.first_started_at;
            }
        | None -> None);
-    board_cursor =
-      { bc_ts = entry.board_cursor_ts; bc_post_id = entry.board_cursor_post_id };
+    board_cursor;
+    board_cursor_read_error;
     board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
@@ -647,15 +662,6 @@ let observe
       |> int_of_float;
     fsm_guard_violation_breakdown = fsm_guard_violation_breakdown ();
   }
-
-(* Fleet fold — observe every currently-registered keeper under
-   [base_path] once. Preserves registry iteration order so downstream
-   matrix rendering stays stable across successive polls.
-
-   Used by GET /api/v1/keepers/composite (LT-16a). *)
-let all_snapshots ~(base_path : string) () : snapshot list =
-  Keeper_registry.all ~base_path ()
-  |> List.map (fun entry -> observe entry)
 
 (* JSON serialisation (RFC-0003 §7) *)
 
@@ -835,6 +841,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       "ts", `Float s.board_cursor.bc_ts;
       "post_id", Json_util.string_opt_to_json s.board_cursor.bc_post_id;
     ];
+    "board_cursor_read_error",
+      Json_util.string_opt_to_json s.board_cursor_read_error;
     "board_wakeups", `Int s.board_wakeups;
     "fiber_stop_flag", `Bool s.fiber_stop_flag;
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;

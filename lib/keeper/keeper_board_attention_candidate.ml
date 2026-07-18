@@ -52,6 +52,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+  ; delivery_signal : Keeper_event_queue.board_stimulus
   ; judgment_request : Yojson.Safe.t
   ; recorded_at : float
   ; status : status
@@ -222,6 +223,14 @@ let of_board_evidence
       ~(post : Board.post)
       ~(comments : Board.comment list)
   =
+  let* delivery_signal =
+    Board_signal.board_stimulus_of_board_evidence
+      ~meta
+      ~signal
+      ~post
+      ~comments
+    |> Result.map_error Board_signal.materialization_error_to_string
+  in
   match keeper_context_to_yojson meta with
   | Error _ as error -> error
   | Ok keeper_context ->
@@ -239,6 +248,7 @@ let of_board_evidence
       { candidate_id
       ; keeper_name = meta.name
       ; signal
+      ; delivery_signal
       ; judgment_request
       ; recorded_at
       ; status = Pending { last_failure = None }
@@ -314,6 +324,7 @@ let candidate_to_json candidate =
     [ "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
+    ; "delivery_signal", Keeper_event_queue.board_stimulus_to_yojson candidate.delivery_signal
     ; "judgment_request", candidate.judgment_request
     ; "recorded_at", `Float candidate.recorded_at
     ; "status", status_to_yojson candidate.status
@@ -551,6 +562,7 @@ let candidate_of_json json =
       [ "candidate_id"
       ; "keeper_name"
       ; "signal"
+      ; "delivery_signal"
       ; "judgment_request"
       ; "recorded_at"
       ; "status"
@@ -569,6 +581,8 @@ let candidate_of_json json =
     then Ok ()
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
+  let* delivery_signal_json = field ~context "delivery_signal" fields in
+  let* delivery_signal = Keeper_event_queue.board_stimulus_of_yojson delivery_signal_json in
   let* judgment_request = field ~context "judgment_request" fields in
   let* (_ : (string * Yojson.Safe.t) list) =
     assoc ~context:(context ^ ".judgment_request") judgment_request
@@ -577,7 +591,15 @@ let candidate_of_json json =
   let* recorded_at = float_json ~context:(context ^ ".recorded_at") recorded_at_json in
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
-  Ok { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  Ok
+    { candidate_id
+    ; keeper_name
+    ; signal
+    ; delivery_signal
+    ; judgment_request
+    ; recorded_at
+    ; status
+    }
 ;;
 
 let parse_rows content =
@@ -751,11 +773,13 @@ let record ~base_path candidate =
       (fun candidates ->
          match find_candidate candidates candidate.candidate_id with
          | None -> Ok (Some candidate, Recorded candidate)
-         | Some existing when existing.signal = candidate.signal ->
+         | Some existing
+           when existing.signal = candidate.signal
+                && existing.delivery_signal = candidate.delivery_signal ->
            Ok (None, Duplicate existing)
          | Some _ ->
            Error
-             "candidate identity conflict: the same candidate_id has a different Board signal")
+             "candidate identity conflict: the same candidate_id has different Board occurrence or delivery evidence")
   with
   | Ok result -> result
   | Error detail -> Record_error detail
@@ -839,7 +863,7 @@ let board_attention_stimulus candidate =
   ; payload =
       Keeper_event_queue.Board_attention
         { candidate_id = candidate.candidate_id
-        ; signal = Board_signal.board_stimulus_of_board_signal candidate.signal
+        ; signal = candidate.delivery_signal
         }
   }
 ;;

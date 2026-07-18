@@ -8,7 +8,6 @@
 type lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason =
   | Cycle_busy
@@ -82,6 +81,10 @@ val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
 val with_revision : int64 -> t -> t
+val validate : t -> (unit, string) result
+(** Validate the complete state before persistence: structural invariants,
+    finite lease/receipt timestamps, and every stimulus reachable from pending,
+    leases, outbox rows, or settlement successors. *)
 
 val claim_when :
   claimed_at:float ->
@@ -95,11 +98,6 @@ val claim_when :
 
 val claim_board : claimed_at:float -> t -> (t * lease option, string) result
 (** Lease every pending board stimulus as one ordered digest. *)
-
-val add_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result
-(** Migration/test compatibility boundary.  Adds one lease for legacy
-    [event-queue-inflight.json] rows and removes matching pending identities. *)
 
 val settle :
   settled_at:float ->
@@ -136,12 +134,6 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
-
-val release_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> t
-(** Compatibility-only projection for the retired split-file API.  Removes
-    matching identities from active leases while leaving pending untouched.
-    New runtime code must settle the opaque lease instead. *)
 
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result

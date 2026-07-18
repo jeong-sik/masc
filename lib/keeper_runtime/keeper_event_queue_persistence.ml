@@ -4,7 +4,6 @@ module State = Keeper_event_queue_state
 type lease_kind = State.lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason = State.requeue_reason =
   | Cycle_busy
@@ -54,6 +53,9 @@ let lease_sequence (lease : lease) = lease.sequence
 let snapshot_filename = "event-queue.json"
 let settlement_wal_filename = "event-queue-settlements.jsonl"
 let unsupported_inflight_filename = "event-queue-inflight.json"
+let reaction_coordination_lock_filename = "event-queue-reaction-coordination.lock"
+
+let before_reaction_coordination_lock_hook = Atomic.make (fun () -> ())
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -118,15 +120,24 @@ let save_json_atomic path json =
 let save_state_unlocked owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
-  match save_json_atomic path (State.to_yojson state) with
-  | Ok () -> Ok ()
-  | Error message ->
+  match State.validate state with
+  | Error detail ->
     Error
       (Printf.sprintf
-         "failed to persist keeper=%s path=%s: %s"
+         "refused invalid keeper event queue state keeper=%s path=%s: %s"
          keeper_name
          path
-         message)
+         detail)
+  | Ok () ->
+    (match save_json_atomic path (State.to_yojson state) with
+     | Ok () -> Ok ()
+     | Error message ->
+       Error
+         (Printf.sprintf
+            "failed to persist keeper=%s path=%s: %s"
+            keeper_name
+            path
+            message))
 ;;
 
 type snapshot_read_error_kind =
@@ -243,9 +254,9 @@ let settlement_wal_receipt_of_json owner = function
   | _ -> Error "settlement WAL row must be a JSON object"
 ;;
 
-let replay_settlement_wal_bytes owner state bytes =
-  let rec replay state = function
-    | [] | [ "" ] -> Ok state
+let replay_settlement_wal_bytes_with_count owner state bytes =
+  let rec replay state row_count = function
+    | [] | [ "" ] -> Ok (state, row_count)
     | "" :: _ -> Error "settlement WAL contains an empty row"
     | line :: rest ->
       (match
@@ -259,9 +270,13 @@ let replay_settlement_wal_bytes owner state bytes =
           | Ok receipt ->
             (match State.replay_transition_receipt receipt state with
              | Error _ as error -> error
-             | Ok state -> replay state rest)))
+             | Ok state -> replay state (row_count + 1) rest)))
   in
-  replay state (String.split_on_char '\n' bytes)
+  replay state 0 (String.split_on_char '\n' bytes)
+;;
+
+let replay_settlement_wal_bytes owner state bytes =
+  replay_settlement_wal_bytes_with_count owner state bytes |> Result.map fst
 ;;
 
 let replay_settlement_wal_unlocked owner state =
@@ -330,6 +345,39 @@ let transition_outbox_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
 ;;
 
+let with_reaction_coordination_lock_result ~base_path ~keeper_name f =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    let runtime_dir = keeper_runtime_dir_of_owner owner in
+    (match
+       try
+         Fs_compat.mkdir_p runtime_dir;
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Error (Printexc.to_string exn)
+     with
+     | Error detail ->
+       Error
+         (Printf.sprintf
+            "failed to prepare event queue reaction coordination lock keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            runtime_dir
+            detail)
+     | Ok () ->
+       let lock_path = Filename.concat runtime_dir reaction_coordination_lock_filename in
+       Atomic.get before_reaction_coordination_lock_hook ();
+       (match File_lock_eio.with_durable_lock ~lock_path f with
+        | Ok value -> Ok value
+        | Error error ->
+          Error
+            (Printf.sprintf
+               "event queue reaction coordination lock failed keeper=%s: %s"
+               (keeper_name_of_owner owner)
+               (File_lock_eio.durable_lock_error_to_string error))))
+;;
+
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
@@ -387,63 +435,160 @@ let load_pending_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.pending
 ;;
 
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
+type snapshot_source_generation =
+  { snapshot_present : bool
+  ; snapshot_revision : int64
+  ; observed_revision : int64
+  ; settlement_wal_end_offset : int
+  ; settlement_wal_row_count : int
   }
 
-type snapshot_pair_with_errors =
+type snapshot_observation =
   { pending : Keeper_event_queue.t
   ; inflight : Keeper_event_queue.t
+  ; source_generation : snapshot_source_generation option
   ; read_errors : snapshot_read_error list
   }
 
-let diagnose_snapshot_read_error ~base_path ~keeper_name message =
+let snapshot_source_generation_to_yojson generation =
+  `Assoc
+    [ "snapshot_present", `Bool generation.snapshot_present
+    ; "snapshot_revision", `String (Int64.to_string generation.snapshot_revision)
+    ; "observed_revision", `String (Int64.to_string generation.observed_revision)
+    ; "settlement_wal_end_offset", `Int generation.settlement_wal_end_offset
+    ; "settlement_wal_row_count", `Int generation.settlement_wal_row_count
+    ]
+;;
+
+let snapshot_read_error kind ?path message = { kind; path; message }
+;;
+
+let read_primary_for_observation_unlocked owner =
+  let path = snapshot_path_of_owner owner in
+  try
+    if not (Sys.file_exists path)
+    then Ok (false, State.empty)
+    else
+      match Safe_ops.read_file_safe path with
+      | Error message -> Error (snapshot_read_error Read_failed ~path message)
+      | Ok bytes ->
+        (match Safe_ops.parse_json_safe ~context:path bytes with
+         | Error message -> Error (snapshot_read_error Parse_failed ~path message)
+         | Ok json ->
+           (match schema_field json with
+            | Error message ->
+              Error (snapshot_read_error Parse_failed ~path message)
+            | Ok schema when String.equal schema State.schema ->
+              (match State.of_yojson json with
+               | Ok state -> Ok (true, state)
+               | Error message ->
+                 Error (snapshot_read_error Parse_failed ~path message))
+            | Ok schema ->
+              Error
+                (snapshot_read_error
+                   Parse_failed
+                   ~path
+                   (Printf.sprintf "unsupported snapshot schema %s" schema))))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (snapshot_read_error Read_failed ~path (Printexc.to_string exn))
+;;
+
+let reject_unsupported_inflight_for_observation owner =
+  let path = unsupported_inflight_path_of_owner owner in
+  try
+    if Sys.file_exists path
+    then
+      Error
+        (snapshot_read_error
+           Parse_failed
+           ~path
+           "unsupported event queue sidecar is present")
+    else Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (snapshot_read_error Read_failed ~path (Printexc.to_string exn))
+;;
+
+let replay_settlement_wal_for_observation_unlocked owner state =
+  let path = settlement_wal_path_of_owner owner in
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+  | Error error ->
+    Error
+      (snapshot_read_error
+         Read_failed
+         ~path
+         (Fs_compat.Private_jsonl_slice.error_to_string error))
+  | Ok slice when String.equal slice.bytes "" ->
+    Ok (state, slice.end_offset, 0)
+  | Ok slice ->
+    (match replay_settlement_wal_bytes_with_count owner state slice.bytes with
+     | Error message -> Error (snapshot_read_error Parse_failed ~path message)
+     | Ok (replayed, row_count) ->
+       (match bump_revision replayed with
+        | Error message -> Error (snapshot_read_error Parse_failed ~path message)
+        | Ok replayed -> Ok (replayed, slice.end_offset, row_count)))
+;;
+
+let empty_snapshot_observation read_errors =
+  { pending = Keeper_event_queue.empty
+  ; inflight = Keeper_event_queue.empty
+  ; source_generation = None
+  ; read_errors
+  }
+;;
+
+let observe_snapshot ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
-  | Error invalid -> [ { kind = Invalid_path; path = None; message = invalid } ]
+  | Error error ->
+    empty_snapshot_observation
+      [ snapshot_read_error Invalid_path (owner_error_to_string error) ]
   | Ok owner ->
-    let primary = snapshot_path_of_owner owner in
-    let unsupported = unsupported_inflight_path_of_owner owner in
-    let inspect path =
-      try
-        if not (Sys.file_exists path)
-        then None
-        else
-          match Safe_ops.read_json_file_safe path with
-          | Error read_message ->
-            Some { kind = Read_failed; path = Some path; message = read_message }
-          | Ok _ -> Some { kind = Parse_failed; path = Some path; message }
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Some
-          { kind = Read_failed
-          ; path = Some path
-          ; message = Printexc.to_string exn
-          }
-    in
-    match inspect unsupported with
-    | Some _ -> [ { kind = Parse_failed; path = Some unsupported; message } ]
-    | None ->
-      (match inspect primary with
-       | Some error -> [ error ]
-       | None -> [ { kind = Parse_failed; path = None; message } ])
-;;
-
-let load_snapshot_pair_with_errors ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state ->
-    { pending = State.pending state; inflight = inflight_queue state; read_errors = [] }
-  | Error message ->
-    { pending = Keeper_event_queue.empty
-    ; inflight = Keeper_event_queue.empty
-    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
-    }
-;;
-
-let load_snapshot_pair ~base_path ~keeper_name =
-  let snapshot = load_snapshot_pair_with_errors ~base_path ~keeper_name in
-  { pending = snapshot.pending; inflight = snapshot.inflight }
+    (match
+       try
+         Owner_lock.with_lock owner (fun () ->
+           match reject_unsupported_inflight_for_observation owner with
+           | Error error -> Error error
+           | Ok () ->
+             (match read_primary_for_observation_unlocked owner with
+              | Error error -> Error error
+              | Ok (snapshot_present, snapshot_state) ->
+                let snapshot_revision = State.revision snapshot_state in
+                (match
+                   replay_settlement_wal_for_observation_unlocked
+                     owner
+                     snapshot_state
+                 with
+                 | Error error -> Error error
+                 | Ok (observed_state, settlement_wal_end_offset, settlement_wal_row_count) ->
+                   Ok
+                     ( observed_state
+                     , { snapshot_present
+                       ; snapshot_revision
+                       ; observed_revision = State.revision observed_state
+                       ; settlement_wal_end_offset
+                       ; settlement_wal_row_count
+                       } ))))
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error
+           (snapshot_read_error
+              Read_failed
+              ~path:(snapshot_path_of_owner owner)
+              (Printexc.to_string exn))
+     with
+     | Error error -> empty_snapshot_observation [ error ]
+     | Ok (state, source_generation) ->
+       { pending = State.pending state
+       ; inflight = inflight_queue state
+       ; source_generation = Some source_generation
+       ; read_errors = []
+       })
 ;;
 
 type snapshot_discovery =
@@ -564,28 +709,117 @@ let exact_stimulus_equal left right =
     (Keeper_event_queue.stimulus_to_yojson right)
 ;;
 
-let durable_stimulus_by_identity state candidate =
-  let same stimulus =
-    Keeper_event_queue.stimulus_identity_equal candidate stimulus
+module Stimulus_identity_map = Map.Make (String)
+
+let identity_digest_collision identity =
+  Error
+    (Printf.sprintf
+       "event queue stimulus identity digest collision: %s"
+       identity)
+;;
+
+let add_durable_stimulus_to_index index stimulus =
+  match Keeper_event_queue.stimulus_identity_id_result stimulus with
+  | Error detail ->
+    Error ("event queue durable stimulus identity is invalid: " ^ detail)
+  | Ok identity ->
+    (match Stimulus_identity_map.find_opt identity index with
+     | None -> Ok (Stimulus_identity_map.add identity stimulus index)
+     | Some existing ->
+       (match
+          Keeper_event_queue.stimulus_identity_equal_result existing stimulus
+        with
+        | Error detail ->
+          Error ("event queue durable stimulus identity is invalid: " ^ detail)
+        | Ok false -> identity_digest_collision identity
+        | Ok true when exact_stimulus_equal existing stimulus -> Ok index
+        | Ok true ->
+          Error
+            (Printf.sprintf
+               "event queue durable state contains conflicting values for stimulus identity %s"
+               identity)))
+;;
+
+let add_durable_stimuli_to_index initial stimuli =
+  let rec loop index = function
+    | [] -> Ok index
+    | stimulus :: rest ->
+      (match add_durable_stimulus_to_index index stimulus with
+       | Error _ as error -> error
+       | Ok index -> loop index rest)
   in
-  let matches =
-    List.filter same (Keeper_event_queue.to_list (State.pending state))
-    @ List.concat_map
-        (fun (lease : lease) -> List.filter same lease.stimuli)
-        (State.leases state)
-    @ List.concat_map
-        (fun (entry : outbox_entry) -> List.filter same entry.stimuli)
-        (State.transition_outbox state)
+  loop initial stimuli
+;;
+
+let durable_stimulus_index state =
+  let groups =
+    Keeper_event_queue.to_list (State.pending state)
+    :: (List.map (fun (lease : lease) -> lease.stimuli) (State.leases state)
+        @ List.map
+            (fun (entry : outbox_entry) -> entry.stimuli)
+            (State.transition_outbox state))
   in
-  match matches with
-  | [] -> Ok None
-  | committed :: rest when List.for_all (exact_stimulus_equal committed) rest ->
-    Ok (Some committed)
-  | _ ->
-    Error
-      (Printf.sprintf
-         "event queue durable state contains conflicting values for stimulus identity %s"
-         (Keeper_event_queue.stimulus_identity_id candidate))
+  let rec loop index = function
+    | [] -> Ok index
+    | stimuli :: rest ->
+      (match add_durable_stimuli_to_index index stimuli with
+       | Error _ as error -> error
+       | Ok index -> loop index rest)
+  in
+  loop Stimulus_identity_map.empty groups
+;;
+
+let validate_enqueue_stimuli ~context stimuli =
+  let rec loop index = function
+    | [] -> Ok ()
+    | stimulus :: rest ->
+      (match Keeper_event_queue.validate_stimulus stimulus with
+       | Ok () -> loop (index + 1) rest
+       | Error detail ->
+         Error (Printf.sprintf "%s[%d] is invalid: %s" context index detail))
+  in
+  loop 0 stimuli
+;;
+
+let admit_stimuli_if_absent state stimuli =
+  match durable_stimulus_index state with
+  | Error _ as error -> error
+  | Ok initial_index ->
+    let rec loop index pending changed reversed = function
+      | [] ->
+        let state = if changed then State.with_pending pending state else state in
+        Ok (state, List.rev reversed)
+      | stimulus :: rest ->
+        (match Keeper_event_queue.stimulus_identity_id_result stimulus with
+         | Error detail ->
+           Error ("event queue candidate identity is invalid: " ^ detail)
+         | Ok identity ->
+           (match Stimulus_identity_map.find_opt identity index with
+            | None ->
+              loop
+                (Stimulus_identity_map.add identity stimulus index)
+                (Keeper_event_queue.enqueue pending stimulus)
+                true
+                (Enqueued stimulus :: reversed)
+                rest
+            | Some existing ->
+              (match
+                 Keeper_event_queue.stimulus_identity_equal_result
+                   existing
+                   stimulus
+               with
+               | Error detail ->
+                 Error ("event queue candidate identity is invalid: " ^ detail)
+               | Ok false -> identity_digest_collision identity
+               | Ok true ->
+                 loop
+                   index
+                   pending
+                   changed
+                   (Already_present existing :: reversed)
+                   rest)))
+    in
+    loop initial_index (State.pending state) false [] stimuli
 ;;
 
 let enqueue_stimulus_if_absent_result
@@ -594,13 +828,36 @@ let enqueue_stimulus_if_absent_result
       ~keeper_name
       stimulus
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match durable_stimulus_by_identity state stimulus with
-    | Error _ as error -> error
-    | Ok (Some committed) -> Ok (state, Already_present committed)
-    | Ok None ->
-      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued stimulus))
+  match
+    validate_enqueue_stimuli
+      ~context:"event queue enqueue stimulus"
+      [ stimulus ]
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      match admit_stimuli_if_absent state [ stimulus ] with
+      | Error _ as error -> error
+      | Ok (state, [ outcome ]) -> Ok (state, outcome)
+      | Ok (_state, []) | Ok (_state, _ :: _ :: _) ->
+        Error "event queue single admission changed result cardinality")
+;;
+
+let enqueue_stimuli_if_absent_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      stimuli
+  =
+  match
+    validate_enqueue_stimuli
+      ~context:"event queue enqueue batch stimulus"
+      stimuli
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      admit_stimuli_if_absent state stimuli)
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =
@@ -802,61 +1059,6 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
        | Ok state -> Ok (state, ()))
 ;;
 
-let record_inflight ~base_path ~keeper_name stimuli =
-  match stimuli with
-  | [] -> ()
-  | _ ->
-    (match
-       commit_transform
-         ~base_path
-         ~keeper_name
-         ~after_commit:(fun _ -> ())
-         (fun state ->
-            match State.add_legacy_inflight stimuli state with
-            | Error _ as error -> error
-            | Ok (state, _lease) -> Ok (state, ()))
-     with
-     | Ok () -> ()
-     | Error message ->
-       Log.Keeper.error
-         "event_queue_snapshot: record legacy inflight failed keeper=%s: %s"
-         keeper_name
-         message)
-;;
-
-let ack_inflight ~base_path ~keeper_name stimuli =
-  match
-    commit_transform
-      ~base_path
-      ~keeper_name
-      ~after_commit:(fun _ -> ())
-      (fun state ->
-         Ok (State.release_legacy_inflight stimuli state, ()))
-  with
-  | Ok () -> ()
-  | Error message ->
-    Log.Keeper.error "event_queue_snapshot: ack_inflight failed keeper=%s: %s" keeper_name message
-;;
-
-let remove_post_ids stimuli state =
-  List.fold_left
-    (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
-       let newly_removed, state = State.remove_by_post_id stimulus.post_id state in
-       Keeper_event_queue.uniq_stimuli (removed @ newly_removed), state)
-    ([], state)
-    stimuli
-;;
-
-let ack_consumed ~base_path ~keeper_name stimuli =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       let _removed, state = remove_post_ids stimuli state in
-       Ok (state, ()))
-;;
-
 let drop_by_post_id
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -1056,3 +1258,12 @@ let fleet_summary_json ~now ~base_path =
     ; "keepers", `List (List.map (keeper_summary_json ~now) summaries)
     ]
 ;;
+
+module For_testing = struct
+  let with_before_reaction_coordination_lock_hook hook f =
+    let previous = Atomic.exchange before_reaction_coordination_lock_hook hook in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_reaction_coordination_lock_hook previous)
+      f
+  ;;
+end

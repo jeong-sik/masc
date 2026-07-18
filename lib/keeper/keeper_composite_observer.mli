@@ -6,7 +6,9 @@
     [specs/keeper-state-machine/KeeperCompositeLifecycle.tla].
 
     Contract:
-    - Pure read. No mutation, no I/O, no event emission.
+    - No mutation, event emission, or I/O. The server supplies a typed cursor
+      observation captured from the per-Keeper SQLite reaction authority;
+      failures remain explicit in the snapshot.
     - Never calls [Keeper_state_machine.apply_event],
       [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
@@ -204,13 +206,18 @@ type turn_attempt = {
   ta_first_started_at : float;
 }
 
-(** Board consumption cursor, mirrored from
-    [registry_entry.board_cursor_ts] / [board_cursor_post_id]. Lets
-    operators see how far a keeper has consumed the shared board. *)
+(** Board consumption cursor projected from the per-Keeper SQLite reaction
+    authority. Lets operators see how far a Keeper has consumed the shared
+    Board without introducing a volatile registry mirror. *)
 type board_cursor = {
   bc_ts : float;
   bc_post_id : string option;
 }
+
+type board_cursor_observation =
+  (Keeper_reaction_store.cursor option, Keeper_reaction_store.error) result
+(** Typed request observation supplied by the server boundary. The observer
+    never opens SQLite or performs other I/O. *)
 
 (** Total run-state classification (#16, 38-bug campaign PR-5). Previously
     the dashboard collapsed "actively executing a turn", "idle waiting for
@@ -311,9 +318,12 @@ type snapshot = {
   turn_attempt : turn_attempt option;
       (** Current turn-attempt observation. *)
   board_cursor : board_cursor;
-      (** Board consumption cursor (ts + last consumed post id). Always
-          present; [ts = 0.0] / [post_id = None] before the keeper has
-          consumed any board post. *)
+      (** Board consumption cursor (ts + last consumed post id). [ts = 0.0] /
+          [post_id = None] means uninitialized only when
+          [board_cursor_read_error = None]. *)
+  board_cursor_read_error : string option;
+      (** Explicit SQLite cursor projection failure. [None] distinguishes a
+          valid uninitialized cursor from a failed read. *)
   board_wakeups : int;
       (** Number of distinct board-wakeup dedup keys currently held.
           The registry keeps a content-fingerprint debounce ledger
@@ -359,7 +369,8 @@ type snapshot = {
           specific guard source that is currently firing. *)
 }
 
-(** Derive a composite snapshot from a live registry entry.
+(** Derive a composite snapshot from a live registry entry and a cursor
+    observation already captured by the server request boundary.
 
     [correlation_id] and [run_id] may be supplied by the caller when the
     observer is driven from a known event envelope (OAS event_bus
@@ -371,13 +382,9 @@ val observe :
   ?correlation_id:string ->
   ?run_id:string ->
   ?now:float ->
+  board_cursor_observation:board_cursor_observation ->
   Keeper_registry.registry_entry ->
   snapshot
-
-(** Observe every registered keeper under [base_path] once. Used by
-    [GET /api/v1/keepers/composite] to render fleet-level matrices
-    (LT-16a). Preserves registry iteration order. *)
-val all_snapshots : base_path:string -> unit -> snapshot list
 
 val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 val turn_phase_of_string : string -> turn_phase option

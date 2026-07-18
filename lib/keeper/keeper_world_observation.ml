@@ -167,9 +167,15 @@ let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
 let check_self_comment_status = Board_signal.check_self_comment_status
 let board_signal_wake_reason = Board_signal.wake_reason
-let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
+
+exception Board_cursor_unavailable of string
+
+let board_cursor_error context error =
+  Board_cursor_unavailable
+    (context ^ ": " ^ Keeper_reaction_ledger.ledger_error_to_string error)
+;;
 
 let scheduled_automation_item_limit = 5
 
@@ -327,65 +333,83 @@ let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
 ;;
 
-let pending_board_event_of_board_signal
-      ~(meta : keeper_meta)
-      ~arrived_at:(_ : float)
-      (signal : Board_dispatch.board_signal)
-  : (pending_board_event, Board_signal.board_unavailable) result
+let board_post_kind_of_queue = function
+  | Keeper_event_queue.Human_post -> Board.Human_post
+  | Keeper_event_queue.Automation_post -> Board.Automation_post
+  | Keeper_event_queue.System_post -> Board.System_post
+;;
+
+let pending_board_event_of_board_stimulus
+      ~(post_id : string)
+      (board : Keeper_event_queue.board_stimulus)
+  : (pending_board_event, Keeper_event_queue.board_stimulus_error) result
   =
-  let self_ids = self_ids meta in
-  let matched = board_signal_match ~meta ~signal in
-  match Board_dispatch.get_post ~post_id:signal.post_id with
-  | Error error ->
-    Error { Board_signal.operation = Board_signal.Get_post; post_id = signal.post_id; error }
-  | Ok post_snapshot ->
-    let title, preview, hearth, post_kind, updated_at =
-      let post : Board.post = post_snapshot in
-      ( post.title
-      , short_preview ~max_len:80 post.content
-      , post.hearth
-      , post.post_kind
-      , post.updated_at )
-    in
-    let event_kind = pending_board_event_kind_of_signal signal in
-    let comment_derived =
-      match signal.kind with
-      | Board_dispatch.Board_post_created -> Ok (false, 0, None, None)
-      | Board_dispatch.Board_comment_added ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available (`New_external (count, author, preview)) ->
-           Ok (true, count, Some author, Some preview)
-         | Board_signal.Available `No_new_external ->
-           Ok (true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content))
-         | Board_signal.Available `Never ->
-           Ok (false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content)))
-      | Board_dispatch.Board_reaction_changed _ ->
-        (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available `Never -> Ok (false, 0, None, None)
-         | Board_signal.Available (`No_new_external | `New_external _) ->
-           Ok (true, 0, None, None))
-    in
-    (match comment_derived with
-     | Error unavailable -> Error unavailable
-     | Ok (self_commented, new_external_since, latest_external_author, latest_external_preview) ->
-       Ok
-         { event_kind
-         ; post_id = signal.post_id
-         ; author = signal.author
-         ; title
-         ; preview
-         ; hearth
-         ; post_kind
-         ; updated_at
-         ; explicit_mention = matched.explicit_mention
-         ; matched_targets = matched.matched_targets
-         ; self_commented
-         ; new_external_since
-         ; latest_external_author
-         ; latest_external_preview
-         })
+  let* () = Keeper_event_queue.validate_board_stimulus board in
+  let signal = Board_signal.board_signal_of_board_stimulus ~post_id board in
+  let latest_external_author, latest_external_preview =
+    match board.thread_snapshot.latest_external with
+    | None -> None, None
+    | Some latest -> Some latest.latest_author, Some latest.latest_preview
+  in
+  Ok
+    { event_kind = pending_board_event_kind_of_signal signal
+    ; post_id
+    ; author = board.author
+    ; title = board.title
+    ; preview = board.preview
+    ; hearth = board.hearth
+    ; post_kind = board_post_kind_of_queue board.post_kind
+    ; updated_at = board.updated_at
+    ; explicit_mention = board.explicit_mention
+    ; matched_targets = board.matched_targets
+    ; self_commented = board.thread_snapshot.self_commented
+    ; new_external_since = board.thread_snapshot.new_external_since
+    ; latest_external_author
+    ; latest_external_preview
+    }
+;;
+
+let board_stimulus_of_pending_board_event
+      ~(signal : Board_dispatch.board_signal)
+      (event : pending_board_event)
+  =
+  let latest_external =
+    match event.latest_external_author, event.latest_external_preview with
+    | None, None -> Ok None
+    | Some latest_author, Some latest_preview ->
+      Ok
+        (Some
+           { Keeper_event_queue.latest_author = latest_author
+           ; latest_preview
+           })
+    | (Some _ as author), preview ->
+      Error
+        (Printf.sprintf
+           "pending Board event has partial latest external evidence author=%b preview=%b"
+           (Option.is_some author)
+           (Option.is_some preview))
+    | None, Some _ ->
+      Error
+        "pending Board event has partial latest external evidence author=false preview=true"
+  in
+  match latest_external with
+  | Error _ as error -> error
+  | Ok latest_external ->
+    Board_signal.board_stimulus_of_projection
+      ~signal
+      ~title:event.title
+      ~preview:event.preview
+      ~hearth:event.hearth
+      ~post_kind:event.post_kind
+      ~updated_at:event.updated_at
+      ~explicit_mention:event.explicit_mention
+      ~matched_targets:event.matched_targets
+      ~thread_snapshot:
+        { Keeper_event_queue.self_commented = event.self_commented
+        ; new_external_since = event.new_external_since
+        ; latest_external
+        }
+    |> Result.map_error Board_signal.materialization_error_to_string
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -671,25 +695,21 @@ let pending_board_event_of_goal_assignment
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
-  : (pending_board_event option, Board_signal.board_unavailable) result
+  : (pending_board_event option, Keeper_event_queue.board_stimulus_error) result
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
     Result.map
       (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+      (pending_board_event_of_board_stimulus
+         ~post_id:stimulus.post_id
+         bs)
   | Keeper_event_queue.Board_attention attention ->
     Result.map
       (fun ev -> Some ev)
-      (pending_board_event_of_board_signal
-         ~meta
-         ~arrived_at:stimulus.arrived_at
-         (Board_signal.board_signal_of_board_stimulus
-            ~post_id:stimulus.post_id
-            attention.signal))
+      (pending_board_event_of_board_stimulus
+         ~post_id:stimulus.post_id
+         attention.signal)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Bg_completed c ->
@@ -726,52 +746,44 @@ let pending_board_event_of_stimulus
     Ok None
 ;;
 
-(** Collect recent board activity using cursor-based tracking.
-    Cursor state lives in Keeper_registry as [(updated_at, post_id)].
-    Returns (structured events, new post count, mention count).
+type board_event_scan =
+  { final_events : pending_board_event list
+  ; new_count : int
+  ; mention_count : int
+  ; actionable_entries :
+      ((float * string) * Keeper_event_queue.stimulus) list
+  ; last_cursor : (float * string) option
+  }
 
-    Comment-stream dedup: after the initial cursor + author filter,
-    each candidate post is scanned for self-authored comments.
-    Posts where the keeper has already commented and no new external
-    replies have arrived are excluded. This prevents duplicate reactive
-    comments while allowing legitimate follow-ups. *)
-let collect_board_events_with_cursor_policy
+let after_board_scan_before_reconciliation_hook = Atomic.make (fun () -> ())
+
+(** Scan recent Board activity after an already-selected cursor. This
+    potentially large Board/comment/candidate phase deliberately runs before
+    the live caller enters per-Keeper reconciliation; the dashboard caller is
+    explicitly read-only.
+
+    Comment-stream dedup: after the initial cursor + author filter, each
+    candidate post is scanned for self-authored comments. Posts where the
+    keeper has already commented and no new external replies have arrived are
+    excluded, while legitimate follow-ups remain actionable. *)
+let scan_board_events_after_cursor
       ~advance_cursor
       ~(base_path : string)
       ~(meta : keeper_meta)
-  : pending_board_event list * int * int
+      ~base_cursor
+  : board_event_scan
   =
-  try
-    let cursor_ts, cursor_post_id =
-      Keeper_registry.get_board_cursor ~base_path meta.name
-    in
-    let base_cursor =
-      if cursor_ts > 0.0
-      then Some (cursor_ts, cursor_post_id)
-      else (
-        let initial_cursor = Board_dispatch.current_post_cursor () in
-        if advance_cursor
-        then (
-          let ts, post_id = initial_cursor in
-          Keeper_registry.set_board_cursor ~base_path meta.name ts post_id;
-          (match post_id with
-           | Some post_id ->
-             Log.Keeper.info
-               "board cursor initialized at current head for %s: (%f, %s)"
-               meta.name
-               ts
-               post_id
-           | None ->
-             Log.Keeper.info
-               "board cursor initialized at empty current head for %s: (%f, no post)"
-               meta.name
-               ts));
-        None)
-    in
     let posts =
       match base_cursor with
       | None -> []
-      | Some cursor -> list_board_posts_after_cursor cursor
+      | Some cursor ->
+        (match list_board_posts_after_cursor cursor with
+         | Ok posts -> posts
+         | Error error ->
+           raise
+             (Board_cursor_unavailable
+                ("Board cursor post scan failed: "
+                 ^ Keeper_reaction_store.error_to_string error)))
     in
     let self_ids = self_ids meta in
     let recent =
@@ -835,9 +847,20 @@ let collect_board_events_with_cursor_policy
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
-        let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_comment_status ~self_ids ~post_id in
-        (match comment_status with
+        let next_cursor =
+          match board_cursor_token_of_post p with
+          | Ok cursor -> cursor
+          | Error error ->
+            raise
+              (Board_cursor_unavailable
+                 ("Board post cursor normalization failed: "
+                  ^ Keeper_reaction_store.error_to_string error))
+        in
+        if is_self_author ~self_ids (Board.Agent_id.to_string p.author)
+        then consume_posts (Some next_cursor) acc rest
+        else
+          let comment_status = check_self_comment_status ~self_ids ~post_id in
+          (match comment_status with
          | Board_signal.Unavailable unavailable ->
            (match log_and_count_unavailable ~context:"comment status" unavailable with
             | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
@@ -892,25 +915,26 @@ let collect_board_events_with_cursor_policy
                          detail));
                  consume_posts (Some next_cursor) acc rest)
            else
+             let event =
+               { event_kind = Board_post_created
+               ; post_id
+               ; author = Board.Agent_id.to_string p.author
+               ; title = p.title
+               ; preview = short_preview ~max_len:80 p.content
+               ; hearth = p.hearth
+               ; post_kind = p.post_kind
+               ; updated_at = p.updated_at
+               ; explicit_mention = matched.explicit_mention
+               ; matched_targets = matched.matched_targets
+               ; self_commented = false
+               ; new_external_since = 0
+               ; latest_external_author = None
+               ; latest_external_preview = None
+               }
+             in
              consume_posts
-               
                (Some next_cursor)
-               ({ event_kind = Board_post_created
-                ; post_id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; preview = short_preview ~max_len:80 p.content
-                ; hearth = p.hearth
-                ; post_kind = p.post_kind
-                ; updated_at = p.updated_at
-                ; explicit_mention = matched.explicit_mention
-                ; matched_targets = matched.matched_targets
-                ; self_commented = false
-                ; new_external_since = 0
-                ; latest_external_author = None
-                ; latest_external_preview = None
-                }
-                :: acc)
+               ((next_cursor, event, signal) :: acc)
                rest
          | Board_signal.Available (`New_external (count, ext_author, ext_preview)) ->
            (
@@ -925,73 +949,64 @@ let collect_board_events_with_cursor_policy
                }
              in
              let matched = board_signal_match ~meta ~signal in
+             let event =
+               { event_kind = Board_post_created
+               ; post_id
+               ; author = Board.Agent_id.to_string p.author
+               ; title = p.title
+               ; preview = short_preview ~max_len:80 p.content
+               ; hearth = p.hearth
+               ; post_kind = p.post_kind
+               ; updated_at = p.updated_at
+               ; explicit_mention = matched.explicit_mention
+               ; matched_targets = matched.matched_targets
+               ; self_commented = true
+               ; new_external_since = count
+               ; latest_external_author = Some ext_author
+               ; latest_external_preview = Some ext_preview
+               }
+             in
              consume_posts
-               
                (Some next_cursor)
-               ({ event_kind = Board_post_created
-                ; post_id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; preview = short_preview ~max_len:80 p.content
-                ; hearth = p.hearth
-                ; post_kind = p.post_kind
-                ; updated_at = p.updated_at
-                ; explicit_mention = matched.explicit_mention
-                ; matched_targets = matched.matched_targets
-                ; self_commented = true
-                ; new_external_since = count
-                ; latest_external_author = Some ext_author
-                ; latest_external_preview = Some ext_preview
-                }
-                :: acc)
+               ((next_cursor, event, signal) :: acc)
                rest))
     in
-    let final_events, last_cursor = consume_posts None [] recent in
-    if advance_cursor
-    then (
-      match base_cursor, last_cursor with
-      | None, _ -> ()
-      | Some base_cursor, Some (ts, post_id)
-        when compare_board_cursor_token
-               (ts, post_id)
-               (fst base_cursor, Option.value ~default:"" (snd base_cursor))
-             > 0 ->
-        (match
-           Keeper_reaction_ledger.record_board_cursor_ack_result
-             ~base_path
-             ~keeper_name:meta.name
-             ~cursor_ts:ts
-             ~post_id:(Some post_id)
-             ()
-         with
-         | Ok _ -> Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
-         | Error error ->
-           Log.Keeper.error
-             "board cursor ledger commit failed; cursor retained keeper=%s post_id=%s: %s"
-             meta.name
-             post_id
-             (Keeper_reaction_ledger.ledger_error_to_string error))
-      | Some base_cursor, Some (ts, post_id) ->
-        Log.Keeper.debug
-          "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
-          meta.name
-          ts
-          post_id
-          (fst base_cursor)
-          (Option.value ~default:"" (snd base_cursor))
-      | Some _, None ->
-        if final_events <> []
-        then (
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string ObservationQueryFailures)
-            ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Cursor_stale)) ]
-            ();
-          Log.Keeper.warn
-            "board cursor not updated for %s despite %d events processed"
-            meta.name
-            (List.length final_events))
-    );
-    final_events, new_count, mention_count
+    let actionable, last_cursor = consume_posts None [] posts in
+    let final_events =
+      List.map (fun (_cursor, event, _signal) -> event) actionable
+    in
+    let actionable_entries =
+      List.map
+        (fun (cursor, (event : pending_board_event), signal) ->
+           let urgency =
+             if event.explicit_mention
+             then Keeper_event_queue.Immediate
+             else Keeper_event_queue.Normal
+           in
+           match board_stimulus_of_pending_board_event ~signal event with
+           | Error detail ->
+             raise
+               (Board_cursor_unavailable
+                  ("Board scan payload materialization failed: " ^ detail))
+           | Ok board ->
+             ( cursor
+             , { Keeper_event_queue.post_id = signal.post_id
+               ; urgency
+               ; arrived_at = event.updated_at
+               ; payload = Keeper_event_queue.Board_signal board
+               } ))
+        actionable
+    in
+    { final_events
+    ; new_count
+    ; mention_count
+    ; actionable_entries
+    ; last_cursor
+    }
+;;
+
+let with_board_collection_error_reporting f =
+  try f ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Keeper_board_attention_candidate.Candidate_unavailable detail as exn ->
@@ -1020,10 +1035,102 @@ let collect_board_events
       ~(meta : keeper_meta)
   : pending_board_event list * int * int
   =
-  collect_board_events_with_cursor_policy
-    ~advance_cursor:true
-    ~base_path
-    ~meta
+  with_board_collection_error_reporting (fun () ->
+    let expected_cursor =
+      match
+        Keeper_reaction_ledger.current_board_cursor_result
+          ~base_path
+          ~keeper_name:meta.name
+      with
+      | Ok cursor -> cursor
+      | Error error -> raise (board_cursor_error "Board cursor read failed" error)
+    in
+    match expected_cursor with
+    | None ->
+      let cursor_ts, post_id = Board_dispatch.current_post_cursor () in
+      let target_cursor = Keeper_reaction_ledger.{ cursor_ts; post_id } in
+      (Atomic.get after_board_scan_before_reconciliation_hook) ();
+      (match
+         Keeper_reaction_ledger.reconcile_board_scan_result
+           ~base_path
+           ~keeper_name:meta.name
+           ~expected_cursor:None
+           ~target_cursor
+           []
+       with
+       | Error error ->
+         raise (board_cursor_error "Board cursor initialization failed" error)
+       | Ok Keeper_reaction_ledger.Board_scan_already_reconciled -> ()
+       | Ok (Keeper_reaction_ledger.Board_scan_cursor_advanced _) ->
+         (match post_id with
+          | Some post_id ->
+            Log.Keeper.info
+              "durable Board cursor initialized at current head for %s: (%f, %s)"
+              meta.name
+              cursor_ts
+              post_id
+          | None ->
+            Log.Keeper.info
+              "durable Board cursor initialized at empty current head for %s: (%f, no post)"
+              meta.name
+              cursor_ts));
+      [], 0, 0
+    | Some expected_cursor ->
+      let base_cursor = expected_cursor.cursor_ts, expected_cursor.post_id in
+      let scan =
+        scan_board_events_after_cursor
+          ~advance_cursor:true
+          ~base_path
+          ~meta
+          ~base_cursor:(Some base_cursor)
+      in
+      let rec make_entries reversed = function
+        | [] -> Ok (List.rev reversed)
+        | ((cursor_ts, post_id), stimulus) :: rest ->
+          (match
+             Keeper_reaction_ledger.make_board_scan_entry
+               ~cursor:{ cursor_ts; post_id = Some post_id }
+               stimulus
+           with
+           | Error _ as error -> error
+           | Ok entry -> make_entries (entry :: reversed) rest)
+      in
+      let entries =
+        match make_entries [] scan.actionable_entries with
+        | Ok entries -> entries
+        | Error error ->
+          raise (board_cursor_error "Board scan stimulus validation failed" error)
+      in
+      (Atomic.get after_board_scan_before_reconciliation_hook) ();
+      (match scan.last_cursor with
+       | None ->
+         if entries <> []
+         then
+           raise
+             (Board_cursor_unavailable
+                "Board scan produced stimuli without an advancing cursor")
+       | Some (cursor_ts, post_id) ->
+         (match
+            Keeper_reaction_ledger.reconcile_board_scan_result
+              ~base_path
+              ~keeper_name:meta.name
+              ~expected_cursor:(Some expected_cursor)
+              ~target_cursor:{ cursor_ts; post_id = Some post_id }
+              entries
+          with
+          | Error error ->
+            raise (board_cursor_error "Board scan reconciliation failed" error)
+          | Ok Keeper_reaction_ledger.Board_scan_already_reconciled -> ()
+          | Ok
+              (Keeper_reaction_ledger.Board_scan_cursor_advanced
+                { suffix_stimulus_count; skipped_prefix_stimulus_count }) ->
+            Log.Keeper.debug
+              "Board scan reconciled keeper=%s admitted_suffix=%d skipped_prefix=%d"
+              meta.name
+              suffix_stimulus_count
+              skipped_prefix_stimulus_count)
+      );
+      [], scan.new_count, scan.mention_count)
 ;;
 
 let collect_board_events_without_advancing_cursor
@@ -1031,11 +1138,38 @@ let collect_board_events_without_advancing_cursor
       ~(meta : keeper_meta)
   : pending_board_event list * int * int
   =
-  collect_board_events_with_cursor_policy
-    ~advance_cursor:false
-    ~base_path
-    ~meta
+  with_board_collection_error_reporting (fun () ->
+    let base_cursor =
+      match
+        Keeper_reaction_ledger.current_board_cursor_result
+          ~base_path
+          ~keeper_name:meta.name
+      with
+      | Error error -> raise (board_cursor_error "Board cursor read failed" error)
+      | Ok None -> None
+      | Ok (Some cursor) -> Some (cursor.cursor_ts, cursor.post_id)
+    in
+    let scan =
+      scan_board_events_after_cursor
+        ~advance_cursor:false
+        ~base_path
+        ~meta
+        ~base_cursor
+    in
+    scan.final_events, scan.new_count, scan.mention_count)
 ;;
+
+module For_testing = struct
+  let with_after_board_scan_before_reconciliation_hook hook f =
+    let previous =
+      Atomic.exchange after_board_scan_before_reconciliation_hook hook
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_board_scan_before_reconciliation_hook previous)
+      f
+  ;;
+end
 
 let observe
       ~(pending_board_events : pending_board_event list option)

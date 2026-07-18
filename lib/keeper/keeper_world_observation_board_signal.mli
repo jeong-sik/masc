@@ -19,6 +19,19 @@ type 'a board_read =
   | Available of 'a
   | Unavailable of board_unavailable
 
+type board_evidence =
+  { post : Board.post
+  ; comments : Board.comment list
+  }
+
+type board_stimulus_materialization_error =
+  | Source_unavailable of board_unavailable
+  | Post_identity_mismatch of {
+      signal_post_id : string;
+      snapshot_post_id : string;
+    }
+  | Invalid_snapshot of Keeper_event_queue.board_stimulus_error
+
 type comment_state =
   [ `Never
   | `No_new_external
@@ -45,6 +58,7 @@ val disposition_of_unavailable : board_unavailable -> disposition
 
 val board_read_operation_to_string : board_read_operation -> string
 val unavailable_to_string : board_unavailable -> string
+val materialization_error_to_string : board_stimulus_materialization_error -> string
 
 val board_signal_of_board_stimulus
   :  post_id:string
@@ -53,15 +67,48 @@ val board_signal_of_board_stimulus
 (** Total conversion from the typed event-queue board payload to the
     [Board_dispatch.board_signal] the matchers consume (RFC-0020). *)
 
-val board_stimulus_of_board_signal
-  :  Board_dispatch.board_signal
-  -> Keeper_event_queue.board_stimulus
-(** Total inverse conversion used by durable Board-signal producers. *)
+val board_stimulus_of_board_evidence :
+  meta:Keeper_meta_contract.keeper_meta ->
+  signal:Board_dispatch.board_signal ->
+  post:Board.post ->
+  comments:Board.comment list ->
+  (Keeper_event_queue.board_stimulus, board_stimulus_materialization_error) result
+(** Purely materialize the immutable queue delivery snapshot from one exact
+    Board evidence set. No Board read occurs in this function. *)
+
+val read_board_evidence : Board_dispatch.board_signal -> board_evidence board_read
+(** Capture the source post and relevant comment stream exactly once for one
+    Board occurrence. The returned evidence is immutable input for every
+    Keeper-lane projection of that occurrence. *)
+
+val board_stimulus_of_projection :
+  signal:Board_dispatch.board_signal ->
+  title:string ->
+  preview:string ->
+  hearth:string option ->
+  post_kind:Board.post_kind ->
+  updated_at:float ->
+  explicit_mention:bool ->
+  matched_targets:string list ->
+  thread_snapshot:Keeper_event_queue.board_thread_snapshot ->
+  (Keeper_event_queue.board_stimulus, board_stimulus_materialization_error) result
+(** Canonical pure constructor shared by live delivery, cursor scans, and
+    attention candidates. Every durable Board payload uses this one mapping. *)
+
+val materialize_board_stimulus :
+  meta:Keeper_meta_contract.keeper_meta ->
+  Board_dispatch.board_signal ->
+  (Keeper_event_queue.board_stimulus, board_stimulus_materialization_error) result
+(** Read the source Board only at the producer/admission boundary, then return
+    the complete typed payload. Intake must use {!board_signal_of_board_stimulus}
+    and never call this function. *)
 
 val post_id_string : Board.post -> string
 val compare_cursor_token : float * string -> float * string -> int
-val cursor_token_of_post : Board.post -> float * string
-val list_posts_after_cursor : float * string option -> Board.post list
+val cursor_token_of_post :
+  Board.post -> (float * string, Keeper_reaction_store.error) result
+val list_posts_after_cursor :
+  float * string option -> (Board.post list, Keeper_reaction_store.error) result
 val text : Board_dispatch.board_signal -> string
 val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keeper_id.t list
 
@@ -87,6 +134,13 @@ type wake_reason =
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
+
+val wake_reason_of_board_evidence
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> signal:Board_dispatch.board_signal
+  -> board_evidence
+  -> wake_reason option
+(** Pure lane-specific wake decision over one captured Board evidence set. *)
 
 val wake_reason
   :  meta:Keeper_meta_contract.keeper_meta

@@ -29,8 +29,17 @@ let board_stimulus ?(post_id = "post-42") ?(arrived_at = 1234.5) () =
           ; author = "operator"
           ; title = "Ship the SQLite reaction ledger"
           ; content = "No dual authority"
+          ; preview = "No dual authority"
           ; hearth = None
-          ; updated_at = Some arrived_at
+          ; post_kind = Human_post
+          ; updated_at = arrived_at
+          ; explicit_mention = false
+          ; matched_targets = []
+          ; thread_snapshot =
+              { self_commented = false
+              ; new_external_since = 0
+              ; latest_external = None
+              }
           }
     }
 ;;
@@ -75,6 +84,57 @@ let expect_store context = function
   | Error error -> fail (context ^ ": " ^ Keeper_reaction_store.error_to_string error)
 ;;
 
+let expect_cursor context = function
+  | Ok cursor -> cursor
+  | Error error -> fail_ledger_error context error
+;;
+
+let expect_board_reconcile context = function
+  | Ok outcome -> outcome
+  | Error error -> fail_ledger_error context error
+;;
+
+let ledger_cursor_of_store (cursor : Keeper_reaction_store.cursor) =
+  Keeper_reaction_ledger.
+    { cursor_ts = cursor.cursor_ts; post_id = cursor.post_id }
+;;
+
+let board_scan_entry_exn context (stimulus : Keeper_event_queue.stimulus) =
+  match
+    Keeper_reaction_ledger.make_board_scan_entry
+      ~cursor:
+        { cursor_ts = stimulus.arrived_at; post_id = Some stimulus.post_id }
+      stimulus
+  with
+  | Ok entry -> entry
+  | Error error -> fail_ledger_error context error
+;;
+
+let expect_queue context = function
+  | Ok queue -> queue
+  | Error detail -> fail (context ^ ": " ^ detail)
+;;
+
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+;;
+
+let check_cursor
+      context
+      (expected : Keeper_reaction_store.cursor option)
+      (actual : Keeper_reaction_ledger.cursor option)
+  =
+  match expected, actual with
+  | None, None -> ()
+  | Some expected, Some actual ->
+    check (float 0.) (context ^ " timestamp") expected.cursor_ts actual.cursor_ts;
+    check (option string) (context ^ " post id") expected.post_id actual.post_id
+  | None, Some _ -> fail (context ^ ": expected an uninitialized cursor")
+  | Some _, None -> fail (context ^ ": expected an initialized cursor")
+;;
+
 let database_path ~base_path ~keeper_name =
   expect_store
     "database path"
@@ -100,8 +160,26 @@ let exec_sql db sql =
          (Sqlite3.errmsg db))
 ;;
 
+let close_read_capabilities context =
+  match Keeper_reaction_store.For_testing.close_read_capabilities () with
+  | Ok () -> ()
+  | Error errors ->
+    fail
+      (context
+       ^ ": "
+       ^ String.concat "; " (List.map Keeper_reaction_store.error_to_string errors))
+;;
+
+let with_clean_read_capabilities f =
+  close_read_capabilities "pre-test read capability cleanup";
+  Fun.protect
+    ~finally:(fun () -> close_read_capabilities "post-test read capability cleanup")
+    f
+;;
+
 let test_absent_database_is_exact_empty () =
-  with_temp_base (fun base_path ->
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
     let keeper_name = "absent-ledger" in
     let stimulus_id = "never-recorded" in
     let evidence =
@@ -116,10 +194,485 @@ let test_absent_database_is_exact_empty () =
     check bool "turn absent" false evidence.turn_started_seen;
     check bool "ack absent" false evidence.event_queue_ack_seen;
     check int "no matches" 0 evidence.matched_record_count;
+    let observation =
+      expect_store
+        "absent typed observation"
+        (Keeper_reaction_store.read_observation
+           ~base_path
+           ~keeper_name
+           ~pending_id_display_limit:20)
+    in
+    check bool "absent cursor" true (Option.is_none observation.cursor);
+    check int "absent exact row count" 0 observation.exact_summary.row_count;
+    check int
+      "absent exact pending count"
+      0
+      observation.exact_summary.pending_stimulus_count;
     check bool
       "read does not create database"
       false
-      (Sys.file_exists (database_path ~base_path ~keeper_name)))
+      (Sys.file_exists (database_path ~base_path ~keeper_name))))
+;;
+
+let store_cursor_event ~event_id ~stimulus_id ~recorded_at ~cursor_ts ~post_id =
+  Keeper_reaction_store.
+    { event_id
+    ; stimulus_id
+    ; recorded_at
+    ; payload = Cursor_ack_event { cursor_ts; post_id }
+    }
+;;
+
+let test_read_capability_reuses_full_validation () =
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
+      let keeper_name = "read-capability-reuse" in
+      ignore
+        (expect_store
+           "initial cursor"
+           (Keeper_reaction_store.append_event
+              ~base_path
+              ~keeper_name
+              (store_cursor_event
+                 ~event_id:"cursor:first"
+                 ~stimulus_id:"cursor:first"
+                 ~recorded_at:100.
+                 ~cursor_ts:100.
+                 ~post_id:(Some "post-first"))));
+      let before =
+        Keeper_reaction_store.For_testing.full_schema_validation_count ()
+      in
+      let first =
+        expect_store
+          "first pooled observation"
+          (Keeper_reaction_store.read_observation
+             ~base_path
+             ~keeper_name
+             ~pending_id_display_limit:0)
+      in
+      let after_first =
+        Keeper_reaction_store.For_testing.full_schema_validation_count ()
+      in
+      check int "first pooled open performs one full validation" (before + 1) after_first;
+      let repeated =
+        expect_store
+          "repeated pooled observation"
+          (Keeper_reaction_store.read_observation
+             ~base_path
+             ~keeper_name
+             ~pending_id_display_limit:0)
+      in
+      check int
+        "repeated observation skips schema-object scan"
+        after_first
+        (Keeper_reaction_store.For_testing.full_schema_validation_count ());
+      check (option string)
+        "repeated observation preserves first cursor"
+        (Some "post-first")
+        (Option.bind repeated.cursor (fun cursor -> cursor.post_id));
+      check int "summary is selected with cursor" 1 first.exact_summary.cursor_ack_count))
+;;
+
+let test_read_capability_reads_updated_values_without_reopen () =
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
+      let keeper_name = "read-capability-fresh-values" in
+      ignore
+        (expect_store
+           "initial cursor"
+           (Keeper_reaction_store.append_event
+              ~base_path
+              ~keeper_name
+              (store_cursor_event
+                 ~event_id:"cursor:first"
+                 ~stimulus_id:"cursor:first"
+                 ~recorded_at:100.
+                 ~cursor_ts:100.
+                 ~post_id:(Some "post-first"))));
+      ignore
+        (expect_store
+           "prime pooled observation"
+           (Keeper_reaction_store.read_observation
+              ~base_path
+              ~keeper_name
+              ~pending_id_display_limit:0));
+      ignore
+        (expect_store
+           "updated cursor"
+           (Keeper_reaction_store.append_event
+              ~base_path
+              ~keeper_name
+              (store_cursor_event
+                 ~event_id:"cursor:second"
+                 ~stimulus_id:"cursor:second"
+                 ~recorded_at:200.
+                 ~cursor_ts:200.
+                 ~post_id:(Some "post-second"))));
+      let after_write_validation =
+        Keeper_reaction_store.For_testing.full_schema_validation_count ()
+      in
+      let updated =
+        expect_store
+          "updated pooled observation"
+          (Keeper_reaction_store.read_observation
+             ~base_path
+             ~keeper_name
+             ~pending_id_display_limit:0)
+      in
+      check int
+        "value update does not reopen reader"
+        after_write_validation
+        (Keeper_reaction_store.For_testing.full_schema_validation_count ());
+      check (option string)
+        "cached capability reads current cursor value"
+        (Some "post-second")
+        (Option.bind updated.cursor (fun cursor -> cursor.post_id));
+      check int "cached capability reads current summary" 2 updated.exact_summary.cursor_ack_count))
+;;
+
+let test_read_capability_release_reopens_strictly () =
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
+      let keeper_name = "read-capability-lifecycle-release" in
+      ignore
+        (expect_store
+           "lifecycle release seed"
+           (Keeper_reaction_store.append_event
+              ~base_path
+              ~keeper_name
+              (store_cursor_event
+                 ~event_id:"lifecycle-release:event"
+                 ~stimulus_id:"lifecycle-release:stimulus"
+                 ~recorded_at:100.
+                 ~cursor_ts:100.
+                 ~post_id:(Some "lifecycle-release:post"))));
+      ignore
+        (expect_store
+           "prime lifecycle read capability"
+           (Keeper_reaction_store.read_observation
+              ~base_path
+              ~keeper_name
+              ~pending_id_display_limit:0));
+      let before_release =
+        Keeper_reaction_store.For_testing.full_schema_validation_count ()
+      in
+      expect_store
+        "release lifecycle read capability"
+        (Keeper_reaction_store.release_read_capability ~base_path ~keeper_name);
+      let reopened =
+        expect_store
+          "strict reopen after lifecycle release"
+          (Keeper_reaction_store.read_observation
+             ~base_path
+             ~keeper_name
+             ~pending_id_display_limit:0)
+      in
+      check int
+        "lifecycle release forces one strict full revalidation"
+        (before_release + 1)
+        (Keeper_reaction_store.For_testing.full_schema_validation_count ());
+      check (option string)
+        "strict reopen preserves durable cursor"
+        (Some "lifecycle-release:post")
+        (Option.bind reopened.cursor (fun cursor -> cursor.post_id))))
+;;
+
+let test_read_capability_schema_change_reopens_strictly () =
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
+      let keeper_name = "read-capability-schema-change" in
+      ignore
+        (expect_store
+           "schema-change seed"
+           (Keeper_reaction_store.append_event
+              ~base_path
+              ~keeper_name
+              (store_cursor_event
+                 ~event_id:"schema-change:event"
+                 ~stimulus_id:"schema-change:stimulus"
+                 ~recorded_at:100.
+                 ~cursor_ts:100.
+                 ~post_id:(Some "schema-change:post"))));
+      ignore
+        (expect_store
+           "prime read capability"
+           (Keeper_reaction_store.read_observation
+              ~base_path
+              ~keeper_name
+              ~pending_id_display_limit:0));
+      let before_tamper_read =
+        Keeper_reaction_store.For_testing.full_schema_validation_count ()
+      in
+      with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
+        exec_sql db "DROP INDEX stimulus_state_pending_order");
+      (match
+         Keeper_reaction_store.read_observation
+           ~base_path
+           ~keeper_name
+           ~pending_id_display_limit:0
+       with
+       | Error (Keeper_reaction_store.Schema_mismatch _) -> ()
+       | Error error -> fail (Keeper_reaction_store.error_to_string error)
+       | Ok _ -> fail "in-place schema change reused a stale read capability");
+      check int
+        "schema version change forces one strict full revalidation"
+        (before_tamper_read + 1)
+        (Keeper_reaction_store.For_testing.full_schema_validation_count ())))
+;;
+
+let test_draft_v3_identity_authority_is_rejected_without_migration () =
+  with_clean_read_capabilities (fun () ->
+    with_temp_base (fun base_path ->
+      let keeper_name = "draft-v3-identity-authority" in
+      let _write_outcome =
+        expect_store
+          "create current reaction authority"
+          (Keeper_reaction_store.append_event
+             ~base_path
+             ~keeper_name
+             (store_cursor_event
+                ~event_id:"draft-v3:event"
+                ~stimulus_id:"keeper-stimulus:sha256:draft-v1"
+                ~recorded_at:100.
+                ~cursor_ts:100.
+                ~post_id:(Some "draft-v3:post")));
+      in
+      with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
+        exec_sql db "PRAGMA user_version=3";
+        exec_sql db
+          "UPDATE ledger_meta SET schema_version = 'keeper.reaction_ledger.sqlite.v3' WHERE singleton = 1");
+      match
+        Keeper_reaction_store.read_observation
+          ~base_path
+          ~keeper_name
+          ~pending_id_display_limit:0
+      with
+      | Error
+          (Keeper_reaction_store.User_version_mismatch
+            { expected = 4L; actual = 3L }) -> ()
+      | Error error -> fail (Keeper_reaction_store.error_to_string error)
+      | Ok _ ->
+        fail
+          "draft v3 identity authority was silently accepted by the v4 hard cut"))
+;;
+
+let test_board_cursor_is_durable_and_canonical () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "durable-board-cursor" in
+    check_cursor
+      "absent database cursor"
+      None
+      (expect_cursor
+         "read absent cursor"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name));
+    let candidate =
+      Keeper_reaction_store.
+        { cursor_ts = 1234.5678904; post_id = Some "post-canonical" }
+    in
+    let expected =
+      expect_store "normalize cursor" (Keeper_reaction_store.normalize_cursor candidate)
+    in
+    ignore
+      (expect_board_reconcile
+      "record cursor"
+      (Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:None
+         ~target_cursor:(ledger_cursor_of_store candidate)
+         []));
+    check_cursor
+      "persisted canonical cursor"
+      (Some expected)
+      (expect_cursor
+         "read persisted cursor"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name)))
+;;
+
+let test_board_admission_crash_retries_without_duplicate () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "board-admission-crash" in
+    let prior =
+      Keeper_reaction_store.{ cursor_ts = 100.; post_id = Some "post-prior" }
+    in
+    ignore
+      (expect_board_reconcile
+      "record prior cursor"
+      (Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:None
+         ~target_cursor:(ledger_cursor_of_store prior)
+         []));
+    let stimulus = board_stimulus ~post_id:"post-after-crash" ~arrived_at:200. () in
+    let target =
+      Keeper_reaction_ledger.
+        { cursor_ts = 200.; post_id = Some stimulus.post_id }
+    in
+    let entry = board_scan_entry_exn "make crash scan entry" stimulus in
+    let exception Simulated_crash in
+    let crashed =
+      try
+        Keeper_reaction_ledger.For_testing
+        .with_after_board_stimuli_admitted_before_cursor_ack_hook
+          (fun () -> raise Simulated_crash)
+          (fun () ->
+             ignore
+               (Keeper_reaction_ledger
+                .reconcile_board_scan_result
+                  ~base_path
+                  ~keeper_name
+                  ~expected_cursor:(Some (ledger_cursor_of_store prior))
+                  ~target_cursor:target
+                  [ entry ]));
+        false
+      with
+      | Simulated_crash -> true
+    in
+    check bool "crash injected after durable admission" true crashed;
+    check_cursor
+      "crash retained prior cursor"
+      (Some prior)
+      (expect_cursor
+         "cursor after crash"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name));
+    let queue_after_crash =
+      expect_queue
+        "queue after crash"
+        (Keeper_event_queue_persistence.load_result ~base_path ~keeper_name)
+      |> Keeper_event_queue.to_list
+    in
+    check int
+      "admitted identity survived crash exactly once"
+      1
+      (List.length
+         (List.filter
+            (Keeper_event_queue.stimulus_identity_equal stimulus)
+            queue_after_crash));
+    (match
+       Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:(Some (ledger_cursor_of_store prior))
+         ~target_cursor:target
+         [ entry ]
+     with
+     | Ok (Keeper_reaction_ledger.Board_scan_cursor_advanced _) -> ()
+     | Ok Keeper_reaction_ledger.Board_scan_already_reconciled ->
+       fail "retry Board admission did not advance the retained cursor"
+     | Error error -> fail_ledger_error "retry board admission" error);
+    let queue_after_retry =
+      expect_queue
+        "queue after retry"
+        (Keeper_event_queue_persistence.load_result ~base_path ~keeper_name)
+      |> Keeper_event_queue.to_list
+    in
+    check int
+      "retry retained one typed identity"
+      1
+      (List.length
+         (List.filter
+            (Keeper_event_queue.stimulus_identity_equal stimulus)
+            queue_after_retry));
+    let expected_cursor =
+      Keeper_reaction_store.{ cursor_ts = 200.; post_id = Some stimulus.post_id }
+    in
+    check_cursor
+      "retry advanced cursor"
+      (Some expected_cursor)
+      (expect_cursor
+         "cursor after retry"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name)))
+;;
+
+let test_board_queue_failure_retains_prior_cursor () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "board-admission-failure" in
+    let prior =
+      Keeper_reaction_store.{ cursor_ts = 300.; post_id = Some "post-prior" }
+    in
+    ignore
+      (expect_board_reconcile
+      "record failure prior cursor"
+      (Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:None
+         ~target_cursor:(ledger_cursor_of_store prior)
+         []));
+    let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
+    mkdir_p (Filename.dirname snapshot_path);
+    (match Fs_compat.save_file_atomic snapshot_path "{not-json" with
+     | Ok () -> ()
+    | Error detail -> fail ("corrupt queue fixture write failed: " ^ detail));
+    let stimulus = board_stimulus ~post_id:"post-blocked" ~arrived_at:400. () in
+    let entry = board_scan_entry_exn "make blocked scan entry" stimulus in
+    (match
+       Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:(Some (ledger_cursor_of_store prior))
+         ~target_cursor:{ cursor_ts = 400.; post_id = Some stimulus.post_id }
+         [ entry ]
+     with
+     | Error (Keeper_reaction_ledger.Event_queue_stimulus_admission_error _) -> ()
+     | Error error -> fail_ledger_error "unexpected admission failure" error
+     | Ok () -> fail "corrupt queue must reject Board admission");
+    check_cursor
+      "queue failure retained prior cursor"
+      (Some prior)
+      (expect_cursor
+         "cursor after queue failure"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name)))
+;;
+
+let test_initial_board_scan_rejects_stimuli_without_mutation () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "board-initial-scan-integrity" in
+    let stimulus = board_stimulus ~post_id:"initial-replay" ~arrived_at:500. () in
+    let target =
+      Keeper_reaction_ledger.
+        { cursor_ts = 500.; post_id = Some stimulus.post_id }
+    in
+    let entry = board_scan_entry_exn "make initial scan entry" stimulus in
+    (match
+       Keeper_reaction_ledger.reconcile_board_scan_result
+         ~base_path
+         ~keeper_name
+         ~expected_cursor:None
+         ~target_cursor:target
+         [ entry ]
+     with
+     | Error
+         (Keeper_reaction_ledger.Board_scan_integrity_error
+           Keeper_reaction_ledger.Initial_scan_contains_stimuli) -> ()
+     | Error error -> fail_ledger_error "unexpected initial scan failure" error
+     | Ok _ -> fail "uninitialized Board scan admitted replay stimuli");
+    check_cursor
+      "rejected initial scan retained absent cursor"
+      None
+      (expect_cursor
+         "cursor after rejected initial scan"
+         (Keeper_reaction_ledger.current_board_cursor_result
+            ~base_path
+            ~keeper_name));
+    let queue =
+      expect_queue
+        "queue after rejected initial scan"
+        (Keeper_event_queue_persistence.load_result ~base_path ~keeper_name)
+      |> Keeper_event_queue.to_list
+    in
+    check int "rejected initial scan did not mutate queue" 0 (List.length queue))
 ;;
 
 let test_stimulus_turn_and_idempotent_replay () =
@@ -225,20 +778,28 @@ let test_queue_identity_replay_ignores_arrival_observation () =
       (outcome = Keeper_reaction_ledger.Already_recorded))
 ;;
 
-let store_stimulus_event ~event_id ~stimulus_id ~post_id =
+let store_stimulus_event_with_kind ~kind ~event_id ~stimulus_id ~post_id =
   Keeper_reaction_store.
     { event_id
     ; stimulus_id
     ; recorded_at = 1000.
     ; payload =
         Stimulus_event
-          { kind = Board_signal
+          { kind
           ; post_id
           ; urgency = Immediate
           ; arrived_at = 900.
           ; board_updated_at = Some 900.
           }
     }
+;;
+
+let store_stimulus_event ~event_id ~stimulus_id ~post_id =
+  store_stimulus_event_with_kind
+    ~kind:Keeper_reaction_store.Board_signal
+    ~event_id
+    ~stimulus_id
+    ~post_id
 ;;
 
 let test_event_identity_conflict_is_typed () =
@@ -546,7 +1107,45 @@ let test_schema_index_tamper_fails_closed_per_keeper () =
            ~keeper_name:healthy_keeper
            ~stimulus_id:healthy_id)
     in
-    check bool "other lane continued" true healthy.stimulus_seen)
+    check bool "other lane continued" true healthy.stimulus_seen;
+    let broken_summary =
+      Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name:broken_keeper
+        ~pending_id_display_limit:20
+    in
+    check bool
+      "failed keeper count is unknown"
+      true
+      (broken_summary |> member "row_count" = `Null);
+    check bool
+      "failed keeper pending count is unknown"
+      true
+      (broken_summary |> member "pending_stimulus_count" = `Null);
+    check bool
+      "failed keeper sample truncation is unknown"
+      true
+      (broken_summary |> member "pending_ids_truncated" = `Null);
+    let fleet =
+      Keeper_reaction_ledger.fleet_summary_json
+        ~base_path
+        ~keeper_name_discovery:
+          (Keeper_reaction_ledger.Keeper_names_discovered
+             [ broken_keeper; healthy_keeper ])
+        ~pending_id_display_limit_per_keeper:20
+    in
+    check bool
+      "fleet exact counts are unknown after a lane read error"
+      true
+      (fleet |> member "row_count" = `Null);
+    check bool
+      "fleet exact pending is unknown after a lane read error"
+      true
+      (fleet |> member "pending_stimulus_count" = `Null);
+    check bool
+      "fleet counts explicitly incomplete"
+      false
+      (fleet |> member "counts_complete" |> to_bool))
 ;;
 
 let test_application_id_tamper_is_typed () =
@@ -863,6 +1462,7 @@ let ordered_reaction_transition
       ~settlement_kind
       ~external_input_requested
       ~stimulus_id
+      ~post_id
   =
   Keeper_reaction_store.
     { transition_id
@@ -877,7 +1477,7 @@ let ordered_reaction_transition
         [ { event_id = transition_id ^ ":source:0"
           ; stimulus_id
           ; stimulus_kind = Schedule_due
-          ; post_id = "ordered-post"
+          ; post_id
           }
         ]
     }
@@ -893,7 +1493,8 @@ let test_latest_reaction_uses_ledger_sequence_and_preserves_outcome () =
          (Keeper_reaction_store.append_event
             ~base_path
             ~keeper_name
-            (store_stimulus_event
+            (store_stimulus_event_with_kind
+               ~kind:Keeper_reaction_store.Schedule_due
                ~event_id:"ordered-stimulus:event"
                ~stimulus_id
                ~post_id:"ordered-post")));
@@ -940,7 +1541,8 @@ let test_latest_reaction_uses_ledger_sequence_and_preserves_outcome () =
          ~settled_at:3000.
          ~settlement_kind:Keeper_reaction_store.Ack
          ~external_input_requested:false
-         ~stimulus_id);
+         ~stimulus_id
+         ~post_id:"ordered-post");
     (match latest () with
      | Some (Keeper_reaction_ledger.Latest_event_queue_ack _) -> ()
      | Some _ | None -> fail "ACK was not the latest typed reaction");
@@ -952,7 +1554,8 @@ let test_latest_reaction_uses_ledger_sequence_and_preserves_outcome () =
          ~settled_at:2000.
          ~settlement_kind:Keeper_reaction_store.Requeue
          ~external_input_requested:false
-         ~stimulus_id);
+         ~stimulus_id
+         ~post_id:"ordered-post");
     (match latest () with
      | Some (Keeper_reaction_ledger.Latest_event_queue_requeued _) -> ()
      | Some _ | None ->
@@ -982,7 +1585,8 @@ let test_latest_reaction_uses_ledger_sequence_and_preserves_outcome () =
          ~settled_at:1000.
          ~settlement_kind:Keeper_reaction_store.Escalate
          ~external_input_requested:true
-         ~stimulus_id);
+         ~stimulus_id
+         ~post_id:"ordered-post");
     (match latest () with
      | Some
          (Keeper_reaction_ledger.Latest_event_queue_escalated
@@ -1068,7 +1672,8 @@ let test_materialized_summary_tracks_all_current_states () =
                  ~settled_at:1200.
                  ~settlement_kind
                  ~external_input_requested
-                 ~stimulus_id)))
+                 ~stimulus_id
+                 ~post_id:stimulus_id)))
     in
     settle "state-ack" 1L Keeper_reaction_store.Ack false "acked";
     settle "state-requeue" 2L Keeper_reaction_store.Requeue false "requeued";
@@ -1092,6 +1697,45 @@ let test_materialized_summary_tracks_all_current_states () =
            ~pending_id_display_limit:20)
     in
     check int "one unique orphan identity" 1 orphan.orphan_reaction_stimulus_count;
+    let conflicting_root =
+      Keeper_reaction_store.
+        { event_id = "orphan-later:conflicting-stimulus"
+        ; stimulus_id = "orphan-later"
+        ; recorded_at = 1150.
+        ; payload =
+            Stimulus_event
+              { kind = Bootstrap
+              ; post_id = "different-post"
+              ; urgency = Immediate
+              ; arrived_at = 900.
+              ; board_updated_at = None
+              }
+        }
+    in
+    (match
+       Keeper_reaction_store.append_event
+         ~base_path
+         ~keeper_name
+         conflicting_root
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "conflicting late root rewrote orphan stimulus identity");
+    let retained_orphan =
+      expect_store
+        "orphan summary after conflicting root"
+        (Keeper_reaction_store.exact_summary
+           ~base_path
+           ~keeper_name
+           ~pending_id_display_limit:20)
+    in
+    check int
+      "conflicting root transaction retained orphan"
+      1
+      retained_orphan.orphan_reaction_stimulus_count;
+    check int
+      "conflicting root did not append an event"
+      orphan.row_count
+      retained_orphan.row_count;
     append_event "late orphan stimulus" (schedule_event "orphan-later");
     let summary =
       expect_store
@@ -1127,77 +1771,43 @@ let test_materialized_summary_tracks_all_current_states () =
       summary.pending_stimulus_ids)
 ;;
 
-let test_summary_hot_path_uses_projection_and_bounded_index () =
-  with_temp_base (fun base_path ->
-    let keeper_name = "summary-query-plan" in
-    ignore
-      (expect_store
-         "query-plan seed"
-         (Keeper_reaction_store.append_event
-            ~base_path
-            ~keeper_name
-            (store_stimulus_event
-               ~event_id:"query-plan:event"
-               ~stimulus_id:"query-plan:stimulus"
-               ~post_id:"query-plan:post")));
-    with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
-      let schema_count =
-        let stmt =
-          Sqlite3.prepare
-            db
-            "SELECT COUNT(*) FROM sqlite_schema WHERE (type = 'table' AND name IN ('ledger_summary', 'stimulus_state')) OR (type = 'trigger' AND name IN ('events_project_summary', 'events_project_stimulus', 'events_project_handling', 'events_project_cursor', 'stimulus_state_count_insert', 'stimulus_state_count_update'))"
-        in
-        Fun.protect
-          ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
-          (fun () ->
-            match Sqlite3.step stmt with
-            | Sqlite3.Rc.ROW -> Int64.to_int (Sqlite3.column_int64 stmt 0)
-            | rc -> fail ("schema evidence query failed: " ^ Sqlite3.Rc.to_string rc))
-      in
-      check int "projection tables and triggers are exact schema" 8 schema_count;
-      let plan_details sql =
-        let stmt = Sqlite3.prepare db ("EXPLAIN QUERY PLAN " ^ sql) in
-        Fun.protect
-          ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
-          (fun () ->
-            let rec loop reversed =
-              match Sqlite3.step stmt with
-              | Sqlite3.Rc.DONE -> List.rev reversed
-              | Sqlite3.Rc.ROW -> loop (Sqlite3.column_text stmt 3 :: reversed)
-              | rc -> fail ("query-plan evidence failed: " ^ Sqlite3.Rc.to_string rc)
-            in
-            loop [])
-      in
-      let plans =
-        plan_details "SELECT * FROM ledger_summary WHERE singleton = 1"
-        @ plan_details
-            "SELECT stimulus_id FROM stimulus_state INDEXED BY stimulus_state_pending_order WHERE current_state = 'pending' ORDER BY stimulus_sequence, stimulus_id LIMIT 20"
-      in
-      check bool
-        "summary plans never read immutable event history"
-        false
-        (List.exists
-           (fun detail ->
-             let detail = String.lowercase_ascii detail in
-             String.starts_with ~prefix:"scan events" detail
-             || String.starts_with ~prefix:"search events" detail)
-           plans);
-      check bool
-        "pending sample uses its bounded covering index"
-        true
-        (List.exists
-           (fun detail ->
-             String.starts_with
-               ~prefix:"SEARCH stimulus_state USING COVERING INDEX stimulus_state_pending_order"
-               detail)
-           plans)))
-;;
-
 let () =
   run
-    "keeper reaction SQLite v3"
+    "keeper reaction SQLite v4"
     [ ( "authority"
       , [ test_case "absent database is exact empty" `Quick test_absent_database_is_exact_empty
+        ; test_case
+            "read capability reuses full validation"
+            `Quick
+            test_read_capability_reuses_full_validation
+        ; test_case
+            "read capability reads updated values without reopen"
+            `Quick
+            test_read_capability_reads_updated_values_without_reopen
+        ; test_case
+            "read capability lifecycle release reopens strictly"
+            `Quick
+            test_read_capability_release_reopens_strictly
+        ; test_case
+            "read capability schema change reopens strictly"
+            `Quick
+            test_read_capability_schema_change_reopens_strictly
+        ; test_case
+            "draft v3 identity authority is rejected"
+            `Quick
+            test_draft_v3_identity_authority_is_rejected_without_migration
+        ; test_case
+            "Board cursor is durable and canonical"
+            `Quick
+            test_board_cursor_is_durable_and_canonical
+        ; test_case
+            "Board admission crash retries without duplicate"
+            `Quick
+            test_board_admission_crash_retries_without_duplicate
+        ; test_case
+            "Board queue failure retains prior cursor"
+            `Quick
+            test_board_queue_failure_retains_prior_cursor
         ; test_case "stimulus and turn replay" `Quick test_stimulus_turn_and_idempotent_replay
         ; test_case
             "queue identity arrival replay"
@@ -1257,9 +1867,5 @@ let () =
             "materialized summary tracks exact current states"
             `Quick
             test_materialized_summary_tracks_all_current_states
-        ; test_case
-            "summary hot path uses projection and bounded index"
-            `Quick
-            test_summary_hot_path_uses_projection_and_bounded_index
         ] )
     ]

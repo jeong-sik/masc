@@ -13,29 +13,20 @@ open Keeper_execution
     for [u] ([immediate] / [normal] / [low]). *)
 val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
 
-(** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
-    stimulus into a pending board event, threading the keeper meta's
-    continuity summary. [Error unavailable] reports a failed board read
-    (board-unavailable-result); this function only reports, it does not
-    decide disposition — see [pending_board_events_of_stimulus_result] for
-    the consuming layer's classify + drop/retain behavior. *)
+(** Pure projection from the durable payload. Board intake never re-reads the
+    mutable Board; [Error invalid] identifies a corrupt in-memory snapshot. *)
 val pending_board_event_of_stimulus
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
+  -> (Keeper_world_observation.pending_board_event option, Keeper_event_queue.board_stimulus_error) result
 
-(** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
-    [stim] into zero-or-one pending board events. On [Error unavailable] it
-    classifies the failure via
-    {!Keeper_world_observation_board_signal.disposition_of_unavailable},
-    logs and counts it, and returns [] — the stimulus is treated as consumed
-    for this turn either way. See the [.ml] for why a queued stimulus has no
-    per-item requeue lever distinct from the whole-lease Ack/Requeue
-    decision. *)
+(** Render zero-or-one prompt events without swallowing projection failure.
+    The heartbeat loop requeues the owning lease on [Error], so ACK cannot
+    discard an unrendered durable payload. *)
 val pending_board_events_of_stimulus_result
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event list
+  -> (Keeper_world_observation.pending_board_event list, string) result
 
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
     a generic [Turn_started] reaction after a real keeper turn is admitted.
@@ -68,15 +59,21 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+val merge_queued_board_events :
+  queued:Keeper_world_observation.pending_board_event list ->
+  scanned:Keeper_world_observation.pending_board_event list ->
+  Keeper_world_observation.pending_board_event list
+(** Put durable queued projections first, preserve every distinct same-post
+    occurrence, and remove only exactly equal scan projections. *)
+
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store, logs the consumption, and returns a list of
-    pending board events derived from [stim] (empty for non-board
-    classes). *)
+    pending board events derived from [stim]. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event list
+  -> (Keeper_world_observation.pending_board_event list, string) result
 
 (** [consume_board_stimulus_batch ~meta_after_triage batch] increments
     Otel_metric_store per stimulus, logs debounce coalescing, and returns the
@@ -84,7 +81,7 @@ val consume_single_heartbeat_stimulus
 val consume_board_stimulus_batch
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus list
-  -> Keeper_world_observation.pending_board_event list
+  -> (Keeper_world_observation.pending_board_event list, string) result
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]

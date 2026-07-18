@@ -307,8 +307,17 @@ let test_fleet_summary_serializes_with_owner_commit () =
     Persistence.persist
       ~base_path
       ~keeper_name
-      (Queue.enqueue Queue.empty pending);
-    Persistence.record_inflight ~base_path ~keeper_name [ inflight ];
+      (Queue.empty |> fun queue -> Queue.enqueue queue pending |> fun queue ->
+       Queue.enqueue queue inflight);
+    ignore
+      (Persistence.claim_when_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:11.0
+         ~ready:(fun candidate -> Queue.stimulus_identity_equal candidate inflight)
+         ()
+       |> require_ok "claim owner-summary active lease"
+       |> require_some "owner-summary active lease");
     let transform_entered = Atomic.make false in
     let release = Atomic.make false in
     let writer_result = ref None in

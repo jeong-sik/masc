@@ -27,14 +27,73 @@ and board_reaction_change = {
   reacted : bool;
 }
 
+and board_post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+
+and board_latest_external = {
+  latest_author : string;
+  latest_preview : string;
+}
+
+and board_thread_snapshot = {
+  self_commented : bool;
+  new_external_since : int;
+  latest_external : board_latest_external option;
+}
+
 type board_stimulus = {
   kind : board_stimulus_kind;
   author : string;
   title : string;
   content : string;
+  preview : string;
   hearth : string option;
-  updated_at : float option;
+  post_kind : board_post_kind;
+  updated_at : float;
+  explicit_mention : bool;
+  matched_targets : string list;
+  thread_snapshot : board_thread_snapshot;
 }
+
+type board_stimulus_error =
+  | Non_finite_board_updated_at of float
+  | Negative_new_external_since of int
+  | Missing_latest_external of int
+  | Explicit_mention_without_targets
+  | Matched_targets_without_explicit_mention of string list
+
+let board_stimulus_error_to_string = function
+  | Non_finite_board_updated_at value ->
+    Printf.sprintf "Board delivery updated_at must be finite, got %.17g" value
+  | Negative_new_external_since count ->
+    Printf.sprintf "Board delivery new_external_since must be non-negative, got %d" count
+  | Missing_latest_external count ->
+    Printf.sprintf
+      "Board delivery with %d new external comments requires latest comment evidence"
+      count
+  | Explicit_mention_without_targets ->
+    "Board delivery explicit mention requires at least one matched target"
+  | Matched_targets_without_explicit_mention targets ->
+    Printf.sprintf
+      "Board delivery has matched targets without an explicit mention: [%s]"
+      (String.concat "," targets)
+
+let validate_board_stimulus board =
+  if not (Float.is_finite board.updated_at)
+  then Error (Non_finite_board_updated_at board.updated_at)
+  else if board.thread_snapshot.new_external_since < 0
+  then Error (Negative_new_external_since board.thread_snapshot.new_external_since)
+  else if
+    board.thread_snapshot.new_external_since > 0
+    && Option.is_none board.thread_snapshot.latest_external
+  then Error (Missing_latest_external board.thread_snapshot.new_external_since)
+  else if board.explicit_mention && board.matched_targets = []
+  then Error Explicit_mention_without_targets
+  else if (not board.explicit_mention) && board.matched_targets <> []
+  then Error (Matched_targets_without_explicit_mention board.matched_targets)
+  else Ok ()
 
 type stimulus_payload =
   | Board_signal of board_stimulus
@@ -366,6 +425,17 @@ let board_reaction_target_type_of_string = function
   | "comment" -> Ok Reaction_comment
   | value -> Error (Printf.sprintf "unknown board reaction target type: %s" value)
 
+let board_post_kind_to_string = function
+  | Human_post -> "human"
+  | Automation_post -> "automation"
+  | System_post -> "system"
+
+let board_post_kind_of_string = function
+  | "human" -> Ok Human_post
+  | "automation" -> Ok Automation_post
+  | "system" -> Ok System_post
+  | value -> Error (Printf.sprintf "unknown board post kind: %s" value)
+
 let option_json f = function
   | Some value -> f value
   | None -> `Null
@@ -385,13 +455,29 @@ let board_stimulus_fields board =
   ; "author", `String board.author
   ; "title", `String board.title
   ; "content", `String board.content
+  ; "preview", `String board.preview
   ; "hearth", option_json (fun value -> `String value) board.hearth
-  ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+  ; "post_kind", `String (board_post_kind_to_string board.post_kind)
+  ; "updated_at_unix", `Float board.updated_at
+  ; "explicit_mention", `Bool board.explicit_mention
+  ; "matched_targets", `List (List.map (fun value -> `String value) board.matched_targets)
+  ; "self_commented", `Bool board.thread_snapshot.self_commented
+  ; "new_external_since", `Int board.thread_snapshot.new_external_since
+  ; ( "latest_external"
+    , option_json
+        (fun latest ->
+           `Assoc
+             [ "author", `String latest.latest_author
+             ; "preview", `String latest.latest_preview
+             ])
+        board.thread_snapshot.latest_external )
   ]
   @
   match board.kind with
   | Post_created | Comment_added -> []
   | Reaction_changed reaction -> board_reaction_change_fields reaction
+
+let board_stimulus_to_yojson board = `Assoc (board_stimulus_fields board)
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -415,8 +501,13 @@ let bool_of_json ~context = function
   | `Bool value -> Ok value
   | _ -> Error (Printf.sprintf "%s must be a boolean" context)
 
+let int_of_json ~context = function
+  | `Int value -> Ok value
+  | _ -> Error (Printf.sprintf "%s must be an integer" context)
+
 let float_of_json ~context = function
-  | `Float value -> Ok value
+  | `Float value when Float.is_finite value -> Ok value
+  | `Float _ -> Error (Printf.sprintf "%s must be a finite number" context)
   | `Int value -> Ok (float_of_int value)
   | _ -> Error (Printf.sprintf "%s must be a number" context)
 
@@ -425,13 +516,6 @@ let optional_string_field ~context name fields =
   | None -> Ok None
   | Some json ->
     let* value = string_of_json ~context:(context ^ "." ^ name) json in
-    Ok (Some value)
-
-let optional_float_field ~context name fields =
-  match optional_field name fields with
-  | None -> Ok None
-  | Some json ->
-    let* value = float_of_json ~context:(context ^ "." ^ name) json in
     Ok (Some value)
 
 let string_field ~context name fields =
@@ -458,6 +542,10 @@ let bool_field ~context name fields =
 let float_field ~context name fields =
   let* json = required_field ~context name fields in
   float_of_json ~context:(context ^ "." ^ name) json
+
+let int_field ~context name fields =
+  let* json = required_field ~context name fields in
+  int_of_json ~context:(context ^ "." ^ name) json
 
 let payload_to_yojson = function
   | Board_signal board ->
@@ -538,25 +626,169 @@ let payload_to_yojson = function
       ; "assigned_by", `String ga.ga_assigned_by
       ]
 
+(* A queue identity must have one total projection for both equality and its
+   durable digest.  Polymorphic equality over [float] is not reflexive for
+   NaN, while JSON rendering can distinguish [-0.] from [0.] even though
+   OCaml equality does not.  [Hitl_edited] also admits nested Yojson values,
+   so normalising only the known timestamp fields is insufficient.
+
+   This closed tree preserves every Yojson constructor and association-list
+   position and normalises both signed zeroes to the same value. Non-finite
+   values are rejected at the typed durable boundary. The tagged JSON encoder below is
+   injective over this tree; an operator-authored JSON string or object cannot
+   collide with an encoded float or constructor tag. *)
+type canonical_identity_json =
+  | Identity_null
+  | Identity_bool of bool
+  | Identity_int of int
+  | Identity_intlit of string
+  | Identity_float of canonical_identity_float
+  | Identity_string of string
+  | Identity_assoc of (string * canonical_identity_json) list
+  | Identity_list of canonical_identity_json list
+
+and canonical_identity_float =
+  | Identity_zero
+  | Identity_nonzero_bits of int64
+
+let canonical_identity_float value =
+  match classify_float value with
+  | FP_zero -> Ok Identity_zero
+  | FP_normal | FP_subnormal ->
+    Ok (Identity_nonzero_bits (Int64.bits_of_float value))
+  | FP_nan | FP_infinite ->
+    Error "durable stimulus identity contains a non-finite float"
+
+let rec canonical_identity_json_of_yojson
+  : Yojson.Safe.t -> (canonical_identity_json, string) result
+=
+  function
+  | `Null -> Ok Identity_null
+  | `Bool value -> Ok (Identity_bool value)
+  | `Int value -> Ok (Identity_int value)
+  | `Intlit value -> Ok (Identity_intlit value)
+  | `Float value ->
+    let* value = canonical_identity_float value in
+    Ok (Identity_float value)
+  | `String value -> Ok (Identity_string value)
+  | `Assoc fields ->
+    let rec loop reversed = function
+      | [] -> Ok (Identity_assoc (List.rev reversed))
+      | (name, value) :: rest ->
+        let* value = canonical_identity_json_of_yojson value in
+        loop ((name, value) :: reversed) rest
+    in
+    loop [] fields
+  | `List values ->
+    let rec loop reversed = function
+      | [] -> Ok (Identity_list (List.rev reversed))
+      | value :: rest ->
+        let* value = canonical_identity_json_of_yojson value in
+        loop (value :: reversed) rest
+    in
+    loop [] values
+
+let rec canonical_identity_json_to_yojson = function
+  | Identity_null -> `List [ `String "null" ]
+  | Identity_bool value -> `List [ `String "bool"; `Bool value ]
+  | Identity_int value ->
+    `List [ `String "int"; `String (string_of_int value) ]
+  | Identity_intlit value -> `List [ `String "intlit"; `String value ]
+  | Identity_float Identity_zero ->
+    `List [ `String "float64"; `String "zero" ]
+  | Identity_float (Identity_nonzero_bits bits) ->
+    `List [ `String "float64_bits"; `String (Printf.sprintf "%016Lx" bits) ]
+  | Identity_string value -> `List [ `String "string"; `String value ]
+  | Identity_assoc fields ->
+    `List
+      [ `String "assoc"
+      ; `List
+          (List.map
+             (fun (name, value) ->
+                `List [ `String name; canonical_identity_json_to_yojson value ])
+             fields)
+      ]
+  | Identity_list values ->
+    `List
+      [ `String "list"
+      ; `List (List.map canonical_identity_json_to_yojson values)
+      ]
+
+type canonical_stimulus_identity =
+  { canonical_post_id : post_id
+  ; canonical_urgency : urgency
+  ; canonical_payload : canonical_identity_json
+  }
+
+let canonical_stimulus_identity_result stimulus =
+  let identity = stimulus_identity stimulus in
+  let* canonical_payload =
+    identity.identity_payload
+    |> payload_to_yojson
+    |> canonical_identity_json_of_yojson
+  in
+  Ok
+    { canonical_post_id = identity.identity_post_id
+    ; canonical_urgency = identity.identity_urgency
+    ; canonical_payload
+    }
+
 let stimulus_identity_to_yojson identity =
   `Assoc
-    [ "post_id", `String identity.identity_post_id
-    ; "urgency", `String (urgency_to_string identity.identity_urgency)
-    ; "payload", payload_to_yojson identity.identity_payload
+    [ "post_id", `String identity.canonical_post_id
+    ; "urgency", `String (urgency_to_string identity.canonical_urgency)
+    ; "payload", canonical_identity_json_to_yojson identity.canonical_payload
     ]
 
-let stimulus_identity_id stimulus =
+let stimulus_identity_id_result stimulus =
+  let* identity = canonical_stimulus_identity_result stimulus in
   let canonical =
-    stimulus |> stimulus_identity |> stimulus_identity_to_yojson
+    identity |> stimulus_identity_to_yojson
     |> Yojson.Safe.to_string
   in
-  "keeper-stimulus:sha256:"
-  ^ Digestif.SHA256.(digest_string canonical |> to_hex)
+  Ok
+    ("keeper-stimulus:v2:sha256:"
+     ^ Digestif.SHA256.(digest_string canonical |> to_hex))
 
-(* In-process equality stays on the typed projection.  The digest is the
-   durable correlation key, not an intermediate representation for comparison. *)
+let invalid_identity operation detail =
+  invalid_arg (Printf.sprintf "%s: %s" operation detail)
+
+let stimulus_identity_id stimulus =
+  match stimulus_identity_id_result stimulus with
+  | Ok identity -> identity
+  | Error detail -> invalid_identity "stimulus_identity_id" detail
+
+let stimulus_identity_equal_result left right =
+  let* left = canonical_stimulus_identity_result left in
+  let* right = canonical_stimulus_identity_result right in
+  Ok (left = right)
+
 let stimulus_identity_equal left right =
-  stimulus_identity left = stimulus_identity right
+  match stimulus_identity_equal_result left right with
+  | Ok equal -> equal
+  | Error detail -> invalid_identity "stimulus_identity_equal" detail
+
+let validate_stimulus stimulus =
+  if not (Float.is_finite stimulus.arrived_at)
+  then Error "durable stimulus arrived_at must be finite"
+  else
+    let* () =
+      match stimulus.payload with
+      | Board_signal board | Board_attention { signal = board; _ } ->
+        validate_board_stimulus board
+        |> Result.map_error board_stimulus_error_to_string
+      | Bootstrap
+      | Fusion_completed _
+      | Bg_completed _
+      | Schedule_due _
+      | Connector_attention _
+      | Hitl_resolved _
+      | Failure_judgment _
+      | Manual_compaction_requested
+      | Goal_assigned _ ->
+        Ok ()
+    in
+    Result.map (fun _ -> ()) (canonical_stimulus_identity_result stimulus)
 
 module Stimulus_identity_id_set = Set.Make (String)
 
@@ -605,9 +837,45 @@ let payload_of_yojson json =
     let* author = string_field ~context "author" fields in
     let* title = string_field ~context "title" fields in
     let* content = string_field ~context "content" fields in
+    let* preview = string_field ~context "preview" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
-    let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok { kind; author; title; content; hearth; updated_at }
+    let* post_kind_raw = string_field ~context "post_kind" fields in
+    let* post_kind = board_post_kind_of_string post_kind_raw in
+    let* updated_at = float_field ~context "updated_at_unix" fields in
+    let* explicit_mention = bool_field ~context "explicit_mention" fields in
+    let* matched_targets = string_list_field ~context "matched_targets" fields in
+    let* self_commented = bool_field ~context "self_commented" fields in
+    let* new_external_since = int_field ~context "new_external_since" fields in
+    let* latest_external_json = required_field ~context "latest_external" fields in
+    let* latest_external =
+      match latest_external_json with
+      | `Null -> Ok None
+      | `Assoc latest_fields ->
+        let latest_context = context ^ ".latest_external" in
+        let* latest_author = string_field ~context:latest_context "author" latest_fields in
+        let* latest_preview = string_field ~context:latest_context "preview" latest_fields in
+        Ok (Some { latest_author; latest_preview })
+      | _ -> Error (context ^ ".latest_external must be an object or null")
+    in
+    let board =
+      { kind
+      ; author
+      ; title
+      ; content
+      ; preview
+      ; hearth
+      ; post_kind
+      ; updated_at
+      ; explicit_mention
+      ; matched_targets
+      ; thread_snapshot = { self_commented; new_external_since; latest_external }
+      }
+    in
+    let* () =
+      validate_board_stimulus board
+      |> Result.map_error board_stimulus_error_to_string
+    in
+    Ok board
   in
   match kind with
   | "board_signal" ->
@@ -705,6 +973,23 @@ let payload_of_yojson json =
          })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
+let board_stimulus_of_yojson json =
+  let* fields = assoc_fields ~context:"board stimulus" json in
+  let* payload = payload_of_yojson (`Assoc (("kind", `String "board_signal") :: fields)) in
+  match payload with
+  | Board_signal board -> Ok board
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Bg_completed _
+  | Schedule_due _
+  | Connector_attention _
+  | Hitl_resolved _
+  | Failure_judgment _
+  | Manual_compaction_requested
+  | Goal_assigned _ ->
+    Error "board stimulus codec produced a non-Board payload"
+
 let stimulus_to_yojson (stimulus : stimulus) =
   `Assoc
     [ "post_id", `String stimulus.post_id
@@ -722,9 +1007,11 @@ let stimulus_of_yojson json =
   let* arrived_at = float_field ~context "arrived_at_unix" fields in
   let* payload_json = required_field ~context "payload" fields in
   let* payload = payload_of_yojson payload_json in
-  Ok { post_id; urgency; arrived_at; payload }
+  let stimulus = { post_id; urgency; arrived_at; payload } in
+  let* () = validate_stimulus stimulus in
+  Ok stimulus
 
-let schema = "keeper.event_queue.v2"
+let schema = "keeper.event_queue.v3"
 
 let queue_to_yojson queue =
   `Assoc

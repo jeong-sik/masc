@@ -2306,12 +2306,11 @@ let light_runtime_resolution_json (config : Workspace.config) =
       @ fleet_fields )
 ;;
 
-(* 30-second TTL chosen to match the dashboard frontend's natural refresh
-   cadence (~3s polling × 10 = a fresh value at least every minute under
-   sustained load).  Tool inventory + usage stats rarely change inside a
-   30s window — the per-actor cache key isolates permission changes from
-   leaking across actors.  Schedule FSM projection is attached outside this
-   cache because due/pending state is operationally time-sensitive. *)
+(* The existing tools projection cache owns one coherent response generation:
+   inventory, usage, schedule, and Keeper waiting evidence all carry their
+   captured [generated_at]. The timestamp is data, not freshness authority, so
+   clients can display cache age without inventing a second store revision. The
+   per-actor key continues to isolate permission-dependent inventory. *)
 let dashboard_tools_cache_ttl_sec = 30.0
 
 let dashboard_tools_cache_key ~base_path ~actor =
@@ -2491,6 +2490,8 @@ let schedule_queue_read_error_dashboard_json
 type schedule_queue_snapshot_index =
   { pending_count : int
   ; inflight_count : int
+  ; source_generation :
+      Keeper_event_queue_persistence.snapshot_source_generation option
   ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
   ; matches :
       ( string
@@ -2560,6 +2561,7 @@ let schedule_queue_evidence_lookup observation executions =
           keeper_name
           { pending_count = Keeper_event_queue.length snapshot.pending
           ; inflight_count = Keeper_event_queue.length snapshot.inflight
+          ; source_generation = snapshot.source_generation
           ; read_errors = snapshot.read_errors
           ; matches
           })
@@ -2668,6 +2670,12 @@ let schedule_keeper_queue_evidence_dashboard_json
                ; "execution_payload_digest", `String payload_digest
                ; "pending_count", `Int snapshot.pending_count
                ; "inflight_count", `Int snapshot.inflight_count
+               ; ( "source_generation"
+                 , match snapshot.source_generation with
+                   | None -> `Null
+                   | Some generation ->
+                     Keeper_event_queue_persistence.snapshot_source_generation_to_yojson
+                       generation )
                ; "read_errors", `List read_errors
                ]
              in
@@ -3261,14 +3269,15 @@ let scheduled_automation_queue_keeper_names = function
 let scheduled_automation_dashboard_json_of_observation observation : Yojson.Safe.t =
   (* Read-only projection; the schedule store remains the status SSOT. *)
   let config = Server_keeper_waiting_inventory.workspace_config observation in
-  let now = Unix.gettimeofday () in
+  let now = Server_keeper_waiting_inventory.captured_at_unix observation in
   let signal_rows, signal_errors =
     schedule_signal_rows_and_errors config schedule_signal_projection_limit
   in
   let base_fields =
     [ "schema", `String "masc.dashboard.scheduled_automation.v1"
     ; "source", `String "schedule_store"
-    ; "generated_at", `String (Masc_domain.now_iso ())
+    ; "generated_at", `String (Server_keeper_waiting_inventory.generated_at observation)
+    ; "generated_at_unix", `Float now
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
     ; "signal_error_count", `Int (List.length signal_errors)
@@ -3287,9 +3296,13 @@ let scheduled_automation_dashboard_json_of_observation observation : Yojson.Safe
        @ [ "status", `String "unknown"
          ; "schedule_store_known", `Bool false
          ; "schedule_store_read_error", `String read_error
-         ; "request_count", `Null
-         ; "request_limit", `Int schedule_projection_request_limit
-         ; "truncated", `Bool false
+         ; ( "request_projection"
+           , `Assoc
+               [ "returned_count", `Int 0
+               ; "total_count", `Null
+               ; "limit", `Int schedule_projection_request_limit
+               ; "truncated", `Bool false
+               ] )
          ; "counts", `Null
          ; "payload_support", `Null
          ; "live_supported_non_terminal_evidence", `Null
@@ -3325,9 +3338,14 @@ let scheduled_automation_dashboard_json_of_observation observation : Yojson.Safe
        @ [ "status", `String "ok"
          ; "schedule_store_known", `Bool true
          ; "schedule_store_read_error", `Null
-         ; "request_count", `Int (List.length schedules)
-         ; "request_limit", `Int schedule_projection_request_limit
-         ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
+         ; ( "request_projection"
+           , `Assoc
+               [ "returned_count", `Int (List.length request_rows)
+               ; "total_count", `Int (List.length schedules)
+               ; "limit", `Int schedule_projection_request_limit
+               ; ( "truncated"
+                 , `Bool (List.length request_rows < List.length schedules) )
+               ] )
          ; "counts", schedule_counts_json schedules
          ; "payload_support", payload_support
          ; ( "live_supported_non_terminal_evidence"
@@ -3396,15 +3414,6 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Workspace.masc_root_dir config))
     in
-    `Assoc
-      [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "config_resolution", config_resolution
-      ; "runtime_resolution", runtime_resolution
-      ; "tool_inventory", inventory
-      ; "tool_usage", usage
-      ]
-  in
-  let attach_live_tools_projections json =
     let observation =
       run Tools_compute (fun () ->
         Server_keeper_waiting_inventory.capture_request_observation
@@ -3419,26 +3428,25 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       run Tools_compute (fun () ->
         Server_keeper_waiting_inventory.dashboard_json_of_observation observation)
     in
-    match json with
-    | `Assoc fields ->
-      `Assoc
-        (fields
-         @ [ "scheduled_automation", scheduled_automation
-           ; "keeper_waiting_inventory", keeper_waiting_inventory
-           ])
-    | other -> other
+    `Assoc
+      [ ( "generated_at"
+        , `String (Server_keeper_waiting_inventory.generated_at observation) )
+      ; "config_resolution", config_resolution
+      ; "runtime_resolution", runtime_resolution
+      ; "tool_inventory", inventory
+      ; "tool_usage", usage
+      ; "scheduled_automation", scheduled_automation
+      ; "keeper_waiting_inventory", keeper_waiting_inventory
+      ]
   in
-  let cached =
-    match timing with
-    | None ->
-      Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
-        compute
-    | Some t ->
-      Server_timing.measure t Cache_lookup (fun () ->
-        Dashboard_cache.get_or_compute cache_key
-          ~ttl:dashboard_tools_cache_ttl_sec compute)
-  in
-  attach_live_tools_projections cached
+  match timing with
+  | None ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
+      compute
+  | Some t ->
+    Server_timing.measure t Cache_lookup (fun () ->
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:dashboard_tools_cache_ttl_sec compute)
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

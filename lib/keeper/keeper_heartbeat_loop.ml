@@ -586,7 +586,10 @@ let run_keepalive_unified_turn
       in
       (match event_intake.event_queue_claim_error with
        | None -> ()
-       | Some message -> record_settlement_failure message);
+       | Some message ->
+         raise
+           (Event_queue_settlement_failed
+              ("event queue intake failed before prompt projection: " ^ message)));
       let pending_board_events = event_intake.pending_board_events in
       let obs =
         Keeper_world_observation.observe

@@ -1,4 +1,4 @@
-(** Typed reaction ledger backed solely by the per-Keeper SQLite v3 store.
+(** Typed reaction ledger backed solely by the per-Keeper SQLite v4 store.
 
     Retired file-based generations are outside the current authority. *)
 
@@ -32,9 +32,41 @@ type write_outcome = Keeper_reaction_store.write_outcome =
   | Inserted
   | Already_recorded
 
+type board_scan_integrity_error =
+  | Initial_scan_contains_stimuli
+  | Scan_target_precedes_expected of
+      { expected : cursor
+      ; target : cursor
+      }
+  | Scan_cursor_authority_disappeared of { expected : cursor }
+  | Scan_cursor_regressed of
+      { expected : cursor
+      ; current : cursor
+      }
+  | Scan_stimulus_not_board_signal of { post_id : string }
+  | Scan_stimulus_cursor_mismatch of
+      { scanned : cursor
+      ; stimulus : cursor
+      }
+  | Scan_stimulus_not_after_expected of
+      { expected : cursor
+      ; stimulus : cursor
+      }
+  | Scan_stimulus_after_target of
+      { target : cursor
+      ; stimulus : cursor
+      }
+  | Scan_stimuli_not_strictly_ordered of
+      { previous : cursor
+      ; current : cursor
+      }
+
 type ledger_error =
   | Store_error of Keeper_reaction_store.error
   | Invalid_turn_lease_sequence of int64
+  | Board_scan_integrity_error of board_scan_integrity_error
+  | Event_queue_coordination_lock_error of string
+  | Event_queue_stimulus_admission_error of string
   | Event_queue_outbox_read_error of string
   | Event_queue_outbox_invariant of { observed_count : int }
   | Event_queue_outbox_retire_error of string
@@ -76,13 +108,47 @@ val project_event_queue_transition_outbox_result :
 (** Reads the exact durable outbox entry, atomically stores its transition
     header and complete ordered source set, then retires that entry. *)
 
-val record_board_cursor_ack_result :
+val current_board_cursor_result :
+  base_path:string -> keeper_name:string -> (cursor option, ledger_error) result
+(** Read the sole durable Board cursor authority. [None] is an exact
+    uninitialized Keeper, including an absent reaction database. *)
+
+type board_scan_entry
+
+val make_board_scan_entry :
+  cursor:cursor ->
+  Keeper_event_queue.stimulus ->
+  (board_scan_entry, ledger_error) result
+(** Bind one typed [Board_signal] stimulus to its normalized Board cursor.
+    Missing or mismatched [updated_at]/post identity is an explicit integrity
+    error; callers cannot construct an unchecked scan entry. *)
+
+type board_scan_reconcile_outcome =
+  | Board_scan_cursor_advanced of
+      { suffix_stimulus_count : int
+      ; skipped_prefix_stimulus_count : int
+      }
+  | Board_scan_already_reconciled
+
+val reconcile_board_scan_result :
   base_path:string ->
   keeper_name:string ->
-  cursor_ts:float ->
-  post_id:string option ->
-  unit ->
-  (write_outcome, ledger_error) result
+  expected_cursor:cursor option ->
+  target_cursor:cursor ->
+  board_scan_entry list ->
+  (board_scan_reconcile_outcome, ledger_error) result
+(** Reconcile an ordered scan produced outside the coordination lock. Under
+    the lock the SQLite cursor is re-read: an unchanged cursor admits the full
+    scan; an advanced cursor admits only entries strictly after it; a cursor at
+    or beyond the target is an exact no-op; disappearance/regression fails
+    explicitly. Queue admission still commits before the target cursor ACK.
+
+    [expected_cursor = None] is initialization CAS and entries are forbidden:
+    the caller's atomically observed Board head is installed only if the
+    cursor remains uninitialized. A concurrent initializer wins without
+    replaying history. Board activity admitted after that head snapshot is not
+    part of initialization and remains strictly after the installed head for
+    the next scan. *)
 
 type event_queue_latest_reaction =
   | Latest_turn_started of
@@ -172,3 +238,11 @@ val fleet_summary_json :
   Yojson.Safe.t
 
 val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
+
+module For_testing : sig
+  val with_after_board_stimuli_admitted_before_cursor_ack_hook :
+    (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Deterministic crash/race barrier after the durable queue commit and
+      before the SQLite cursor ACK. The previous hook is restored even when
+      the test body raises. *)
+end

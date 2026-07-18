@@ -1,7 +1,6 @@
 type lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason =
   | Cycle_busy
@@ -145,18 +144,6 @@ let append_missing stimuli queue =
     stimuli
 ;;
 
-let remove_stimuli queue stimuli =
-  let should_remove stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.filter (fun stimulus -> not (should_remove stimulus))
-  |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
-;;
-
 let lease_id_of_sequence sequence = Printf.sprintf "lease:%Ld" sequence
 
 let make_lease ~kind ~claimed_at stimuli state =
@@ -211,25 +198,14 @@ let claim_board ~claimed_at state =
     make_lease ~kind:Board_batch ~claimed_at:(Some claimed_at) stimuli { state with pending })
 ;;
 
-let add_legacy_inflight stimuli state =
-  if lease_admission_blocked state
-  then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
-  else (
-    let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
-    let pending = remove_stimuli state.pending stimuli in
-    make_lease ~kind:Legacy_inflight ~claimed_at:None stimuli { state with pending })
-;;
-
 let lease_kind_label = function
   | Single -> "single"
   | Board_batch -> "board_batch"
-  | Legacy_inflight -> "legacy_inflight"
 ;;
 
 let lease_kind_of_label = function
   | "single" -> Ok Single
   | "board_batch" -> Ok Board_batch
-  | "legacy_inflight" -> Ok Legacy_inflight
   | label -> Error (Printf.sprintf "unknown event queue lease kind: %s" label)
 ;;
 
@@ -614,24 +590,6 @@ let remove_by_post_id post_id state =
   , { state with pending; leases } )
 ;;
 
-let release_legacy_inflight stimuli state =
-  let should_release stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  let leases =
-    List.filter_map
-      (fun (lease : lease) ->
-         let remaining = List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli in
-         match remaining with
-         | [] -> None
-         | _ :: _ -> Some { lease with stimuli = remaining })
-      state.leases
-  in
-  { state with leases }
-;;
-
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
   | _ -> Error (context ^ " must be a JSON object")
@@ -909,6 +867,69 @@ let duplicate_by key values =
   loop [] values
 ;;
 
+let validate_stimuli ~context stimuli =
+  let rec loop index = function
+    | [] -> Ok ()
+    | stimulus :: rest ->
+      (match Keeper_event_queue.validate_stimulus stimulus with
+       | Ok () -> loop (index + 1) rest
+       | Error detail ->
+         Error (Printf.sprintf "%s[%d] is invalid: %s" context index detail))
+  in
+  loop 0 stimuli
+;;
+
+let validate_receipt_stimuli ~context (receipt : transition_receipt) =
+  if not (Float.is_finite receipt.settled_at)
+  then Error (context ^ ".settled_at must be finite")
+  else
+    match validate_settlement receipt.settlement with
+    | Error detail -> Error (context ^ ".settlement is invalid: " ^ detail)
+    | Ok () ->
+      (match receipt.settlement with
+       | Ack | Requeue _ -> Ok ()
+       | Escalate { successor = None; _ } -> Ok ()
+       | Escalate { successor = Some successor; _ } ->
+         (match Keeper_event_queue.validate_stimulus successor with
+          | Ok () -> Ok ()
+          | Error detail -> Error (context ^ ".successor is invalid: " ^ detail)))
+;;
+
+let validate_state_values state =
+  let* () =
+    validate_stimuli
+      ~context:"event queue pending stimulus"
+      (Keeper_event_queue.to_list state.pending)
+  in
+  let rec validate_leases index = function
+    | [] -> Ok ()
+    | (lease : lease) :: rest ->
+      let context = Printf.sprintf "event queue lease[%d]" index in
+      (match lease.claimed_at with
+       | Some claimed_at when not (Float.is_finite claimed_at) ->
+         Error (context ^ ".claimed_at must be finite")
+       | None | Some _ ->
+         let* () = validate_stimuli ~context:(context ^ ".stimulus") lease.stimuli in
+         validate_leases (index + 1) rest)
+  in
+  let* () = validate_leases 0 state.leases in
+  let* () =
+    match state.last_settlement with
+    | None -> Ok ()
+    | Some receipt ->
+      validate_receipt_stimuli ~context:"event queue last settlement" receipt
+  in
+  let rec validate_outbox index = function
+    | [] -> Ok ()
+    | (entry : outbox_entry) :: rest ->
+      let context = Printf.sprintf "event queue outbox[%d]" index in
+      let* () = validate_receipt_stimuli ~context:(context ^ ".receipt") entry.receipt in
+      let* () = validate_stimuli ~context:(context ^ ".stimulus") entry.stimuli in
+      validate_outbox (index + 1) rest
+  in
+  validate_outbox 0 state.transition_outbox
+;;
+
 let validate_state state =
   if Int64.compare state.revision 0L < 0
   then Error "event queue revision must not be negative"
@@ -959,8 +980,12 @@ let validate_state state =
          then
            Error
              "event queue next lease sequence must exceed every lease and receipt sequence"
-         else Ok state)
+         else
+           let* () = validate_state_values state in
+           Ok state)
 ;;
+
+let validate state = validate_state state |> Result.map (fun _ -> ())
 
 let of_yojson json =
   let context = "keeper event queue state" in

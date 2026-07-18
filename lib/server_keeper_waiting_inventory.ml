@@ -59,8 +59,12 @@ type request_observation =
   { config : Workspace.config
   ; schedule_state_result : (Schedule_store.state, Schedule_store.read_error) result
   ; keeper_names_result : (string list, string) result
+  ; event_queue_snapshot_discovery :
+      Keeper_event_queue_persistence.snapshot_discovery
   ; event_queue_snapshots :
-      Keeper_event_queue_persistence.snapshot_pair_with_errors Keeper_name_map.t
+      Keeper_event_queue_persistence.snapshot_observation Keeper_name_map.t
+  ; captured_at_unix : float
+  ; generated_at : string
   }
 
 let capture_request_observation
@@ -69,20 +73,26 @@ let capture_request_observation
   =
   let schedule_state_result = Schedule_store.read_state_result config in
   let keeper_names_result = Keeper_meta_store.keeper_names_result config in
+  let event_queue_snapshot_discovery =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+      ~base_path:config.Workspace.base_path
+  in
   let metadata_keeper_names =
     match keeper_names_result with
     | Ok names -> names
     | Error _ -> []
   in
   let queue_keeper_names =
-    metadata_keeper_names @ additional_queue_keeper_names schedule_state_result
+    metadata_keeper_names
+    @ event_queue_snapshot_discovery.keeper_names
+    @ additional_queue_keeper_names schedule_state_result
     |> List.sort_uniq String.compare
   in
   let event_queue_snapshots =
     List.fold_left
       (fun snapshots keeper_name ->
          let snapshot =
-           Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+           Keeper_event_queue_persistence.observe_snapshot
              ~base_path:config.Workspace.base_path
              ~keeper_name
          in
@@ -90,11 +100,21 @@ let capture_request_observation
       Keeper_name_map.empty
       queue_keeper_names
   in
-  { config; schedule_state_result; keeper_names_result; event_queue_snapshots }
+  let captured_at_unix = Time_compat.now () in
+  { config
+  ; schedule_state_result
+  ; keeper_names_result
+  ; event_queue_snapshot_discovery
+  ; event_queue_snapshots
+  ; captured_at_unix
+  ; generated_at = Masc_domain.iso8601_of_unix_seconds captured_at_unix
+  }
 ;;
 
 let workspace_config observation = observation.config
 let schedule_state_result observation = observation.schedule_state_result
+let captured_at_unix observation = observation.captured_at_unix
+let generated_at observation = observation.generated_at
 
 let event_queue_snapshot observation ~keeper_name =
   Keeper_name_map.find_opt keeper_name observation.event_queue_snapshots
@@ -250,6 +270,23 @@ let queue_read_error_detail (error : Keeper_event_queue_persistence.snapshot_rea
              error.kind) )
     ; "path", Json_util.string_opt_to_json error.path
     ; "message", `String error.message
+    ]
+;;
+
+let queue_observation_json keeper_name
+  (snapshot : Keeper_event_queue_persistence.snapshot_observation)
+  =
+  `Assoc
+    [ "keeper_name", `String keeper_name
+    ; ( "source_generation"
+      , match snapshot.source_generation with
+        | None -> `Null
+        | Some generation ->
+          Keeper_event_queue_persistence.snapshot_source_generation_to_yojson
+            generation )
+    ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
+    ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
+    ; "read_errors", `List (List.map queue_read_error_detail snapshot.read_errors)
     ]
 ;;
 
@@ -772,15 +809,35 @@ let pending_confirms_or_error_rows config =
 ;;
 
 let keeper_names_or_error_rows observation =
-  match observation.keeper_names_result with
-  | Ok keeper_names -> keeper_names, []
-  | Error err ->
-    ( []
-    , [ read_error_row
-          ~waiting_on:"keeper_meta_store"
-          ~next_action:"repair_keeper_meta_store"
-          (`Assoc [ "error", `String err ])
-      ] )
+  let metadata_keeper_names, metadata_error_rows =
+    match observation.keeper_names_result with
+    | Ok keeper_names -> keeper_names, []
+    | Error err ->
+      ( []
+      , [ read_error_row
+            ~waiting_on:"keeper_meta_store"
+            ~next_action:"repair_keeper_meta_store"
+            (`Assoc [ "error", `String err ])
+        ] )
+  in
+  let snapshot_discovery_error_rows =
+    match observation.event_queue_snapshot_discovery.read_error with
+    | None -> []
+    | Some error ->
+      [ read_error_row
+          ~waiting_on:"event_queue_snapshot_discovery"
+          ~next_action:"inspect_event_queue_snapshot_inventory"
+          (`Assoc
+            [ "kind", `String "snapshot_discovery_failed"
+            ; "error", `String error
+            ])
+      ]
+  in
+  ( List.sort_uniq
+      String.compare
+      (metadata_keeper_names
+       @ observation.event_queue_snapshot_discovery.keeper_names)
+  , metadata_error_rows @ snapshot_discovery_error_rows )
 ;;
 
 let row_state rows =
@@ -980,7 +1037,7 @@ let global_rows_from rows =
 
 let dashboard_json_of_observation observation =
   let config = observation.config in
-  let now = Time_compat.now () in
+  let now = observation.captured_at_unix in
   let keeper_names, keeper_name_read_error_rows =
     keeper_names_or_error_rows observation
   in
@@ -1022,6 +1079,12 @@ let dashboard_json_of_observation observation =
             if external_attention_truncated then count + 1 else count)
          0
   in
+  let event_queue_observations =
+    observation.event_queue_snapshots
+    |> Keeper_name_map.bindings
+    |> List.map (fun (keeper_name, snapshot) ->
+      queue_observation_json keeper_name snapshot)
+  in
   let waiting_keeper_count =
     per_keeper
     |> List.fold_left
@@ -1035,7 +1098,8 @@ let dashboard_json_of_observation observation =
   `Assoc
     [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v2"
     ; "source", `String "server_keeper_waiting_inventory"
-    ; "generated_at", `String (Masc_domain.now_iso ())
+    ; "generated_at", `String observation.generated_at
+    ; "generated_at_unix", `Float observation.captured_at_unix
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])
     ; "keeper_count_known", `Bool (List.length keeper_name_read_error_rows = 0)
     ; "keeper_count", `Int (List.length keeper_names)
@@ -1049,6 +1113,8 @@ let dashboard_json_of_observation observation =
     ; ( "global_pending_confirm_count_known"
       , `Bool (List.length pending_confirm_read_error_rows = 0) )
     ; "global_pending_confirm_count", `Int (global_pending_confirm_count keeper_names pending_confirms)
+    ; "event_queue_observation_count", `Int (List.length event_queue_observations)
+    ; "event_queue_observations", `List event_queue_observations
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
     ; "keepers", `List keeper_json_rows
     ; "global_waiting_on", `List (List.map waiting_row_json global_rows)

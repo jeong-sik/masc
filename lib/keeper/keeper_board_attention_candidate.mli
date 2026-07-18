@@ -55,6 +55,11 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
+      (** Immutable producer occurrence used for candidate identity and judge
+          evidence; it is never consulted by queue intake. *)
+  ; delivery_signal : Keeper_event_queue.board_stimulus
+      (** Complete Keeper-specific prompt snapshot materialized with the same
+          Board evidence set. Once admitted, this is the sole intake authority. *)
   ; judgment_request : Yojson.Safe.t
   ; recorded_at : float
   ; status : status

@@ -195,10 +195,19 @@ let test_event_queue_pending_and_inflight_are_visible () =
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
-    (queue_of_list [ pending ]);
-  Keeper_event_queue_persistence.record_inflight
-    ~base_path:config.Workspace_utils_backend_setup.base_path
-    ~keeper_name [ inflight ];
+    (queue_of_list [ pending; inflight ]);
+  (match
+     Keeper_event_queue_persistence.claim_when_result
+       ~base_path:config.Workspace_utils_backend_setup.base_path
+       ~keeper_name
+       ~claimed_at:120.0
+       ~ready:(fun candidate ->
+         Keeper_event_queue.stimulus_identity_equal candidate inflight)
+       ()
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "waiting inventory fixture did not create an active lease"
+   | Error error -> fail ("waiting inventory fixture claim failed: " ^ error));
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "event pending metric"
     Otel_metric_store.metric_keeper_waiting_count
@@ -298,6 +307,40 @@ let test_request_observation_freezes_shared_store_revisions () =
   let fresh_json = Server_keeper_waiting_inventory.dashboard_json config in
   check int "fresh observation sees the later schedule and replacement queue" 3
     (json_int_member "row_count" fresh_json)
+;;
+
+let test_snapshot_only_unregistered_keeper_is_visible () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "snapshot-only-unregistered" in
+  let pending =
+    stimulus ~post_id:"durable-without-meta" ~arrived_at:125.0
+      Keeper_event_queue.Bootstrap
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list [ pending ]);
+  (match Keeper_meta_store.read_meta config keeper_name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "snapshot-only fixture unexpectedly has Keeper metadata"
+   | Error error -> fail ("Keeper metadata read failed: " ^ error));
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check bool "Keeper count remains complete" true
+    (json_bool_member "keeper_count_known" json);
+  check int "snapshot-only Keeper is counted" 1
+    (json_int_member "keeper_count" json);
+  match find_keeper json keeper_name with
+  | None -> fail "snapshot-only durable Keeper lane is missing"
+  | Some keeper ->
+    check string "snapshot-only Keeper is waiting" "waiting"
+      (json_string_member "state" keeper);
+    check int "snapshot-only Keeper has one durable row" 1
+      (json_int_member "waiting_count" keeper);
+    check int "snapshot-only row comes from durable pending queue" 1
+      U.(
+        keeper |> member "sources" |> member "event_queue_pending"
+        |> to_int)
 ;;
 
 let test_manual_compaction_waiting_row_has_typed_producer () =
@@ -763,6 +806,154 @@ let save_text path text =
   | Error err -> fail ("save_file_atomic failed: " ^ err)
 ;;
 
+let read_text_exn path =
+  match Safe_ops.read_file_safe path with
+  | Ok bytes -> bytes
+  | Error error -> fail ("read_file_safe failed: " ^ error)
+;;
+
+let test_queue_observation_replays_wal_without_mutating_files () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "read-only-queue-observation" in
+  ensure_keeper config keeper_name;
+  let base_path = config.Workspace_utils_backend_setup.base_path in
+  let queued =
+    stimulus
+      ~post_id:"settled-only-in-wal"
+      ~arrived_at:100.0
+      Keeper_event_queue.Bootstrap
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path
+    ~keeper_name
+    (queue_of_list [ queued ]);
+  let lease =
+    match
+      Keeper_event_queue_persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:110.0
+        ~ready:(fun _ -> true)
+        ()
+    with
+    | Ok (Some lease) -> lease
+    | Ok None -> fail "queue observation fixture did not claim its stimulus"
+    | Error error -> fail ("queue observation fixture claim failed: " ^ error)
+  in
+  let snapshot_state =
+    match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error error -> fail ("queue observation fixture state read failed: " ^ error)
+  in
+  let receipt =
+    match
+      Keeper_event_queue_state.settle
+        ~settled_at:120.0
+        ~lease
+        ~settlement:Keeper_event_queue_state.Ack
+        snapshot_state
+    with
+    | Ok (_state, Keeper_event_queue_state.Settled receipt) -> receipt
+    | Ok (_state, Keeper_event_queue_state.Already_settled _) ->
+      fail "queue observation fixture settlement was already applied"
+    | Error error -> fail ("queue observation fixture settlement failed: " ^ error)
+  in
+  let canonical_base_path =
+    match Config_dir_resolver.canonical_base_path base_path with
+    | Ok path -> path
+    | Error error ->
+      fail
+        ("queue observation fixture base path failed: "
+         ^ Config_dir_resolver.canonical_base_path_error_to_string error)
+  in
+  let runtime_dir =
+    Filename.concat
+      (Common.keepers_runtime_dir_of_base ~base_path:canonical_base_path)
+      keeper_name
+  in
+  let snapshot_path = Filename.concat runtime_dir "event-queue.json" in
+  let wal_path = Filename.concat runtime_dir "event-queue-settlements.jsonl" in
+  let wal_bytes =
+    `Assoc
+      [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+      ; "base_path", `String canonical_base_path
+      ; "keeper_name", `String keeper_name
+      ; ( "receipt"
+        , Keeper_event_queue_state.transition_receipt_to_yojson receipt )
+      ]
+    |> Yojson.Safe.to_string
+    |> fun row -> row ^ "\n"
+  in
+  save_text wal_path wal_bytes;
+  let snapshot_before = read_text_exn snapshot_path in
+  let wal_before = read_text_exn wal_path in
+  let observation =
+    Server_keeper_waiting_inventory.capture_request_observation config
+  in
+  let first, second =
+    match
+      ( Server_keeper_waiting_inventory.event_queue_snapshot
+          observation
+          ~keeper_name
+      , Server_keeper_waiting_inventory.event_queue_snapshot
+          observation
+          ~keeper_name )
+    with
+    | Some first, Some second -> first, second
+    | None, _ | _, None -> fail "captured queue observation is missing"
+  in
+  check bool "same request shares one immutable queue observation" true (first == second);
+  check int "WAL ACK removes the captured active lease in memory" 0
+    (Keeper_event_queue.length first.inflight);
+  check int "WAL ACK does not restore a pending stimulus" 0
+    (Keeper_event_queue.length first.pending);
+  check int "read-only observation has no read errors" 0
+    (List.length first.read_errors);
+  let generation =
+    match first.source_generation with
+    | Some generation -> generation
+    | None -> fail "read-only observation omitted its source generation"
+  in
+  check int64 "snapshot revision evidence"
+    (Keeper_event_queue_state.revision snapshot_state)
+    generation.snapshot_revision;
+  check int64 "logical revision includes the committed WAL"
+    (Int64.succ generation.snapshot_revision)
+    generation.observed_revision;
+  check int "one committed WAL row was replayed" 1
+    generation.settlement_wal_row_count;
+  check int "WAL byte boundary is exact" (String.length wal_before)
+    generation.settlement_wal_end_offset;
+  let json =
+    Server_keeper_waiting_inventory.dashboard_json_of_observation observation
+  in
+  check string "projection keeps the captured generated_at"
+    (Server_keeper_waiting_inventory.generated_at observation)
+    (json_string_member "generated_at" json);
+  let queue_evidence =
+    match
+      U.(json |> member "event_queue_observations" |> to_list)
+      |> List.find_opt (fun row ->
+        String.equal keeper_name (json_string_member "keeper_name" row))
+    with
+    | Some row -> row
+    | None -> fail "projected queue generation evidence is missing"
+  in
+  check string "projected snapshot revision remains lossless"
+    (Int64.to_string generation.snapshot_revision)
+    U.(queue_evidence |> member "source_generation" |> member "snapshot_revision" |> to_string);
+  check string "projected observed revision remains lossless"
+    (Int64.to_string generation.observed_revision)
+    U.(queue_evidence |> member "source_generation" |> member "observed_revision" |> to_string);
+  check string "dashboard observation leaves snapshot bytes unchanged"
+    snapshot_before
+    (read_text_exn snapshot_path);
+  check string "dashboard observation leaves WAL bytes unchanged"
+    wal_before
+    (read_text_exn wal_path)
+;;
+
 let test_corrupt_chat_queue_snapshot_is_read_error () =
   with_workspace
   @@ fun config ->
@@ -848,26 +1039,40 @@ let test_keeper_name_discovery_failure_is_read_error () =
   rm_rf keeper_dir;
   save_text keeper_dir "not-a-directory";
   let json = Server_keeper_waiting_inventory.dashboard_json config in
-  check_metric_float "global keeper-name read error metric"
+  check_metric_float "global Keeper inventory read error metric"
     Otel_metric_store.metric_keeper_waiting_count
     ~labels:[ "scope", "global"; "source", "read_error" ]
-    1.0;
+    2.0;
   check bool "keeper count unknown" false
     (json_bool_member "keeper_count_known" json);
   check int "keeper count stays compatibility zero" 0
     (json_int_member "keeper_count" json);
-  check int "global read error row" 1 (json_int_member "global_row_count" json);
-  match U.(json |> member "global_waiting_on" |> to_list) with
-  | [ row ] ->
-    check string "source" "read_error" (json_string_member "source" row);
-    check string "waiting_on" "keeper_meta_store"
-      (json_string_member "waiting_on" row);
-    check string "wake producer" "read_model_reader"
-      (json_string_member "wake_producer" row);
-    check string "next action" "repair_keeper_meta_store"
-      (json_string_member "next_action" row)
-  | [] -> fail "expected one global waiting row, got none"
-  | _first :: _second :: _rest -> fail "expected one global waiting row, got multiple"
+  check int "both discovery failures are explicit" 2
+    (json_int_member "global_row_count" json);
+  let rows = U.(json |> member "global_waiting_on" |> to_list) in
+  let row waiting_on =
+    match
+      List.find_opt
+        (fun row ->
+           String.equal waiting_on (json_string_member "waiting_on" row))
+        rows
+    with
+    | Some row -> row
+    | None -> fail ("missing global read error: " ^ waiting_on)
+  in
+  let metadata_row = row "keeper_meta_store" in
+  check string "metadata wake producer" "read_model_reader"
+    (json_string_member "wake_producer" metadata_row);
+  check string "metadata repair action" "repair_keeper_meta_store"
+    (json_string_member "next_action" metadata_row);
+  let snapshot_row = row "event_queue_snapshot_discovery" in
+  check string "snapshot discovery wake producer" "read_model_reader"
+    (json_string_member "wake_producer" snapshot_row);
+  check string "snapshot discovery action"
+    "inspect_event_queue_snapshot_inventory"
+    (json_string_member "next_action" snapshot_row);
+  check string "snapshot discovery error is typed" "snapshot_discovery_failed"
+    U.(snapshot_row |> member "detail" |> member "kind" |> to_string)
 ;;
 
 let test_corrupt_external_attention_is_read_error () =
@@ -1038,6 +1243,10 @@ let () =
             test_event_queue_pending_and_inflight_are_visible
         ; test_case "request observation freezes shared store revisions" `Quick
             test_request_observation_freezes_shared_store_revisions
+        ; test_case "snapshot-only unregistered Keeper is visible" `Quick
+            test_snapshot_only_unregistered_keeper_is_visible
+        ; test_case "queue observation replays WAL without file mutation" `Quick
+            test_queue_observation_replays_wal_without_mutating_files
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "chat queue pending rows are visible" `Quick

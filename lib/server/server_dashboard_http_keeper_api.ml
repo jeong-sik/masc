@@ -2123,7 +2123,7 @@ let handle_keeper_get_subroutes state req request reqd =
   else if req_path = prefix ^ "composite" then
     (* LT-16a: fleet-wide composite snapshot. Enumerates every
        registered keeper via [Keeper_registry.all] and projects each
-       through [Keeper_composite_observer.observe]. Same purity
+       through [Keeper_composite_observer.observe]. Same read-only
        contract as the per-keeper route below.
 
        Shape:
@@ -2140,8 +2140,9 @@ let handle_keeper_get_subroutes state req request reqd =
     Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/composite" then
     (* RFC-0003 §7: composite lifecycle snapshot derived from the
-       registry entry via the [Keeper_composite_observer] pure
-       projection. No mutation, no I/O, no provider/token access. *)
+       registry entry and the SQLite Board cursor authority via the
+       [Keeper_composite_observer] read-only projection. No mutation,
+       event emission, or provider/token access. *)
     let name = extract_name "/composite" in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"

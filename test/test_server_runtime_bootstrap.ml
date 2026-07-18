@@ -1343,8 +1343,17 @@ let test_health_json_surfaces_durable_paused_keepers () =
                   ; author = ""
                   ; title = ""
                   ; content = ""
+                  ; preview = ""
                   ; hearth = None
-                  ; updated_at = None
+                  ; post_kind = Keeper_event_queue.Human_post
+                  ; updated_at = 1234.5
+                  ; explicit_mention = false
+                  ; matched_targets = []
+                  ; thread_snapshot =
+                      { self_commented = false
+                      ; new_external_since = 0
+                      ; latest_external = None
+                      }
                   }
             }
           in
@@ -3082,8 +3091,17 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
                 ; author = ""
                 ; title = ""
                 ; content = ""
+                ; preview = ""
                 ; hearth = None
-                ; updated_at = Some updated_at
+                ; post_kind = Keeper_event_queue.Human_post
+                ; updated_at
+                ; explicit_mention = false
+                ; matched_targets = []
+                ; thread_snapshot =
+                    { self_commented = false
+                    ; new_external_since = 0
+                    ; latest_external = None
+                    }
                 }
           }
         in
@@ -3095,13 +3113,20 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
                stimulus
              |> require_reaction_ledger_write "record cursor-swept stimulus")
           [ stimulus "health-post-1" 10.0; stimulus "health-post-2" 20.0 ];
-        Keeper_reaction_ledger.record_board_cursor_ack_result
-          ~base_path:dir
-          ~keeper_name:"cursor-swept"
-          ~cursor_ts:20.0
-          ~post_id:(Some "health-post-2")
-          ()
-        |> require_reaction_ledger_write "record cursor-swept cursor ack";
+        (match
+           Keeper_reaction_ledger.reconcile_board_scan_result
+             ~base_path:dir
+             ~keeper_name:"cursor-swept"
+             ~expected_cursor:None
+             ~target_cursor:{ cursor_ts = 20.0; post_id = Some "health-post-2" }
+             []
+         with
+         | Ok (Keeper_reaction_ledger.Board_scan_cursor_advanced _)
+         | Ok Keeper_reaction_ledger.Board_scan_already_reconciled -> ()
+         | Error error ->
+           Alcotest.fail
+             ("record cursor-swept cursor ack: "
+              ^ Keeper_reaction_ledger.ledger_error_to_string error));
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in

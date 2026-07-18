@@ -258,6 +258,13 @@ type enqueue_stimulus_durable_result =
   | Stimulus_already_present of Keeper_event_queue.stimulus
   | Stimulus_storage_error of string
 
+let with_reaction_coordination_lock_result ~base_path ~keeper_name f =
+  Keeper_event_queue_persistence.with_reaction_coordination_lock_result
+    ~base_path
+    ~keeper_name
+    f
+;;
+
 let enqueue_stimulus_durable_result ~base_path name stimulus =
   match
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
@@ -271,6 +278,21 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Ok (Keeper_event_queue_persistence.Already_present committed) ->
     Stimulus_already_present committed
   | Error detail -> Stimulus_storage_error detail
+;;
+
+let enqueue_stimuli_durable_result ~base_path ~keeper_name stimuli =
+  Keeper_event_queue_persistence.enqueue_stimuli_if_absent_result
+    ~base_path
+    ~keeper_name
+    ~after_commit:(publish_pending ~base_path keeper_name)
+    stimuli
+  |> Result.map (fun outcomes ->
+    List.map
+      (function
+        | Keeper_event_queue_persistence.Enqueued committed
+        | Keeper_event_queue_persistence.Already_present committed ->
+          committed)
+      outcomes)
 ;;
 
 let enqueue_hitl_resolution_durable_result

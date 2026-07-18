@@ -46,21 +46,64 @@ and board_reaction_change = {
   reacted : bool;
 }
 
+and board_post_kind =
+  | Human_post
+  | Automation_post
+  | System_post
+
+and board_latest_external = {
+  latest_author : string;
+  latest_preview : string;
+}
+
+and board_thread_snapshot = {
+  self_commented : bool;
+  new_external_since : int;
+  latest_external : board_latest_external option;
+}
+
 type board_stimulus = {
   kind : board_stimulus_kind;
   author : string;
   title : string;
   content : string;
+  preview : string;
   hearth : string option;
-  updated_at : float option;
+  post_kind : board_post_kind;
+  updated_at : float;
+  explicit_mention : bool;
+  matched_targets : string list;
+  thread_snapshot : board_thread_snapshot;
 }
 (** Typed board-signal payload carried end-to-end (RFC-0020).
 
     This is a [keeper_runtime]-owned boundary DTO. The queue is a low-level
     data module and must not depend on the [board] domain library, so the
-    keeper layer converts to/from [Board_dispatch.board_signal] at the
-    enqueue and drain boundaries. The board post id is not duplicated here:
-    it is the enclosing [stimulus.post_id]. *)
+    keeper layer materializes the complete immutable prompt projection before
+    enqueue and converts it without re-reading the mutable Board at intake.
+    [content] retains the exact signal text used for deterministic mention
+    matching, while [preview], [post_kind], [updated_at], and
+    [thread_snapshot] are the admitted rendering snapshot. The board post id
+    is not duplicated here: it is the enclosing [stimulus.post_id]. *)
+
+type board_stimulus_error =
+  | Non_finite_board_updated_at of float
+  | Negative_new_external_since of int
+  | Missing_latest_external of int
+  | Explicit_mention_without_targets
+  | Matched_targets_without_explicit_mention of string list
+
+val validate_board_stimulus : board_stimulus -> (unit, board_stimulus_error) result
+(** Validate the closed Board delivery snapshot before durable admission or
+    prompt projection. A positive external-comment count requires exact latest
+    comment evidence; no sentinel author/preview is accepted. *)
+
+val board_stimulus_error_to_string : board_stimulus_error -> string
+
+val board_stimulus_to_yojson : board_stimulus -> Yojson.Safe.t
+val board_stimulus_of_yojson : Yojson.Safe.t -> (board_stimulus, string) result
+(** Exact hard-cut v3 codec for embedding one Board delivery snapshot in other
+    MASC-owned durable records. *)
 
 type stimulus_payload =
   | Board_signal of board_stimulus
@@ -245,12 +288,31 @@ val enqueue : t -> stimulus -> t
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. *)
+    not create an unbounded backlog of otherwise identical stimuli.
+
+    Equality and {!stimulus_identity_id} share one closed projection.
+    It preserves typed JSON constructors and association order, treats signed
+    zeroes as equal, and rejects non-finite numbers. This convenience function
+    raises [Invalid_argument] for an invalid stimulus; production ingress
+    should use {!validate_stimulus} or {!stimulus_identity_equal_result}. *)
+
+val stimulus_identity_equal_result :
+  stimulus -> stimulus -> (bool, string) result
+(** Typed identity comparison. A non-finite identity field is an explicit
+    [Error], never a distinct replay identity. *)
 
 val stimulus_identity_id : stimulus -> string
-(** Collision-resistant identifier of the exact closed identity projection
-    used by {!stimulus_identity_equal}. Consumers must not independently
-    reconstruct durable queue identity. *)
+(** Versioned collision-resistant identifier of the exact closed identity
+    projection used by {!stimulus_identity_equal}. Consumers must not
+    independently reconstruct durable queue identity. Raises
+    [Invalid_argument] for invalid in-memory stimuli. *)
+
+val stimulus_identity_id_result : stimulus -> (string, string) result
+(** Typed identifier construction for production boundaries. *)
+
+val validate_stimulus : stimulus -> (unit, string) result
+(** Reject non-finite arrival and identity floats, including nested edited
+    HITL JSON, before the value enters durable queue state. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)

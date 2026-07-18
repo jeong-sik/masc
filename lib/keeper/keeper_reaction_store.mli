@@ -147,6 +147,14 @@ type exact_summary =
   ; latest_stimulus_id : string option
   }
 
+type read_observation =
+  { cursor : cursor option
+  ; exact_summary : exact_summary
+  }
+(** One transactionally consistent read of the two materialized observation
+    authorities. The retained read capability is not a value cache: both
+    fields are selected from SQLite for every call. *)
+
 type path_operation =
   | Inspect_parent
   | Prepare_parent
@@ -219,6 +227,16 @@ type discovery =
 
 val error_to_string : error -> string
 
+val normalize_cursor : cursor -> (cursor, error) result
+(** Canonicalize the timestamp to the SQLite microsecond representation used
+    by cursor identity, storage, and ordering. *)
+
+val compare_normalized_cursor : cursor -> cursor -> int
+(** Total ordering used by the SQLite cursor projection: timestamp first, then
+    [None < Some post_id], then bytewise post id. Both arguments must already
+    have passed {!normalize_cursor}. This is the single comparison authority
+    for Board scan and reconciliation code. *)
+
 val cursor_identity_id : cursor -> (string, error) result
 (** Collision-resistant identity of the normalized cursor token. *)
 
@@ -253,6 +271,24 @@ val append_events_and_transition :
 (** Atomically records prerequisite root events and the complete settlement
     transition. No partial causal projection is externally observable. *)
 
+val read_observation :
+  base_path:string ->
+  keeper_name:string ->
+  pending_id_display_limit:int ->
+  (read_observation, error) result
+(** Read cursor and exact summary in one SQLite read transaction. A validated
+    connection capability may be retained between calls, but never a cursor,
+    count, or pending identity. Every use validates exact file identity,
+    application/user/store/Keeper metadata, and SQLite [schema_version]. A
+    changed capability is closed and strictly reopened with full schema-object
+    validation before any value is returned. *)
+
+val current_cursor :
+  base_path:string -> keeper_name:string -> (cursor option, error) result
+(** Read the singleton Board cursor projection in one SQLite read
+    transaction. [None] means that this Keeper has never committed a cursor;
+    an absent database has the same exact empty meaning. *)
+
 val events_for_stimuli :
   base_path:string ->
   keeper_name:string ->
@@ -286,9 +322,25 @@ val exact_summary :
     row plus an indexed, bounded pending identity sample; the limit never caps
     counts or status inputs. *)
 
+val release_read_capability :
+  base_path:string -> keeper_name:string -> (unit, error) result
+(** Close and remove the retained read capability for one Keeper lifecycle.
+    A later observation performs a fresh strict open. No timeout or arbitrary
+    pool-size eviction participates in this boundary. *)
+
 val database_path : base_path:string -> keeper_name:string -> (string, error) result
 (** Exposed for operator diagnostics and focused corruption tests only. *)
 
 val discover_keeper_names : base_path:string -> discovery
 (** Discovers every valid Keeper with a current SQLite reaction authority.
     Unsafe entries are explicit errors and do not hide healthy sibling lanes. *)
+
+module For_testing : sig
+  val full_schema_validation_count : unit -> int
+  (** Number of exact [sqlite_schema] object-list validations performed by
+      this process. This is a typed performance seam, not production state. *)
+
+  val close_read_capabilities : unit -> (unit, error list) result
+  (** Close and remove every retained read capability. Any close failure is
+      returned explicitly. Tests should call this only while no read is live. *)
+end

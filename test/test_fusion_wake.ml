@@ -292,7 +292,7 @@ let test_fusion_completion_is_actionable () =
   | Error unavailable ->
     fail
       ("Fusion_completed stimulus must not hit a board read: "
-       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+       ^ Keeper_event_queue.board_stimulus_error_to_string unavailable)
 ;;
 
 (* RFC-0290: a completed background job follows the same non-empty delivery
@@ -341,7 +341,7 @@ let test_bg_completion_is_actionable () =
   | Error unavailable ->
     fail
       ("Bg_completed stimulus must not hit a board read: "
-       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+       ^ Keeper_event_queue.board_stimulus_error_to_string unavailable)
 ;;
 
 let test_bg_failure_missing_board_post_id_fallback () =
@@ -396,7 +396,7 @@ let test_scheduled_wake_is_actionable () =
   | Error unavailable ->
     fail
       ("Schedule_due stimulus must not hit a board read: "
-       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+       ^ Keeper_event_queue.board_stimulus_error_to_string unavailable)
 ;;
 
 (* (3) an empty board_post_id (sink failed to create the post) still delivers

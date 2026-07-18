@@ -106,8 +106,17 @@ let test_typed_payload_surface () =
            ; author = "alice"
            ; title = "t"
            ; content = "c"
+           ; preview = "c"
            ; hearth = None
-           ; updated_at = None
+           ; post_kind = Human_post
+           ; updated_at = 1.0
+           ; explicit_mention = false
+           ; matched_targets = []
+           ; thread_snapshot =
+               { self_commented = false
+               ; new_external_since = 0
+               ; latest_external = None
+               }
            })
       "p9"
   in

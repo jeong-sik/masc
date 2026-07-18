@@ -92,7 +92,7 @@ let test_generated_at_recent () =
    reaches [compute] at all. *)
 let test_single_flight_dedups_concurrent_bootstrap () =
   Dashboard_snapshot.reset_for_test ();
-  let compute_count = Atomic.make 0 in
+  let starter_calls = Atomic.make 0 in
   let snap =
     Dashboard_snapshot.make_for_test
       ~shell:(`String "shared") ~tools:`Null
@@ -101,25 +101,21 @@ let test_single_flight_dedups_concurrent_bootstrap () =
   let results = Array.make 8 None in
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
-      let compute () =
-        ignore (Atomic.fetch_and_add compute_count 1);
-        (* Yield so the other fibers run and queue on the in-flight
-           promise; a non-yielding compute would serialize the fibers
-           and measure nothing. *)
-        Eio.Time.sleep env#clock 0.05;
-        snap
+      let start_compute ~resolve =
+        ignore (Atomic.fetch_and_add starter_calls 1);
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Time.sleep env#clock 0.05;
+          resolve (Ok snap))
       in
       Array.iteri
         (fun i _ ->
           Eio.Fiber.fork ~sw (fun () ->
             results.(i) <-
               Some
-                (Dashboard_snapshot.bootstrap_single_flight ~compute)
+                (Dashboard_snapshot.bootstrap_single_flight ~start_compute)
                   .Dashboard_snapshot.generation))
         results));
-  (* The switch joined every fiber before returning; assertions outside
-     the switch body cannot race the workers. *)
-  Alcotest.(check int) "compute ran exactly once" 1 (Atomic.get compute_count);
+  Alcotest.(check int) "compute ran exactly once" 1 (Atomic.get starter_calls);
   let generations =
     Array.to_list results
     |> List.filter_map Fun.id
@@ -136,10 +132,78 @@ let test_single_flight_skips_compute_when_populated () =
       ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   Dashboard_snapshot.publish_for_test snap;
-  let compute () = Alcotest.fail "compute ran despite a live snapshot" in
-  let observed = Dashboard_snapshot.bootstrap_single_flight ~compute in
+  let start_compute ~resolve:_ =
+    Alcotest.fail "start_compute ran despite a live snapshot"
+  in
+  let observed = Dashboard_snapshot.bootstrap_single_flight ~start_compute in
   Alcotest.(check int)
     "returned the published snapshot" snap.generation observed.generation
+;;
+
+(* A cancelled caller must not restart the flight: the worker owns the
+   marker and the promise, so a mid-flight client disconnect neither
+   clears the marker nor blocks the resolution for later callers. *)
+let test_caller_cancellation_keeps_flight_alive () =
+  Dashboard_snapshot.reset_for_test ();
+  let starter_calls = Atomic.make 0 in
+  let snap =
+    Dashboard_snapshot.make_for_test
+      ~shell:(`String "survivor") ~tools:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
+  in
+  let observed = ref None in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let start_compute ~resolve =
+        ignore (Atomic.fetch_and_add starter_calls 1);
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Time.sleep env#clock 0.1;
+          resolve (Ok snap))
+      in
+      (* Caller A disconnects 20ms into the flight. *)
+      Eio.Fiber.fork ~sw (fun () ->
+        (try
+           Eio.Switch.run (fun sw_a ->
+             Eio.Fiber.fork ~sw:sw_a (fun () ->
+               Eio.Time.sleep env#clock 0.02;
+               Eio.Switch.fail sw_a (Failure "client disconnect"));
+             ignore
+               (Dashboard_snapshot.bootstrap_single_flight ~start_compute))
+         with
+         | Eio.Cancel.Cancelled _ | Failure _ -> ()));
+      (* Caller B joins after A is gone. *)
+      Eio.Time.sleep env#clock 0.05;
+      observed := Some (Dashboard_snapshot.bootstrap_single_flight ~start_compute)));
+  Alcotest.(check int) "starter ran exactly once" 1 (Atomic.get starter_calls);
+  match !observed with
+  | None -> Alcotest.fail "caller B never observed the flight result"
+  | Some t ->
+    Alcotest.(check int) "caller B got the worker's snapshot" snap.generation t.generation
+;;
+
+(* A worker failure resolves waiters with the error and clears the
+   marker so the next caller retries a fresh flight. *)
+let test_failure_resolves_error_and_allows_retry () =
+  Dashboard_snapshot.reset_for_test ();
+  let starter_calls = Atomic.make 0 in
+  let snap =
+    Dashboard_snapshot.make_for_test
+      ~shell:(`String "recovered") ~tools:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
+  in
+  let boom = Failure "provider exploded" in
+  let start_compute ~resolve =
+    let attempt = Atomic.fetch_and_add starter_calls 1 in
+    if attempt = 0
+    then resolve (Error (boom, Printexc.get_raw_backtrace ()))
+    else resolve (Ok snap)
+  in
+  (match Dashboard_snapshot.bootstrap_single_flight ~start_compute with
+   | exception Failure msg when String.equal msg "provider exploded" -> ()
+   | _ -> Alcotest.fail "worker failure was not re-raised to the waiter");
+  let recovered = Dashboard_snapshot.bootstrap_single_flight ~start_compute in
+  Alcotest.(check int) "retry ran a second flight" 2 (Atomic.get starter_calls);
+  Alcotest.(check int) "retry returned the recovered snapshot" snap.generation recovered.generation
 ;;
 
 let () =
@@ -167,6 +231,10 @@ let () =
             `Quick test_single_flight_dedups_concurrent_bootstrap;
           Alcotest.test_case "populated slot skips compute"
             `Quick test_single_flight_skips_compute_when_populated;
+          Alcotest.test_case "caller cancellation keeps flight alive"
+            `Quick test_caller_cancellation_keeps_flight_alive;
+          Alcotest.test_case "failure resolves error and allows retry"
+            `Quick test_failure_resolves_error_and_allows_retry;
         ] );
     ]
 ;;

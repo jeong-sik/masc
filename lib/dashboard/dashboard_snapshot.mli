@@ -68,13 +68,18 @@ val current_or_bootstrap : config:Workspace.config -> t
     concurrent callers share that one compute instead of each paying
     it (boot-gap dogpile fix). *)
 
-val bootstrap_single_flight : compute:(unit -> t) -> t
-(** {!current} if populated; otherwise one winner runs [compute]
-    (production: offloaded to the CPU pool) while concurrent callers
-    await the shared [(t, exn) result Eio.Promise.t].  A winner failure
-    resolves the promise with [Error exn] so waiters re-raise it in
-    their own context and can fall back to their own compute instead of
-    hanging.  [compute] is a parameter so tests can count invocations
+val bootstrap_single_flight :
+  start_compute:(resolve:((t, exn * Printexc.raw_backtrace) result -> unit) -> unit) -> t
+(** {!current} if populated; otherwise one CAS winner starts a detached
+    compute via [start_compute] and every caller (including the winner)
+    awaits the shared promise.  Ownership rule: the in-flight marker and
+    the promise are owned by the detached compute, never by a request
+    fiber — a cancelled caller only cancels its own wait; the marker
+    clears and the promise resolves exactly once, in the worker's
+    completion path.  Only a [start_compute] that raises before
+    detaching resolves inline (so waiters cannot hang).  Waiters
+    re-raise the worker's exception with its captured backtrace.
+    [start_compute] is a parameter so tests control timing/ownership
     without a workspace. *)
 
 val refresh_loop :

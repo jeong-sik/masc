@@ -41,10 +41,11 @@ val start :
     loop, bounded by [config.timeout_s].
 
     [compute] runs off the serving domain via
-    {!Domain_pool_ref.submit_cpu_or_inline} (one CPU-pool worker slot;
-    inline fallback before the pool is installed at boot), so blocking
-    file I/O and JSON construction in refresh loops no longer starve
-    HTTP/WS/keeper fibers on the main Eio domain.
+    {!Domain_pool_ref.submit_io_or_inline} at IO weight (0.05 of a worker;
+    the computes are file-I/O-bound), so blocking file I/O and JSON
+    construction in refresh loops no longer starve HTTP/WS/keeper fibers
+    on the main Eio domain nor consume whole CPU-pool workers.
+    Inline fallback before the pool is installed at boot.
 
     When [config.on_error] is set, it is called on timeout or exception,
     allowing callers to record the failure (e.g. mark_cached_surface_error). *)

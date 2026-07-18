@@ -18,3 +18,10 @@ val submit_io_or_inline : (unit -> 'a) -> 'a
 
 val submit_cpu_or_inline : (unit -> 'a) -> 'a
 (** Submit CPU-bound work to the shared domain pool, or run inline when absent. *)
+
+val submit_cpu_detached : sw:Eio.Switch.t -> (unit -> unit) -> unit
+(** Fire-and-forget CPU-weight submit: the job runs on a pool worker
+    attached to [sw] and outlives the submitting fiber.  Used when the
+    caller must not own the job's lifecycle (a cancelled caller must not
+    cancel or abandon shared work).  Before the pool is installed, forks
+    the job on the caller's domain under [sw]. *)

@@ -593,22 +593,28 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                         let path = Filename.concat dir name in
                         if mtime_of path < cutoff
                         then (
-                          (try
-                             if Sys.is_directory path
-                             then Fs_compat.remove_tree path
-                             else Sys.remove path
-                           with
-                           | Sys_error _ | Unix.Unix_error _ -> ());
-                          incr deleted)));
+                          let removed =
+                            try
+                              if Sys.is_directory path
+                              then (
+                                Fs_compat.remove_tree path;
+                                true)
+                              else (
+                                Sys.remove path;
+                                true)
+                            with
+                            | Sys_error _ | Unix.Unix_error _ -> false
+                          in
+                          if removed
+                          then incr deleted
+                          else
+                            Log.Server.warn
+                              "periodic JSONL prune: could not remove %s"
+                              path)));
                  !deleted)
              in
-             (* trajectories/<keeper>/ and tool_blobs/<shard>/ accumulate
-                regular files; delete files older than the cutoff, then drop
-                emptied subdirectories.  tool_blobs is safe to age-prune
-                because [Tool_blob_store.put] atomically rewrites a blob on
-                every put, refreshing its mtime — so a blob's mtime is the
-                date of its newest referencing tool_calls row, and rows older
-                than the retention window are pruned in this same round. *)
+             (* trajectories/<keeper>/ accumulates regular files; delete files
+                older than the cutoff, then drop emptied subdirectories. *)
              let prune_files_by_mtime dir =
                if not (Sys.file_exists dir)
                then 0
@@ -625,9 +631,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                            then walk p
                            else if mtime_of p < cutoff
                            then (
-                             (try Sys.remove p with
-                              | Sys_error _ -> ());
-                             incr deleted))
+                             let removed =
+                               try
+                                 Sys.remove p;
+                                 true
+                               with
+                               | Sys_error _ -> false
+                             in
+                             if removed
+                             then incr deleted
+                             else
+                               Log.Server.warn
+                                 "periodic JSONL prune: could not remove %s" p))
                         entries
                     | exception Sys_error _ -> ());
                    if not (String.equal path dir)
@@ -664,14 +679,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                   2026-06-10, scanned by every store-fallback read. *)
                + prune_dir (Filename.concat masc "transition-audit")
                (* 2026-07-18: oas-events and costs share the dated layout;
-                  traces, trajectories and tool_blobs had no retention at
-                  all (114k/177k cold files observed) and are pruned by age
-                  on the same knob. *)
+                  traces and trajectories had no retention at all (114k cold
+                  files observed) and are pruned by age on the same knob.
+                  tool_blobs is deliberately NOT age-pruned here: blobs are
+                  referenced not only by tool_calls rows but also by keeper
+                  context/history via keeper_artifact_hydrator, whose
+                  retention horizon is longer and unmeasured — an mtime-only
+                  prune can leave live references dangling.  A blob GC must
+                  compute its keep-set from every referencing store first. *)
                + prune_dir (Filename.concat masc "oas-events")
                + prune_dir (Filename.concat masc "costs")
                + prune_trace_dirs (Filename.concat masc "traces")
                + prune_files_by_mtime (Filename.concat masc "trajectories")
-               + prune_files_by_mtime (Filename.concat masc "tool_blobs")
              in
              if total > 0
              then

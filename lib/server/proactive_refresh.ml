@@ -95,40 +95,30 @@ let notify_error config exn =
   | Some f -> Safe_ops.protect ~default:() (fun () -> f exn)
   | None -> ()
 
-let offload_slots = Eio.Semaphore.make 1
-
 let start ~sw ~clock ~config:raw_config ~compute ~on_result =
   (* Run [compute] off the serving domain.  Every refresh loop that goes
      through [start] (operator_snapshot, operator_digest, execution,
      execution_trust, mission, full_health_snapshot, …) used to run its
      blocking file I/O + JSON construction inline on the main Eio domain,
      starving HTTP/WS/keeper fibers — the measured 60s dashboard_execution
-     renders with keepers=0 and the per-refresh 24-60s timeouts.  The CPU
-     pool already exists for exactly this (Dashboard_snapshot.refresh_loop
-     and the single-flight bootstrap use it).  [submit_cpu_or_inline]
-     reserves one worker slot and falls back to inline before the pool is
-     installed at boot.  Concurrent runs of different loops may touch the
-     same Jsonl_incremental_projection tables from different worker domains;
-     those projections are designed to tolerate racing rebuilds of the same
-     key (idempotent re-fold, later Hashtbl.replace wins — see
-     jsonl_incremental_projection.ml "Concurrency").
+     renders with keepers=0 and the per-refresh 24-60s timeouts.
 
-     [offload_slots] bounds how many refresh computes occupy the pool at
-     once.  The pool is one shared Eio.Executor_pool where a CPU submit
-     costs weight 1.0 (a whole worker) and a request-path IO submit costs
-     0.05; on small hosts (CI: domain_count 1-2) an unbounded boot wave of
-     refresh computes consumed the entire weight budget and starved
-     pool-served endpoints (/api/v1/dashboard/transport-health timed out
-     25x in the transport truth harness).  One slot keeps the heavy
-     background work off the serving domain while leaving pool capacity
-     for request-path submits; the refresh cadence absorbs the
-     serialization (loops already back off adaptively when slow). *)
-  let compute () =
-    Eio.Semaphore.acquire offload_slots;
-    Eio_guard.protect
-      ~finally:(fun () -> Eio.Semaphore.release offload_slots)
-      (fun () -> Domain_pool_ref.submit_cpu_or_inline compute)
-  in
+     The computes are I/O-bound (per-keeper file tail reads with bounded
+     JSON), so they submit at IO weight (0.05 of a worker), not CPU weight
+     (1.0): a CPU-weight submit of blocking I/O both wastes a full worker
+     and, on small hosts, lets a boot wave of refresh computes consume the
+     whole pool budget (observed in CI: pool-served endpoints timing out).
+     IO weight keeps many refreshes and request-path submits admitted
+     concurrently — no separate throttle is needed or wanted (a shared
+     semaphore would be a fleet-wide head-of-line block whose timeout
+     swallows every other producer).  [submit_io_or_inline] falls back to
+     inline before the pool is installed at boot.  Concurrent runs of
+     different loops may touch the same Jsonl_incremental_projection tables
+     from different worker domains; those projections are designed to
+     tolerate racing rebuilds of the same key (idempotent re-fold, later
+     Hashtbl.replace wins — see jsonl_incremental_projection.ml
+     "Concurrency"). *)
+  let compute () = Domain_pool_ref.submit_io_or_inline compute in
   (* Clamp timeout below interval to prevent overlapping refreshes.
      When timeout >= interval, a timed-out compute runs past the next
      scheduled refresh, causing cascading failures (#7164). *)

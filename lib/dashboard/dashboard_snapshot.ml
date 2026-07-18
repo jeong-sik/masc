@@ -70,7 +70,9 @@ let bootstrap ~(config : Workspace.config) : t =
   let shell =
     try
       (!dashboard_shell_payload_json_ref) config
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap shell failed: %s"
         (Printexc.to_string exn);
       `Null
@@ -78,7 +80,9 @@ let bootstrap ~(config : Workspace.config) : t =
   let shell_light =
     try
       (!dashboard_shell_payload_json_ref) ~light:true config
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap shell_light failed: %s"
         (Printexc.to_string exn);
       `Null
@@ -86,7 +90,9 @@ let bootstrap ~(config : Workspace.config) : t =
   let tools =
     try
       (!dashboard_tools_http_json_ref) config
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap tools failed: %s"
         (Printexc.to_string exn);
       `Null
@@ -96,7 +102,9 @@ let bootstrap ~(config : Workspace.config) : t =
       let base_path = config.base_path in
       let masc_root = Workspace.masc_root_dir config in
       Telemetry_unified.summary_json ~base_path ~masc_root ()
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap telemetry_summary failed: %s"
         (Printexc.to_string exn);
       `Null
@@ -143,16 +151,31 @@ let bootstrap ~(config : Workspace.config) : t =
    wait-free read path falls back to a synchronous compute — and on a cold
    server each dashboard panel load fires several of those at once, so N
    concurrent request fibers used to pay the same 10-40s compute N times
-   (the loser discards it, per the CAS in [bootstrap]).  One winner now
-   computes offloaded to the CPU pool; concurrent callers await the shared
-   promise instead of duplicating the work.  If the winner fails, waiters
-   observe the exception and each retries their own path — no dogpile on
-   the happy path, no hidden failure either. *)
-let bootstrap_in_flight : (t, exn) result Eio.Promise.t option Atomic.t =
+   (the loser discards it, per the CAS in [bootstrap]).
+
+   Ownership: the in-flight marker and the result promise are owned by the
+   detached compute, never by any request fiber.  A caller that wins the
+   CAS merely STARTS the worker; a caller cancelled while awaiting only
+   cancels its own wait — the marker stays, the worker still finishes and
+   publishes, and no cancelled request can restart the dogpile (observed
+   failure mode of the request-owned variant: a 15-35s request
+   cancellation cleared the marker mid-flight and the next request started
+   a second worker).  The marker clears and the promise resolves exactly
+   once, in the worker's completion path; only a starter that fails before
+   detaching resolves inline so waiters cannot hang. *)
+let bootstrap_in_flight : (t, exn * Printexc.raw_backtrace) result Eio.Promise.t option Atomic.t =
   Atomic.make None
 ;;
 
-let rec bootstrap_single_flight ~(compute : unit -> t) : t =
+let raise_with_backtrace (exn, backtrace) =
+  if String.equal (Printexc.raw_backtrace_to_string backtrace) ""
+  then raise exn
+  else Printexc.raise_with_backtrace exn backtrace
+;;
+
+let rec bootstrap_single_flight
+    ~(start_compute : resolve:((t, exn * Printexc.raw_backtrace) result -> unit) -> unit)
+  : t =
   match Atomic.get slot with
   | Some t -> t
   | None ->
@@ -160,35 +183,49 @@ let rec bootstrap_single_flight ~(compute : unit -> t) : t =
      | Some promise ->
        (match Eio.Promise.await promise with
         | Ok t -> t
-        | Error exn -> raise exn)
+        | Error err -> raise_with_backtrace err)
      | None ->
        let promise, resolver = Eio.Promise.create () in
        if not (Atomic.compare_and_set bootstrap_in_flight None (Some promise))
-       then bootstrap_single_flight ~compute
+       then bootstrap_single_flight ~start_compute
        else (
-         (* The promise must resolve and the slot must clear on EVERY exit,
-            including cancellation — otherwise waiters hang on an unresolved
-            promise and later callers see a stale in-flight marker.  The
-            exception (cancel or failure) is delivered to waiters as
-            [Error exn] and re-raised here: nothing is swallowed. *)
-         let result =
-           try Ok (compute ()) with
-           | exn -> Error exn
+         let resolve result =
+           Atomic.set bootstrap_in_flight None;
+           Eio.Promise.resolve resolver result
          in
-         Atomic.set bootstrap_in_flight None;
-         Eio.Promise.resolve resolver result;
-         match result with
+         (try start_compute ~resolve with
+          | exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            resolve (Error (exn, backtrace)));
+         (* Await THIS promise — never re-check the marker.  The worker
+            resolves it (possibly synchronously inside [start_compute]);
+            re-reading the shared state here would restart a fresh flight
+            forever when the compute does not itself publish to [slot]. *)
+         match Eio.Promise.await promise with
          | Ok t -> t
-         | Error exn -> raise exn))
+         | Error err -> raise_with_backtrace err))
+;;
+
+let start_bootstrap_compute ~config ~resolve =
+  let run () =
+    try resolve (Ok (bootstrap ~config)) with
+    | Eio.Cancel.Cancelled _ as exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      resolve (Error (exn, backtrace));
+      raise exn
+    | exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      resolve (Error (exn, backtrace))
+  in
+  (match Eio_context.get_root_switch_opt () with
+   | Some sw -> Domain_pool_ref.submit_cpu_detached ~sw run
+   | None -> run ())
 ;;
 
 let current_or_bootstrap ~config =
   match Atomic.get slot with
   | Some t -> t
-  | None ->
-    bootstrap_single_flight
-      ~compute:(fun () ->
-        Domain_pool_ref.submit_cpu_or_inline (fun () -> bootstrap ~config))
+  | None -> bootstrap_single_flight ~start_compute:(start_bootstrap_compute ~config)
 ;;
 
 (* RFC-0138 Phase 3: refresh loop optionally accepts [~state] so it

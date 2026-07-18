@@ -25,3 +25,9 @@ let submit_cpu_or_inline f =
   | Some p -> Domain_pool.submit_cpu p f
   | None -> f ()
 ;;
+
+let submit_cpu_detached ~sw f =
+  match Atomic.get pool with
+  | Some p -> ignore (Domain_pool.submit_cpu_async ~sw p f)
+  | None -> ignore (Eio.Fiber.fork ~sw f)
+;;

@@ -13,8 +13,8 @@
     [emit_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
-    [all_sort_orders] convenience list, [is_initialized],
-    [jsonl_forced], [sweep]) are hidden — callers consume the typed
+    [all_sort_orders] convenience list, [is_initialized])
+    are hidden — callers consume the typed
     sort-order helpers, lifecycle entry points, post / comment /
     vote operations, and the JSON projection / hook setters
     only. *)
@@ -130,10 +130,6 @@ val flusher_start_backoff_delay_for_test : attempt:int -> float
 
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)
-
-val jsonl_forced : unit -> bool
-(** [true] iff [MASC_BOARD_BACKEND] forces the JSONL backend.
-    Exposed so the dispatch test can pin the env-driven default. *)
 
 (** {1 Posts} *)
 

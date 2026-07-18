@@ -259,22 +259,6 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
-  type backend =
-    | Jsonl
-    | Pg
-    | Unknown_backend of string
-
-  let backend_of_string raw =
-    match raw |> String.trim |> String.lowercase_ascii with
-    | "jsonl" -> Jsonl
-    | "pg" -> Pg
-    | other -> Unknown_backend other
-
-  let backend_to_string = function
-    | Jsonl -> "jsonl"
-    | Pg -> "pg"
-    | Unknown_backend value -> value
-
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
@@ -287,12 +271,6 @@ module Board = struct
       @ops_class operator *)
   let flusher_inbox_capacity =
     get_int ~default:1000 "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
-
-  (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
-  let backend_opt () =
-    Sys.getenv_opt "MASC_BOARD_BACKEND"
-    |> trim_opt
-    |> Option.map backend_of_string
 end
 
 (** {1 Tool Surface Configuration} *)

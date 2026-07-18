@@ -45,15 +45,23 @@ describe('queueDrainStatusOf', () => {
     expect(status?.label).toBe('드레인 중')
   })
 
-  it('treats not_found + a recorded keeper reaction as a healthy 완료 (drained), never a miss', () => {
-    for (const reaction of ['matched_consumed_ack', 'matched_turn_started', 'matched_stimulus'] as const) {
+  it('treats not_found + keeper handling evidence as a healthy 완료 (drained), never a miss', () => {
+    for (const reaction of ['matched_consumed_ack', 'matched_turn_started'] as const) {
       const status = queueDrainStatusOf(req('not_found', reaction))
       expect(status?.state, `reaction=${reaction}`).toBe('drained')
       expect(status?.label).toBe('완료')
     }
   })
 
-  it('flags a genuine miss only when the wake is in no queue AND the keeper never reacted', () => {
+  it('treats matched_stimulus as enqueue-only evidence and reports a missing queue item as actionable', () => {
+    const status = queueDrainStatusOf(req('not_found', 'matched_stimulus'))
+    expect(status?.state).toBe('missed')
+    expect(status?.label).toBe('누락 ⚠')
+    expect(status?.tone).toBe('warn')
+    expect(status !== null && isCalendarVisible(status)).toBe(true)
+  })
+
+  it('flags not_found reaction evidence as a genuine miss', () => {
     const status = queueDrainStatusOf(req('not_found', 'not_found'))
     expect(status?.state).toBe('missed')
     expect(status?.label).toBe('누락 ⚠')
@@ -98,16 +106,17 @@ describe('isCalendarVisible', () => {
 })
 
 describe('countQueueDrainMisses', () => {
-  it('counts only genuine misses (queue=not_found AND reaction=not_found)', () => {
+  it('counts queue misses with no keeper handling evidence', () => {
     const requests: DashboardScheduledAutomationRequest[] = [
       req('matched_pending'),
       req('not_found', 'not_found'), // miss
       req('not_found', 'matched_turn_started'), // drained — not a miss
+      req('not_found', 'matched_stimulus'), // enqueue-only evidence — miss
       req('not_found', 'not_found'), // miss
       req('read_error'), // read error — not counted as a miss
       req(null), // no evidence
     ]
-    expect(countQueueDrainMisses(requests)).toBe(2)
+    expect(countQueueDrainMisses(requests)).toBe(3)
   })
 
   it('returns 0 for an empty list', () => {

@@ -12,14 +12,14 @@
 //     "yes, awaiting / mid drain". not_found means "in neither queue" — but that
 //     is ALSO the normal post-completion state (a drained wake leaves the
 //     queue), so not_found alone cannot mean "lost".
-//   · keeper_reaction_evidence — did the keeper actually react to the stimulus
-//     (consumed_ack / turn_started / stimulus recorded)? This disambiguates a
-//     drained-and-handled wake from a genuinely lost one.
+//   · keeper_reaction_evidence — did the keeper actually handle the stimulus
+//     (consumed_ack / turn_started)? A matched_stimulus row proves only that the
+//     wake was enqueued; it is not evidence that the keeper drained it.
 //
-// A genuine miss is ONLY queue=not_found AND reaction=not_found: dispatched, not
-// in the queue, and never recorded as reacted. Every other not_found is a
-// healthy completion. Labeling not_found alone as "missed" would false-alarm on
-// every successful wake.
+// A genuine miss is queue=not_found with either reaction=not_found or
+// reaction=matched_stimulus: dispatched, no longer in either queue, and no
+// handling evidence. Queue=not_found alone remains insufficient because a
+// successfully drained wake also leaves the queue.
 
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import type { StatusChipTone } from '../common/status-chip'
@@ -45,7 +45,6 @@ export interface QueueDrainStatus {
 const REACTED: ReadonlySet<string> = new Set([
   'matched_consumed_ack',
   'matched_turn_started',
-  'matched_stimulus',
 ])
 
 const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'state'>>> = {
@@ -62,7 +61,7 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   drained: {
     label: '완료',
     tone: 'neutral',
-    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_started / stimulus)',
+    title: '큐에서 빠졌고 keeper 처리 증거가 기록됨 (consumed_ack / turn_started)',
   },
   missed: {
     label: '누락 ⚠',
@@ -102,7 +101,7 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
     case 'not_found': {
       const reaction = request.keeper_reaction_evidence?.projection_status
       if (reaction != null && REACTED.has(reaction)) return 'drained'
-      if (reaction === 'not_found') return 'missed'
+      if (reaction === 'not_found' || reaction === 'matched_stimulus') return 'missed'
       if (reaction === 'read_error') return 'read_error'
       if (reaction === 'quarantined') return 'evidence_invalid'
       // quarantine / missing identity / unrecognized / absent:
@@ -141,8 +140,8 @@ export function isCalendarVisible(status: QueueDrainStatus): boolean {
   return CALENDAR_VISIBLE.has(status.state)
 }
 
-/** Count of requests whose last keeper-wake execution is a genuine miss
- * (queue=not_found AND reaction=not_found). Feeds the KPI strip. */
+/** Count of requests whose last keeper-wake execution has left the queue
+ * without keeper handling evidence. Feeds the KPI strip. */
 export function countQueueDrainMisses(
   requests: readonly DashboardScheduledAutomationRequest[],
 ): number {

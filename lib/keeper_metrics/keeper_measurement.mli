@@ -17,7 +17,6 @@ type threshold_params = {
   compaction_ratio_gate : float;
   compaction_message_gate : int;
   compaction_token_gate : int;
-  compaction_cooldown_sec : int;
   model_ratio_multiplier : float;
 }
 

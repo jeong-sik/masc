@@ -1538,7 +1538,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; compaction_ratio_gate_opt = None
         ; compaction_message_gate_opt = None
         ; compaction_token_gate_opt = None
-        ; compaction_cooldown_sec_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; instructions_arg = Some "new operator intent"

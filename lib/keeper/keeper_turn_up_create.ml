@@ -103,12 +103,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               let (env_ratio_gate, env_message_gate, env_token_gate) =
                 keeper_compaction_policy_from_env ()
               in
-              let compaction_cooldown_sec =
-                Option.value
-                  ~default:(keeper_compaction_cooldown_sec ())
-                  p.compaction_cooldown_sec_opt
-                |> normalize_compaction_cooldown_sec
-              in
               let
                 ( compaction_profile,
                   compaction_ratio_gate,
@@ -249,7 +243,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ratio_gate = compaction_ratio_gate;
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
-          cooldown_sec = compaction_cooldown_sec;
         };
         created_at = now_iso ();
         updated_at = now_iso ();

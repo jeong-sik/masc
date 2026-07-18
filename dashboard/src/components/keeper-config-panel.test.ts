@@ -67,7 +67,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       ratio_gate: 0.85,
       message_gate: 16,
       token_gate: 24000,
-      cooldown_sec: 120,
     },
     proactive: {
       enabled: true,
@@ -459,7 +458,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       ratio_gate: 0.8,
       message_gate: 0,
       token_gate: 0,
-      cooldown_sec: 0,
     } as KeeperConfig['compaction'],
     proactive: {
       enabled: false,
@@ -658,7 +656,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
         ratio_gate: 0.8,
         message_gate: 0,
         token_gate: 24000,
-        cooldown_sec: 0,
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -676,7 +673,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
         ratio_gate: 0.8,
         message_gate: 0,
         token_gate: 24000,
-        cooldown_sec: 0,
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {

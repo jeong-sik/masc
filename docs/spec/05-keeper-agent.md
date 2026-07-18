@@ -514,14 +514,6 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 `max_checkpoints_retained = 3`. `save` 후 `prune`이 호출되어 초과분을 삭제한다.
 
-### INV-KEEPER-004: compaction cooldown 강제
-
-`compact_if_needed`는 실제 완료된 마지막 compaction 시각을 기준으로
-`compaction_cooldown_sec`를 적용한다. Assistant text나 proactive turn은 이
-clock을 갱신하지 않는다.
-
-
-
 ### INV-KEEPER-006: proactive judgment boundary
 
 proactive 행동의 의미와 품질은 configured LLM이 판단한다. 문장 종결어미, 단어 목록, 유사도, 재시도 횟수 같은 로컬 휴리스틱은 최종 판정이나 의미 있는 fallback을 만들 수 없다. 빈 출력과 모델 실패는 관측 가능한 오류로 남으며 Keeper의 다른 활동을 중단시키지 않는다.

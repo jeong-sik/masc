@@ -145,13 +145,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
       |> normalize_compaction_token_gate
     in
-    let compaction_cooldown_sec =
-      Safe_ops.json_int
-        ~default:(keeper_compaction_cooldown_sec ())
-        "compaction_cooldown_sec"
-        json
-      |> normalize_compaction_cooldown_sec
-    in
     let pp_always_allow = None in
     (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
     Ok
@@ -166,7 +159,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; ratio_gate = compaction_ratio_gate
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate
-          ; cooldown_sec = compaction_cooldown_sec
           }
       ; pp_always_allow
       }
@@ -370,6 +362,7 @@ type removed_keeper_meta_field =
   | Tool_access
   | Tool_denylist
   | Policy_voice_enabled
+  | Compaction_cooldown
   | Last_blocker
 
 let removed_keeper_meta_field_of_key = function
@@ -380,6 +373,7 @@ let removed_keeper_meta_field_of_key = function
   | "tool_access" -> Some Tool_access
   | "tool_denylist" -> Some Tool_denylist
   | "policy_voice_enabled" -> Some Policy_voice_enabled
+  | "compaction_cooldown_sec" -> Some Compaction_cooldown
   | "last_blocker" -> Some Last_blocker
   | _ -> None
 ;;
@@ -392,6 +386,7 @@ let removed_keeper_meta_field_to_wire = function
   | Tool_access -> "tool_access"
   | Tool_denylist -> "tool_denylist"
   | Policy_voice_enabled -> "policy_voice_enabled"
+  | Compaction_cooldown -> "compaction_cooldown_sec"
   | Last_blocker -> "last_blocker"
 ;;
 
@@ -411,7 +406,8 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
        | Some (Persona_profile_path as field)
        | Some (Tool_access as field)
        | Some (Tool_denylist as field)
-       | Some (Policy_voice_enabled as field) ->
+       | Some (Policy_voice_enabled as field)
+       | Some (Compaction_cooldown as field) ->
          Error
            ( "removed keeper meta field is no longer supported: "
              ^ removed_keeper_meta_field_to_wire field )

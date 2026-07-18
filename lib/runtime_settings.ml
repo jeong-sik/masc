@@ -428,12 +428,11 @@ let surfaces =
     };
     {
       id = "keeper_compaction";
-      description = "Keeper context compaction thresholds and cooldown";
+      description = "Keeper context compaction thresholds";
       param_keys = [
         "keeper.compaction.ratio";
         "keeper.compaction.max_messages";
         "keeper.compaction.max_tokens";
-        "keeper.compaction.cooldown_sec";
       ];
     };
     {

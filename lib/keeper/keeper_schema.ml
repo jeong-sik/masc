@@ -266,10 +266,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Token count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
-        ("compaction_cooldown_sec", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Minimum seconds between completed compactions. 0 disables the cooldown.");
-        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);

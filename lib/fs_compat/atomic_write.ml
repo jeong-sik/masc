@@ -2549,7 +2549,10 @@ let save_file_atomic
        error exn)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> error exn
+  (* Filename.temp_file's only documented failure is Sys_error; anything
+     else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
+     rather than collapse into the string error channel. *)
+  | Sys_error _ as exn -> error exn
 ;;
 
 let has_atomic_temp_shape ~prefix name =

@@ -2,10 +2,6 @@
     from deleted [Runtime_metrics]; metric-name strings preserved verbatim
     (operator dashboard seam). *)
 
-val on_provider_cooldown : provider:string -> reason:string -> unit
-(** Tick the per-provider cooldown-entry counter
-    ([masc_runtime_provider_cooldown_total]). *)
-
 val on_runtime_metrics_eviction : unit -> unit
 (** Tick the metrics LRU eviction counter
     ([masc_runtime_metrics_eviction_total]). *)

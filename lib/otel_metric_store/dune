@@ -8,7 +8,6 @@
   otel_builtin_metric_names
   otel_core_metric_names
   otel_identity_metric_names
-  otel_metric_hotpath
   otel_metric_key
   otel_metric_names
   otel_metric_store_core

@@ -31,46 +31,89 @@ let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
    "quiet, mention-triggered bot" baseline per RFC-0203. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-(* Parse a configured trigger policy. Delegates to the single strict
-   parser in Discord_gateway_state so config and the (test-covered)
-   canonical grammar can never drift. An empty value is "unset" and
-   silently takes the default; a non-empty value that fails to parse
-   (typo, removed variant) is logged and falls back to the default
-   rather than being silently coerced into a policy the operator did
-   not write. *)
-let parse_trigger_policy raw : Gw.trigger_policy =
-  let s = String.trim raw in
-  if String.equal s "" then default_trigger_policy
-  else
-    match Discord_gateway_state.parse_trigger_policy s with
-    | Ok policy -> policy
-    | Error msg ->
-      Log.Server.warn
-        "discord trigger_policy %S rejected (%s); using default %s"
-        s msg
-        (Discord_gateway_state.trigger_policy_to_string default_trigger_policy);
-      default_trigger_policy
+(* Typed trigger-policy loading, mirroring the Slack sibling
+   ([Server_slack_in_process_gateway.load_trigger_policy_from_toml]): a
+   missing file or missing key is "unset" (default applies); an unreadable
+   file, malformed TOML, wrong field type, or a value the strict grammar
+   rejects is an explicit load error and the gateway does not start —
+   never a silent fallback onto a policy the operator did not write
+   (masc#25123 / PR #25126 recut). *)
 
+type trigger_policy_toml_load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Gw.trigger_policy
+
+type trigger_policy_load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+  | Trigger_policy_env_invalid of { detail : string }
+
+let trigger_policy_load_error_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "cannot read %s: %s" path detail
+  | Runtime_toml_invalid { path; detail } ->
+    Printf.sprintf "invalid TOML in %s: %s" path detail
+  | Trigger_policy_invalid { path; detail } ->
+    Printf.sprintf "invalid discord.trigger_policy in %s: %s" path detail
+  | Trigger_policy_env_invalid { detail } ->
+    Printf.sprintf "invalid MASC_DISCORD_TRIGGER_POLICY: %s" detail
+;;
+
+let load_trigger_policy_from_toml ~path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
+  | exception Unix.Unix_error (code, _, _) ->
+    Error (Runtime_toml_unreadable { path; detail = Unix.error_message code })
+  | _ ->
+    (match Safe_ops.read_file_safe path with
+     | Error detail -> Error (Runtime_toml_unreadable { path; detail })
+     | Ok content ->
+       (match Otoml.Parser.from_string_result content with
+        | Error detail -> Error (Runtime_toml_invalid { path; detail })
+        | Ok toml ->
+          (match
+             Field_resolution.resolve_string toml [ "discord"; "trigger_policy" ]
+           with
+           | Field_resolution.Missing -> Ok Trigger_policy_missing
+           | Field_resolution.Type_mismatch { expected; message; _ } ->
+             Error
+               (Trigger_policy_invalid
+                  { path
+                  ; detail = Printf.sprintf "expected %s: %s" expected message
+                  })
+           | Field_resolution.Present raw ->
+             let raw = String.trim raw in
+             if String.equal raw ""
+             then Ok Trigger_policy_missing
+             else
+               (match Discord_gateway_state.parse_trigger_policy raw with
+                | Ok policy -> Ok (Trigger_policy_loaded policy)
+                | Error detail ->
+                  Error (Trigger_policy_invalid { path; detail })))))
+;;
+
+(* Env > TOML > default — the precedence config/runtime.toml documents for
+   this key. An invalid env value is a load error like an invalid TOML value;
+   an empty/unset env falls through to the TOML plane. *)
 let resolved_trigger_policy () =
-  let from_toml () =
-    try
-      let resolution = Config_dir_resolver.resolve () in
-      let toml_path =
-        Filename.concat resolution.Config_dir_resolver.config_root.path
-          Config_dir_resolver.runtime_toml_filename
-      in
-      if Sys.file_exists toml_path then
-        let tbl = Otoml.Parser.from_file toml_path in
-        Otoml.find_opt tbl Otoml.get_string [ "discord"; "trigger_policy" ]
-      else None
-    with _ -> None
-  in
-  match from_toml () with
-  | Some raw -> parse_trigger_policy raw
+  match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
+  | Some raw ->
+    (match Discord_gateway_state.parse_trigger_policy raw with
+     | Ok policy -> Ok policy
+     | Error detail -> Error (Trigger_policy_env_invalid { detail }))
   | None ->
-    (match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
-    | None -> Gw.Mention_or_thread
-    | Some raw -> parse_trigger_policy raw)
+    let resolution = Config_dir_resolver.resolve () in
+    let toml_path =
+      Filename.concat resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    (match load_trigger_policy_from_toml ~path:toml_path with
+     | Error _ as error -> error
+     | Ok (Trigger_policy_loaded policy) -> Ok policy
+     | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
+       Ok default_trigger_policy)
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
@@ -642,7 +685,16 @@ let start ~sw ~env ~clock ~state =
     Log.Server.warn
       "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
   | Some token ->
-    let policy = resolved_trigger_policy () in
+    (match resolved_trigger_policy () with
+     | Error error ->
+       (* Same fail-closed posture as the Slack sibling (RFC-0317): a
+          malformed policy configuration must stop the gateway, not boot it
+          on a policy the operator did not write. *)
+       Log.Server.error
+         "RFC-0203: Discord trigger-policy configuration rejected; gateway \
+          not started (%s)"
+         (trigger_policy_load_error_to_string error)
+     | Ok policy ->
     State.set_trigger_policy policy;
     let ingress =
       Connector_ingress_lane.create
@@ -685,4 +737,4 @@ let start ~sw ~env ~clock ~state =
       | exn ->
         Log.Server.error
           "RFC-0203: in-process Discord gateway crashed: %s"
-          (Printexc.to_string exn))
+          (Printexc.to_string exn)))

@@ -258,7 +258,6 @@ let test_default_config_syncs_test_base_path_env () =
   in
   with_envs
     [ ("MASC_BASE_PATH", None);
-      ("MASC_TEST_SYNCED_BASE_PATH", None);
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       ignore (Workspace_utils.default_config requested);
@@ -274,7 +273,6 @@ let test_auto_synced_test_base_path_does_not_override_later_requests () =
   in
   with_envs
     [ ("MASC_BASE_PATH", None);
-      ("MASC_TEST_SYNCED_BASE_PATH", None);
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       ignore (Workspace_utils.default_config first);

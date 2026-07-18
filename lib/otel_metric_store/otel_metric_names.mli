@@ -261,5 +261,3 @@ val metric_persistence_read_drops : string
 
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)
 val metric_persistence_utf8_repair : string
-
-val metric_discovery_history_failures : string

@@ -511,7 +511,6 @@ let initialize_owner_state_blocking
      config record says canonical while its backend still follows an alias. *)
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Discovery_cache.set_env ~sw ~net;
-  Discovery_cache.set_base_path base_path;
   Gc_sampler.run ~sw ~clock ~interval:30.0;
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =

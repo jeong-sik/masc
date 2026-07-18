@@ -1605,31 +1605,6 @@ let test_invalid_author () =
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
 
-(** {1 MASC_BOARD_BACKEND env var} *)
-
-let test_jsonl_forced_default () =
-  (try Unix.putenv "MASC_BOARD_BACKEND" "" with _ -> ());
-  Alcotest.(check bool) "empty env not forced"
-    false (Board_dispatch.jsonl_forced ())
-
-let test_jsonl_forced_explicit () =
-  Unix.putenv "MASC_BOARD_BACKEND" "jsonl";
-  Alcotest.(check bool) "jsonl is forced"
-    true (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
-let test_jsonl_forced_pg () =
-  Unix.putenv "MASC_BOARD_BACKEND" "pg";
-  Alcotest.(check bool) "pg is not forced"
-    false (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
-let test_jsonl_forced_case_insensitive () =
-  Unix.putenv "MASC_BOARD_BACKEND" "JSONL";
-  Alcotest.(check bool) "JSONL uppercase is forced"
-    true (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
 (** {1 SubBoard CRUD} *)
 
 let test_sub_board_create_and_get () =
@@ -2069,12 +2044,6 @@ let () =
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
-    ];
-    "env_control", [
-      Alcotest.test_case "default not forced" `Quick (with_eio test_jsonl_forced_default);
-      Alcotest.test_case "jsonl forced" `Quick (with_eio test_jsonl_forced_explicit);
-      Alcotest.test_case "pg not forced" `Quick (with_eio test_jsonl_forced_pg);
-      Alcotest.test_case "case insensitive" `Quick (with_eio test_jsonl_forced_case_insensitive);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

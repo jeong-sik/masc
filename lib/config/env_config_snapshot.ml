@@ -212,8 +212,6 @@ let dashboard_entries =
 
 let board_entries =
   [
-    entry ~default:"(none)" "MASC_BOARD_BACKEND"
-      "Board backend type (e.g. jsonl, pg); None when unset";
     entry ~default:"30.0" "MASC_BOARD_FLUSH_INTERVAL_SEC"
       "Flush interval for board persistence (seconds)";
   ]

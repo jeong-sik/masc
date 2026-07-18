@@ -294,11 +294,6 @@ let reset_for_test () =
   Atomic.set board_signal_hook None;
   Atomic.set board_sse_hook None
 
-let jsonl_forced () =
-  match Env_config.Board.backend_opt () with
-  | Some Env_config.Board.Jsonl -> true
-  | Some (Env_config.Board.Pg | Env_config.Board.Unknown_backend _) | None -> false
-
 let backend () =
   match Atomic.get backend_state with
   | Active (Jsonl store as backend, _) ->
@@ -706,10 +701,6 @@ let flush () =
   match Atomic.get backend_state with
   | Active (Jsonl store, _) -> Board.flush_dirty store
   | Uninitialized -> ()
-
-let sweep () =
-  match backend () with
-  | Jsonl store -> Board.sweep store
 
 let get_all_karma () =
   match backend () with

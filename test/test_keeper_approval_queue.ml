@@ -538,33 +538,48 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
 ;;
 
 let test_different_owners_claim_in_parallel () =
+  (* Real concurrent proof: fibers race the per-owner claim, so the
+     one-winner-per-owner invariant is exercised under actual Atomic
+     contention instead of sequential calls.  Unique owner names keep the
+     process-global active map isolated without a production reset. *)
   let base_path = temp_dir () in
+  let suffix = string_of_int (int_of_float (Unix.gettimeofday () *. 1_000_000.0)) in
   Fun.protect
     ~finally:(fun () ->
-      Gate.For_testing.reset_active_auto_judges ();
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
-       Gate.For_testing.reset_active_auto_judges ();
-       let owner_a =
-         pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 1))
+       let owner_a = "owner-a-" ^ suffix in
+       let owner_b = "owner-b-" ^ suffix in
+       let entry_a1 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_a ~input:(`Int 1))
        in
-       let owner_a_next =
-         pending_entry_exn (submit ~base_path ~keeper_name:"owner-a" ~input:(`Int 2))
+       let entry_a2 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_a ~input:(`Int 2))
        in
-       let owner_b =
-         pending_entry_exn (submit ~base_path ~keeper_name:"owner-b" ~input:(`Int 1))
+       let entry_b1 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_b ~input:(`Int 1))
        in
-       Alcotest.(check bool) "first owner activates" true
-         (Gate.For_testing.claim_auto_judge owner_a);
-       Alcotest.(check bool) "same owner remains queued" false
-         (Gate.For_testing.claim_auto_judge owner_a_next);
-       Alcotest.(check bool) "different owner activates in parallel" true
-         (Gate.For_testing.claim_auto_judge owner_b);
-       Gate.For_testing.release_auto_judge owner_a;
-       Alcotest.(check bool) "same owner next activates after release" true
-         (Gate.For_testing.claim_auto_judge owner_a_next))
+       let winners_a = Atomic.make 0 in
+       let winners_b = Atomic.make 0 in
+       let hammer entry winners =
+         for _ = 1 to 40 do
+           if Gate.For_testing.claim_auto_judge entry
+           then ignore (Atomic.fetch_and_add winners 1)
+         done
+       in
+       Eio_main.run (fun _env ->
+         Eio.Switch.run (fun sw ->
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b)));
+       Alcotest.(check int) "one winner for owner A under contention" 1 (Atomic.get winners_a);
+       Alcotest.(check int) "one winner for owner B in parallel" 1 (Atomic.get winners_b);
+       Gate.For_testing.release_auto_judge entry_a1;
+       Alcotest.(check bool) "same owner re-claims after release" true
+         (Gate.For_testing.claim_auto_judge entry_a2))
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =

@@ -201,12 +201,6 @@ let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
     ]
 ;;
 
-let next_sequence_unlocked ~base_path =
-  match SMap.find_opt base_path (Atomic.get next_sequences) with
-  | Some sequence -> sequence
-  | None -> first_sequence
-;;
-
 let persist_snapshot_with_sequence_unlocked
       ~base_path
       ~next_sequence
@@ -231,12 +225,36 @@ let persist_snapshot_with_sequence_unlocked
      | exn -> Error { path; reason = Printexc.to_string exn })
 ;;
 
+type store_lifecycle =
+  | Uninstalled
+  | Ready of int
+  | Unavailable of storage_error
+
+let next_sequence_lifecycle ~base_path =
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some error -> Unavailable error
+  | None ->
+    (match SMap.find_opt base_path (Atomic.get next_sequences) with
+     | Some sequence -> Ready sequence
+     | None -> Uninstalled)
+;;
+
 let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
-  persist_snapshot_with_sequence_unlocked
-    ~base_path
-    ~next_sequence:(next_sequence_unlocked ~base_path)
-    ~pending_map
-    ~delivery_map
+  match next_sequence_lifecycle ~base_path with
+  | Ready next_sequence ->
+    persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  | Uninstalled ->
+    Error
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; install_persistence must \
+           complete before publishing"
+      }
+  | Unavailable error -> Error error
 ;;
 
 let reject_unknown_fields ~surface ~allowed fields =
@@ -618,7 +636,7 @@ let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty, 1)
+    then Ok (SMap.empty, SMap.empty, first_sequence)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -1723,22 +1741,30 @@ let submit_pending
       | Some id -> Ok (id, None)
       | None ->
         let id = generate_id () in
-        let sequence = next_sequence_unlocked ~base_path in
-        if sequence = max_int
-        then
-          Error
-            { path = pending_store_path ~base_path
-            ; reason = "approval sequence exhausted its integer representation"
-            }
-        else
-          let entry =
-            create_entry
-              ~id
-              ~sequence
-              ~keeper_name
-              ~tool_name
-              ~input
-              ?turn_id
+        (match next_sequence_lifecycle ~base_path with
+         | Uninstalled ->
+           Error
+             { path = pending_store_path ~base_path
+             ; reason =
+                 "gate_pending store is not installed; submit requires a completed install"
+             }
+         | Unavailable error -> Error error
+         | Ready sequence ->
+           if sequence = max_int
+           then
+             Error
+               { path = pending_store_path ~base_path
+               ; reason = "approval sequence exhausted its integer representation"
+               }
+           else
+             let entry =
+               create_entry
+                 ~id
+                 ~sequence
+                 ~keeper_name
+                 ~tool_name
+                 ~input
+                 ?turn_id
               ?request_context
               ?task_id
               ?goal_id

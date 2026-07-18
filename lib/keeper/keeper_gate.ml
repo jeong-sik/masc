@@ -928,5 +928,4 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
-  let reset_active_auto_judges () = Atomic.set active_auto_judges Auto_judge_owners.empty
 end

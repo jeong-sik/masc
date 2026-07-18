@@ -1976,6 +1976,14 @@ let complete_delivery delivery =
            | Ok () -> finish ())))
 ;;
 
+let compare_pending_order left right =
+  match String.compare left.audit_base_path right.audit_base_path with
+  | 0 ->
+    let sequence_order = Int.compare left.sequence right.sequence in
+    if sequence_order = 0 then String.compare left.id right.id else sequence_order
+  | workspace_order -> workspace_order
+;;
+
 let install_persistence_internal ~after_load ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
@@ -2047,7 +2055,10 @@ let install_persistence_internal ~after_load ~base_path =
                    (Atomic.get next_sequences));
               Ok
                 ( SMap.cardinal loaded_pending
-                , SMap.bindings loaded_deliveries |> List.map snd ))))
+                , SMap.bindings loaded_deliveries
+                  |> List.map snd
+                  |> List.sort (fun left right ->
+                    compare_pending_order left.entry right.entry) ))))
   in
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
@@ -2191,7 +2202,7 @@ let resolve ~base_path ~id ~(decision : decision)
 (** List all pending approvals as JSON. *)
 let pending_entries_in_sequence_order () =
   SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
-  |> List.sort (fun left right -> Int.compare left.sequence right.sequence)
+  |> List.sort compare_pending_order
 ;;
 
 let list_pending_json () : Yojson.Safe.t =

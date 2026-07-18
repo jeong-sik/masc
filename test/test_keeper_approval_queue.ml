@@ -499,16 +499,31 @@ let test_monotonic_sequence_survives_restart () =
 
 let test_same_owner_drain_uses_sequence_not_wall_clock () =
   let base_path = temp_dir () in
+  let other_base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
+      cleanup_dir base_path;
+      cleanup_dir other_base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
        let first = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 1) in
        let second = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 2) in
+       let other =
+         submit ~base_path:other_base_path ~keeper_name:"fifo-owner" ~input:(`Int 3)
+       in
        let first = { (pending_entry_exn first) with requested_at = 500.0 } in
        let second = { (pending_entry_exn second) with requested_at = 1.0 } in
+       let expected_global =
+         if String.compare base_path other_base_path < 0
+         then [ first.id; second.id; other ]
+         else [ other; first.id; second.id ]
+       in
+       Alcotest.(check (list string))
+         "global projection groups deterministic workspace-local FIFO"
+         expected_global
+         (AQ.list_pending_entries ()
+          |> List.map (fun (entry : AQ.pending_approval) -> entry.id));
        match
          Gate.For_testing.ready_auto_judges_for_owner
            ~base_path

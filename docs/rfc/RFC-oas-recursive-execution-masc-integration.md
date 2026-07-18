@@ -3,11 +3,11 @@ rfc: "oas-recursive-execution-masc-integration"
 title: "OAS recursive execution integration for Keeper, Fusion, and the dashboard"
 status: Draft
 created: 2026-07-17
-updated: 2026-07-17
+updated: 2026-07-18
 author: codex
-last_verified: 2026-07-17
-source_baseline: masc/main@d5bd126498f88e256c2e5e912d20ae1f7a22baeb
-oas_source_baseline: oas/main@fd713eb0cfc4ffa9887a5d4830f497be7263004d
+last_verified: 2026-07-18
+source_baseline: masc/main@03272e0af1d844423d3df1f2c33dd81428d168c7
+oas_source_baseline: oas/main@2102d4de5cdce118cfd6100a8c88e1ed52b0678b
 supersedes:
   - masc-oas-bridge-total-llm-dispatch-boundary
   - shared-admission-primitive-knob-binding-policy
@@ -20,6 +20,8 @@ depends_on:
 related:
   - docs/OAS-MASC-BOUNDARY.md
   - docs/spec/04-turn-lifecycle.md
+  - github/masc#25121
+  - github/masc#25122
   - docs/spec/13-oas-integration.md
   - docs/rfc/RFC-0338-lane-per-keeper-persistence-isolation.md
   - docs/rfc/RFC-0341-keeper-lifecycle-projection-ssot.md
@@ -60,11 +62,12 @@ DAG, no re-declared OAS progress type, and no compatibility dispatcher.
 
 ### §0.1 Reconciliation with the current MASC bridge/admission Drafts
 
-MASC main at `d5bd126498` includes two narrower Drafts that were written before
-this end-to-end ownership cut:
+MASC main at `03272e0af1` contains two withdrawn historical RFCs that were
+written before this end-to-end ownership cut:
 `RFC-masc-oas-bridge-total-llm-dispatch-boundary` and
-`RFC-shared-admission-primitive-knob-binding-policy`. Their useful decisions
-remain:
+`RFC-shared-admission-primitive-knob-binding-policy`. #25103 removed their
+normative authority; the #25104-#25106 tombstone stack is not yet merged. They
+are not implementation sources. The following useful constraints remain:
 
 - every MASC-originated LLM request crosses one typed product boundary;
 - resource ownership and queue pressure are explicit and observable;
@@ -237,12 +240,16 @@ ownership/index code:
   `Agent_sdk.Tool.t`;
 - `Fusion_oas_binding`: adapts a typed Fusion execution capability to one
   `Agent_sdk.Tool.t`;
+- `Auto_judge_oas_binding`: constructs the immutable OAS Agent definition used
+  for one typed approval judgment; it owns no queue, worker, or provider call;
 - `Product_execution_activation`: solely owns the exact, versioned MASC
-  Keeper-delivery/Fusion-run activation encodings and their typed resolution;
+  Keeper-delivery/Fusion-run/Auto-Judge-approval activation encodings and their
+  typed resolution;
 - `Keeper_oas_recurrence`: asks the configured LLM for the MASC-owned decision
   at an OAS progress boundary and applies the corresponding OAS public action;
-- `Oas_async_terminal_inbox`: durably stages OAS operation-event references and
-  projects each exact MASC-owned root to its Keeper lane or Fusion-run inbox;
+- `Oas_async_terminal_inbox`: durably stages OAS terminal-fact references and
+  projects each exact MASC-owned root to its Keeper lane, Fusion-run inbox, or
+  Auto Judge approval resolver;
 - `Keeper_execution_projection`: joins a MASC lane delivery/settlement with the
   OAS read pages referenced by its exact execution-evidence fact.
 
@@ -251,7 +258,7 @@ There is no MASC wrapper around `Tool_batch.expose`,
 builder calls those OAS functions directly. A pass-through facade would add a
 second place to learn and maintain the same API.
 
-The two domain adapters return the OAS existential package rather than exposing
+The two Tool adapters return the OAS existential package rather than exposing
 their runner internals:
 
 ```ocaml
@@ -281,6 +288,7 @@ module Product_execution_activation : sig
   type product_root =
     | Keeper_lane_delivery of Keeper_lane_delivery_ref.t
     | Fusion_run of Fusion_run_ref.t
+    | Auto_judge_approval of Keeper_approval_ref.t
 
   type construction_error
   type decode_error
@@ -303,6 +311,13 @@ module Product_execution_activation : sig
     -> resolution
 end
 ```
+
+`Auto_judge_oas_binding` similarly constructs one immutable generic OAS Agent
+definition at readiness. The approval queue does not receive an
+`Execution_context.t` or an executor. It starts that definition only through
+the public OAS root-start CAS with the exact `Auto_judge_approval` activation.
+Consequently a queue retry after reply loss resolves the same root instead of
+minting another Operation or retaining a private execution context.
 
 These signatures intentionally show only the product capabilities and the OAS
 result. Durable codecs, executable identity/revision, Tool identity/revision,
@@ -768,6 +783,33 @@ If a PreTool hook blocks, the dashboard reads the OAS block decision and one
 ToolResult from OAS. MASC may join its Gate reference as product metadata, but
 must not emit a second Tool terminal.
 
+Auto Judge remains a MASC-owned approval policy, but its model call is an OAS
+execution. The approval queue starts one immutable OAS Agent definition through
+the public root-start CAS, using the exact `Auto_judge_approval` activation and
+selected OAS runtime binding. It stores only the approval identity plus the OAS
+root/terminal-fact reference. Provider attempts, model output, cancellation,
+and root terminal state stay in the OAS Journal/read model.
+
+MASC resolves the typed approval verdict exactly once with a CAS keyed by the
+approval identity and terminal fact reference. Only that product decision is
+MASC state; raw model output and provider state are not copied. A committed
+verdict stages one typed owner-lane item and wakes only that Keeper. Invalid or
+undecodable output commits a typed judgment-failure disposition with the same
+fact reference, stages it for the owner lane and operator, and advances the
+owner cursor. It never silently selects a verdict, automatically retries the
+semantic decision, resumes a suspended Gate fiber, or head-of-line blocks later
+approval sequences.
+
+There is no application-root switch that calls `Llm_provider.Complete.complete`
+directly for each pending owner. OAS binding capacity is the sole provider
+admission authority. If it is unavailable, the exact approval remains in its
+durable owner queue without MASC allocating a per-approval waiter fiber, retry
+timer, or second concurrency counter. OAS alone owns any internal binding
+admission/waiting strategy and its bounded resource contract. That OAS contract
+is binding-isolated: a saturated binding does not retain a global Operation
+worker/admission permit while waiting, so it cannot stop another binding's
+Journal commit or provider dispatch.
+
 ## §11 Runtime binding/capability SSOT and issue #22654
 
 Issue #22654 correctly identified a local MASC mirror of OAS
@@ -782,7 +824,11 @@ The hard cut is not complete. At the inspected MASC baseline:
 - `Runtime_schema` re-exports that constructor;
 - `runtime_adapter` and the dashboard have explicit arms for it;
 - `Runtime_toml.parse_thinking_control_format` still has no accepted input for
-  it and owns a separate hand-written list of labels and aliases.
+  it and owns a separate hand-written list of labels and aliases;
+- #25081 still parses MASC `binding.max_concurrent` and projects it field by
+  field into OAS `Provider_config.max_concurrent_requests`. #25086 and #25087
+  correctly removed the duplicate runtime-candidate and Memory admission paths,
+  but the MASC declaration/parser/projection remains at this baseline.
 
 The target removes the MASC semantic mirrors for OAS `api_format`, transport,
 credential, provider, model, and concrete binding declarations. This includes
@@ -815,11 +861,12 @@ them; OAS validates them against that exact row before dispatch.
 
 OAS `Capability_vocab` is the vocabulary SSOT. Its target public hard-cut API is
 `decode_thinking_control_format` over the exact `{ label; token }` wire pair and
-the exhaustive inverse `encode_thinking_control_format`. Decode compares
-canonical labels exactly and returns typed `Unknown_label of string`,
-`Token_required`, `Token_forbidden`, or `Invalid_token` errors. The token is a
-validated value; empty or padded text cannot cross the codec and no caller
-prevalidation is required.
+the exhaustive inverse `encode_thinking_control_format`. Both return the same
+typed codec-error family; decode compares canonical labels exactly, while
+encode revalidates the public token-bearing constructor. Errors are
+`Unknown_label of string`, `Token_required`, `Token_forbidden`, or
+`Invalid_token`. Empty or padded text cannot cross either direction and no
+caller prevalidation is required.
 
 MASC does **not** parse those two capability fields through the OAS decoder.
 That would centralize vocabulary while leaving two declaration authorities.
@@ -831,9 +878,11 @@ declaration is the only capability authority. A MASC logical runtime role
 contains only its opaque OAS binding reference.
 
 Dashboard output loads the effective capability from the resolved OAS binding
-and calls `encode_thinking_control_format` directly. Canonical OAS labels and
-tokens are therefore read-only projections of the effective row, not MASC
-configuration. Current hyphenated aliases and absent-field-to-
+and calls `encode_thinking_control_format` directly, surfacing its typed error
+as an OAS binding/readiness invariant failure rather than choosing a display
+default. Canonical OAS labels and tokens are therefore read-only projections of
+the effective row, not MASC configuration. Current hyphenated aliases and
+absent-field-to-
 `No_thinking_control` defaults are deleted with their tests. The legacy
 normalizing `thinking_control_format_of_label_and_token` is deleted inside OAS
 when its catalog loaders move to the exact decoder; it cannot remain as an
@@ -889,6 +938,17 @@ The implementation optimizes for product readability, not type-system display.
 - Every finite OAS call and awaited composite is attached to its caller-owned
   Eio structured scope. Work that outlives that scope is a durable async
   Operation, not a detached fiber.
+- A Keeper-owned durable queue orders work by a monotonic owner sequence
+  committed with the row. Wall-clock time, process-local insertion order, and
+  a generated ID are observations/identities, never FIFO authority or a
+  tie-break repair.
+- Owner drain reads an indexed owner cursor/page. Completing one owner item
+  does not rescan the workspace or fleet pending set, and activating K owners
+  does not perform K scans over P pending rows.
+- Durable queue serialization is scoped to the exact BasePath/owner storage
+  authority. No fleet-wide mutex is held across snapshot encoding, filesystem
+  write, flush, rename, provider I/O, or OAS acknowledgement; slow storage for
+  one workspace cannot block another workspace's Gate commit.
 - One blocked Keeper lane, Tool CPU pool, Fusion operation, or dashboard reader
   cannot own another Keeper's progress resources. Pure CPU work uses the OAS
   executor authority appropriate to the binding; blocking/non-cooperative work
@@ -940,6 +1000,16 @@ behind flags.
 - MASC has no execution envelope, root link, delivery-to-root index, or
   cause-to-root selector; root idempotency is the OAS activation index and
   repeatable causes remain causal evidence only;
+- Auto Judge provider work enters through one activation-CAS OAS Agent root;
+  no Keeper root-switch/direct Complete call, stored execution context, product
+  provider counter, or detached per-owner worker can become a second execution
+  authority;
+- the reaction ledger consumes exactly one current identity generation. It
+  does not load prior schema rows into current summaries, represent an unknown
+  reaction label as a valid reaction, or duplicate OAS execution receipt and
+  terminal state. Execution-derived product reactions carry an OAS fact
+  reference; MASC-only Board, queue, cursor, and operator reactions retain
+  their typed MASC owner reference and do not acquire a synthetic OAS edge;
 - an AST/interface gate rejects local OAS closed-sum redeclarations and
   pass-through batch/Agent facades;
 - every MASC logical runtime reference resolves exactly once through an OAS
@@ -1011,6 +1081,11 @@ The oracles prove:
   roots without becoming a first/latest/unique lookup key;
 - one async operation terminal creates one lane item and at most one effective
   wake for its owning Keeper;
+- one Auto Judge approval creates one activated OAS Agent root and
+  provider-attempt tree; reply loss or restart reuses that root, the
+  `(approval_id, terminal fact)` verdict/failure CAS commits at most once before
+  owner staging, and the MASC approval row never contains a second model
+  transcript or provider terminal classification;
 - an unavailable Keeper/Fusion destination leaves its terminal reference staged
   without preventing another owner's terminal projection;
 - a late terminal never mutates the closed ToolUse or old provider turn;
@@ -1040,6 +1115,22 @@ The oracles prove:
   remains exact and lane-local;
 - holding every Tool CPU worker at an explicit barrier does not prevent OAS
   framework Journal/read work or unrelated Keeper lanes;
+- an owner with two same-clock-time approvals drains by their committed owner
+  sequence, not timestamp or ID; restart preserves that order byte-for-byte;
+- completing one owner item visits only that owner's indexed page. Evidence
+  counts visited rows/index reads and rejects a workspace/fleet scan or
+  `K * P` bulk-drain shape without relying on latency thresholds;
+- holding workspace A's durable write/flush barrier does not prevent workspace
+  B from committing a Gate decision, staging an async terminal, or reading its
+  owner page;
+- saturating the OAS provider binding starts zero extra provider calls and
+  allocates zero MASC per-approval waiter fibers; Auto Judge approvals remain
+  durable, any bounded binding wait remains OAS-owned, and another
+  binding/Keeper continues;
+- a fixture containing the retired reaction identity generation is admitted
+  only to an exact raw-row quarantine as a typed legacy-schema fact, without a
+  legacy semantic decode, and contributes zero current stimuli/reactions; one
+  source occurrence cannot be counted once under each generation;
 - the tests use barriers and committed-event ordering, not sleeps, latency
   thresholds, retry counts, or inferred fleet-size assumptions;
 - dashboard refresh work is proportional to requested pages/expanded nodes and
@@ -1088,9 +1179,11 @@ authority.
    provider-binding declaration codec, `Error.category` /
    `Error.category_label`, durable `Execution_root_activation`, public
    propagation of `Execution_event.External_event` into Agent roots, and root
-   activation/cause access from execution context/read facts.
-2. Add the two MASC domain bindings and register them through the one OAS
-   application runtime.
+   activation/cause access from execution context/read facts. The same release
+   must provide binding-isolated admission that relinquishes global execution
+   permits before a saturated binding waits.
+2. Add the two MASC Tool bindings plus the Auto Judge Agent binding and register
+   them through the one OAS application runtime.
 3. Compose Agent/Keeper/Fusion/Tool arrays only through OAS public catalogs and
    batch adapters.
 4. Move Keeper execution to the explicit five-case OAS step surface and add the
@@ -1102,7 +1195,15 @@ authority.
 5. Activate every finite MASC-owned root with its exact lane-delivery or
    Fusion-run activation, add activation replay/reconciliation, and add the
    staged per-owner durable async-terminal inbox. Do not add a MASC root link or
-   cause-to-root index.
+   cause-to-root index. Move Auto Judge model work to an OAS Agent root started
+   by the exact approval activation CAS; delete direct `Complete.complete`
+   root-switch workers, stored execution contexts, and every MASC
+   provider-capacity authority. Commit the typed MASC approval verdict or
+   judgment-failure disposition once by `(approval_id, OAS terminal fact)` CAS,
+   stage it for the owner/operator, and advance the owner cursor. Replace
+   timestamp/ID owner ordering and whole-pending-set drains with one committed
+   owner sequence and indexed owner cursor. Replace cross-workspace queue I/O
+   serialization with the exact BasePath/owner commit authority.
 6. Replace flat/reconstructed dashboard rows with the joined hierarchical read
    projection and local collapse state; stop the OAS-native serialization and
    persistence in `keeper_event_bridge.native_event_to_json` and remove the
@@ -1124,7 +1225,12 @@ authority.
    feedback loops, and tests for retired compatibility behavior in the same
    cutover series. Replace the current broad `Keeper_execution_receipt` with the
    reference-only lane settlement; there is no runtime compatibility decoder
-   for the retired receipt shape.
+   for the retired receipt shape. Hard-cut the reaction ledger to one identity
+   generation: delete the v1 reader/writer and mixed-generation summary path,
+   return a typed legacy-schema/quarantine result for retained old rows, and
+   remove `Execution_receipt`/`Terminal_reason` reaction copies in favor of the
+   exact OAS fact reference. MASC-only reactions keep their typed product owner
+   reference. No row is interpreted by both generations.
 9. Delete `scripts/oas-api-surface.json`, its snapshot/regeneration path,
    `lib/oas_compat`, the duplicate classifiers in `Keeper_agent_error` and
    `Keeper_turn_runtime_budget_routing`, and the forwarding alias after moving
@@ -1146,11 +1252,12 @@ At this draft baseline the following are real blockers, not future polish:
 1. RFC-OAS-029 and RFC-OAS-037 are not yet released implementations consumed
    by MASC.
 2. OAS must release durable generic `Execution_root_activation` CAS on the
-   public Agent start/continue API and expose each committed root's activation
-   and causes through `Execution_context.root` / `Execution_root_context` and
-   read facts. This is required for exact reply-loss/crash replay and
-   product-actor resolution without a MASC root link, cause-only lookup,
-   internal ID, or scan.
+   public Agent start/continue API, including embedding-owned root start without
+   a pre-existing `Execution_context.t`, and expose each committed root's
+   activation and causes through `Execution_context.root` /
+   `Execution_root_context` and read facts. This is required for Auto Judge and
+   exact reply-loss/crash replay plus product-actor resolution without a MASC
+   root link, stored context, cause-only lookup, internal ID, or scan.
 3. OAS must release the exact public `decode_thinking_control_format` /
    `encode_thinking_control_format` pair, validated token/error surface, and
    checked catalog/overlay/custom-binding declaration codec. The decoder is
@@ -1158,7 +1265,9 @@ At this draft baseline the following are real blockers, not future polish:
    only the encoder over the resolved effective row. Current MASC capability
    and provider-binding parsing cannot be deleted before those upstream
    authorities exist, and the thinking parser has already drifted again after
-   #22654.
+   #22654. MASC #25081 also still projects its local `max_concurrent` field into
+   OAS; #25086/#25087 removed downstream duplicate admission but not this
+   declaration/parser authority.
 4. OAS main has not released public `Error.category` /
    `Error.category_label`, so the three MASC classifiers, forwarding alias, and
    their consumers cannot yet move to the upstream canonical projection.
@@ -1171,8 +1280,19 @@ At this draft baseline the following are real blockers, not future polish:
 6. The compiled-interface conformance checker, removal of the historical API
    fingerprint/compatibility classifier, generated projections, and executable
    completion evidence do not exist.
+7. Current MASC Auto Judge orders an owner's work by wall-clock timestamp/ID,
+   scans the pending set during owner drains, starts direct provider workers
+   outside an activated OAS Agent root, and serializes queue persistence across
+   workspaces.
+   The reaction ledger also consumes v1 and v2 identity generations together
+   and retains execution receipt/terminal copies. These are active SSOT and
+   server-performance blockers, not migration compatibility to preserve.
+8. OAS must guarantee that a saturated provider binding does not retain a
+   global Operation worker/admission permit while it waits. MASC removing its
+   own waiter is insufficient if one binding can still stop unrelated bindings,
+   Journal commits, or terminal projection inside the shared OAS runtime.
 
-Until all six are closed, “design reviewed” and “runtime feature complete”
+Until all eight are closed, “design reviewed” and “runtime feature complete”
 must remain separate claims.
 
 ## §17 Evidence
@@ -1193,8 +1313,17 @@ must remain separate claims.
   — practical module/functor trade-offs; used here to avoid functor ceremony
   where direct capability arguments suffice; checked 2026-07-17; confidence
   Medium-High.
+- [근거] MASC `main@03272e0af1`, `lib/keeper/keeper_gate.ml`,
+  `lib/keeper/keeper_approval_queue.ml`,
+  `lib/keeper/hitl_summary_worker.ml`,
+  `lib/keeper/keeper_provider_subcall.ml`, and
+  `lib/keeper/keeper_reaction_ledger.ml`, plus #25081
+  `lib/runtime/runtime_adapter.ml` — current timestamp/ID owner ordering,
+  whole-pending-set drain, direct provider completion, cross-workspace queue
+  serialization, mixed reaction identity generations, and MASC-side provider
+  capacity projection; checked 2026-07-18; confidence High.
 - [근거] `git show 0dc45378d3`, `lib/runtime/runtime_schema.ml`,
   `lib/runtime/runtime_toml.ml`, and
   `Llm_provider.Capability_vocab` at the inspected local baselines — #22654
   type re-export fix and the remaining `Thinking_object_adaptive` parser drift;
-  checked 2026-07-17; confidence High.
+  checked 2026-07-18; confidence High.

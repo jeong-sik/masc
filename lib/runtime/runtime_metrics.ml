@@ -11,16 +11,24 @@
     dashboards / alert rules query them by name), so renaming the module does
     not rename the series. *)
 
-let metric_runtime_metrics_eviction = "masc_runtime_metrics_eviction_total"
-let metric_runtime_audit_failure = "masc_runtime_audit_failure_total"
+type audit_failure_stage =
+  | Store_creation
+  | Append
+
+let audit_failure_stage_to_string = function
+  | Store_creation -> "store_creation"
+  | Append -> "append"
+;;
 
 let on_runtime_metrics_eviction () =
-  Otel_metric_store_core.inc_counter metric_runtime_metrics_eviction ()
+  Otel_metric_store_core.inc_counter
+    Otel_runtime_metric_names.metric_runtime_metrics_eviction
+    ()
 ;;
 
 let on_runtime_audit_failure ~stage =
   Otel_metric_store_core.inc_counter
-    metric_runtime_audit_failure
-    ~labels:[("stage", stage)]
+    Otel_runtime_metric_names.metric_runtime_audit_failure
+    ~labels:[ "stage", audit_failure_stage_to_string stage ]
     ()
 ;;

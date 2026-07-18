@@ -983,7 +983,6 @@
   test_task_dispatch
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
-  test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier
   test_param_type_classifier
@@ -1153,7 +1152,6 @@
   test_task_dispatch
   test_workspace_task_lifecycle
   test_workspace_task_verification_phase_e
-  test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier
   test_param_type_classifier
@@ -1440,7 +1438,6 @@
   test_validation_coverage
   test_dashboard_resilience_coverage
   test_nickname_coverage
-  test_level2_config_coverage
   test_config_coverage
   test_progress_coverage
   test_mcp_protocol_coverage
@@ -1485,7 +1482,6 @@
   test_validation_coverage
   test_dashboard_resilience_coverage
   test_nickname_coverage
-  test_level2_config_coverage
   test_config_coverage
   test_progress_coverage
   test_mcp_protocol_coverage

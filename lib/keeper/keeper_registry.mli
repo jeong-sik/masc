@@ -465,6 +465,25 @@ val wakeup_running :
     or inactive live hint without treating the already-committed payload as a
     delivery failure. *)
 
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+val wakeup_running_exact :
+  intent:wakeup_intent -> registry_entry -> exact_wakeup_outcome
+(** Signal only the Keeper lane captured by [registry_entry]. The current
+    registry entry is resolved by its existing canonical key and compared with
+    the captured entry through [Keeper_lane.Id]; an entry registered later
+    under the same name returns [Exact_wake_replaced] without signalling it.
+    Immutable record updates that preserve the lane id remain the same owner,
+    and lifecycle/phase admission is evaluated from that current record. The
+    ownership check and signal are serialized with lifecycle transactions for
+    this Keeper key; an unowned wake returns [Exact_wake_lifecycle_reserved]. *)
+
 (** Set fiber_wakeup for all running keepers. *)
 val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
 

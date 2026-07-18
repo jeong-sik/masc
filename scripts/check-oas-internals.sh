@@ -1,47 +1,24 @@
 #!/usr/bin/env bash
-# Guard masc from reaching past the agent_sdk public surface.
+# Guard MASC from reaching past the public surfaces of linked OAS libraries.
 #
 # Symmetric counterpart to OAS's scripts/check-sdk-independence.sh
 # (oas does not depend on masc; masc does not reach into
 # oas internals).
 #
-# Tiers:
-#   strict   (default, fail-on-match):
-#     - `Agent_sdk__*` mangled internal-module references in lib/
-#       (these would only appear if a caller bypassed the wrapped
-#       library by going through the dune __ -mangled name directly).
+# Fails on any mangled internal-module reference for the three wrapped OAS
+# libraries linked by lib/dune: agent_sdk, agent_sdk.base, and
+# agent_sdk.llm_provider. Such a reference bypasses the public wrapper.
 #
-#   warn     (--include-internals):
-#     - `Llm_provider.Provider_kind` qualified module access
-#       outside lib/runtime_model/provider_kind_resolver.{ml,mli} and
-#       lib/runtime/runtime_provider_labels.{ml,mli}
-#       (informational; allowed uses include serialization, type
-#       annotations, local-module aliases, and comments).
-#     - `Llm_provider.Constants` qualified access outside
-#       lib/oas_compat/ and runtime provider boundary helpers.
-#       (informational; runtime subsystem currently legitimately
-#       reads default inference params).
-#
-#   strict-internals (--strict-internals):
-#     promote warn-tier matches to failures. Use after baseline
-#     occurrences have been tagged with `(* boundary-allow:<reason> *)`.
-#
-# Permanently excluded scopes: _build/, .worktrees/, .masc/playground/,
-# test/ (test fixtures legitimately reference internals for boundary
-# round-trip checks).
+# Test support, fixtures, documentation, and archived sources are excluded.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-include_internals=0
-strict_internals=0
 for arg in "$@"; do
   case "$arg" in
-    --include-internals) include_internals=1 ;;
-    --strict-internals)  include_internals=1; strict_internals=1 ;;
     -h|--help)
-      sed -n '1,32p' "$0"
+      sed -n '1,14p' "$0"
       exit 0
       ;;
     *)
@@ -56,101 +33,53 @@ if ! command -v rg >/dev/null 2>&1; then
   exit 1
 fi
 
-# Common rg excludes.
 RG_BASE_FLAGS=(
   --type-add 'ocaml:*.{ml,mli}'
   -t ocaml
   -g '!_build/**'
+  -g '!_build_codex_trpg/**'
   -g '!.worktrees/**'
+  -g '!worktrees/**'
   -g '!.masc/playground/**'
+  -g '!archive/**'
+  -g '!dashboard_bonsai/**'
+  -g '!docs/**'
+  -g '!fixtures/**'
+  -g '!test/**'
+  -g '!test_lib/**'
+  -g '!**/test/**'
+  -g '!**/tests/**'
 )
 
-# Filter: skip OCaml comment-leading lines and lines tagged with
-# `boundary-allow`. Mirrors OAS's check-sdk-independence.sh heuristic.
-filter_noise() {
-  awk -F':' '
-    {
-      idx = index($0, ":")
-      rest = substr($0, idx + 1)
-      idx2 = index(rest, ":")
-      content = substr(rest, idx2 + 1)
-      sub(/^[[:space:]]+/, "", content)
-      if (content ~ /^\*/) next
-      if (content ~ /^\(\*/) next
-      if ($0 ~ /boundary-allow/) next
-      print $0
-    }
-  '
-}
+OAS_MANGLED_PREFIX_PATTERN='Agent_sdk__|Agent_sdk_base__|Llm_provider__'
 
-scan_strict_agent_sdk_internal() {
-  # Catch `Agent_sdk__Foo` (the dune wrapped-library mangled name).
-  # Direct legit access uses `Agent_sdk.Foo` instead.
-  local matches
-  matches="$(rg -n 'Agent_sdk__[A-Za-z_]' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null | filter_noise || true)"
+scan_mangled_oas_internal() {
+  local matches status
+  if matches="$(rg -n "${RG_BASE_FLAGS[@]}" "$OAS_MANGLED_PREFIX_PATTERN" . 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  case "$status" in
+    0) ;;
+    1) matches="" ;;
+    *)
+      echo "OAS-internals check failed: ripgrep scan error (exit $status)" >&2
+      echo "$matches" >&2
+      return 1
+      ;;
+  esac
+
   if [[ -n "$matches" ]]; then
-    echo "FAIL [strict]: Agent_sdk__ mangled internal reference (use Agent_sdk.X instead)" >&2
+    echo "FAIL [strict]: OAS mangled internal reference (use the public wrapper instead)" >&2
     echo "$matches" >&2
     return 1
   fi
   return 0
 }
 
-scan_warn_provider_kind_external() {
-  # Provider_kind qualified access outside runtime provider boundary helpers.
-  local matches
-  matches="$(rg -n 'Llm_provider\.Provider_kind|\bProvider_kind\.' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
-    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
-    | grep -v 'lib/runtime/runtime_provider_labels\.' \
-    | filter_noise || true)"
-  if [[ -n "$matches" ]]; then
-    if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Provider_kind raw access outside runtime provider boundary helpers" >&2
-    else
-      echo "WARN [internals]: Llm_provider.Provider_kind raw access outside runtime provider boundary helpers" >&2
-    fi
-    echo "$matches" >&2
-    return 1
-  fi
-  return 0
-}
-
-scan_warn_constants_external() {
-  # Llm_provider.Constants outside oas_compat / runtime provider boundary helpers.
-  local matches
-  matches="$(rg -n 'Llm_provider\.Constants' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
-    | grep -v 'lib/oas_compat/' \
-    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
-    | grep -v 'lib/runtime_model/runtime_provider_defaults\.' \
-    | filter_noise || true)"
-  if [[ -n "$matches" ]]; then
-    if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
-    else
-      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
-    fi
-    echo "$matches" >&2
-    return 1
-  fi
-  return 0
-}
-
-overall_fail=0
-if ! scan_strict_agent_sdk_internal; then
-  overall_fail=1
-fi
-
-if [[ "$include_internals" -eq 1 ]]; then
-  pk_ok=1
-  if ! scan_warn_provider_kind_external; then pk_ok=0; fi
-  cn_ok=1
-  if ! scan_warn_constants_external; then cn_ok=0; fi
-  if [[ "$strict_internals" -eq 1 && ( "$pk_ok" -eq 0 || "$cn_ok" -eq 0 ) ]]; then
-    overall_fail=1
-  fi
-fi
-
-if [[ "$overall_fail" -ne 0 ]]; then
+if ! scan_mangled_oas_internal; then
   echo "OAS-internals check failed" >&2
   exit 1
 fi

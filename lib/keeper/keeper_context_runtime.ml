@@ -106,6 +106,22 @@ type max_context_resolution = {
 type max_context_resolution_error =
   | Invalid_requested_context_override of int
   | Runtime_context_window_unavailable of { runtime_id : string }
+  | Runtime_assignment_unavailable of { keeper_name : string }
+
+type max_context_observation =
+  | Available of
+      { runtime_id : string
+      ; resolution : max_context_resolution
+      }
+  | Unavailable of
+      { runtime_id : string option
+      ; reason : max_context_resolution_error
+      }
+
+let max_context_resolution_error_code = function
+  | Invalid_requested_context_override _ -> "invalid_requested_context_override"
+  | Runtime_context_window_unavailable _ -> "runtime_context_window_unavailable"
+  | Runtime_assignment_unavailable _ -> "runtime_assignment_unavailable"
 
 let max_context_resolution_error_to_string = function
   | Invalid_requested_context_override requested ->
@@ -114,6 +130,8 @@ let max_context_resolution_error_to_string = function
     Printf.sprintf
       "no configured runtime context window resolved for runtime id %S"
       runtime_id
+  | Runtime_assignment_unavailable { keeper_name } ->
+    Printf.sprintf "no runtime assignment resolved for keeper %S" keeper_name
 
 type context_budget_source =
   | Runtime_provider_cap
@@ -135,24 +153,40 @@ let context_budget_source_to_string = function
   | Requested_override_clamped_to_provider ->
     "requested_override_clamped_to_provider"
 
-let context_budget_json_of_resolution
-    ~(runtime_id : string)
-    (resolution : max_context_resolution) : Yojson.Safe.t =
-  let context_budget_source =
-    resolution
-    |> context_budget_source_of_resolution
-    |> context_budget_source_to_string
-  in
-  `Assoc
-    [ ("runtime_id", `String runtime_id)
-    ; ("provider_context_window", `Int resolution.primary_budget)
-    ; ("budget_source", `String context_budget_source)
-    ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
-    ; ("primary_budget", `Int resolution.primary_budget)
-    ; ("runtime_budget", `Int resolution.runtime_budget)
-    ; ("requested_context_window", `Int resolution.requested_context_window)
-    ; ("effective_budget", `Int resolution.effective_budget)
-    ]
+let context_budget_json_of_observation
+    (observation : max_context_observation) : Yojson.Safe.t =
+  match observation with
+  | Available { runtime_id; resolution } ->
+    let context_budget_source =
+      resolution
+      |> context_budget_source_of_resolution
+      |> context_budget_source_to_string
+    in
+    `Assoc
+      [ ("runtime_id", `String runtime_id)
+      ; ("available", `Bool true)
+      ; ("unavailable_reason", `Null)
+      ; ("provider_context_window", `Int resolution.primary_budget)
+      ; ("budget_source", `String context_budget_source)
+      ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
+      ; ("primary_budget", `Int resolution.primary_budget)
+      ; ("runtime_budget", `Int resolution.runtime_budget)
+      ; ("requested_context_window", `Int resolution.requested_context_window)
+      ; ("effective_budget", `Int resolution.effective_budget)
+      ]
+  | Unavailable { runtime_id; reason } ->
+    `Assoc
+      [ ("runtime_id", Json_util.string_opt_to_json runtime_id)
+      ; ("available", `Bool false)
+      ; ("unavailable_reason", `String (max_context_resolution_error_code reason))
+      ; ("provider_context_window", `Null)
+      ; ("budget_source", `Null)
+      ; ("requested_override", `Null)
+      ; ("primary_budget", `Null)
+      ; ("runtime_budget", `Null)
+      ; ("requested_context_window", `Null)
+      ; ("effective_budget", `Null)
+      ]
 ;;
 
 let apply_post_turn_lifecycle_with_resilience_handles =
@@ -310,35 +344,6 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
       then dedupe_keep_order (model :: configured)
       else configured
 
-let resolve_max_context_resolution ~requested_override (labels : string list)
-    : max_context_resolution =
-  let default_budget = Runtime.default_max_context () in
-  let runtime_budget =
-    labels
-    |> List.find_map (fun label ->
-           String.trim label
-           |> Runtime.max_context_of_runtime_id)
-    (* Labels are an ordered runtime-budget preference list. If none resolve,
-       the precomputed default runtime budget preserves config-less tests.
-       DET-OK: dispatch still fail-fast validates the selected runtime id before
-       provider execution. *)
-    |> Option.value ~default:default_budget
-  in
-  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
-  let primary_budget = runtime_budget in
-  let requested_context_window =
-    match requested_override with
-    | Some requested when requested > 0 -> requested
-    | _ -> primary_budget
-  in
-  let effective_budget = min requested_context_window primary_budget in
-  { requested_override
-  ; primary_budget
-  ; runtime_budget
-  ; requested_context_window
-  ; effective_budget
-  }
-
 let resolve_max_context_resolution_for_runtime_id
       ~requested_override
       ~runtime_id
@@ -367,24 +372,22 @@ let resolve_max_context_resolution_for_runtime_id
             ; effective_budget
             }))
 
-let resolve_max_context_resolution_of_meta (m : keeper_meta)
-    : max_context_resolution =
-  (* Projection-only compatibility path for manual compaction, operator/status,
-     dashboard, and tool surfaces that do not yet return typed capacity errors.
-     Actual direct/unified turn admission uses
-     [resolve_max_context_resolution_for_runtime_id] and never falls through
-     this ordered-label/default path.
-
-     [effective_model_labels_for_turn] projects through
-     [Provider_runtime_projection.default_execution_model_strings], which ignores
-     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
-     single-binding artifact), so on its own the budget would size against
-     [runtime].default and could admit prompts exceeding a smaller per-keeper
-     model's window. Prepend the routed id so these remaining projections prefer
-     it until their typed hard-cut removes this fallback API. *)
-  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
-  resolve_max_context_resolution
-    ~requested_override:m.max_context_override labels
+let observe_max_context_resolution_of_meta (m : keeper_meta)
+    : max_context_observation =
+  match runtime_id_of_meta_opt m with
+  | None ->
+    Unavailable
+      { runtime_id = None
+      ; reason = Runtime_assignment_unavailable { keeper_name = m.name }
+      }
+  | Some runtime_id ->
+    (match
+       resolve_max_context_resolution_for_runtime_id
+         ~requested_override:m.max_context_override
+         ~runtime_id
+     with
+     | Ok resolution -> Available { runtime_id; resolution }
+     | Error reason -> Unavailable { runtime_id = Some runtime_id; reason })
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =

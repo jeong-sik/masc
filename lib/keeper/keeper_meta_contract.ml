@@ -546,10 +546,16 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
    default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
    to the default itself). The id is opaque here; only the OAS adapter parses
    it. *)
-let runtime_id_of_meta (meta : keeper_meta) =
+let runtime_id_of_meta_opt (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
-  | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
-  | Some _ | None -> Runtime.get_default_runtime_id ()
+  | Some runtime_id when String.trim runtime_id <> "" -> Some (String.trim runtime_id)
+  | Some _ | None -> Option.map (fun (runtime : Runtime.t) -> runtime.id) (Runtime.get_default_runtime ())
+;;
+
+let runtime_id_of_meta meta =
+  match runtime_id_of_meta_opt meta with
+  | Some runtime_id -> runtime_id
+  | None -> Runtime.get_default_runtime_id ()
 ;;
 
 let proactive_cycle_outcome_to_string = function

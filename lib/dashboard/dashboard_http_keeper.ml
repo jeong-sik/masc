@@ -666,13 +666,12 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ~registry_entry
           in
 
-          let max_context_resolution =
-            Keeper_context_runtime.resolve_max_context_resolution_of_meta m
+          let max_context_observation =
+            Keeper_context_runtime.observe_max_context_resolution_of_meta m
           in
           let context_budget =
-            Keeper_context_runtime.context_budget_json_of_resolution
-              ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)
-              max_context_resolution
+            Keeper_context_runtime.context_budget_json_of_observation
+              max_context_observation
           in
           let context =
             match last_metrics with

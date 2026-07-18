@@ -418,13 +418,6 @@ val set_runtime_media_failover :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. The list order is preserved. *)
 
-val default_max_context : unit -> int
-(** Effective context-window budget of the default runtime's model (RFC-0206
-    single-binding), clamped by the OAS provider capability catalog when that
-    cap is available. Replaces the deleted
-    [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
-    [Runtime_constants.fallback_context_window] before {!init_default} runs. *)
-
 val default_model_api_name : unit -> string
 (** API model name of the default runtime, sent to the runtime completion
     endpoint (RFC-0206 single-binding). Replaces the deleted

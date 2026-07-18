@@ -355,6 +355,14 @@ let with_runtime_initialized f =
   with_runtime_file (fun _path -> f ())
 ;;
 
+let resolve_context_exn ~requested_override runtime_id =
+  match Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+          ~requested_override ~runtime_id with
+  | Ok resolution -> resolution
+  | Error error -> Alcotest.fail
+      (Keeper_context_runtime.max_context_resolution_error_to_string error)
+;;
+
 let test_messages_http_runtime_loads_and_assignment_resolves () =
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -921,24 +929,16 @@ let test_rerank_resolver_errors_on_unknown_runtime_id () =
 let test_context_budget_uses_selected_runtime () =
   with_runtime_initialized (fun () ->
     let default_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "runpod_mtp.qwen" ]
+      resolve_context_exn ~requested_override:None "runpod_mtp.qwen"
     in
     let selected_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.gpt" ]
+      resolve_context_exn ~requested_override:None "openai.gpt"
     in
     let small_budget =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "openai.small" ]
+      resolve_context_exn ~requested_override:None "openai.small"
     in
     let oversized_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:(Some 128_001)
-        [ "openai.small" ]
+      resolve_context_exn ~requested_override:(Some 128_001) "openai.small"
     in
     Alcotest.(check int)
       "default runtime budget"
@@ -974,6 +974,21 @@ let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
          runtime_id
      | Error _ -> Alcotest.fail "unexpected strict context resolution error"
      | Ok _ -> Alcotest.fail "unknown runtime must not receive a default capacity");
+    let unavailable =
+      Keeper_context_runtime.Unavailable
+        { runtime_id = Some "missing.runtime"
+        ; reason =
+            Keeper_context_runtime.Runtime_context_window_unavailable
+              { runtime_id = "missing.runtime" }
+        }
+      |> Keeper_context_runtime.context_budget_json_of_observation
+    in
+    Alcotest.(check bool)
+      "unavailable capacity is null and retains typed reason"
+      true
+      J.(unavailable |> member "effective_budget" = `Null
+         && unavailable |> member "unavailable_reason" |> to_string
+            = "runtime_context_window_unavailable");
     match
       Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
         ~requested_override:(Some 0)
@@ -987,9 +1002,7 @@ let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
 let test_context_budget_source_is_shared_ssot () =
   with_runtime_initialized (fun () ->
     let source requested_override =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override
-        [ "openai.gpt" ]
+      resolve_context_exn ~requested_override "openai.gpt"
       |> Keeper_context_runtime.context_budget_source_of_resolution
       |> Keeper_context_runtime.context_budget_source_to_string
     in
@@ -1007,21 +1020,22 @@ let test_context_budget_source_is_shared_ssot () =
       (source (Some 1_000_000)))
 ;;
 
-(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
-   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
-   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
-   exercised separately through the strict runtime-ID resolver. *)
 let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let res =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta
+      Keeper_context_runtime.observe_max_context_resolution_of_meta
         (make_meta "budgettest")
     in
-    Alcotest.(check int)
-      "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
-      64000
-      res.Keeper_context_runtime.effective_budget)
+    match res with
+    | Keeper_context_runtime.Available { resolution; _ } ->
+      Alcotest.(check int)
+        "of_meta observes routed runtime (openai.gpt=64000), not default (128000)"
+        64000
+        resolution.Keeper_context_runtime.effective_budget
+    | Keeper_context_runtime.Unavailable { reason; _ } ->
+      Alcotest.fail
+        (Keeper_context_runtime.max_context_resolution_error_to_string reason))
 ;;
 
 let test_turn_context_window_uses_routed_runtime () =
@@ -1630,9 +1644,7 @@ let test_max_context_accessor_clamps_to_provider_cap () =
       (Some 131072)
       (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
     let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ "ollama_cloud.stalecontext" ]
+      resolve_context_exn ~requested_override:None "ollama_cloud.stalecontext"
     in
     Alcotest.(check int)
       "keeper context budget uses provider-effective cap"
@@ -1668,9 +1680,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
       (Some oas_provider_limit)
       (Runtime.max_context_of_runtime_id runtime_id);
     let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:None
-        [ runtime_id ]
+      resolve_context_exn ~requested_override:None runtime_id
     in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"

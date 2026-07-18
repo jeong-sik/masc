@@ -7,6 +7,7 @@ type keeper_context_snapshot =
   ; context_tokens : int option
   ; context_max : int option
   ; context_source : string option
+  ; context_unavailable_reason : Keeper_context_runtime.max_context_resolution_error option
   }
 
 val keeper_context_snapshot_is_empty : keeper_context_snapshot -> bool

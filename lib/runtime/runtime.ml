@@ -1693,18 +1693,6 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
-(* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]
-   scanned model labels across a runtime's candidates and folded the max. Under
-   single-binding every keeper uses the default runtime, so the context budget
-   is that runtime's [model.max_context]. Falls back to
-   [Runtime_constants.fallback_context_window] when the default is not yet
-   initialized (config-less test binaries). *)
-let default_max_context () : int =
-  match get_default_runtime () with
-  | Some rt -> max_context_of_runtime rt
-  | None -> Runtime_constants.fallback_context_window
-;;
-
 (* RFC-0206 single-binding: the deleted
    [Runtime_runtime.default_local_model_label_and_id] scanned configured/available
    labels and returned the model-id substring. Under single-binding the model

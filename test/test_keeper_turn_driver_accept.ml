@@ -1081,10 +1081,7 @@ let test_manual_direct_turn_uses_effective_context_budget () =
     "manual direct turn resolves max context from runtime/meta"
     true
     (contains
-       ~needle:
-         "Keeper_context_runtime.resolve_max_context_resolution\n\
-          \t                  ~requested_override:meta.max_context_override \
-          effective_models"
+       ~needle:"Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id"
        slice);
   Alcotest.(check bool)
     "manual direct first attempt uses provider-effective budget"

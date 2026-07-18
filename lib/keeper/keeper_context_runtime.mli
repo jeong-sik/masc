@@ -90,6 +90,14 @@ type max_context_resolution =
 type max_context_resolution_error =
   | Invalid_requested_context_override of int
   | Runtime_context_window_unavailable of { runtime_id : string }
+  | Runtime_assignment_unavailable of { keeper_name : string }
+
+type max_context_observation =
+  | Available of { runtime_id : string; resolution : max_context_resolution }
+  | Unavailable of
+      { runtime_id : string option
+      ; reason : max_context_resolution_error
+      }
 
 type context_budget_source =
   | Runtime_provider_cap
@@ -181,12 +189,9 @@ val keeper_action_kind_of_tool_names : string list -> string
 
 val effective_model_labels_for_turn : keeper_meta -> string list
 
-val resolve_max_context_resolution
-  :  requested_override:int option
-  -> string list
-  -> max_context_resolution
-
-val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
+val observe_max_context_resolution_of_meta
+  :  keeper_meta
+  -> max_context_observation
 
 val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
@@ -197,15 +202,16 @@ val max_context_resolution_error_to_string
   :  max_context_resolution_error
   -> string
 
+val max_context_resolution_error_code : max_context_resolution_error -> string
+
 val context_budget_source_of_resolution
   :  max_context_resolution
   -> context_budget_source
 
 val context_budget_source_to_string : context_budget_source -> string
 
-val context_budget_json_of_resolution
-  :  runtime_id:string
-  -> max_context_resolution
+val context_budget_json_of_observation
+  :  max_context_observation
   -> Yojson.Safe.t
 
 (** {1 Mention Detection} *)

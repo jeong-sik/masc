@@ -65,6 +65,11 @@ let disposition_of_error : Board.board_error -> disposition = function
     (* Store/disk-level hiccup unrelated to whether the target exists; the
        next read is expected to succeed once the environment recovers. *)
     Transient
+  | Board.Persistence_commit_unknown _ ->
+    (* The intended row may already be visible, but the directory commit was
+       not confirmed. Retrying observation is safe and may see the committed
+       projection after persistence reconciliation. *)
+    Transient
   | Board.Validation_error _ ->
     (* Not reachable from [get_post]/[get_comments] today (only write paths
        produce it). Classified [Permanent] for exhaustiveness: it signals
@@ -145,6 +150,7 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
            (queue_reaction_change_of_board reaction))
+  ; routing_event_id = None
   ; author = signal.author
   ; title = signal.title
   ; content = signal.content
@@ -318,11 +324,14 @@ type wake_reason =
   | Reaction_after_self_activity
       (** An external reaction landed on a post the keeper authored or a thread
           the keeper had commented on. *)
+  | Broadcast
+      (** An explicitly typed Board broadcast audience. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
+  | Broadcast -> "broadcast"
 ;;
 
 let self_authored_post ~self_ids ~(post_id : string) =

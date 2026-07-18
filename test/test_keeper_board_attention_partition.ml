@@ -99,6 +99,7 @@ let candidate ?(instructions = "partition context") index =
   match
     A.of_board_evidence
       ~meta:(meta ~instructions keeper_name)
+      ~routing_event_id:None
       ~recorded_at:(float_of_int index)
       ~signal
       ~post

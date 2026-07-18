@@ -22,6 +22,10 @@ type board_error =
   | Post_not_found of string
   | Comment_not_found of string
   | Io_error of string
+  | Persistence_commit_unknown of string
+    (** The intended durable mutation became visible, but the filesystem could
+        not confirm its directory commit. Callers must retain intended memory
+        state and retry persistence; rolling back would create split-brain. *)
   | Validation_error of string
   | Already_voted of string
   | Already_exists of string
@@ -222,6 +226,18 @@ type reaction_toggle_result = {
   summary: reaction_summary list;
 }
 
+type prepared_reaction = {
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+  created_at : float;
+}
+
+type 'a mutation_application =
+  | Applied of 'a
+  | Already_applied of 'a
+  | Repaired_partial_apply of 'a
+
 (** {1 SubBoard — Named spaces within the board} *)
 
 module Sub_board_id : sig
@@ -326,10 +342,15 @@ type store = {
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
+  mutable dirty_sub_boards: bool;                          (** Deferred sub-board snapshot *)
   dirty_post_ids: (string, unit) Hashtbl.t;                 (** Deferred post snapshots *)
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
+  pending_post_durability: (string, string) Hashtbl.t;      (** post_id -> original commit-unknown detail *)
+  pending_comment_durability: (string, string) Hashtbl.t;   (** comment_id -> original commit-unknown detail *)
+  pending_parent_projection_repairs: (string, unit) Hashtbl.t; (** comment_id -> parent rewrite required *)
   mutable last_flush: float;
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
+  flusher_producer_mutex: Eio.Mutex.t;                    (** Serializes non-blocking inbox admission *)
   sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)
   sub_boards_by_slug: (string, string) Hashtbl.t;          (** slug -> sub_board_id *)
   (* RFC-0233 §7 guard #2: real secondary indexes for origin lookup, mirroring

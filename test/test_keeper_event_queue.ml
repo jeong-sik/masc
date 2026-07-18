@@ -126,9 +126,10 @@ let settle_and_project
 
 let () =
   let open Keeper_event_queue in
-  let board_payload () =
+  let board_payload ?routing_event_id () =
     Board_signal
       { kind = Post_created
+      ; routing_event_id
       ; author = "a"
       ; title = "t"
       ; content = "c"
@@ -143,12 +144,29 @@ let () =
   assert (not (is_board_signal Bootstrap));
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
+  let routed_stimulus event_id =
+    { post_id = "same-board-post"
+    ; urgency = Normal
+    ; arrived_at = 1.0
+    ; payload = board_payload ~routing_event_id:event_id ()
+    }
+  in
+  assert
+    (stimulus_identity_equal
+       (routed_stimulus "routing-event-1")
+       (routed_stimulus "routing-event-1"));
+  assert
+    (not
+       (stimulus_identity_equal
+          (routed_stimulus "routing-event-1")
+          (routed_stimulus "routing-event-2")));
 
   let board_attention_payload ?(content = "c") candidate_id =
     Board_attention
       { candidate_id
       ; signal =
           { kind = Post_created
+          ; routing_event_id = None
           ; author = "a"
           ; title = "t"
           ; content
@@ -191,6 +209,7 @@ let () =
             ; emoji = "👏"
             ; reacted = true
             }
+      ; routing_event_id = Some "routing-reaction-1"
       ; author = "reactor"
       ; title = "parent"
       ; content = "body"

@@ -19,8 +19,7 @@
     Internal helpers stay private at this boundary:
     - {b Vote-direction normaliser}: [all_vote_directions],
       [vote_direction_of_string_opt].
-    - {b Vote log persistence}: [append_vote_log],
-      [rewrite_vote_log].
+    - {b Vote log persistence}: durable append and snapshot helpers.
     - {b Internal vote outcome}: the [vote_outcome] record
       carries the score delta, optional fresh peer-upvote economy
       credit, and post-lock vote log / feedback side effects.
@@ -61,9 +60,8 @@ val vote_direction_of_string_opt : string -> vote_direction option
 
 val vote_log_path : unit -> string
 (** Path to the append-only vote log JSONL under
-    [<base>/.masc/board-votes.jsonl].  The internal append
-    + rotate path mirrors the post / comment writers in
-    {!Board_core}. *)
+    [<base>/.masc/board-votes.jsonl]. The internal append uses the same
+    stable-lock durable JSONL protocol as post / comment writers. *)
 
 (** {1 Voting} *)
 
@@ -164,31 +162,39 @@ val set_pinned :
 
 val delete_post :
   store -> post_id:string -> (unit, board_error) Result.t
-(** Removes the post and every comment under it from the
-    in-memory store.  The JSONL log keeps the original
-    rows; the rewriter on next flush overwrites the file
-    without them. *)
+(** Removes the post and every dependent comment, vote, and reaction, then
+    durably rewrites the projection set before returning success. *)
 
 (** {1 Global store + lifecycle} *)
 
+exception Board_persistence_unavailable of string
+(** Raised when a persisted Board projection cannot be read, fully decoded, or
+    durably normalized. The singleton is not published with partial state. *)
+
 val global : unit -> store
-(** Lazy singleton.  First call constructs the store via
-    {!create_store}, then runs the four loaders
-    ([load_persisted_posts] / [_comments] / [_votes] +
-    [recalculate_reply_counts]) under
-    [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
-    fiber cannot leave the singleton half-initialised. *)
+(** Lazy singleton. The first call fully decodes every persisted projection,
+    re-derives counters, and durably compacts discarded dependent rows before
+    publishing the store. Any load or repair failure raises
+    {!Board_persistence_unavailable}; partial state is never published. *)
 
 val reset_global_for_test : unit -> unit
 (** Reinstalls a fresh lazy singleton.  Safe to call only
     from test setup before concurrent fibers exist. *)
 
-val flush_dirty : store -> unit
-(** Flushes dirty post/comment snapshots to the JSONL files
-    with a short in-memory snapshot lock and append-only disk
-    writes.  When dirty vote targets exist, compacts the vote
-    log from the same timestamp-preserving in-memory snapshot.
-    Stamps [last_flush] with the wall clock. *)
+val flush_dirty : store -> (unit, board_error) result
+(** Flushes the post/comment/vote/reaction/sub-board projections under the persistence
+    transaction lock. The state mutex is held only while taking or comparing a
+    snapshot. Dirty state is cleared only after every durable rewrite succeeds
+    and the in-memory snapshot is still current; failures stay retryable. *)
+
+val sweep_and_flush :
+  ?protected_post_ids:string list ->
+  ?protected_comment_ids:string list ->
+  store ->
+  ((int * int), board_error) result
+(** Runs exact-reference-aware expiry removal and its durable projection flush
+    under one persistence transaction, preventing votes or other writers from
+    interleaving between removal and rewrite. *)
 
 (** {1 Karma} *)
 

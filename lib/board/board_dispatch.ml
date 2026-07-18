@@ -72,12 +72,12 @@ type backend_state =
   | Uninitialized
   | Active of board_backend * flusher_handle
 
-type board_signal_kind =
+type board_signal_kind = Board_signal_command.signal_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_change
 
-and board_reaction_change = {
+and board_reaction_change = Board_signal_command.reaction_change = {
   target_type : Board.reaction_target_type;
   target_id : string;
   user_id : string;
@@ -85,7 +85,7 @@ and board_reaction_change = {
   reacted : bool;
 }
 
-type board_signal = {
+type board_signal = Board_signal_command.signal = {
   kind : board_signal_kind;
   post_id : string;
   author : string;
@@ -94,6 +94,107 @@ type board_signal = {
   hearth : string option;
   updated_at : float option;
 }
+
+type board_signal_event = {
+  event_id : string;
+  audience : Board_signal_audience.t;
+  signal : board_signal;
+}
+
+type board_signal_delivery =
+  | Atomic_sink_accepted
+  | Recipient_settlement_complete
+
+let routing_mutation_mu = Eio.Mutex.create ()
+
+let routing_delivery_claim_mu = Stdlib.Mutex.create ()
+let routing_delivery_claims : (string, unit) Hashtbl.t = Hashtbl.create 64
+
+let with_routing_mutation_lock f =
+  Eio.Mutex.use_rw ~protect:true routing_mutation_mu f
+;;
+
+let claim_routing_delivery event_id =
+  Stdlib.Mutex.protect routing_delivery_claim_mu (fun () ->
+    if Hashtbl.mem routing_delivery_claims event_id
+    then false
+    else (
+      Hashtbl.add routing_delivery_claims event_id ();
+      true))
+;;
+
+let release_routing_delivery event_id =
+  Stdlib.Mutex.protect routing_delivery_claim_mu (fun () ->
+    Hashtbl.remove routing_delivery_claims event_id)
+;;
+
+let ensure_no_prepared_routing_mutation () =
+  Result.bind (Board_signal_outbox.entries ()) (fun entries ->
+    match
+      List.find_opt
+        (fun (entry : Board_signal_outbox.entry) ->
+           match entry.phase with
+           | Board_signal_outbox.Prepared _ -> true
+           | Board_signal_outbox.Committed _ | Board_signal_outbox.Delivered _ -> false)
+        entries
+    with
+    | None -> Ok ()
+    | Some entry ->
+      Error
+        (Printf.sprintf
+           "prior Board routing mutation remains prepared: event_id=%s"
+           entry.event_id))
+;;
+
+type pending_routing_references = {
+  post_ids : string list;
+  comment_ids : string list;
+}
+
+let pending_routing_references () =
+  Result.map
+    (fun entries ->
+       List.fold_left
+         (fun references (entry : Board_signal_outbox.entry) ->
+            let command =
+              match entry.phase with
+              | Board_signal_outbox.Prepared command -> Some command
+              | Board_signal_outbox.Committed { mutation; _ } -> Some mutation
+              | Board_signal_outbox.Delivered _ -> None
+            in
+            match command with
+            | None -> references
+            | Some command ->
+              let post_id = Board_signal_command.referenced_post_id command in
+              let comment_ids =
+                match Board_signal_command.referenced_comment_id command with
+                | None -> references.comment_ids
+                | Some comment_id -> comment_id :: references.comment_ids
+              in
+              { post_ids = post_id :: references.post_ids; comment_ids })
+         { post_ids = []; comment_ids = [] }
+         entries
+       |> fun references ->
+       { post_ids = List.sort_uniq String.compare references.post_ids
+       ; comment_ids = List.sort_uniq String.compare references.comment_ids
+       })
+    (Board_signal_outbox.entries ())
+;;
+
+let reject_referenced_post_mutation ~operation ~post_id mutation =
+  match pending_routing_references () with
+  | Error detail -> Error (Board_types.Io_error detail)
+  | Ok references ->
+    if List.exists (String.equal post_id) references.post_ids
+    then
+      Error
+        (Board_types.Io_error
+           (Printf.sprintf
+              "Board post %s is fenced by its pending routing command: %s"
+              operation
+              post_id))
+    else mutation ()
+;;
 
 type board_sse_event =
   | Post_created of {
@@ -162,14 +263,34 @@ let start_flusher_actor ~sw store =
     while true do
       match Eio.Stream.take store.Board.flusher_inbox with
       | Board_types.Flush ->
-          (try Board.flush_dirty store
+          (try
+             match Board.flush_dirty store with
+             | Ok () -> ()
+             | Error error ->
+               Log.BoardLog.error "Flush failed: %s" (Board.show_board_error error)
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
       | Board_types.Sweep ->
           (try
-             let swept = Board.sweep store in
-             ignore swept
+             with_routing_mutation_lock (fun () ->
+               match pending_routing_references () with
+               | Ok references ->
+                 (match
+                    Board.sweep_and_flush
+                      ~protected_post_ids:references.post_ids
+                      ~protected_comment_ids:references.comment_ids
+                      store
+                  with
+                  | Ok _ -> ()
+                  | Error error ->
+                    Log.BoardLog.error
+                      "Post-sweep flush failed: %s"
+                      (Board.show_board_error error))
+               | Error detail ->
+                 Log.BoardLog.warn
+                   "Board sweep deferred because routing references are unavailable: %s"
+                   detail)
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
@@ -242,21 +363,142 @@ let ensure_flusher_actor store =
       loop flusher_start_cas_retries
 
 
-let board_signal_hook : (board_signal -> unit) option Atomic.t = Atomic.make None
+let board_signal_hook :
+    (board_signal_event -> (board_signal_delivery, string) result) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+let recover_and_drain_callback :
+    (unit -> (unit, string) result) Atomic.t
+  =
+  Atomic.make (fun () -> Ok ())
+;;
+
+let recover_prepared_callback :
+    (unit -> (unit, string) result) Atomic.t
+  =
+  Atomic.make (fun () -> Ok ())
+;;
+
+let admit_routing_mutation mutation =
+  match (Atomic.get recover_prepared_callback) () with
+  | Error detail ->
+    Error (Board_types.Io_error ("board routing-event recovery failed: " ^ detail))
+  | Ok () ->
+    with_routing_mutation_lock (fun () ->
+      match ensure_no_prepared_routing_mutation () with
+      | Error detail -> Error (Board_types.Io_error detail)
+      | Ok () -> mutation ())
+;;
 
 let set_board_signal_hook hook =
-  Atomic.set board_signal_hook (Some hook)
+  Atomic.set board_signal_hook (Some hook);
+  match (Atomic.get recover_and_drain_callback) () with
+  | Ok () -> ()
+  | Error detail ->
+    Log.BoardLog.error "Board signal outbox recovery failed: %s" detail
+;;
 
-let emit_board_signal signal =
-  match Atomic.get board_signal_hook with
-  | Some hook ->
-      (try hook signal
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.BoardLog.error "Board signal hook failed: %s"
-             (Printexc.to_string exn))
-  | None -> ()
+let deliver_committed_signal event_id =
+  if not (claim_routing_delivery event_id)
+  then Ok ()
+  else
+    Fun.protect
+      ~finally:(fun () -> release_routing_delivery event_id)
+      (fun () ->
+        Result.bind (Board_signal_outbox.entries ()) (fun entries ->
+      match
+        List.find_opt
+          (fun (entry : Board_signal_outbox.entry) ->
+             String.equal entry.event_id event_id)
+          entries
+      with
+      | None
+      | Some { phase = Board_signal_outbox.Delivered _; _ } -> Ok ()
+      | Some { phase = Board_signal_outbox.Prepared _; _ } ->
+        Error ("Board routing event is not committed: " ^ event_id)
+      | Some
+          { phase = Board_signal_outbox.Committed { mutation = payload; _ }
+          ; _
+          } ->
+        let signal = Board_signal_command.signal payload in
+        let audience = Board_signal_command.audience payload in
+          match Atomic.get board_signal_hook with
+          | None ->
+            Log.BoardLog.info
+              "Board routing event remains committed until a hook is installed: event_id=%s"
+              event_id;
+            Ok ()
+          | Some hook ->
+            let delivery =
+              try hook { event_id; audience; signal } with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn -> Error (Printexc.to_string exn)
+            in
+            (match delivery with
+             | Error detail ->
+               Log.BoardLog.error
+                 "Board signal hook rejected committed event: event_id=%s error=%s"
+                 event_id
+                 detail;
+               Error detail
+             | Ok delivery ->
+               let settlement =
+                 match delivery with
+                 | Atomic_sink_accepted ->
+                   Board_signal_outbox.plan_recipients
+                     ~event_id
+                     ~recipients:[]
+                 | Recipient_settlement_complete -> Ok ()
+               in
+               (match Result.bind settlement (fun () ->
+                  Board_signal_outbox.mark_delivered
+                    ~event_id
+                    ~at:(Time_compat.now ()))
+                with
+                | Ok () ->
+                  (match Board_signal_outbox.compact_terminal () with
+                   | Ok () -> Ok ()
+                   | Error detail ->
+                     Log.BoardLog.error
+                       "Board signal outbox terminal compaction failed: event_id=%s error=%s"
+                       event_id
+                       detail;
+                     Error detail)
+                | Error detail ->
+                  Log.BoardLog.error
+                    "Board signal delivery acknowledgement failed: event_id=%s error=%s"
+                    event_id
+                    detail;
+                  Error detail))))
+;;
+
+let new_routing_event_id () = Random_id.prefixed ~prefix:"bse-" ~bytes:16
+
+let prepare_routing_event ~event_id mutation =
+  Board_signal_outbox.prepare ~event_id ~command:mutation
+;;
+
+let commit_routing_event ~event_id value =
+  match Board_signal_outbox.commit ~event_id with
+  | Error detail ->
+    (* The Board mutation has already durably succeeded.  Its Prepared row and
+       preassigned entity id are sufficient for deterministic recovery. *)
+    Log.BoardLog.error
+      "Board mutation committed but routing-event commit failed; recovery remains pending: event_id=%s error=%s"
+      event_id
+      detail;
+    Ok value
+  | Ok () -> Ok value
+;;
+
+let drain_after_mutation () =
+  match (Atomic.get recover_and_drain_callback) () with
+  | Ok () -> ()
+  | Error detail ->
+    Log.BoardLog.error "Board signal outbox drain remains pending: %s" detail
+;;
 
 let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None
 
@@ -292,7 +534,9 @@ let reset_for_test () =
   Atomic.set backend_state Uninitialized;
   Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
   Atomic.set board_signal_hook None;
-  Atomic.set board_sse_hook None
+  Atomic.set board_sse_hook None;
+  Stdlib.Mutex.protect routing_delivery_claim_mu (fun () ->
+    Hashtbl.clear routing_delivery_claims)
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
@@ -356,55 +600,82 @@ let matching_post_ids_for_comment_author_filter ~needle (comments : Board.commen
     comments;
   matches
 
-let emit_post_created (post : Board.post) =
+let emit_post_created_sse (post : Board.post) =
   let pid = Board.Post_id.to_string post.id in
   let auth = Board.Agent_id.to_string post.author in
-  emit_board_signal
-    {
-      kind = Board_post_created;
-      post_id = pid;
-      author = auth;
-      title = post.title;
-      content = post.content;
-      hearth = post.hearth;
-      updated_at = Some post.updated_at;
-    };
   emit_board_sse_event
     (Post_created
        { post_id = pid; author = auth; title = post.title;
          content = post.content; post_kind = post.post_kind;
          hearth = post.hearth })
+;;
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
   match backend () with
   | Jsonl store ->
-    (match
-       Board.create_post
-         store
-         ~author
-         ~content
-         ?title
-         ?body
-         ~post_kind
-         ?meta_json
-         ?visibility
-         ?ttl_hours
-         ?hearth
-         ?thread_id
-         ?origin
-         ()
-     with
+    let mutation_result =
+      admit_routing_mutation (fun () ->
+        let event_id = new_routing_event_id () in
+        let post_id = Board.Post_id.generate () in
+        match
+          Board.prepare_post
+            store
+            ~post_id
+            ~author
+            ~content
+            ?title
+            ?body
+            ~post_kind
+            ?meta_json
+            ?visibility
+            ?ttl_hours
+            ?hearth
+            ?thread_id
+            ?origin
+            ()
+        with
+        | Error _ as error -> error
+        | Ok post ->
+          (match Board_signal_command.post post with
+           | Error _ as error -> error
+           | Ok command ->
+          (match
+             prepare_routing_event ~event_id command
+           with
+           | Error detail ->
+             Error
+               (Board_types.Io_error ("board routing-event prepare failed: " ^ detail))
+           | Ok () ->
+             (match Board.apply_prepared_post store post with
+              | Error board_error -> Error board_error
+              | Ok
+                  (Board.Applied applied
+                  | Board.Already_applied applied
+                  | Board.Repaired_partial_apply applied) ->
+                commit_routing_event ~event_id applied))))
+    in
+    (match mutation_result with
+     | Error _ as error -> error
      | Ok post ->
-       emit_post_created post;
-       Ok post
-     | Error _ as error -> error)
+       emit_post_created_sse post;
+       drain_after_mutation ();
+       Ok post)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
   | Jsonl store ->
-      Board.update_post_with_outcome store ~post_id ~editor ~content ?title
-        ?body ?new_author ()
+    admit_routing_mutation (fun () ->
+      reject_referenced_post_mutation ~operation:"edit" ~post_id (fun () ->
+        Board.update_post_with_outcome
+          store
+          ~post_id
+          ~editor
+          ~content
+          ?title
+          ?body
+          ?new_author
+          ()))
 
 let get_post ~post_id =
   match backend () with
@@ -508,32 +779,63 @@ let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
   | Jsonl store ->
-      (match
-         Board.add_comment store ~post_id ~author ~content ?parent_id
-           ~ttl_hours ()
-       with
-      | Ok comment ->
-          let cid = Board.Comment_id.to_string comment.id in
-          let auth = Board.Agent_id.to_string comment.author in
-          (match Board.get_post store ~post_id with
-          | Ok post ->
-              emit_board_signal
-                {
-                  kind = Board_comment_added;
-                  post_id;
-                  author = auth;
-                  title = post.title;
-                  content;
-                  hearth = post.hearth;
-                  updated_at = Some post.updated_at;
-                }
-          | Error e ->
-              Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s"
-                post_id (Board_types.show_board_error e));
-          emit_board_sse_event
-            (Comment_added { post_id; comment_id = cid; author = auth });
-          Ok comment
-      | Error _ as err -> err)
+    let mutation_result =
+      admit_routing_mutation (fun () ->
+        let event_id = new_routing_event_id () in
+        let comment_id = Board.Comment_id.generate () in
+        match
+          Board.prepare_comment
+            store
+            ~comment_id
+            ~post_id
+            ~author
+            ~content
+            ?parent_id
+            ~ttl_hours
+            ()
+        with
+        | Error _ as error -> error
+        | Ok (comment, post) ->
+          (match Board.get_comments store ~post_id with
+           | Error _ as error -> error
+           | Ok prior_comments ->
+          (match
+             Board_signal_command.comment
+               ~post
+               ~comments:prior_comments
+               comment
+           with
+           | Error _ as error -> error
+           | Ok prepared ->
+          (match prepare_routing_event ~event_id prepared with
+           | Error detail ->
+             Error
+               (Board_types.Io_error ("board routing-event prepare failed: " ^ detail))
+           | Ok () ->
+             (match
+                Board.apply_prepared_comment
+                  store
+                  ~parent_reply_count_before:post.reply_count
+                  comment
+              with
+              | Error board_error -> Error board_error
+              | Ok
+                  (Board.Applied applied
+                  | Board.Already_applied applied
+                  | Board.Repaired_partial_apply applied) ->
+                commit_routing_event ~event_id applied)))))
+    in
+    (match mutation_result with
+     | Error _ as error -> error
+     | Ok comment ->
+       emit_board_sse_event
+         (Comment_added
+            { post_id
+            ; comment_id = Board.Comment_id.to_string comment.id
+            ; author = Board.Agent_id.to_string comment.author
+            });
+       drain_after_mutation ();
+       Ok comment)
 
 let current_vote_for_post ~voter ~post_id =
   match backend () with
@@ -593,47 +895,60 @@ let post_for_reaction_target store ~target_type ~target_id =
            let post_id = Board.Post_id.to_string comment.post_id in
            Board.get_post store ~post_id)
 
-let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
-  match
-    post_for_reaction_target store ~target_type:toggled.target_type
-      ~target_id:toggled.target_id
-  with
-  | Ok post ->
-      emit_board_signal
-        {
-          kind =
-            Board_reaction_changed
-              {
-                target_type = toggled.target_type;
-                target_id = toggled.target_id;
-                user_id = toggled.user_id;
-                emoji = toggled.emoji;
-                reacted = toggled.reacted;
-              };
-          post_id = Board.Post_id.to_string post.id;
-          author = toggled.user_id;
-          title = post.title;
-          content = post.content;
-          hearth = post.hearth;
-          updated_at = Some post.updated_at;
-        }
-  | Error e ->
-      Log.BoardLog.warn
-        "board reaction signal skipped: target=%s:%s user=%s emoji=%s: %s"
-        (Board.reaction_target_type_to_string toggled.target_type)
-        toggled.target_id toggled.user_id toggled.emoji
-        (Board_types.show_board_error e)
-
 let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
-  let result =
+  let mutation_result =
     match backend () with
     | Jsonl store ->
-        (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
-         | Ok toggled as ok ->
-             emit_reaction_board_signal store toggled;
-             ok
-         | Error _ as err -> err)
+      admit_routing_mutation (fun () ->
+        match
+          Board.prepare_reaction_toggle store ~target_type ~target_id ~user_id ~emoji
+        with
+        | Error _ as error -> error
+        | Ok prepared ->
+          let event_id = new_routing_event_id () in
+          (match post_for_reaction_target store ~target_type ~target_id with
+           | Error _ as error -> error
+           | Ok post ->
+             (match
+                Board.get_comments
+                  store
+                  ~post_id:(Board.Post_id.to_string post.id)
+              with
+              | Error _ as error -> error
+              | Ok comments ->
+             (match
+                Board_signal_command.reaction
+                  ~post
+                  ~comments
+                  ~target_type
+                  ~target_id
+                  ~user_id:prepared.user_id
+                  ~emoji:prepared.emoji
+                  ~reacted:prepared.reacted
+                  ~created_at:prepared.created_at
+              with
+               | Error _ as error -> error
+              | Ok mutation ->
+             (match prepare_routing_event ~event_id mutation with
+              | Error detail ->
+                Error
+                  (Board_types.Io_error
+                     ("board routing-event prepare failed: " ^ detail))
+              | Ok () ->
+                (match
+                   Board.set_reaction
+                     store
+                     ~target_type
+                     ~target_id
+                     ~user_id:prepared.user_id
+                     ~emoji:prepared.emoji
+                     ~reacted:prepared.reacted
+                     ~created_at:prepared.created_at
+                 with
+                 | Error board_error -> Error board_error
+                 | Ok toggled -> commit_routing_event ~event_id toggled))))))
   in
+  let result = mutation_result in
   (match result with
    | Ok toggled ->
        emit_board_sse_event
@@ -644,7 +959,8 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
               user_id = toggled.user_id;
               emoji = toggled.emoji;
               reacted = toggled.reacted;
-            })
+            });
+       drain_after_mutation ()
    | Error e ->
        (match e with
         | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
@@ -654,6 +970,88 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
          (Board.reaction_target_type_to_string target_type)
          target_id user_id emoji (Board_types.show_board_error e));
   result
+
+let collect_result errors = function
+  | Ok () -> errors
+  | Error detail -> detail :: errors
+;;
+
+let recover_prepared_entries store entries =
+  let rec from_oldest_pending = function
+    | [] -> []
+    | ({ Board_signal_outbox.phase = Board_signal_outbox.Prepared _; _ } :: _ as pending)
+    | ({ Board_signal_outbox.phase = Board_signal_outbox.Committed _; _ } :: _ as pending)
+      -> pending
+    | _ :: rest -> from_oldest_pending rest
+  in
+  let rec replay = function
+    | [] -> Ok ()
+    | (entry : Board_signal_outbox.entry) :: successors ->
+      let command, commit_after_apply =
+        match entry.phase with
+        | Board_signal_outbox.Prepared command -> command, true
+        | Board_signal_outbox.Committed { mutation = command; _ } -> command, false
+        | Board_signal_outbox.Delivered { mutation; _ } -> mutation, false
+      in
+      let recovery =
+        Result.bind (Board_signal_command.apply store command) (fun () ->
+          if commit_after_apply
+          then Board_signal_outbox.commit ~event_id:entry.event_id
+          else Ok ())
+      in
+      (match recovery with
+       | Ok () -> replay successors
+       | Error detail ->
+         Error
+           (Printf.sprintf
+              "Board routing recovery stopped at event_id=%s; \
+               successors_not_attempted=%d; error=%s"
+              entry.event_id
+              (List.length successors)
+              detail))
+  in
+  replay (from_oldest_pending entries)
+;;
+
+let deliver_committed_entries entries =
+  List.fold_left
+    (fun errors (entry : Board_signal_outbox.entry) ->
+       match entry.phase with
+       | Board_signal_outbox.Committed _ ->
+         collect_result errors (deliver_committed_signal entry.event_id)
+       | Board_signal_outbox.Prepared _
+       | Board_signal_outbox.Delivered _ -> errors)
+    []
+    entries
+;;
+
+let recover_prepared_board_signal_outbox () =
+  with_routing_mutation_lock (fun () ->
+    let store = match backend () with Jsonl store -> store in
+    match Board_signal_outbox.entries () with
+    | Error detail -> Error detail
+    | Ok initial_entries ->
+      recover_prepared_entries store initial_entries)
+;;
+
+let recover_and_drain_board_signal_outbox () =
+  let recovery_errors = (Atomic.get recover_prepared_callback) () in
+  match recovery_errors with
+  | Error _ as error -> error
+  | Ok () ->
+    (match Board_signal_outbox.entries () with
+     | Error detail -> Error detail
+     | Ok recovered_entries ->
+       let delivery_errors = deliver_committed_entries recovered_entries in
+       (match delivery_errors with
+        | [] -> Board_signal_outbox.compact_terminal ()
+        | errors -> Error (String.concat "; " (List.rev errors))))
+;;
+
+let () =
+  Atomic.set recover_prepared_callback recover_prepared_board_signal_outbox;
+  Atomic.set recover_and_drain_callback recover_and_drain_board_signal_outbox
+;;
 
 let list_reactions ~target_type ~target_id ?user_id () =
   match backend () with
@@ -677,7 +1075,10 @@ let list_hearths () =
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with
-  | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
+  | Jsonl store ->
+    with_routing_mutation_lock (fun () ->
+      reject_referenced_post_mutation ~operation:"thread update" ~post_id (fun () ->
+        Board.set_thread_id store ~post_id ~thread_id))
 
 let set_pinned ~post_id ~pinned =
   match backend () with
@@ -685,7 +1086,10 @@ let set_pinned ~post_id ~pinned =
 
 let delete_post ~post_id =
   match backend () with
-  | Jsonl store -> Board.delete_post store ~post_id
+  | Jsonl store ->
+    with_routing_mutation_lock (fun () ->
+      reject_referenced_post_mutation ~operation:"deletion" ~post_id (fun () ->
+        Board.delete_post store ~post_id))
 
 let search ~query ~limit =
   match backend () with
@@ -705,11 +1109,21 @@ let search ~query ~limit =
 let flush () =
   match Atomic.get backend_state with
   | Active (Jsonl store, _) -> Board.flush_dirty store
-  | Uninitialized -> ()
+  | Uninitialized -> Ok ()
 
 let sweep () =
   match backend () with
-  | Jsonl store -> Board.sweep store
+  | Jsonl store ->
+    with_routing_mutation_lock (fun () ->
+      match pending_routing_references () with
+      | Error detail -> Error detail
+      | Ok references ->
+        Result.map_error
+          Board.show_board_error
+          (Board.sweep_and_flush
+            ~protected_post_ids:references.post_ids
+            ~protected_comment_ids:references.comment_ids
+            store))
 
 let get_all_karma () =
   match backend () with

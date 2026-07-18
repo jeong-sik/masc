@@ -429,6 +429,38 @@ let transaction_append path ~expected suffix =
   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
 ;;
 
+let transaction_update path decide =
+  match Fs_compat.transact_private_jsonl_durable_locked_result path decide with
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok (Error detail) -> fail detail
+  | Ok (Ok result) -> result
+;;
+
+let test_private_jsonl_transaction_read_decide_append_is_atomic () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let seen =
+    transaction_update path (fun existing ->
+      Ok (Some "{\"row\":2}\n", existing))
+  in
+  check string "decision sees exact committed bytes" "{\"row\":1}\n" seen;
+  check string
+    "transaction appends once"
+    "{\"row\":1}\n{\"row\":2}\n"
+    (Fs_compat.load_file path);
+  (match
+     Fs_compat.transact_private_jsonl_durable_locked_result path (fun _existing ->
+       Error "typed-decision-rejection")
+   with
+   | Ok (Error "typed-decision-rejection") -> ()
+   | Ok (Error detail) -> fail ("unexpected decision error: " ^ detail)
+   | Ok (Ok _) -> fail "rejected transaction returned success"
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  check string
+    "decision rejection writes nothing"
+    "{\"row\":1}\n{\"row\":2}\n"
+    (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_transaction_missing_and_delta_contract () =
   with_transaction_jsonl None @@ fun path ->
   let origin = transaction_snapshot path ~after:None in
@@ -549,7 +581,25 @@ let test_private_jsonl_transaction_lock_contention_is_typed () =
                 | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal)))
       (fun () ->
          match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
-         | Error (Fs_compat.Stable_lock_contended _) -> ()
+         | Error (Fs_compat.Stable_lock_contended _) ->
+           (match
+              Fs_compat.transact_private_jsonl_durable_locked_result
+                path
+                (fun _existing -> Ok (Some "{\"row\":1}\n", ()))
+            with
+            | Error (Fs_compat.Stable_lock_contended _) -> ()
+            | Error error ->
+              fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+            | Ok _ -> fail "stable-lock transaction bypassed cross-process owner")
+          ; (match
+               Fs_compat.append_private_jsonl_durable_stable_locked_result
+                 path
+                 "{\"row\":1}\n"
+             with
+             | Error (Fs_compat.Stable_lock_contended _) -> ()
+             | Error error ->
+               fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+             | Ok () -> fail "stable-lock append bypassed cross-process owner")
          | Error error ->
            fail (Fs_compat.private_jsonl_transaction_error_to_string error)
          | Ok _ -> fail "cross-process stable-lock contention was accepted")
@@ -559,7 +609,11 @@ let () =
   run
     "fs_compat durable append"
     [ ( "durable_append"
-      , [ test_case "success fsyncs" `Quick test_success_fsyncs
+      , [ test_case
+            "private JSONL stable lock contention is typed"
+            `Quick
+            test_private_jsonl_transaction_lock_contention_is_typed
+        ; test_case "success fsyncs" `Quick test_success_fsyncs
         ; test_case
             "partial ENOSPC rolls back and fsyncs"
             `Quick
@@ -629,6 +683,10 @@ let () =
             `Quick
             test_private_jsonl_transaction_missing_and_delta_contract
         ; test_case
+            "private JSONL transaction read-decide-append is atomic"
+            `Quick
+            test_private_jsonl_transaction_read_decide_append_is_atomic
+        ; test_case
             "private JSONL transaction rejects a second writer cursor"
             `Quick
             test_private_jsonl_transaction_rejects_second_writer_cursor
@@ -640,10 +698,6 @@ let () =
             "private JSONL stable lock is private"
             `Quick
             test_private_jsonl_transaction_lock_is_private
-        ; test_case
-            "private JSONL stable lock contention is typed"
-            `Quick
-            test_private_jsonl_transaction_lock_contention_is_typed
         ] )
     ]
 ;;

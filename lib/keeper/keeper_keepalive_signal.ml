@@ -12,6 +12,7 @@ open Keeper_memory
 open Keeper_execution
 
 module Board_wake = Keeper_world_observation_board_signal
+module Board_signal_outbox = Masc_board_handlers.Board_signal_outbox
 
 type grpc_heartbeat_starter_fn = {
   f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
@@ -345,6 +346,7 @@ let queue_reaction_change_of_board
 ;;
 
 let board_signal_stimulus
+      ~routing_event_id
       ~(reason : Board_wake.wake_reason)
       (signal : Board_dispatch.board_signal)
   =
@@ -356,6 +358,7 @@ let board_signal_stimulus
            | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
            | Board_dispatch.Board_reaction_changed reaction ->
              Keeper_event_queue.Reaction_changed (queue_reaction_change_of_board reaction))
+      ; routing_event_id = Some routing_event_id
       ; author = signal.author
       ; title = signal.title
       ; content = signal.content
@@ -367,6 +370,7 @@ let board_signal_stimulus
   ; urgency =
       (match reason with
        | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
+       | Board_wake.Broadcast -> Keeper_event_queue.Immediate
        | Board_wake.Thread_reply_after_self_comment
        | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
@@ -381,6 +385,7 @@ let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry)
 
 let record_board_attention_candidate
       ~(config : Workspace.config)
+      ~routing_event_id
       ~(signal_kind_label : string)
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
@@ -388,6 +393,7 @@ let record_board_attention_candidate
   match
     Keeper_board_attention_candidate.of_board_signal
       ~meta
+      ~routing_event_id
       ~recorded_at:(Time_compat.now ())
       signal
   with
@@ -400,7 +406,8 @@ let record_board_attention_candidate
       "board attention evidence unavailable: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+      (Keeper_world_observation_board_signal.unavailable_to_string unavailable);
+    Error (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
   | Keeper_world_observation_board_signal.Available candidate ->
     (match
        Keeper_board_attention_worker.record_and_notify
@@ -411,7 +418,8 @@ let record_board_attention_candidate
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
          ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
-         ()
+         ();
+       Ok ()
      | Error err ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -422,20 +430,22 @@ let record_board_attention_candidate
          "board attention candidate record failed: keeper=%s post=%s error=%s"
          meta.name
          signal.post_id
-         err)
+         err;
+       Error err)
 ;;
 
 let deliver_addressed_board_signal
       ~(config : Workspace.config)
+      ~routing_event_id
       ~(reason : Board_wake.wake_reason)
       ~(signal : Board_dispatch.board_signal)
-      (meta : keeper_meta)
+      ~keeper_name
   =
-  let stimulus = board_signal_stimulus ~reason signal in
+  let stimulus = board_signal_stimulus ~routing_event_id ~reason signal in
   match
     Keeper_registry_event_queue.enqueue_stimulus_durable_result
       ~base_path:config.base_path
-      meta.name
+      keeper_name
       stimulus
   with
   | Keeper_registry_event_queue.Stimulus_enqueued
@@ -443,9 +453,150 @@ let deliver_addressed_board_signal
   | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 
+let keeper_ids identities =
+  identities
+  |> List.filter_map Keeper_identity.Keeper_id.of_string
+  |> List.sort_uniq Keeper_identity.Keeper_id.compare
+;;
+
+let entry_matches_target_identity
+      (entry : Keeper_registry.registry_entry)
+      target_identity
+  =
+  match Keeper_identity.Keeper_id.of_string target_identity with
+  | None -> false
+  | Some target_id ->
+    let delivery_ids =
+      Keeper_world_observation_message_scope.message_feed_targets entry.meta
+      |> Keeper_lane_mentions.target_ids_of
+    in
+    List.exists (Keeper_identity.Keeper_id.equal target_id) delivery_ids
+;;
+
+let entry_matches_participant_identities
+      participant_ids
+      (entry : Keeper_registry.registry_entry)
+  =
+  let self_ids = Keeper_world_observation_message_scope.self_ids entry.meta in
+  List.exists
+    (fun participant ->
+       List.exists (Keeper_identity.Keeper_id.equal participant) self_ids)
+    participant_ids
+;;
+
+let dedupe_registry_entries entries =
+  entries
+  |> List.sort (fun
+       (left : Keeper_registry.registry_entry)
+       (right : Keeper_registry.registry_entry) ->
+       String.compare left.name right.name)
+  |> List.sort_uniq (fun
+       (left : Keeper_registry.registry_entry)
+       (right : Keeper_registry.registry_entry) ->
+       String.compare left.name right.name)
+;;
+
+let resolve_target_entry registry_entries identity =
+  match
+    List.filter
+      (fun entry -> entry_matches_target_identity entry identity)
+      registry_entries
+  with
+  | [] -> Error (Printf.sprintf "Board target has no Keeper lane: %s" identity)
+  | [ entry ] -> Ok entry
+  | matches ->
+    Error
+      (Printf.sprintf
+         "Board target resolves to multiple Keeper lanes: target=%s lanes=%s"
+         identity
+         (String.concat
+            ","
+            (List.map
+               (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+               matches)))
+;;
+
+let addressed_entries_for_audience registry_entries audience signal =
+  match audience with
+  | Board_signal_audience.Targets _ ->
+    Error "Target identities must be resolved as independent delivery units"
+  | Board_signal_audience.Broadcast ->
+    Ok (List.map (fun entry -> entry, Board_wake.Broadcast) registry_entries)
+  | Board_signal_audience.Thread_participants identities ->
+    let participant_ids = keeper_ids identities in
+    let entries =
+      registry_entries
+      |> List.filter (entry_matches_participant_identities participant_ids)
+      |> dedupe_registry_entries
+    in
+    (match signal.Board_dispatch.kind with
+     | Board_dispatch.Board_comment_added ->
+       Ok
+         (List.map
+            (fun entry -> entry, Board_wake.Thread_reply_after_self_comment)
+            entries)
+     | Board_dispatch.Board_reaction_changed _ ->
+       Ok
+         (List.map
+            (fun entry -> entry, Board_wake.Reaction_after_self_activity)
+            entries)
+     | Board_dispatch.Board_post_created ->
+       Error "Board post-created signal cannot have Thread_participants audience")
+  | Board_signal_audience.Discoverable ->
+    Error "Discoverable Board audience is not deterministic delivery"
+;;
+
+let addressed_reason_for_audience audience signal =
+  match audience with
+  | Board_signal_audience.Targets _ -> Ok Board_wake.Explicit_mention
+  | Board_signal_audience.Broadcast -> Ok Board_wake.Broadcast
+  | Board_signal_audience.Thread_participants _ ->
+    (match signal.Board_dispatch.kind with
+     | Board_dispatch.Board_comment_added ->
+       Ok Board_wake.Thread_reply_after_self_comment
+     | Board_dispatch.Board_reaction_changed _ ->
+       Ok Board_wake.Reaction_after_self_activity
+     | Board_dispatch.Board_post_created ->
+       Error "Board post-created signal cannot have Thread_participants audience")
+  | Board_signal_audience.Discoverable ->
+    Error "Discoverable Board audience has no addressed wake reason"
+;;
+
+let rec traverse_recipients make acc = function
+  | [] -> Ok (List.rev acc)
+  | value :: rest ->
+    Result.bind (make value) (fun recipient ->
+      traverse_recipients make (recipient :: acc) rest)
+;;
+
+let delivery_units_for_audience registry_entries audience signal =
+  match audience with
+  | Board_signal_audience.Targets identities ->
+    traverse_recipients Board_signal_outbox.target_identity [] identities
+  | Board_signal_audience.Discoverable ->
+    traverse_recipients
+      Board_signal_outbox.keeper_lane
+      []
+      (List.map
+         (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+         registry_entries)
+  | Board_signal_audience.Broadcast
+  | Board_signal_audience.Thread_participants _ ->
+    Result.bind
+      (addressed_entries_for_audience registry_entries audience signal)
+      (fun entries ->
+         traverse_recipients
+           Board_signal_outbox.keeper_lane
+           []
+           (List.map
+              (fun ((entry : Keeper_registry.registry_entry), _reason) -> entry.name)
+              entries))
+;;
+
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
-      (signal : Board_dispatch.board_signal)
+      ({ event_id = routing_event_id; audience; signal } :
+        Board_dispatch.board_signal_event)
   =
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
@@ -457,114 +608,199 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
-  (* Every lane is independent: persist and signal each addressed Keeper
-     without a fleet-wide cap, ordering dependency, or content debounce. *)
   let board_ym = Eio_guard.create_yield_meter () in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       (try
-          match read_meta config entry.name with
-        | Error detail ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_read") ]
-            ();
-          Log.Keeper.warn
-            "board signal Keeper metadata unavailable: keeper=%s error=%s"
-            entry.name
-            detail
-        | Ok None ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_meta_missing") ]
-            ();
-          Log.Keeper.warn
-            "board signal Keeper metadata missing: keeper=%s"
-            entry.name
-        | Ok (Some meta) ->
-          (match
-             Keeper_world_observation.board_signal_wake_reason
-               ~meta
-               ~signal
-           with
-           | Keeper_world_observation_board_signal.Unavailable unavailable ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string KeepaliveSignalFailures)
-               ~labels:[ ("keeper", meta.name); ("phase", "board_signal_read") ]
-               ();
-             Log.Keeper.warn
-               "board signal relevance read unavailable: keeper=%s post=%s error=%s"
-               meta.name
-               signal.post_id
-               (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-           | Keeper_world_observation_board_signal.Available None ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
-               ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
-               ();
-             record_board_attention_candidate
-               ~config
-               ~signal_kind_label
-               ~meta
-               signal
-           | Keeper_world_observation_board_signal.Available (Some reason) ->
-             (match deliver_addressed_board_signal ~config ~reason ~signal meta with
-              | Error detail ->
-                Otel_metric_store.inc_counter
-                  Keeper_metrics.(to_string KeepaliveSignalFailures)
-                  ~labels:
-                    [ ("keeper", meta.name); ("phase", "board_signal_delivery") ]
-                  ();
-                Log.Keeper.warn
-                  "board signal durable delivery failed: keeper=%s reason=%s post=%s error=%s"
-                  meta.name
-                  (Board_wake.wake_reason_label reason)
-                  signal.post_id
-                  detail
-              | Ok () ->
-                if meta.paused || entry.phase = Keeper_state_machine.Paused
-                then
-                  Log.Keeper.info
-                    "board signal queued for paused Keeper: keeper=%s reason=%s post=%s"
-                    meta.name
-                    (Board_wake.wake_reason_label reason)
-                    signal.post_id
-                else (
-                  let outcome =
-                    Keeper_registry.wakeup_running
-                      ~intent:Keeper_registry.Reactive_signal
-                      ~base_path:config.base_path
-                      meta.name
-                  in
-                  match outcome with
-                  | Keeper_registry.Signaled ->
-                    Log.Keeper.info
-                      "board signal wakeup: keeper=%s reason=%s post=%s"
-                      meta.name
-                      (Board_wake.wake_reason_label reason)
-                      signal.post_id
-                  | Keeper_registry.Deferred_unregistered
-                  | Keeper_registry.Deferred_not_running _
-                  | Keeper_registry.Deferred_lifecycle _ ->
-                    Log.Keeper.info
-                      "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
-                      meta.name
-                      (Board_wake.wake_reason_label reason)
-                      signal.post_id)))
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
-            ();
-          Log.Keeper.warn
-            "board signal lane failed independently: keeper=%s post=%s error=%s"
-            entry.name
+  let fail ~keeper ~phase detail =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string KeepaliveSignalFailures)
+      ~labels:[ "keeper", keeper; "phase", phase ]
+      ();
+    Log.Keeper.warn
+      "board signal lane failed: event_id=%s keeper=%s phase=%s post=%s error=%s"
+      routing_event_id
+      keeper
+      phase
+      signal.post_id
+      detail;
+    Error (Printf.sprintf "keeper=%s phase=%s error=%s" keeper phase detail)
+  in
+  let registry_entry recipient =
+    List.find_opt
+      (fun (entry : Keeper_registry.registry_entry) ->
+         String.equal entry.name recipient)
+      registry_entries
+  in
+  let process_addressed_recipient recipient (reason : Board_wake.wake_reason) =
+    try
+      match
+        deliver_addressed_board_signal
+          ~config
+          ~routing_event_id
+          ~reason
+          ~signal
+          ~keeper_name:recipient
+      with
+      | Error detail -> fail ~keeper:recipient ~phase:"board_signal_delivery" detail
+      | Ok () ->
+        let paused =
+          match registry_entry recipient with
+          | Some entry ->
+            entry.meta.paused || entry.phase = Keeper_state_machine.Paused
+          | None -> false
+        in
+        if paused
+        then
+          Log.Keeper.info
+            "board signal queued for paused Keeper: keeper=%s reason=%s post=%s"
+            recipient
+            (Board_wake.wake_reason_label reason)
             signal.post_id
-            (Printexc.to_string exn));
-       Eio_guard.yield_step board_ym)
-    registry_entries
+        else (
+          let outcome =
+            Keeper_registry.wakeup_running
+              ~intent:Keeper_registry.Reactive_signal
+              ~base_path:config.base_path
+              recipient
+          in
+          match outcome with
+          | Keeper_registry.Signaled ->
+            Log.Keeper.info
+              "board signal wakeup: keeper=%s reason=%s post=%s"
+              recipient
+              (Board_wake.wake_reason_label reason)
+              signal.post_id
+          | Keeper_registry.Deferred_unregistered
+          | Keeper_registry.Deferred_not_running _
+          | Keeper_registry.Deferred_lifecycle _ ->
+            Log.Keeper.info
+              "board signal durably queued; live wake deferred: keeper=%s reason=%s post=%s"
+              recipient
+              (Board_wake.wake_reason_label reason)
+              signal.post_id);
+        Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      fail
+        ~keeper:recipient
+        ~phase:"board_lane_failure"
+        (Printexc.to_string exn)
+  in
+  let process_discoverable_recipient recipient =
+    match registry_entry recipient with
+    | None ->
+      fail
+        ~keeper:recipient
+        ~phase:"board_attention_recipient_missing"
+        "planned Discoverable recipient is not registered"
+    | Some entry ->
+      Result.map_error
+        (fun detail ->
+           Printf.sprintf
+             "keeper=%s phase=board_attention_candidate_record error=%s"
+             entry.name
+             detail)
+        (record_board_attention_candidate
+           ~config
+           ~routing_event_id
+           ~signal_kind_label
+           ~meta:entry.meta
+           signal)
+  in
+  let ensure_recipient_plan () =
+    match Board_signal_outbox.recipient_progress ~event_id:routing_event_id with
+    | Error _ as error -> error
+    | Ok Board_signal_outbox.Recipients_unplanned ->
+      Result.bind
+        (delivery_units_for_audience registry_entries audience signal)
+        (fun recipients ->
+           Result.bind
+             (Board_signal_outbox.plan_recipients
+                ~event_id:routing_event_id
+                ~recipients)
+             (fun () ->
+                Board_signal_outbox.recipient_progress ~event_id:routing_event_id))
+    | Ok progress -> Ok progress
+  in
+  Result.bind (ensure_recipient_plan ()) (fun progress ->
+  let recipients =
+    match progress with
+    | Board_signal_outbox.Recipients_unplanned -> []
+    | Board_signal_outbox.Recipients_pending recipients -> recipients
+    | Board_signal_outbox.Recipients_settled -> []
+  in
+  let addressed_reason = addressed_reason_for_audience audience signal in
+  let process_recipient recipient =
+    match recipient, audience with
+    | ( Board_signal_outbox.Target_identity { identity; keeper_name = None }
+      , Board_signal_audience.Targets _ ) ->
+      (match resolve_target_entry registry_entries identity with
+       | Error detail ->
+         ignore
+           (fail ~keeper:identity ~phase:"board_target_resolution" detail
+             : (unit, string) result);
+         Result.map
+           (fun () -> `Terminalized)
+           (Board_signal_outbox.reject_target
+              ~event_id:routing_event_id
+              ~identity)
+       | Ok entry ->
+         Result.bind
+           (Board_signal_outbox.resolve_target
+              ~event_id:routing_event_id
+              ~identity
+              ~keeper_name:entry.name)
+           (fun resolved ->
+              Result.map
+                (fun () -> `Settle resolved)
+                (process_addressed_recipient
+                   entry.name
+                   Board_wake.Explicit_mention)))
+    | ( Board_signal_outbox.Target_identity
+          { identity = _; keeper_name = Some keeper_name }
+      , Board_signal_audience.Targets _ ) ->
+      Result.map
+        (fun () -> `Settle recipient)
+        (process_addressed_recipient keeper_name Board_wake.Explicit_mention)
+    | Board_signal_outbox.Keeper_lane keeper_name, Board_signal_audience.Discoverable ->
+      Result.map
+        (fun () -> `Settle recipient)
+        (process_discoverable_recipient keeper_name)
+    | ( Board_signal_outbox.Keeper_lane keeper_name
+      , (Board_signal_audience.Broadcast
+        | Board_signal_audience.Thread_participants _) ) ->
+      Result.bind addressed_reason (fun reason ->
+        Result.map
+          (fun () -> `Settle recipient)
+          (process_addressed_recipient keeper_name reason))
+    | Board_signal_outbox.Keeper_lane _, Board_signal_audience.Targets _
+    | Board_signal_outbox.Target_identity _, Board_signal_audience.Discoverable
+    | Board_signal_outbox.Target_identity _, Board_signal_audience.Broadcast
+    | ( Board_signal_outbox.Target_identity _
+      , Board_signal_audience.Thread_participants _ ) ->
+      Error "Board audience and durable recipient kind disagree"
+  in
+  let failures =
+    List.fold_left
+      (fun failures recipient ->
+         let result = process_recipient recipient in
+         let result =
+           Result.bind result (function
+             | `Terminalized -> Ok ()
+             | `Settle settled_recipient ->
+               Board_signal_outbox.settle_recipient
+                 ~event_id:routing_event_id
+                 ~recipient:settled_recipient)
+         in
+         Eio_guard.yield_step board_ym;
+         match result with
+         | Ok () -> failures
+         | Error detail -> detail :: failures)
+      []
+      recipients
+  in
+  match failures with
+  | [] -> Ok ()
+  | _ -> Error (String.concat "; " (List.rev failures)))
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

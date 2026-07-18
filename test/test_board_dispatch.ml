@@ -2,6 +2,9 @@
 
 open Masc
 
+module Board_signal_outbox = Masc_board_handlers.Board_signal_outbox
+module Board_signal_command = Masc_board_handlers.Board_signal_command
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -22,6 +25,8 @@ let with_eio f () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
+  Board_dispatch.set_board_signal_hook (fun _ ->
+    Ok Board_dispatch.Atomic_sink_accepted);
   f ()
 
 let block_board_masc_dir_with_file () =
@@ -359,55 +364,945 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
-let test_dedup_hit_does_not_emit_post_created_fanout () =
-  let keeper_signals = ref 0 in
-  let sse_post_created = ref 0 in
-  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
-  Board_dispatch.set_board_sse_hook (function
-    | Board_dispatch.Post_created _ -> incr sse_post_created
-    | _ -> ());
-  let create () =
-    Board_dispatch.create_post ~author:"dedup-agent"
-      ~content:"same post body from one keeper turn"
-      ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
+let test_failed_board_signal_delivery_replays_same_event_id () =
+  let blocked_ids = ref [] in
+  let accepted_ids = ref [] in
+  let record event =
+    if String.equal event.Board_dispatch.signal.content "blocked routing event"
+    then blocked_ids := event.event_id :: !blocked_ids
+    else accepted_ids := event.event_id :: !accepted_ids
   in
-  let first =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
+  Board_dispatch.set_board_signal_hook (fun event ->
+      record event;
+      Error "synthetic durable-lane rejection");
+  (match
+     Board_dispatch.create_post ~author:"replay-agent"
+       ~content:"blocked routing event"
+       ~post_kind:Board.Human_post ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  Alcotest.(check int) "first delivery attempted" 1 (List.length !blocked_ids);
+  Board_dispatch.set_board_signal_hook (fun event ->
+      record event;
+      if String.equal event.signal.content "blocked routing event"
+      then Error "blocked lane still unavailable"
+      else Ok Board_dispatch.Atomic_sink_accepted);
+  (match
+     Board_dispatch.create_post ~author:"replay-agent"
+       ~content:"accepted routing event"
+       ~post_kind:Board.Human_post ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  Alcotest.(check int) "new event delivered while older event stays pending" 1
+    (List.length !accepted_ids);
+  let first_blocked_id =
+    match List.rev !blocked_ids with
+    | first :: _ -> first
+    | [] -> Alcotest.fail "blocked event was never offered to the hook"
   in
-  let second =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  Alcotest.(check string)
-    "dedup returns existing post"
-    (Board.Post_id.to_string first.id)
-    (Board.Post_id.to_string second.id);
-  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
-  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
+  Board_dispatch.set_board_signal_hook (fun event ->
+      record event;
+      Ok Board_dispatch.Atomic_sink_accepted);
+  Alcotest.(check bool) "every blocked replay preserves event identity" true
+    (List.for_all (String.equal first_blocked_id) !blocked_ids);
+  let delivery_count = List.length !blocked_ids + List.length !accepted_ids in
+  Board_dispatch.set_board_signal_hook (fun event ->
+      record event;
+      Ok Board_dispatch.Atomic_sink_accepted);
+  Alcotest.(check int) "delivered events are not replayed again" delivery_count
+    (List.length !blocked_ids + List.length !accepted_ids)
 
-let test_create_post_persistence_failure_returns_error_without_fanout () =
+let test_reaction_toggles_have_distinct_routing_event_ids () =
+  Board_dispatch.set_board_signal_hook (fun _ ->
+    Ok Board_dispatch.Atomic_sink_accepted);
+  let post =
+    match
+      Board_dispatch.create_post ~author:"reaction-event-author"
+        ~content:"reaction routing identity"
+        ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let events = ref [] in
+  Board_dispatch.set_board_signal_hook (fun event ->
+      events := event :: !events;
+      Ok Board_dispatch.Atomic_sink_accepted);
+  let post_id = Board.Post_id.to_string post.id in
+  let toggle () =
+    match
+      Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+        ~target_id:post_id ~user_id:"reaction-event-user" ~emoji:"👍"
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok toggled -> toggled
+  in
+  let liked = toggle () in
+  let unliked = toggle () in
+  Alcotest.(check bool) "first toggle likes" true liked.reacted;
+  Alcotest.(check bool) "second toggle unlikes" false unliked.reacted;
+  match List.rev !events with
+  | [ first; second ] ->
+    Alcotest.(check bool) "separate mutations have separate routing ids" true
+      (not (String.equal first.event_id second.event_id))
+  | _ -> Alcotest.fail "expected exactly two reaction routing events"
+
+let test_board_signal_audience_is_frozen_at_mutation_boundary () =
+  let events = ref [] in
+  Board_dispatch.set_board_signal_hook (fun event ->
+      events := event :: !events;
+      Ok Board_dispatch.Atomic_sink_accepted);
+  let direct_post =
+    match
+      Board_dispatch.create_post
+        ~author:"audience-author"
+        ~content:"@target-b @target-a inspect"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match !events with
+   | { Board_dispatch.audience = Board_signal_audience.Targets identities; _ } :: _ ->
+     Alcotest.(check (list string))
+       "direct targets are exact and canonical"
+       [ "target-a"; "target-b" ]
+       identities
+   | _ -> Alcotest.fail "direct post did not freeze Targets audience");
+  events := [];
+  let post_id = Board.Post_id.to_string direct_post.id in
+  (match
+     Board_dispatch.add_comment
+       ~post_id
+       ~author:"thread-replier"
+       ~content:"ordinary thread reply"
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match !events with
+   | { Board_dispatch.audience =
+         Board_signal_audience.Thread_participants identities
+     ; _
+     } :: _ ->
+     Alcotest.(check (list string))
+       "thread audience snapshots prior participants"
+       [ "audience-author" ]
+       identities
+   | _ -> Alcotest.fail "ordinary comment did not freeze Thread_participants");
+  events := [];
+  (match
+     Board_dispatch.add_comment
+       ~post_id
+       ~author:"direct-replier"
+       ~content:"@comment-target answer directly"
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match !events with
+  | { Board_dispatch.audience = Board_signal_audience.Targets identities; _ } :: _ ->
+    Alcotest.(check (list string))
+      "comment direct target wins over thread audience"
+      [ "comment-target" ]
+      identities
+  | _ -> Alcotest.fail "direct comment did not freeze Targets audience"
+;;
+
+let test_direct_visibility_requires_explicit_target () =
+  match
+    Board_dispatch.create_post
+      ~author:"direct-without-target"
+      ~content:"no recipient"
+      ~post_kind:Board.Human_post
+      ~visibility:Board.Direct
+      ()
+  with
+  | Error (Board.Validation_error _) -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "Direct visibility accepted a targetless post"
+;;
+
+let expect_outbox_ok context = function
+  | Ok value -> value
+  | Error detail -> Alcotest.failf "%s: %s" context detail
+;;
+
+let keeper_recipient name =
+  expect_outbox_ok
+    ("create Keeper recipient " ^ name)
+    (Board_signal_outbox.keeper_lane name)
+;;
+
+let target_recipient identity =
+  expect_outbox_ok
+    ("create target recipient " ^ identity)
+    (Board_signal_outbox.target_identity identity)
+;;
+
+let test_outbox_command label =
+  let author =
+    match Board.Agent_id.of_string "outbox-test" with
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post : Board.post =
+    { id = Board.Post_id.generate ()
+    ; author
+    ; title = label
+    ; body = label
+    ; content = label
+    ; post_kind = Board.System_post
+    ; meta_json = None
+    ; visibility = Board.Internal
+    ; created_at = 1.0
+    ; updated_at = 1.0
+    ; expires_at = 0.0
+    ; votes_up = 0
+    ; votes_down = 0
+    ; reply_count = 0
+    ; pinned = false
+    ; hearth = None
+    ; thread_id = None
+    ; origin = None
+    }
+  in
+  match Board_signal_command.post post with
+  | Ok command -> command
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let test_board_signal_command_codec_is_strict_and_canonical () =
+  let command = test_outbox_command "typed-command-roundtrip" in
+  let encoded = Board_signal_command.to_yojson command in
+  (match Board_signal_command.of_yojson encoded with
+   | Ok decoded ->
+     Alcotest.(check string)
+       "canonical roundtrip"
+       (Yojson.Safe.to_string encoded)
+       (Yojson.Safe.to_string (Board_signal_command.to_yojson decoded))
+   | Error detail -> Alcotest.fail detail);
+  match
+    Board_signal_command.of_yojson
+      (`Assoc [ "kind", `String "unknown-command" ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown durable command was accepted"
+;;
+
+let post_of_command = function
+  | Board_signal_command.Post { post; _ } -> post
+  | Board_signal_command.Comment _ | Board_signal_command.Reaction _ ->
+    Alcotest.fail "expected a post command"
+;;
+
+let apply_test_post store post =
+  match Board.apply_prepared_post store post with
+  | Ok _ -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let test_pending_routing_command_fences_only_referenced_sweep_entity () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let expired command =
+    let post = post_of_command command in
+    let post = { post with Board.expires_at = Time_compat.now () -. 1.0 } in
+    match Board_signal_command.post post with
+    | Ok command -> command
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let protected_command = expired (test_outbox_command "protected-expired") in
+  let unrelated_command = expired (test_outbox_command "unrelated-expired") in
+  let protected_post = post_of_command protected_command in
+  let unrelated_post = post_of_command unrelated_command in
+  apply_test_post store protected_post;
+  apply_test_post store unrelated_post;
+  let event_id = "protected-expired-routing" in
+  expect_outbox_ok
+    "prepare protected routing command"
+    (Board_signal_outbox.prepare ~event_id ~command:protected_command);
+  expect_outbox_ok "commit protected routing command" (Board_signal_outbox.commit ~event_id);
+  (match
+     Board_dispatch.set_thread_id
+       ~post_id:(Board.Post_id.to_string protected_post.id)
+       ~thread_id:"must-not-overtake-routing"
+   with
+   | Error (Board.Io_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok () -> Alcotest.fail "pending post accepted an identity-changing thread update");
+  (match
+     Board_dispatch.set_thread_id
+       ~post_id:(Board.Post_id.to_string unrelated_post.id)
+       ~thread_id:"unrelated-thread"
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match Board_dispatch.sweep () with
+   | Ok (removed_posts, _) ->
+     Alcotest.(check int) "only unrelated expired post swept" 1 removed_posts
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Board.get_post store ~post_id:(Board.Post_id.to_string protected_post.id)
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match
+    Board.get_post store ~post_id:(Board.Post_id.to_string unrelated_post.id)
+  with
+  | Error (Board.Post_not_found _) -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "unrelated expired post was globally fenced"
+;;
+
+let test_outbox_compaction_retains_terminal_successors () =
+  let first = "test-outbox-first" in
+  let second = "test-outbox-second" in
+  let first_command = test_outbox_command first in
+  let second_command = test_outbox_command second in
+  expect_outbox_ok
+    "prepare first"
+    (Board_signal_outbox.prepare ~event_id:first ~command:first_command);
+  expect_outbox_ok
+    "idempotent prepare first"
+    (Board_signal_outbox.prepare ~event_id:first ~command:first_command);
+  expect_outbox_ok
+    "prepare second"
+    (Board_signal_outbox.prepare ~event_id:second ~command:second_command);
+  expect_outbox_ok "commit second" (Board_signal_outbox.commit ~event_id:second);
+  expect_outbox_ok
+    "idempotent commit second"
+    (Board_signal_outbox.commit ~event_id:second);
+  expect_outbox_ok
+    "plan atomic second"
+    (Board_signal_outbox.plan_recipients ~event_id:second ~recipients:[]);
+  expect_outbox_ok
+    "deliver second"
+    (Board_signal_outbox.mark_delivered ~event_id:second ~at:(Time_compat.now ()));
+  expect_outbox_ok "compact with older pending" (Board_signal_outbox.compact_terminal ());
+  let retained = expect_outbox_ok "read retained outbox" (Board_signal_outbox.entries ()) in
+  (match retained with
+   | [ { event_id = first_id; phase = Board_signal_outbox.Prepared _; _ }
+     ; { event_id = second_id; phase = Board_signal_outbox.Delivered _; _ }
+     ] ->
+     Alcotest.(check string) "oldest pending retained" first first_id;
+     Alcotest.(check string) "terminal successor retained" second second_id
+   | _ -> Alcotest.fail "expected pending command followed by terminal successor");
+  expect_outbox_ok "commit first" (Board_signal_outbox.commit ~event_id:first);
+  expect_outbox_ok
+    "plan atomic first"
+    (Board_signal_outbox.plan_recipients ~event_id:first ~recipients:[]);
+  expect_outbox_ok
+    "deliver first"
+    (Board_signal_outbox.mark_delivered ~event_id:first ~at:(Time_compat.now ()));
+  expect_outbox_ok "compact terminal ledger" (Board_signal_outbox.compact_terminal ());
+  Alcotest.(check int)
+    "fully terminal outbox compacts to empty"
+    0
+    (List.length (expect_outbox_ok "read empty outbox" (Board_signal_outbox.entries ())))
+;;
+
+let test_outbox_requires_every_planned_recipient_settlement () =
+  let event_id = "test-outbox-recipient-settlement" in
+  expect_outbox_ok
+    "prepare recipient event"
+    (Board_signal_outbox.prepare
+       ~event_id
+       ~command:(test_outbox_command "recipient-settlement"));
+  expect_outbox_ok "commit recipient event" (Board_signal_outbox.commit ~event_id);
+  expect_outbox_ok
+    "plan exact recipients"
+    (Board_signal_outbox.plan_recipients
+       ~event_id
+       ~recipients:
+         [ keeper_recipient "beta"
+         ; keeper_recipient "alpha"
+         ; keeper_recipient "alpha"
+         ]);
+  (match Board_signal_outbox.recipient_progress ~event_id with
+   | Ok
+       (Board_signal_outbox.Recipients_pending
+         [ Board_signal_outbox.Keeper_lane "alpha"
+         ; Board_signal_outbox.Keeper_lane "beta"
+         ]) -> ()
+   | Ok _ -> Alcotest.fail "recipient plan was not canonical or complete"
+   | Error detail -> Alcotest.fail detail);
+  expect_outbox_ok
+    "settle alpha"
+    (Board_signal_outbox.settle_recipient
+       ~event_id
+       ~recipient:(keeper_recipient "alpha"));
+  expect_outbox_ok
+    "idempotent settle alpha"
+    (Board_signal_outbox.settle_recipient
+       ~event_id
+       ~recipient:(keeper_recipient "alpha"));
+  (match Board_signal_outbox.recipient_progress ~event_id with
+   | Ok
+       (Board_signal_outbox.Recipients_pending
+         [ Board_signal_outbox.Keeper_lane "beta" ]) -> ()
+   | Ok _ -> Alcotest.fail "settled recipient remained pending"
+   | Error detail -> Alcotest.fail detail);
+  (match Board_signal_outbox.mark_delivered ~event_id ~at:(Time_compat.now ()) with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "event delivered before every recipient settled");
+  expect_outbox_ok
+    "settle beta"
+    (Board_signal_outbox.settle_recipient
+       ~event_id
+       ~recipient:(keeper_recipient "beta"));
+  (match Board_signal_outbox.recipient_progress ~event_id with
+   | Ok Board_signal_outbox.Recipients_settled -> ()
+   | Ok _ -> Alcotest.fail "fully settled plan remained pending"
+   | Error detail -> Alcotest.fail detail);
+  expect_outbox_ok
+    "deliver fully settled event"
+    (Board_signal_outbox.mark_delivered ~event_id ~at:(Time_compat.now ()))
+;;
+
+let test_outbox_rejected_target_is_terminal () =
+  let event_id = "test-outbox-terminal-rejection" in
+  let identity = "unmapped-board-target" in
+  expect_outbox_ok
+    "prepare rejected-target event"
+    (Board_signal_outbox.prepare
+       ~event_id
+       ~command:(test_outbox_command "terminal-rejection"));
+  expect_outbox_ok "commit rejected-target event" (Board_signal_outbox.commit ~event_id);
+  expect_outbox_ok
+    "plan rejected target"
+    (Board_signal_outbox.plan_recipients
+       ~event_id
+       ~recipients:[ target_recipient identity ]);
+  expect_outbox_ok
+    "terminally reject target"
+    (Board_signal_outbox.reject_target ~event_id ~identity);
+  (match Board_signal_outbox.resolve_target ~event_id ~identity ~keeper_name:"late-keeper" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "terminally rejected target was resolved later");
+  match Board_signal_outbox.recipient_progress ~event_id with
+  | Ok Board_signal_outbox.Recipients_settled -> ()
+  | Ok _ -> Alcotest.fail "terminal rejection was changed by failed resolution"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_comment_replay_repairs_partial_parent_projection () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post
+        store
+        ~author:"comment-repair-author"
+        ~content:"comment repair parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment, parent_before =
+    match
+      Board.prepare_comment
+        store
+        ~post_id
+        ~author:"comment-repair-replier"
+        ~content:"durable comment"
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match
+     Board.apply_prepared_comment
+       store
+       ~parent_reply_count_before:parent_before.reply_count
+       comment
+   with
+   | Ok (Board.Applied _) -> ()
+   | Ok _ -> Alcotest.fail "first comment application must be new"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Board.with_lock store (fun () ->
+    let current = Hashtbl.find store.posts post_id in
+    Hashtbl.replace store.posts post_id { current with reply_count = 0 };
+    Hashtbl.remove store.comments_by_post post_id);
+  (match
+     Board.apply_prepared_comment
+       store
+       ~parent_reply_count_before:parent_before.reply_count
+       comment
+   with
+   | Ok (Board.Repaired_partial_apply _) -> ()
+   | Ok _ -> Alcotest.fail "partial comment projection must be reported as repaired"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let repaired = Hashtbl.find store.posts post_id in
+  Alcotest.(check int) "reply count repaired exactly once" 1 repaired.reply_count;
+  let indexed =
+    Hashtbl.find_opt store.comments_by_post post_id
+    |> Option.value ~default:[]
+    |> List.filter (String.equal (Board.Comment_id.to_string comment.id))
+  in
+  Alcotest.(check int) "comment index repaired without duplicate" 1 (List.length indexed)
+;;
+
+let test_prepared_creation_conflicts_are_exact () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.prepare_post
+        store
+        ~author:"prepared-conflict-author"
+        ~content:"canonical post command"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match Board.apply_prepared_post store post with
+   | Ok (Board.Applied _) -> ()
+   | Ok _ -> Alcotest.fail "first prepared post apply must create"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let conflicting_post =
+    { post with body = "different body"; content = "different body" }
+  in
+  (match Board.apply_prepared_post store conflicting_post with
+   | Error (Board.Already_exists _) -> ()
+   | Error error ->
+     Alcotest.failf "unexpected post conflict: %s" (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "same post id/time accepted different immutable command");
+  let post_id = Board.Post_id.to_string post.id in
+  let comment, parent_before =
+    match
+      Board.prepare_comment
+        store
+        ~post_id
+        ~author:"prepared-conflict-commenter"
+        ~content:"canonical comment command"
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match
+     Board.apply_prepared_comment
+       store
+       ~parent_reply_count_before:parent_before.reply_count
+       comment
+   with
+   | Ok (Board.Applied _) -> ()
+   | Ok _ -> Alcotest.fail "first prepared comment apply must create"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let conflicting_comment = { comment with content = "different comment" } in
+  match
+    Board.apply_prepared_comment
+      store
+      ~parent_reply_count_before:parent_before.reply_count
+      conflicting_comment
+  with
+  | Error (Board.Already_exists _) -> ()
+  | Error error ->
+    Alcotest.failf "unexpected comment conflict: %s" (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "same comment id/time accepted different immutable command"
+;;
+
+let non_empty_jsonl_rows path =
+  Fs_compat.load_file path
+  |> String.split_on_char '\n'
+  |> List.filter (fun row -> not (String.equal row ""))
+;;
+
+let test_pending_post_durability_fences_replay () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.prepare_post
+        store
+        ~author:"pending-post-author"
+        ~content:"pending post must settle before replay succeeds"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match Board.apply_prepared_post store post with
+   | Ok (Board.Applied _) -> ()
+   | Ok _ -> Alcotest.fail "first prepared post application must be new"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board.rewrite_jsonl_durable_result
+       ~where:"test_pending_post_projection_loss"
+       (Board.persist_path ())
+       ""
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let post_id = Board.Post_id.to_string post.id in
+  Board.with_lock store (fun () ->
+    Hashtbl.replace
+      store.Board.pending_post_durability
+      post_id
+      "injected original commit-unknown";
+    Board.mark_dirty_post store post_id);
+  (match Board.apply_prepared_post store post with
+   | Ok (Board.Repaired_partial_apply _) -> ()
+   | Ok (Board.Already_applied _) ->
+     Alcotest.fail "pending post durability escaped through Already_applied"
+   | Ok (Board.Applied _) -> Alcotest.fail "pending replay appended a second post"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool)
+    "post durability obligation cleared only after settlement"
+    false
+    (Hashtbl.mem store.Board.pending_post_durability post_id);
+  Alcotest.(check int)
+    "settlement restored one canonical post row"
+    1
+    (List.length (non_empty_jsonl_rows (Board.persist_path ())))
+;;
+
+let test_pending_comment_durability_fences_replay () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post
+        store
+        ~author:"pending-comment-parent"
+        ~content:"comment settlement parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment, parent_before =
+    match
+      Board.prepare_comment
+        store
+        ~post_id
+        ~author:"pending-comment-author"
+        ~content:"primary and parent obligations settle independently"
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  (match
+     Board.apply_prepared_comment
+       store
+       ~parent_reply_count_before:parent_before.reply_count
+       comment
+   with
+   | Ok (Board.Applied _) -> ()
+   | Ok _ -> Alcotest.fail "first prepared comment application must be new"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board.rewrite_jsonl_durable_result
+       ~where:"test_pending_comment_projection_loss"
+       (Board.comments_path ())
+       ""
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let stale_posts_jsonl =
+    Board.with_lock store (fun () ->
+      let current = Hashtbl.find store.Board.posts post_id in
+      Hashtbl.replace
+        store.Board.posts
+        post_id
+        { current with reply_count = 0; updated_at = parent_before.updated_at };
+      Hashtbl.replace
+        store.Board.pending_comment_durability
+        comment_id
+        "injected original comment commit-unknown";
+      Hashtbl.replace store.Board.pending_parent_projection_repairs comment_id ();
+      Board.mark_dirty_post store post_id;
+      Board.mark_dirty_comment store comment_id;
+      Board.posts_jsonl_unlocked store)
+  in
+  (match Board.save_posts_jsonl_result stale_posts_jsonl with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board.apply_prepared_comment
+       store
+       ~parent_reply_count_before:parent_before.reply_count
+       comment
+   with
+   | Ok (Board.Repaired_partial_apply _) -> ()
+   | Ok (Board.Already_applied _) ->
+     Alcotest.fail "pending comment durability escaped through Already_applied"
+   | Ok (Board.Applied _) -> Alcotest.fail "pending replay appended a second comment"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool)
+    "comment primary obligation cleared"
+    false
+    (Hashtbl.mem store.Board.pending_comment_durability comment_id);
+  Alcotest.(check bool)
+    "comment parent obligation cleared"
+    false
+    (Hashtbl.mem store.Board.pending_parent_projection_repairs comment_id);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  (match Board_dispatch.get_post ~post_id with
+   | Ok restored -> Alcotest.(check int) "durable reply count" 1 restored.reply_count
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check int)
+    "durable comment restored exactly once"
+    1
+    (List.length
+       (match Board_dispatch.get_comments ~post_id with
+        | Ok comments -> comments
+        | Error error -> Alcotest.fail (Board.show_board_error error)))
+;;
+
+let test_comment_projection_failure_replays_without_duplicate_append () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post
+        store
+        ~author:"comment-partial-author"
+        ~content:"comment partial persistence parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment, parent_before =
+    match
+      Board.prepare_comment
+        store
+        ~post_id
+        ~author:"comment-partial-replier"
+        ~content:"one durable comment row"
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let posts_path = Board.persist_path () in
+  let backup_path = posts_path ^ ".partial-test-backup" in
+  Unix.rename posts_path backup_path;
+  Unix.mkdir posts_path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      (try
+         if (Unix.stat posts_path).Unix.st_kind = Unix.S_DIR then Unix.rmdir posts_path
+       with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      if Sys.file_exists backup_path then Unix.rename backup_path posts_path)
+    (fun () ->
+       (match
+          Board.apply_prepared_comment
+            store
+            ~parent_reply_count_before:parent_before.reply_count
+            comment
+        with
+        | Error (Board.Io_error _) -> ()
+        | Error error ->
+          Alcotest.failf
+            "expected parent projection Io_error, got %s"
+            (Board.show_board_error error)
+        | Ok _ -> Alcotest.fail "parent projection failure returned success");
+       (match Board.get_comments store ~post_id with
+        | Ok [ existing ] ->
+          Alcotest.(check string)
+            "durable comment stays in memory for repair"
+            (Board.Comment_id.to_string comment.id)
+            (Board.Comment_id.to_string existing.id)
+        | Ok comments ->
+          Alcotest.failf "expected one retained comment, got %d" (List.length comments)
+        | Error error -> Alcotest.fail (Board.show_board_error error));
+       Unix.rmdir posts_path;
+       Unix.rename backup_path posts_path;
+       (match
+          Board.apply_prepared_comment
+            store
+            ~parent_reply_count_before:parent_before.reply_count
+            comment
+        with
+        | Ok (Board.Repaired_partial_apply _) -> ()
+        | Ok _ -> Alcotest.fail "same-process replay did not repair parent projection"
+        | Error error -> Alcotest.fail (Board.show_board_error error));
+       let durable_comment_rows =
+         Fs_compat.load_file (Board.comments_path ())
+         |> String.split_on_char '\n'
+         |> List.filter (fun row -> not (String.equal row ""))
+       in
+       Alcotest.(check int)
+         "same-process repair does not append duplicate comment row"
+         1
+         (List.length durable_comment_rows))
+;;
+
+let test_recovery_stops_before_successor_after_oldest_failure () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let successor =
+    match
+      Board.prepare_post
+        store
+        ~author:"recovery-successor-author"
+        ~content:"must remain unapplied"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  expect_outbox_ok
+    "prepare failing oldest"
+    (let missing_post =
+       let author =
+         match Board.Agent_id.of_string "recovery-actor" with
+         | Ok value -> value
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let id =
+         match Board.Post_id.of_string "missing-recovery-target" with
+         | Ok value -> value
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       { successor with
+         id
+       ; author
+       ; title = "missing"
+       ; body = "missing"
+       ; content = "missing"
+       }
+     in
+     let command =
+       match
+         Board_signal_command.reaction
+           ~post:missing_post
+           ~comments:[]
+           ~target_type:Board.Reaction_post
+           ~target_id:"missing-recovery-target"
+           ~user_id:"recovery-actor"
+           ~emoji:"👀"
+           ~reacted:true
+           ~created_at:1.0
+       with
+       | Ok command -> command
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+     in
+     Board_signal_outbox.prepare
+       ~event_id:"recovery-oldest-invalid"
+       ~command);
+  expect_outbox_ok
+    "prepare valid successor"
+    (Board_signal_outbox.prepare
+       ~event_id:"recovery-valid-successor"
+       ~command:
+         (match Board_signal_command.post successor with
+          | Ok command -> command
+          | Error error -> Alcotest.fail (Board.show_board_error error)));
+  Board_dispatch.set_board_signal_hook (fun _event ->
+    Ok Board_dispatch.Atomic_sink_accepted);
+  match Board.get_post store ~post_id:(Board.Post_id.to_string successor.id) with
+  | Error (Board.Post_not_found _) -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "successor applied after oldest recovery command failed"
+;;
+
+let test_reaction_persistence_failure_is_explicit_and_rolled_back () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post
+        store
+        ~author:"reaction-persist-author"
+        ~content:"reaction persistence target"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  ignore (block_board_masc_dir_with_file ());
+  (match
+     Board.set_reaction
+       store
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reaction-persist-user"
+       ~emoji:"👍"
+       ~reacted:true
+       ~created_at:(Time_compat.now ())
+   with
+   | Error (Board.Io_error _) -> ()
+   | Error error ->
+     Alcotest.failf "expected reaction Io_error, got %s" (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "reaction persistence failure must not return success");
+  match
+    Board.list_reactions
+      store
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id:"reaction-persist-user"
+      ()
+  with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok summaries ->
+    let reacted =
+      List.find_opt
+        (fun (summary : Board.reaction_summary) -> String.equal summary.emoji "👍")
+        summaries
+      |> Option.map (fun (summary : Board.reaction_summary) -> summary.reacted)
+      |> Option.value ~default:false
+    in
+    Alcotest.(check bool) "failed reaction mutation rolled back" false reacted
+;;
+
+let test_create_post_outbox_prepare_failure_returns_error_without_fanout () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
-  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_signal_hook (fun _ ->
+      incr keeper_signals;
+      Ok Board_dispatch.Atomic_sink_accepted);
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Post_created _ -> incr sse_post_created
     | _ -> ());
   ignore (block_board_masc_dir_with_file ());
-  let before_errors = Board.persist_error_count () in
   check_io_error
-    ~where:"append_post"
+    ~where:"routing-event recovery"
     (Board_dispatch.create_post
        ~author:"persist-fail-agent"
        ~content:"this post must not survive a failed append"
        ~post_kind:Board.Human_post
        ());
-  Alcotest.(check bool)
-    "persist error counter incremented"
-    true
-    (Board.persist_error_count () > before_errors);
   Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
   Alcotest.(check int) "SSE post_created not emitted" 0 !sse_post_created;
   Alcotest.(check int)
@@ -621,8 +1516,8 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
         | Error detail ->
           Alcotest.failf "owner candidate read failed: %s" detail);
        Alcotest.(check bool)
-         "live owner collection woke the Keeper"
-         true
+         "pending ambient judgment does not wake the owner lane"
+         false
          (Atomic.get entry.fiber_wakeup))
 ;;
 
@@ -769,12 +1664,44 @@ let test_author_filter_treats_wildcards_literally () =
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
-let test_legacy_post_without_kind_is_rejected () =
-  let post_id = seed_legacy_keeper_post () in
-  match Board_dispatch.get_post ~post_id with
-  | Error (Board.Post_not_found _) -> ()
-  | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok _ -> Alcotest.fail "legacy post without post_kind must not be classified"
+let test_malformed_root_projection_fails_closed () =
+  match seed_legacy_keeper_post () with
+  | exception Board.Board_persistence_unavailable _ -> ()
+  | _ -> Alcotest.fail "schema-invalid root projection published a partial Board"
+
+let test_legacy_meta_json_projection_fails_closed () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.prepare_post
+        store
+        ~author:"legacy-meta-author"
+        ~content:"legacy metadata must not be guessed during boot"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let legacy_json =
+    match Board.post_to_yojson post with
+    | `Assoc fields ->
+      `Assoc
+        (("meta_json", `String {|{"source":"legacy-runtime-fallback"}|})
+         :: List.remove_assoc "meta" fields)
+    | _ -> Alcotest.fail "canonical post serializer did not emit an object"
+  in
+  Fs_compat.save_file
+    (Board.persist_path ())
+    (Yojson.Safe.to_string legacy_json ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  match Board_dispatch.init_jsonl () with
+  | exception Board.Board_persistence_unavailable _ -> ()
+  | () -> Alcotest.fail "legacy meta_json row bypassed strict Board boot"
 
 (** {1 Comment Operations} *)
 
@@ -832,7 +1759,7 @@ let test_comment_persists_post_reply_count () =
   | Ok fetched ->
     Alcotest.(check int) "reply_count survives restart" 1 fetched.reply_count
 
-let test_add_comment_persistence_failure_rolls_back_without_fanout () =
+let test_add_comment_outbox_prepare_failure_does_not_mutate () =
   let post =
     match
       Board_dispatch.create_post
@@ -847,23 +1774,21 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
   let post_id = Board.Post_id.to_string post.id in
   let keeper_signals = ref 0 in
   let sse_comment_added = ref 0 in
-  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_signal_hook (fun _ ->
+      incr keeper_signals;
+      Ok Board_dispatch.Atomic_sink_accepted);
+  keeper_signals := 0;
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Comment_added _ -> incr sse_comment_added
     | _ -> ());
   ignore (block_board_masc_dir_with_file ());
-  let before_errors = Board.persist_error_count () in
   check_io_error
-    ~where:"append_comment"
+    ~where:"routing-event recovery"
     (Board_dispatch.add_comment
        ~post_id
        ~author:"comment-persist-fail-responder"
        ~content:"this comment must not survive a failed append"
        ());
-  Alcotest.(check bool)
-    "persist error counter incremented"
-    true
-    (Board.persist_error_count () > before_errors);
   Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
   Alcotest.(check int) "SSE comment_added not emitted" 0 !sse_comment_added;
   (match Board_dispatch.get_post ~post_id with
@@ -1440,7 +2365,9 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
   in
   let comment_id = Board.Comment_id.to_string comment.id in
   let seen = ref None in
-  Board_dispatch.set_board_signal_hook (fun signal -> seen := Some signal);
+  Board_dispatch.set_board_signal_hook (fun event ->
+      seen := Some event.Board_dispatch.signal;
+      Ok Board_dispatch.Atomic_sink_accepted);
   (match
      Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
        ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
@@ -1514,11 +2441,19 @@ let test_set_thread_id () =
       match Board_dispatch.set_thread_id ~post_id:pid ~thread_id:"thread-abc" with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok () ->
+          (match Board_dispatch.get_post ~post_id:pid with
+           | Error e -> Alcotest.fail (Board.show_board_error e)
+           | Ok p ->
+             Alcotest.(check (option string)) "thread_id set"
+               (Some "thread-abc") p.thread_id);
+          Board.reset_global_for_test ();
+          Board_dispatch.reset_for_test ();
+          Board_dispatch.init_jsonl ();
           match Board_dispatch.get_post ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok p ->
-              Alcotest.(check (option string)) "thread_id set"
-                (Some "thread-abc") p.thread_id
+            Alcotest.(check (option string)) "thread_id survives restart"
+              (Some "thread-abc") p.thread_id
 
 let test_set_pinned () =
   match
@@ -1535,8 +2470,7 @@ let test_set_pinned () =
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok p -> Alcotest.(check bool) "pinned set in memory" true p.pinned);
-      (* set_pinned marks the post dirty, so the flag must survive a restart
-         (unlike set_thread_id which is in-memory only). *)
+      (* Immediate persistence keeps the operator flag across restart. *)
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Board_dispatch.init_jsonl ();
@@ -1584,7 +2518,212 @@ let test_set_pinned_persistence_failure_rolls_back () =
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
 let test_flush () =
-  Board_dispatch.flush ()
+  match Board_dispatch.flush () with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
+let test_flush_failure_is_explicit_and_retains_dirty_state () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"flush-failure-author"
+        ~content:"dirty projection must remain retryable"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match Board_dispatch.vote ~voter:"flush-failure-voter" ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  ignore (block_board_masc_dir_with_file ());
+  (match Board.flush_dirty store with
+   | Error (Board.Io_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok () -> Alcotest.fail "flush reported success after durable rewrite failure");
+  Alcotest.(check bool) "dirty state remains retryable" true store.Board.dirty_posts
+
+let test_vote_persistence_failure_rolls_back () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"vote-rollback-author"
+        ~content:"vote append failure must not become durable later"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  ignore (block_board_masc_dir_with_file ());
+  check_io_error
+    ~where:"append_vote_log"
+    (Board_dispatch.vote ~voter:"vote-rollback-voter" ~post_id ~direction:Board.Up);
+  (match Board_dispatch.current_vote_for_post ~voter:"vote-rollback-voter" ~post_id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "failed vote remained in the in-memory ledger"
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match Board_dispatch.get_post ~post_id with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok current ->
+    Alcotest.(check int) "failed vote did not change up count" 0 current.votes_up;
+    Alcotest.(check int) "failed vote did not change down count" 0 current.votes_down
+
+let test_restart_repairs_mixed_projection_generation () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"mixed-generation-author"
+        ~content:"root projection controls orphan recovery"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.add_comment
+       ~post_id
+       ~author:"mixed-generation-commenter"
+       ~content:"must not survive without its root post"
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board_dispatch.vote
+       ~voter:"mixed-generation-voter"
+       ~post_id
+       ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"mixed-generation-reactor"
+       ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board.rewrite_jsonl_durable_result
+       ~where:"test_root_generation_commit"
+       (Board.persist_path ())
+       ""
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  (match Board_dispatch.get_post ~post_id with
+   | Error (Board.Post_not_found _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "deleted root post reappeared from a stale projection");
+  Alcotest.(check int)
+    "orphan comments pruned on load"
+    0
+    (List.length (Board_dispatch.list_comments ()));
+  Alcotest.(check int)
+    "orphan reactions pruned on load"
+    0
+    (match
+       Board_dispatch.list_reactions
+         ~target_type:Board.Reaction_post
+         ~target_id:post_id
+         ()
+     with
+     | Error (Board.Post_not_found _) -> 0
+     | Ok _ -> Alcotest.fail "missing root accepted a reaction lookup"
+     | Error error -> Alcotest.fail (Board.show_board_error error));
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let typed_post_id =
+    match Board.Post_id.of_string post_id with
+    | Ok id -> id
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let recreated =
+    match
+      Board.prepare_post
+        store
+        ~post_id:typed_post_id
+        ~author:"mixed-generation-recreator"
+        ~content:"same identity, new root generation"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  (match Board.apply_prepared_post store recreated with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Alcotest.(check int)
+    "compacted orphan comments cannot revive after id reuse"
+    0
+    (List.length (Board_dispatch.list_comments ()));
+  Alcotest.(check int)
+    "compacted orphan reactions cannot revive after id reuse"
+    0
+    (match
+       Board_dispatch.list_reactions
+         ~target_type:Board.Reaction_post
+         ~target_id:post_id
+         ()
+     with
+     | Ok summaries -> List.length summaries
+     | Error error -> Alcotest.fail (Board.show_board_error error));
+  match
+    Board_dispatch.current_vote_for_post
+      ~voter:"mixed-generation-voter"
+      ~post_id
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "compacted orphan vote revived after id reuse"
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
+let test_restart_recalculates_vote_projection_from_ledger () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"vote-repair-author"
+        ~content:"vote ledger repairs stale post counters"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match
+     Board_dispatch.vote ~voter:"vote-repair-voter" ~post_id ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_post ~post_id with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok repaired ->
+    Alcotest.(check int) "up count derived from vote ledger" 1 repaired.votes_up;
+    Alcotest.(check int) "down count derived from vote ledger" 0 repaired.votes_down
 
 (** {1 Validation} *)
 
@@ -1710,6 +2849,103 @@ let test_sub_board_create_delete_persisted_snapshot () =
    | Ok () -> ());
   Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
+
+let test_dirty_sub_board_snapshot_is_flushable () =
+  let sub_board =
+    match
+      Board_dispatch.create_sub_board
+        ~slug:"retryable-sub-board"
+        ~name:"Retryable"
+        ~description:"commit-unknown recovery authority"
+        ~owner:"retry-owner"
+        ()
+    with
+    | Ok sub_board -> sub_board
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let id = Board.Sub_board_id.to_string sub_board.id in
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  Board.with_lock store (fun () ->
+    Hashtbl.remove store.sub_boards id;
+    Hashtbl.remove store.sub_boards_by_slug sub_board.slug;
+    store.dirty_sub_boards <- true);
+  (match Board.flush_dirty store with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool)
+    "sub-board dirty marker clears after durable snapshot"
+    false
+    store.dirty_sub_boards;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_sub_board ~sub_board_id:id with
+  | Error (Board.Invalid_id _) -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "dirty sub-board snapshot was not durably flushed"
+
+let test_malformed_sub_board_access_fails_closed () =
+  let path = Board.sub_boards_path () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let row =
+    `Assoc
+      [ "id", `String (Board.Sub_board_id.to_string (Board.Sub_board_id.generate ()))
+      ; "slug", `String "corrupt-access"
+      ; "name", `String "Corrupt access"
+      ; "description", `String "must not default open"
+      ; "owner", `String "access-owner"
+      ; "members", `List [ `String "access-owner" ]
+      ; "access", `Int 42
+      ; "created_at", `Float (Time_compat.now ())
+      ; "post_count", `Int 0
+      ]
+  in
+  Fs_compat.save_file path (Yojson.Safe.to_string row ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  match Board_dispatch.init_jsonl () with
+  | exception Board.Board_persistence_unavailable _ -> ()
+  | () -> Alcotest.fail "schema-invalid sub-board access published as Open"
+
+let test_duplicate_sub_board_access_fails_closed () =
+  let path = Board.sub_boards_path () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let access_orders =
+    [ `String "open", `String "owner_only"
+    ; `String "owner_only", `String "open"
+    ]
+  in
+  List.iteri
+    (fun order_index (first_access, second_access) ->
+       let row =
+         `Assoc
+           [ "id", `String (Board.Sub_board_id.to_string (Board.Sub_board_id.generate ()))
+           ; "slug", `String (Printf.sprintf "duplicate-access-%d" order_index)
+           ; "name", `String "Ambiguous access"
+           ; "description", `String "duplicate authorization fields must fail"
+           ; "owner", `String "duplicate-access-owner"
+           ; "members", `List [ `String "duplicate-access-owner" ]
+           ; "access", first_access
+           ; "access", second_access
+           ; "created_at", `Float (Time_compat.now ())
+           ; "post_count", `Int 0
+           ]
+       in
+       let source_bytes = Yojson.Safe.to_string row ^ "\n" in
+       Fs_compat.save_file path source_bytes;
+       Board.reset_global_for_test ();
+       Board_dispatch.reset_for_test ();
+       (match Board_dispatch.init_jsonl () with
+        | exception Board.Board_persistence_unavailable _ -> ()
+        | () -> Alcotest.fail "duplicate sub-board access fields were published");
+       Alcotest.(check string)
+         "failed strict boot does not normalize ambiguous source"
+         source_bytes
+         (Fs_compat.load_file path))
+    access_orders
 
 let test_sub_board_access_default_open () =
   (match Board_dispatch.create_sub_board ~slug:"open-board" ~name:"Open"
@@ -1914,7 +3150,9 @@ let test_sub_board_delete_clears_orphan_hearth () =
    | Ok post ->
        Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
          None post.Board.hearth);
-  Board_dispatch.flush ();
+  (match Board_dispatch.flush () with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
@@ -1980,10 +3218,14 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
-      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
-        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
-      Alcotest.test_case "create append failure returns error without fanout" `Quick
-        (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
+      Alcotest.test_case "failed keeper delivery replays exact routing event" `Quick
+        (with_eio test_failed_board_signal_delivery_replays_same_event_id);
+      Alcotest.test_case "signal audience freezes at mutation boundary" `Quick
+        (with_eio test_board_signal_audience_is_frozen_at_mutation_boundary);
+      Alcotest.test_case "Direct visibility requires explicit target" `Quick
+        (with_eio test_direct_visibility_requires_explicit_target);
+      Alcotest.test_case "create outbox prepare failure has no mutation or fanout" `Quick
+        (with_eio test_create_post_outbox_prepare_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
@@ -1996,7 +3238,7 @@ let () =
         `Quick
         (with_eio test_first_board_observation_starts_at_current_head);
       Alcotest.test_case
-        "dashboard projection does not produce attention candidate"
+        "ambient candidate stays off owner lane before judgment"
         `Quick
         (with_eio test_dashboard_projection_does_not_produce_attention_candidate);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
@@ -2006,15 +3248,27 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "legacy post without kind is rejected" `Quick
-        (with_eio test_legacy_post_without_kind_is_rejected);
+      Alcotest.test_case "malformed root projection fails closed" `Quick
+        (with_eio test_malformed_root_projection_fails_closed);
+      Alcotest.test_case "legacy meta_json projection fails closed" `Quick
+        (with_eio test_legacy_meta_json_projection_fails_closed);
+      Alcotest.test_case "pending post durability fences replay" `Quick
+        (with_eio test_pending_post_durability_fences_replay);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
       Alcotest.test_case "comment persists post reply_count" `Quick
         (with_eio test_comment_persists_post_reply_count);
-      Alcotest.test_case "comment append failure rolls back without fanout" `Quick
-        (with_eio test_add_comment_persistence_failure_rolls_back_without_fanout);
+      Alcotest.test_case "comment outbox prepare failure has no mutation or fanout" `Quick
+        (with_eio test_add_comment_outbox_prepare_failure_does_not_mutate);
+      Alcotest.test_case "prepared creation conflicts compare immutable command" `Quick
+        (with_eio test_prepared_creation_conflicts_are_exact);
+      Alcotest.test_case "pending comment durability fences replay" `Quick
+        (with_eio test_pending_comment_durability_fences_replay);
+      Alcotest.test_case "comment partial persistence repairs without duplicate append" `Quick
+        (with_eio test_comment_projection_failure_replays_without_duplicate_append);
+      Alcotest.test_case "recovery stops before successor after oldest failure" `Quick
+        (with_eio test_recovery_stops_before_successor_after_oldest_failure);
       Alcotest.test_case "get_post_and_comments atomic" `Quick
         (with_eio test_get_post_and_comments_atomic);
       Alcotest.test_case "get_post_and_comments pagination clamps" `Quick
@@ -2028,6 +3282,10 @@ let () =
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
       Alcotest.test_case "current vote lookup" `Quick
         (with_eio test_current_vote_lookup);
+      Alcotest.test_case "vote persistence failure rolls back" `Quick
+        (with_eio test_vote_persistence_failure_rolls_back);
+      Alcotest.test_case "restart derives vote counters from ledger" `Quick
+        (with_eio test_restart_recalculates_vote_projection_from_ledger);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
       Alcotest.test_case "flusher start retries forced CAS conflicts" `Quick
@@ -2038,6 +3296,24 @@ let () =
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick
         (with_eio test_reaction_toggle_and_summary);
+      Alcotest.test_case "toggle events keep distinct routing identities" `Quick
+        (with_eio test_reaction_toggles_have_distinct_routing_event_ids);
+      Alcotest.test_case "outbox keeps terminal successors behind pending command" `Quick
+        (with_eio test_outbox_compaction_retains_terminal_successors);
+      Alcotest.test_case "outbox requires every recipient settlement" `Quick
+        (with_eio test_outbox_requires_every_planned_recipient_settlement);
+      Alcotest.test_case "outbox target rejection is terminal" `Quick
+        (with_eio test_outbox_rejected_target_is_terminal);
+      Alcotest.test_case "typed outbox command codec is strict" `Quick
+        (with_eio test_board_signal_command_codec_is_strict_and_canonical);
+      Alcotest.test_case "pending routing fences only referenced sweep entity" `Quick
+        (with_eio test_pending_routing_command_fences_only_referenced_sweep_entity);
+      Alcotest.test_case "restart prunes mixed-generation orphans" `Quick
+        (with_eio test_restart_repairs_mixed_projection_generation);
+      Alcotest.test_case "comment replay repairs partial parent projection" `Quick
+        (with_eio test_comment_replay_repairs_partial_parent_projection);
+      Alcotest.test_case "reaction persistence failure is explicit" `Quick
+        (with_eio test_reaction_persistence_failure_is_explicit_and_rolled_back);
       Alcotest.test_case "comment reaction survives restart" `Quick
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick
@@ -2065,6 +3341,8 @@ let () =
       Alcotest.test_case "set_pinned append failure rolls back" `Quick
         (with_eio test_set_pinned_persistence_failure_rolls_back);
       Alcotest.test_case "flush" `Quick (with_eio test_flush);
+      Alcotest.test_case "flush failure is explicit and retryable" `Quick
+        (with_eio test_flush_failure_is_explicit_and_retains_dirty_state);
     ];
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);
@@ -2083,6 +3361,12 @@ let () =
       Alcotest.test_case "delete" `Quick (with_eio test_sub_board_delete);
       Alcotest.test_case "persisted create/delete snapshot" `Quick
         (with_eio test_sub_board_create_delete_persisted_snapshot);
+      Alcotest.test_case "dirty snapshot is flushable" `Quick
+        (with_eio test_dirty_sub_board_snapshot_is_flushable);
+      Alcotest.test_case "malformed access fails closed" `Quick
+        (with_eio test_malformed_sub_board_access_fails_closed);
+      Alcotest.test_case "duplicate access fields fail closed" `Quick
+        (with_eio test_duplicate_sub_board_access_fails_closed);
       Alcotest.test_case "default access open" `Quick (with_eio test_sub_board_access_default_open);
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);

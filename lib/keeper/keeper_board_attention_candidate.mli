@@ -104,6 +104,7 @@ val candidate_id_of_signal : keeper_name:string -> Board_dispatch.board_signal -
 
 val of_board_evidence :
   meta:Keeper_meta_contract.keeper_meta ->
+  routing_event_id:string option ->
   recorded_at:float ->
   signal:Board_dispatch.board_signal ->
   post:Board.post ->
@@ -112,6 +113,7 @@ val of_board_evidence :
 
 val of_board_signal :
   meta:Keeper_meta_contract.keeper_meta ->
+  ?routing_event_id:string ->
   recorded_at:float ->
   Board_dispatch.board_signal ->
   candidate Keeper_world_observation_board_signal.board_read

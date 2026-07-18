@@ -15,9 +15,3 @@ val parse_sub_board_members
   :  owner:Agent_id.t
   -> string list
   -> (Agent_id.t list, board_error) result
-
-(** Same as [parse_sub_board_members] but skips invalid agent ids. *)
-val parse_sub_board_members_lenient
-  :  owner:Agent_id.t
-  -> string list
-  -> Agent_id.t list

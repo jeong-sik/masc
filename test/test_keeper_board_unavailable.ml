@@ -102,6 +102,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
   ; payload =
       Keeper_event_queue.Board_signal
         { kind = Keeper_event_queue.Post_created
+        ; routing_event_id = None
         ; author = "external-author"
         ; title = "poison stimulus"
         ; content = "references a post_id that was never created"

@@ -20,6 +20,9 @@
   board_moderation
   board_paths
   board_sort
+  board_signal_audience
+  board_signal_command
+  board_signal_outbox
   board_sub_board_json
   board_votes
   board_votes_json)

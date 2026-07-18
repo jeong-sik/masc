@@ -21,6 +21,7 @@ type board_error =
   | Post_not_found of string
   | Comment_not_found of string
   | Io_error of string
+  | Persistence_commit_unknown of string
   | Validation_error of string
   | Already_voted of string
   | Already_exists of string
@@ -159,6 +160,23 @@ type reaction_toggle_result = {
   summary : reaction_summary list;
 }
 
+(** Canonically validated next reaction state, captured before durable command
+    preparation. [reacted] is a set-state effect, never a replayed toggle. *)
+type prepared_reaction = {
+  user_id : string;
+  emoji : string;
+  reacted : bool;
+  created_at : float;
+}
+
+(** Result of applying an immutable Board mutation command. Replay returns
+    [Already_applied] only when the stored entity has the command's exact
+    immutable creation identity. *)
+type 'a mutation_application =
+  | Applied of 'a
+  | Already_applied of 'a
+  | Repaired_partial_apply of 'a
+
 (** {1 SubBoard — Named spaces within the board} *)
 
 module Sub_board_id : sig
@@ -255,10 +273,22 @@ type store = {
   (** Unique reactions keyed by target type, target id, user id, and emoji. *)
   mutable dirty_posts : bool;
   mutable dirty_comments : bool;
+  mutable dirty_sub_boards : bool;
   dirty_post_ids : (string, unit) Hashtbl.t;
   dirty_comment_ids : (string, unit) Hashtbl.t;
+  pending_post_durability : (string, string) Hashtbl.t;
+  (** Post ids whose create append had an unknown commit outcome. The value is
+      the original typed failure detail retained for settlement diagnostics. *)
+  pending_comment_durability : (string, string) Hashtbl.t;
+  (** Comment ids whose create append had an unknown commit outcome. The value
+      is the original typed failure detail retained for settlement diagnostics. *)
+  pending_parent_projection_repairs : (string, unit) Hashtbl.t;
+  (** Comment ids whose durable row exists but whose parent projection still
+      requires an idempotent rewrite. *)
   mutable last_flush : float;
   flusher_inbox : flusher_msg Eio.Stream.t;
+  flusher_producer_mutex : Eio.Mutex.t;
+  (** Serializes capacity observation and non-blocking inbox admission. *)
   sub_boards : (string, sub_board) Hashtbl.t;
   (** Sub-board id -> sub_board record. *)
   sub_boards_by_slug : (string, string) Hashtbl.t;

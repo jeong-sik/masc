@@ -800,7 +800,6 @@ type private_jsonl_transaction_operation =
   | Close_rewrite_stage
   | Rename_rewrite_stage
   | Sync_rewrite_parent
-  | Inspect_rewritten_data
   | Remove_rewrite_stage
 
 type private_jsonl_operation_failure =
@@ -823,6 +822,7 @@ type private_jsonl_transaction_error =
       { failure : private_jsonl_operation_failure
       ; cleanup_failures : private_jsonl_operation_failure list
       }
+  | Commit_unknown of private_jsonl_operation_failure
   | Transaction_append_failed of durable_append_error
 
 val private_jsonl_transaction_error_to_string :
@@ -856,6 +856,13 @@ val append_private_jsonl_durable_locked_at_cursor_result :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+(** Append complete newline-terminated JSONL rows under the stable sibling
+    lock without a prior cursor read. The append is fsynced and rolled back on
+    failure. This is the O(suffix) create-only path for ledgers that share the
+    stable transaction family with atomic rewrites. *)
+val append_private_jsonl_durable_stable_locked_result :
+  string -> string -> (unit, private_jsonl_transaction_error) result
+
 (** Atomically replace a complete private JSONL store iff [expected] still
     names the exact current store. The staged payload and parent directory are
     fsynced; no directory-fsync failure is suppressed. The stable sibling lock
@@ -865,6 +872,17 @@ val rewrite_private_jsonl_durable_locked_at_cursor_result :
   expected:Private_jsonl_cursor.t ->
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** Read, decide, and optionally append complete JSONL rows while holding one
+    stable sibling lock for the entire transaction.  The outer result reports
+    storage/locking failures; the inner result is the caller's typed decision
+    failure.  [decide] runs in the same blocking system-thread boundary as the
+    transaction and therefore must not perform Eio effects.  [Some suffix]
+    must be non-empty and newline-terminated; [None] performs no write. *)
+val transact_private_jsonl_durable_locked_result :
+  string ->
+  (string -> (string option * 'a, 'decision_error) result) ->
+  (('a, 'decision_error) result, private_jsonl_transaction_error) result
 
 val durable_append_failure_to_string : durable_append_failure -> string
 

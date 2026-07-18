@@ -136,7 +136,14 @@ let run_cmd cli_base_path =
     (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->
-      (try Board_dispatch.flush () with
+      (try
+         match Board_dispatch.flush () with
+         | Ok () -> ()
+         | Error error ->
+           Log.Misc.warn
+             "shutdown: board flush failed: %s"
+             (Board.show_board_error error)
+       with
        | Eio.Cancel.Cancelled _ -> ()
        | exn ->
          Log.Misc.warn

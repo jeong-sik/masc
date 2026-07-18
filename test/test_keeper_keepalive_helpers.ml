@@ -6,6 +6,7 @@ module Types = Masc_domain
 open Alcotest
 open Masc
 module KK = Masc.Keeper_keepalive
+module Board_signal_command = Masc_board_handlers.Board_signal_command
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -18,6 +19,7 @@ let rec rm_rf path =
 
 let with_temp_workspace f =
   let base_path = Filename.temp_dir "keeper-heartbeat-current-task" "" in
+  Unix.putenv "MASC_BASE_PATH" base_path;
   let config = Workspace.default_config base_path in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
@@ -175,6 +177,7 @@ let test_not_in_registry_warn_state_is_bounded () =
 
 module KKS = Masc.Keeper_keepalive_signal
 module KWOBS = Masc.Keeper_world_observation_board_signal
+module Board_signal_outbox = Masc_board_handlers.Board_signal_outbox
 
 let make_board_resume_meta name =
   let json =
@@ -283,6 +286,54 @@ let board_queue_length config keeper_name =
   |> Keeper_event_queue.length
 ;;
 
+let targets_audience identities =
+  match Board_signal_audience.targets identities with
+  | Ok audience -> audience
+  | Error detail -> fail detail
+;;
+
+let prepare_committed_routing_event event_id =
+  let author =
+    match Board.Agent_id.of_string "keepalive-test" with
+    | Ok value -> value
+    | Error error -> fail (Board.show_board_error error)
+  in
+  let post : Board.post =
+    { id = Board.Post_id.generate ()
+    ; author
+    ; title = "keeper keepalive delivery"
+    ; body = "keeper keepalive delivery"
+    ; content = "keeper keepalive delivery"
+    ; post_kind = Board.System_post
+    ; meta_json = None
+    ; visibility = Board.Internal
+    ; created_at = 1.0
+    ; updated_at = 1.0
+    ; expires_at = 0.0
+    ; votes_up = 0
+    ; votes_down = 0
+    ; reply_count = 0
+    ; pinned = false
+    ; hearth = None
+    ; thread_id = None
+    ; origin = None
+    }
+  in
+  (match
+     Board_signal_outbox.prepare
+       ~event_id
+       ~command:
+         (match Board_signal_command.post post with
+          | Ok command -> command
+          | Error error -> fail (Board.show_board_error error))
+   with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  match Board_signal_outbox.commit ~event_id with
+  | Ok () -> ()
+  | Error detail -> fail detail
+;;
+
 let overwrite_file path contents =
   let channel = open_out_bin path in
   Fun.protect
@@ -309,7 +360,17 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
          ; updated_at = Some 123.0
          }
        in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       prepare_committed_routing_event "event-multi-lane";
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id = "event-multi-lane"
+            ; audience = targets_audience [ "alpha"; "beta" ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
        check int "alpha durable queue" 1 (board_queue_length config "alpha");
        check int "beta durable queue" 1 (board_queue_length config "beta");
        List.iter
@@ -347,7 +408,17 @@ let test_paused_exact_mention_is_durable_without_wake () =
          ; updated_at = Some 124.0
          }
        in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       prepare_committed_routing_event "event-paused-lane";
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id = "event-paused-lane"
+            ; audience = targets_audience [ "pausedlane" ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
        check int "paused durable queue" 1 (board_queue_length config meta.name);
        match Keeper_registry.get ~base_path:config.base_path meta.name with
        | Some entry ->
@@ -383,7 +454,17 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
          ; updated_at = Some 124.5
          }
        in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       prepare_committed_routing_event "event-restarting-lane";
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id = "event-restarting-lane"
+            ; audience = targets_audience [ "restartlane" ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
        check int "Restarting durable queue" 1
          (board_queue_length config meta.name);
        match Keeper_registry.get ~base_path:config.base_path meta.name with
@@ -393,7 +474,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
        | None -> fail "Restarting registry entry missing")
 ;;
 
-let test_lane_meta_failure_does_not_block_next_durable_delivery () =
+let test_non_target_metadata_does_not_enter_direct_delivery () =
   with_temp_workspace @@ fun config ->
   Fun.protect
     ~finally:Keeper_registry.clear
@@ -419,11 +500,148 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
          ; updated_at = Some 125.0
          }
        in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
-       check int "unreadable lane has no queued signal" 0
+       prepare_committed_routing_event "event-lane-isolation";
+       (match
+         KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id = "event-lane-isolation"
+            ; audience = targets_audience [ "aaahealthy" ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check int "non-target lane has no queued signal" 0
          (board_queue_length config broken.name);
-       check int "next lane receives durable signal" 1
+       check int "target lane receives durable signal" 1
          (board_queue_length config healthy.name))
+;;
+
+let test_recipient_failure_settles_healthy_lane_once () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let broken = make_board_resume_meta "aaabroken" in
+       let healthy = make_board_resume_meta "zzzhealthy" in
+       persist_and_register_board_lane config broken;
+       persist_and_register_board_lane config healthy;
+       let broken_queue_path =
+         Filename.concat
+           (Filename.concat
+              (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
+              broken.name)
+           "event-queue.json"
+       in
+       rm_rf broken_queue_path;
+       Fs_compat.mkdir_p (Filename.dirname broken_queue_path);
+       Unix.mkdir broken_queue_path 0o700;
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-recipient-settlement"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@aaabroken @zzzhealthy settle independently"
+         ; hearth = None
+         ; updated_at = Some 126.0
+         }
+       in
+       let event_id = "event-recipient-settlement" in
+       prepare_committed_routing_event event_id;
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id
+            ; audience = targets_audience [ broken.name; healthy.name ]
+            ; signal
+            }
+        with
+        | Error _ -> ()
+        | Ok () -> fail "broken recipient queue returned global success");
+       check int "healthy recipient accepted once" 1
+         (board_queue_length config healthy.name);
+       (match Board_signal_outbox.recipient_progress ~event_id with
+        | Ok
+            (Board_signal_outbox.Recipients_pending
+              [ Board_signal_outbox.Target_identity
+                  { identity; keeper_name = Some keeper_name }
+              ]) ->
+          check string "broken target identity remains" broken.name identity;
+          check string "broken target lane is frozen" broken.name keeper_name
+        | Ok _ -> fail "healthy recipient was not durably settled"
+        | Error detail -> fail detail);
+       Unix.rmdir broken_queue_path;
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id
+            ; audience = targets_audience [ broken.name; healthy.name ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check int "healthy recipient is not replayed" 1
+         (board_queue_length config healthy.name);
+       check int "repaired recipient accepts once" 1
+         (board_queue_length config broken.name);
+       match Board_signal_outbox.recipient_progress ~event_id with
+       | Ok Board_signal_outbox.Recipients_settled -> ()
+       | Ok _ -> fail "recipient plan did not reach settled"
+       | Error detail -> fail detail)
+;;
+
+let test_missing_target_does_not_block_healthy_target () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       let healthy = make_board_resume_meta "healthy-target" in
+       let missing = make_board_resume_meta "missing-target" in
+       persist_and_register_board_lane config healthy;
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-missing-target-isolation"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@healthy-target @missing-target resolve independently"
+         ; hearth = None
+         ; updated_at = Some 127.0
+         }
+       in
+       let event_id = "event-missing-target-isolation" in
+       prepare_committed_routing_event event_id;
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id
+            ; audience = targets_audience [ healthy.name; missing.name ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check int "healthy target accepted despite missing sibling" 1
+         (board_queue_length config healthy.name);
+       (match Board_signal_outbox.recipient_progress ~event_id with
+        | Ok Board_signal_outbox.Recipients_settled -> ()
+        | Ok _ -> fail "unroutable target was not explicitly terminalized"
+        | Error detail -> fail detail);
+       persist_and_register_board_lane config missing;
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id
+            ; audience = targets_audience [ healthy.name; missing.name ]
+            ; signal
+            }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check int "healthy target is not replayed after sibling resolves" 1
+         (board_queue_length config healthy.name);
+       check int "explicitly rejected target is not silently replayed" 0
+         (board_queue_length config missing.name))
 ;;
 
 (* ── Test runner ─── *)
@@ -460,8 +678,12 @@ let () =
             test_paused_exact_mention_is_durable_without_wake
         ; test_case "Restarting exact mention is durable with deferred wake" `Quick
             test_restarting_exact_mention_is_durable_with_deferred_wake
-        ; test_case "lane metadata failure does not block next durable delivery" `Quick
-            test_lane_meta_failure_does_not_block_next_durable_delivery
+        ; test_case "non-target metadata is outside direct delivery" `Quick
+            test_non_target_metadata_does_not_enter_direct_delivery
+        ; test_case "recipient failure settles healthy lane exactly once" `Quick
+            test_recipient_failure_settles_healthy_lane_once
+        ; test_case "missing target does not block healthy target" `Quick
+            test_missing_target_does_not_block_healthy_target
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

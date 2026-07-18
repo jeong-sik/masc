@@ -2,12 +2,6 @@
 
 include Board_core
 
-let record_post_meta_json_read_drop () =
-  Board_metrics_hooks.inc_persistence_read_drop
-    ~surface:Board_metrics_hooks.Board_post_meta_json
-    ~reason:Read_drop_reason.Invalid_payload
-;;
-
 let visibility_of_string = Board_core_classify.visibility_of_string
 
 (* RFC-0233 §7: decode the typed post origin. Parse, don't repair — an absent
@@ -70,17 +64,17 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       Log.BoardLog.warn
         "dropping persisted board post %s: missing or invalid post_kind"
         id_str;
-    let meta_json =
-      match Safe_ops.json_member_opt "meta" json with
-      | Some (`Assoc _ as meta) -> Some meta
-      | Some _ | None ->
-        (match Safe_ops.json_string_opt "meta_json" json with
-         | Some raw ->
-           (try Some (Yojson.Safe.from_string raw) with
-            | Yojson.Json_error _ ->
-              record_post_meta_json_read_drop ();
-              None)
-         | None -> None)
+    let meta_json_decode =
+      match json with
+      | `Assoc fields ->
+        if Option.is_some (List.assoc_opt "meta_json" fields)
+        then None
+        else (
+          match List.assoc_opt "meta" fields with
+          | None -> Some None
+          | Some (`Assoc _ as meta) -> Some (Some meta)
+          | Some _ -> None)
+      | _ -> None
     in
     let origin =
       match Safe_ops.json_member_opt "origin" json with
@@ -91,9 +85,10 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        ( Post_id.of_string id_str
        , Agent_id.of_string author_str
        , visibility_of_string vis_str
-       , post_kind_opt )
+       , post_kind_opt
+       , meta_json_decode )
      with
-     | Ok id, Ok author, Some visibility, Some post_kind ->
+     | Ok id, Ok author, Some visibility, Some post_kind, Some meta_json ->
        (match
           normalize_post_payload
             ~content
@@ -151,23 +146,27 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
     , Some content
     , Some created_at
     , Some expires_at ) ->
-    let parent_id_opt = Safe_ops.json_string_opt "parent_id" json in
+    let parent_id =
+      match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "parent_id" fields with
+         | Some `Null -> Some None
+         | Some (`String raw) ->
+           (match Comment_id.of_string raw with
+            | Ok id -> Some (Some id)
+            | Error _ -> None)
+         | Some _ | None -> None)
+      | _ -> None
+    in
     let votes_up = Safe_ops.json_int ~default:0 "votes_up" json in
     let votes_down = Safe_ops.json_int ~default:0 "votes_down" json in
     (match
        ( Comment_id.of_string id_str
        , Post_id.of_string post_id_str
-       , Agent_id.of_string author_str )
+       , Agent_id.of_string author_str
+       , parent_id )
      with
-     | Ok id, Ok post_id, Ok author ->
-       let parent_id =
-         match parent_id_opt with
-         | Some s ->
-           (match Comment_id.of_string s with
-            | Ok cid -> Some cid
-            | _ -> None)
-         | None -> None
-       in
+     | Ok id, Ok post_id, Ok author, Some parent_id ->
        Some
          { id
          ; post_id
@@ -183,78 +182,158 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
   | _ -> None
 ;;
 
+exception Persisted_jsonl_transaction_failed of string
+
+exception Invalid_persisted_jsonl_row of
+  { line_number : int
+  ; reason : string
+  }
+
+let has_unique_object_fields = function
+  | `Assoc fields ->
+    let field_names = List.map fst fields in
+    List.length field_names
+    = List.length (List.sort_uniq String.compare field_names)
+  | _ -> true
+;;
+
+let strict_jsonl_rows ~path ~decode =
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error error ->
+    Error
+      ( path
+      , Persisted_jsonl_transaction_failed
+          (Fs_compat.private_jsonl_transaction_error_to_string error) )
+  | Ok snapshot ->
+    let lines_result =
+      if String.equal snapshot.bytes ""
+      then Ok []
+      else
+        match List.rev (String.split_on_char '\n' snapshot.bytes) with
+        | "" :: reversed_lines -> Ok (List.rev reversed_lines)
+        | _ ->
+          Error
+            (Invalid_persisted_jsonl_row
+               { line_number = 0
+               ; reason = "durable JSONL snapshot is not newline-terminated"
+               })
+    in
+    (match lines_result with
+     | Error cause -> Error (path, cause)
+     | Ok lines ->
+       let rec parse line_number decoded = function
+         | [] -> Ok (List.rev decoded)
+         | line :: rest ->
+           (match
+              if String.equal line ""
+              then
+                Error
+                  (Invalid_persisted_jsonl_row
+                     { line_number; reason = "empty JSONL row" })
+              else
+                try
+                  let json = Yojson.Safe.from_string line in
+                  if not (has_unique_object_fields json)
+                  then
+                    Error
+                      (Invalid_persisted_jsonl_row
+                         { line_number
+                         ; reason = "row contains duplicate object fields"
+                         })
+                  else (
+                    match decode json with
+                    | Some value -> Ok value
+                    | None ->
+                      Error
+                        (Invalid_persisted_jsonl_row
+                           { line_number
+                           ; reason = "row does not satisfy the projection schema"
+                           }))
+                with
+                | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+                | Yojson.Json_error reason ->
+                  Error (Invalid_persisted_jsonl_row { line_number; reason })
+                | cause ->
+                  Error
+                    (Invalid_persisted_jsonl_row
+                       { line_number; reason = Printexc.to_string cause })
+            with
+            | Error cause -> Error (path, cause)
+            | Ok value -> parse (line_number + 1) (value :: decoded) rest)
+       in
+       parse 1 [] lines)
+;;
+
 let load_persisted_posts store =
   let path = persist_path () in
-  if not (Fs_compat.file_exists path)
-  then Ok 0
-  else
-    try
-      let t0 = Time_compat.now () in
-      let now = Time_compat.now () in
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match post_of_yojson json with
-           | Some p
-             when Float.compare p.expires_at 0.0 = 0
-                  || Float.compare p.expires_at now > 0 ->
-             Hashtbl.replace store.posts (Post_id.to_string p.id) p;
-             (* RFC-0233 §7: rebuild the origin indexes on load (derive-on-load,
-                mirroring comments_by_post below) so find_post_by_turn_ref /
-                find_post_by_run_id survive a restart without a second persisted
-                SSOT that could drift from the post rows. *)
-             index_post_origin store p;
-             incr loaded
-           | _ -> ())
-        lines;
-      store.post_count := Hashtbl.length store.posts;
-      let elapsed = Time_compat.now () -. t0 in
-      if !loaded > 0
-      then Log.BoardLog.info "loaded %d posts from %s in %.3fs" !loaded path elapsed
-      else Log.BoardLog.debug "loaded 0 posts from %s in %.3fs" path elapsed;
-      Ok !loaded
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
+  let t0 = Time_compat.now () in
+  let now = Time_compat.now () in
+  match strict_jsonl_rows ~path ~decode:post_of_yojson with
+  | Error _ as error -> error
+  | Ok rows ->
+    let loaded = ref 0 in
+    let discarded = ref false in
+    List.iter
+      (fun (p : post) ->
+         if
+           Float.compare p.expires_at 0.0 = 0
+           || Float.compare p.expires_at now > 0
+         then (
+           let key = Post_id.to_string p.id in
+           (match Hashtbl.find_opt store.posts key with
+            | Some previous ->
+              discarded := true;
+              unindex_post_origin store previous
+            | None -> ());
+           Hashtbl.replace store.posts key p;
+           index_post_origin store p;
+           incr loaded)
+         else discarded := true)
+      rows;
+    if !discarded then store.dirty_posts <- true;
+    store.post_count := Hashtbl.length store.posts;
+    let elapsed = Time_compat.now () -. t0 in
+    if !loaded > 0
+    then Log.BoardLog.info "loaded %d posts from %s in %.3fs" !loaded path elapsed
+    else Log.BoardLog.debug "loaded 0 posts from %s in %.3fs" path elapsed;
+    Ok !loaded
 ;;
 
 let load_persisted_comments store =
   let path = comments_path () in
-  if not (Fs_compat.file_exists path)
-  then Ok 0
-  else
-    try
-      let t0 = Time_compat.now () in
-      let now = Time_compat.now () in
-      let loaded = ref 0 in
-      let lines = Fs_compat.load_jsonl path in
-      List.iter
-        (fun json ->
-           match comment_of_yojson json with
-           | Some c
-             when Float.compare c.expires_at 0.0 = 0
-                  || Float.compare c.expires_at now > 0 ->
-             let cid = Comment_id.to_string c.id in
-             Hashtbl.replace store.comments cid c;
-             let post_key = Post_id.to_string c.post_id in
-             let existing =
-               Hashtbl.find_opt store.comments_by_post post_key
-               |> Option.value ~default:[]
-             in
-             let indexed =
-               if List.exists (String.equal cid) existing then existing else cid :: existing
-             in
-             Hashtbl.replace store.comments_by_post post_key indexed;
-             incr loaded
-           | _ -> ())
-        lines;
-      let elapsed = Time_compat.now () -. t0 in
-      if !loaded > 0
-      then Log.BoardLog.info "loaded %d comments from %s in %.3fs" !loaded path elapsed
-      else Log.BoardLog.debug "loaded 0 comments from %s in %.3fs" path elapsed;
-      Ok !loaded
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Error (path, e)
+  let t0 = Time_compat.now () in
+  let now = Time_compat.now () in
+  match strict_jsonl_rows ~path ~decode:comment_of_yojson with
+  | Error _ as error -> error
+  | Ok rows ->
+    let loaded = ref 0 in
+    let discarded = ref false in
+    List.iter
+      (fun (c : comment) ->
+         if
+           (Float.compare c.expires_at 0.0 = 0
+            || Float.compare c.expires_at now > 0)
+           && Hashtbl.mem store.posts (Post_id.to_string c.post_id)
+         then (
+           let cid = Comment_id.to_string c.id in
+           if Hashtbl.mem store.comments cid then discarded := true;
+           Hashtbl.replace store.comments cid c;
+           let post_key = Post_id.to_string c.post_id in
+           let existing =
+             Hashtbl.find_opt store.comments_by_post post_key
+             |> Option.value ~default:[]
+           in
+           let indexed =
+             if List.exists (String.equal cid) existing then existing else cid :: existing
+           in
+           Hashtbl.replace store.comments_by_post post_key indexed;
+           incr loaded)
+         else discarded := true)
+      rows;
+    if !discarded then store.dirty_comments <- true;
+    let elapsed = Time_compat.now () -. t0 in
+    if !loaded > 0
+    then Log.BoardLog.info "loaded %d comments from %s in %.3fs" !loaded path elapsed
+    else Log.BoardLog.debug "loaded 0 comments from %s in %.3fs" path elapsed;
+    Ok !loaded
 ;;

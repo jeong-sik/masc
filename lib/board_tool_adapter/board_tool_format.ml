@@ -61,6 +61,8 @@ let board_error_to_string = function
   | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
   | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
+  | Board.Persistence_commit_unknown s ->
+    Printf.sprintf "Persistence commit status unknown: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
   | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s

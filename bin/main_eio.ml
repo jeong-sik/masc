@@ -736,7 +736,13 @@ let run_cmd host port cli_base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
             (try
               Eio.Time.with_timeout_exn clock 2.0
-                (fun () -> Board_dispatch.flush ())
+                (fun () ->
+                  match Board_dispatch.flush () with
+                  | Ok () -> ()
+                  | Error error ->
+                    Log.Server.error
+                      "[Shutdown] Phase 3/4 BOARD: flush failed: %s"
+                      (Board.show_board_error error))
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn

@@ -38,6 +38,15 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
+let persist_transaction_error ~where error =
+  let detail = Fs_compat.private_jsonl_transaction_error_to_string error in
+  record_persist_error ~where detail;
+  match error with
+  | Fs_compat.Commit_unknown _ ->
+    Error (Persistence_commit_unknown (Printf.sprintf "%s: %s" where detail))
+  | _ -> Error (Io_error (Printf.sprintf "%s: %s" where detail))
+;;
+
 let create_store () =
   { posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -52,10 +61,15 @@ let create_store () =
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
   ; dirty_comments = false
+  ; dirty_sub_boards = false
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
+  ; pending_post_durability = Hashtbl.create 64
+  ; pending_comment_durability = Hashtbl.create 64
+  ; pending_parent_projection_repairs = Hashtbl.create 64
   ; last_flush = Time_compat.now ()
   ; flusher_inbox = Eio.Stream.create flusher_inbox_capacity
+  ; flusher_producer_mutex = Eio.Mutex.create ()
   ; sub_boards = Hashtbl.create 64
   ; sub_boards_by_slug = Hashtbl.create 64
   ; posts_by_turn_ref = Hashtbl.create 256
@@ -128,9 +142,10 @@ let mark_dirty_comment store comment_id =
 
 let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
 
-(** Serialize JSONL writes. Callers must never hold the state mutex while
-    acquiring [persist_mutex]; compute snapshots under [with_lock], release it,
-    then call [with_persist_lock]. *)
+(** Serialize JSONL writes and their state transitions.  Mutation paths acquire
+    this lock before briefly acquiring the state mutex, then release the state
+    mutex before filesystem I/O.  No caller may acquire [persist_mutex] while
+    already holding the state mutex. *)
 let with_persist_lock store f =
   let started = Time_compat.now () in
   Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
@@ -167,7 +182,7 @@ let vote_key_target key =
          | _ -> None))
 ;;
 
-let sweep store =
+let sweep ?(protected_post_ids = []) ?(protected_comment_ids = []) store =
   with_lock store (fun () ->
     let now = Time_compat.now () in
     let removed_posts = ref 0 in
@@ -176,6 +191,8 @@ let sweep store =
       Hashtbl.fold
         (fun id (post : post) acc ->
            if
+             not (List.exists (String.equal id) protected_post_ids)
+             &&
              Stdlib.Float.compare post.expires_at 0.0 > 0
              && Stdlib.Float.compare post.expires_at now < 0
              && !removed_posts < Limits.sweeper_batch_size
@@ -189,8 +206,8 @@ let sweep store =
     List.iter
       (fun id ->
          (match Hashtbl.find_opt store.posts id with
-          | Some p -> unindex_post_origin store p
-          | None -> ());
+         | Some p -> unindex_post_origin store p
+         | None -> ());
          Hashtbl.remove store.posts id;
          Hashtbl.remove store.comments_by_post id;
          Stdlib.decr store.post_count)
@@ -199,6 +216,8 @@ let sweep store =
       Hashtbl.fold
         (fun id (comment : comment) acc ->
            if
+             not (List.exists (String.equal id) protected_comment_ids)
+             &&
              Stdlib.Float.compare comment.expires_at 0.0 > 0
              && Stdlib.Float.compare comment.expires_at now < 0
              && !removed_comments < Limits.sweeper_batch_size
@@ -217,8 +236,9 @@ let sweep store =
               store.comments_by_post
               (Post_id.to_string c.post_id)
               cid
-          | None -> ());
-         Hashtbl.remove store.comments cid)
+         | None -> ());
+         Hashtbl.remove store.comments cid;
+         ())
       expired_comments;
     (* Reclaim reactions and votes whose target post/comment no longer exists.
        [sweep] removes posts/comments but historically left [store.reactions] and
@@ -266,6 +286,14 @@ let sweep store =
         removed_votes;
     if !removed_posts > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
+    if
+      !removed_posts > 0
+      || !removed_comments > 0
+      || removed_reactions > 0
+      || removed_votes > 0
+    then (
+      store.dirty_posts <- true;
+      store.dirty_comments <- true);
     store.last_sweep <- now;
     !removed_posts, !removed_comments)
 ;;
@@ -299,23 +327,73 @@ let enqueue_scheduled_msg store scheduled =
 ;;
 
 let enqueue_scheduled_msgs store scheduled =
-  let scheduled_count = List.length scheduled in
-  let inbox_len = Eio.Stream.length store.flusher_inbox in
-  if scheduled_count = 0
-  then ()
-  else if scheduled_count > flusher_inbox_capacity - inbox_len
-  then (
-    record_flusher_schedule_drop scheduled_count;
-    List.iter (rollback_scheduled_msg store) scheduled;
-    Log.BoardLog.warn
-      "board flusher inbox full; skipped scheduling sweep/flush messages \
-       (queued=%d, requested=%d, capacity=%d)"
-      inbox_len scheduled_count flusher_inbox_capacity)
-  else (
-    (* [maybe_sweep] is the only producer of these messages and reserves
-       timestamps under [store.mutex] before this check. Once there is room for
-       the whole batch, these adds should not block on capacity. *)
-    List.iter (enqueue_scheduled_msg store) scheduled)
+  Eio.Mutex.use_rw ~protect:true store.flusher_producer_mutex (fun () ->
+    let scheduled_count = List.length scheduled in
+    let inbox_len = Eio.Stream.length store.flusher_inbox in
+    if scheduled_count = 0
+    then ()
+    else if scheduled_count > flusher_inbox_capacity - inbox_len
+    then (
+      record_flusher_schedule_drop scheduled_count;
+      List.iter (rollback_scheduled_msg store) scheduled;
+      Log.BoardLog.warn
+        "board flusher inbox full; skipped scheduling sweep/flush messages \
+         (queued=%d, requested=%d, capacity=%d)"
+        inbox_len scheduled_count flusher_inbox_capacity)
+    else
+      (* Every producer holds [flusher_producer_mutex] across capacity
+         observation and admission. [Eio.Stream.add] therefore has room and
+         does not suspend while this mutex is held. *)
+      List.iter (enqueue_scheduled_msg store) scheduled)
+;;
+
+let request_flush store =
+  Eio.Mutex.use_rw ~protect:true store.flusher_producer_mutex (fun () ->
+    let inbox_len = Eio.Stream.length store.flusher_inbox in
+    if inbox_len >= flusher_inbox_capacity
+    then (
+      record_flusher_schedule_drop 1;
+      Error
+        (Printf.sprintf
+           "board flusher inbox is full (queued=%d, capacity=%d)"
+           inbox_len
+           flusher_inbox_capacity))
+    else
+      try
+        Eio.Stream.add store.flusher_inbox Flush;
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+      | cause ->
+        Error
+          (Printf.sprintf
+             "board flush admission failed: %s"
+             (Printexc.to_string cause)))
+;;
+
+let settle_unknown_durable_snapshot
+      store
+      ~initial_detail
+      ~retry
+      ~on_settled
+  =
+  match retry () with
+  | Ok () ->
+    on_settled ();
+    Ok ()
+  | Error retry_error ->
+    let admission_detail =
+      match request_flush store with
+      | Ok () -> "dirty snapshot admitted to the Board flusher"
+      | Error detail -> "dirty snapshot flush admission failed: " ^ detail
+    in
+    Error
+      (Persistence_commit_unknown
+         (Printf.sprintf
+            "%s; idempotent snapshot settlement failed: %s; %s"
+            initial_detail
+            (show_board_error retry_error)
+            admission_detail))
 ;;
 
 let maybe_sweep store =
@@ -367,8 +445,6 @@ let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir = Board_paths.ensure_masc_dir
-let max_jsonl_bytes = Board_paths.max_jsonl_bytes
-let rotate_if_needed = Board_paths.rotate_if_needed
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
@@ -381,36 +457,43 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
+let rewrite_jsonl_durable_result ~where path content =
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error error -> persist_transaction_error ~where error
+  | Ok snapshot ->
+    (match
+       Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+         path
+         ~expected:snapshot.cursor
+         content
+     with
+     | Ok _cursor -> Ok ()
+     | Error error -> persist_transaction_error ~where error)
+;;
 let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
+    rewrite_jsonl_durable_result ~where:"rewrite_posts" path content
   with
   | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
 ;;
-let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
-let rewrite_posts store =
-  let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_posts_jsonl content)
+let comments_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (comment : comment) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson comment));
+       Buffer.add_char buf '\n')
+    store.comments;
+  Buffer.contents buf
 ;;
-let rewrite_comments store =
+let save_comments_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = comments_path () in
-    let buf = Buffer.create 4096 in
-    Hashtbl.iter
-      (fun _ (cmt : comment) ->
-         Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
-         Buffer.add_char buf '\n')
-      store.comments;
-    match Fs_compat.save_file_atomic path (Buffer.contents buf) with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_comments" msg
+    rewrite_jsonl_durable_result ~where:"rewrite_comments" path content
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_comments" msg
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -421,32 +504,26 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
-let save_reactions_jsonl content =
+let save_reactions_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = reactions_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_reactions" msg
+    rewrite_jsonl_durable_result ~where:"rewrite_reactions" path content
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
 ;;
-let rewrite_reactions_unlocked store =
-  save_reactions_jsonl (reactions_jsonl_unlocked store)
-;;
-let rewrite_reactions store =
-  let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_reactions_jsonl content)
-;;
-
 (** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)
 let append_post (p : post) =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
-    rotate_if_needed path;
-    Ok ()
+    (match
+       Fs_compat.append_private_jsonl_durable_stable_locked_result
+         path
+         (Yojson.Safe.to_string (post_to_yojson p) ^ "\n")
+     with
+     | Ok () -> Ok ()
+     | Error error -> persist_transaction_error ~where:"append_post" error)
   with
   | Sys_error msg -> persist_io_error ~where:"append_post" msg
 ;;
@@ -454,9 +531,13 @@ let append_comment (c : comment) =
   try
     ensure_masc_dir ();
     let path = comments_path () in
-    Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
-    rotate_if_needed path;
-    Ok ()
+    (match
+       Fs_compat.append_private_jsonl_durable_stable_locked_result
+         path
+         (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n")
+     with
+     | Ok () -> Ok ()
+     | Error error -> persist_transaction_error ~where:"append_comment" error)
   with
   | Sys_error msg -> persist_io_error ~where:"append_comment" msg
 ;;
@@ -470,6 +551,7 @@ let rollback_fresh_post store (post : post) =
       when Stdlib.Float.equal current.created_at post.created_at
            && Stdlib.Float.equal current.updated_at post.updated_at ->
       Hashtbl.remove store.posts key;
+      Hashtbl.remove store.pending_post_durability key;
       unindex_post_origin store post;
       store.post_count := max 0 (!(store.post_count) - 1);
       invalidate_post_caches store
@@ -477,24 +559,25 @@ let rollback_fresh_post store (post : post) =
 ;;
 
 let rollback_rolled_up_post store ~(previous : post) ~(rolled_up : post) =
-  let rollback =
-    with_lock store (fun () ->
-      let key = Post_id.to_string previous.id in
-      match Hashtbl.find_opt store.posts key with
-      | Some current when current = rolled_up ->
-        Hashtbl.replace store.posts key previous;
-        mark_dirty_post store key;
-        invalidate_post_caches store;
-        Ok (posts_jsonl_unlocked store)
-      | Some _ -> Error "rollup target changed before rollback"
-      | None -> Error "rollup target missing before rollback")
-  in
-  match rollback with
-  | Error _ as e -> e
-  | Ok posts_jsonl ->
-    (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+  with_persist_lock store (fun () ->
+    let rollback =
+      with_lock store (fun () ->
+        let key = Post_id.to_string previous.id in
+        match Hashtbl.find_opt store.posts key with
+        | Some current when current = rolled_up ->
+          Hashtbl.replace store.posts key previous;
+          mark_dirty_post store key;
+          invalidate_post_caches store;
+          Ok (posts_jsonl_unlocked store)
+        | Some _ -> Error "rollup target changed before rollback"
+        | None -> Error "rollup target missing before rollback")
+    in
+    match rollback with
+    | Error _ as e -> e
+    | Ok posts_jsonl ->
+      (match save_posts_jsonl_result posts_jsonl with
      | Ok () -> Ok ()
-     | Error e -> Error (Board_types.show_board_error e))
+     | Error e -> Error (Board_types.show_board_error e)))
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
@@ -552,8 +635,9 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 ;;
 
 (** {1 Post Operations} *)
-let create_post
+let prepare_post
       store
+      ?post_id
       ~author
       ~content
       ?title
@@ -572,15 +656,16 @@ let create_post
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
+    let post_id = Option.value ~default:(Post_id.generate ()) post_id in
     if ttl_hours < 0
     then Error (Validation_error "ttl_hours must be non-negative")
     else
     let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
+    let created_at = Time_compat.now () in
     let expires_at =
-      let now = Time_compat.now () in
       if ttl_hours = 0
       then 0.0
-      else now +. (Stdlib.Float.of_int ttl_hours *. Masc_time_constants.hour)
+      else created_at +. (Stdlib.Float.of_int ttl_hours *. Masc_time_constants.hour)
     in
     match
       normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
@@ -595,59 +680,157 @@ let create_post
       ->
     if String.length normalized_body = 0
     then Error (Validation_error "Content cannot be empty")
-    else (
-      let board_result =
-        with_lock store (fun () ->
-          match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
-            | Error e -> Error e
-            | Ok () ->
-              let now = Time_compat.now () in
-              let post =
-                    { id = Post_id.generate ()
-                    ; author = author_id
-                    ; title = normalized_title
-                    ; body = normalized_body
-                    ; content = normalized_body
-                    ; post_kind = normalized_kind
-                    ; meta_json = normalized_meta
-                    ; visibility
-                    ; created_at = now
-                    ; updated_at = now
-                    ; expires_at
-                    ; votes_up = 0
-                    ; votes_down = 0
-                    ; reply_count = 0
-                    ; pinned = false
-                    ; hearth
-                    ; thread_id
-                    ; origin
-                    }
-                  in
-                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
-                  index_post_origin store post;
-                  Stdlib.incr store.post_count;
-                  invalidate_post_caches store;
-              Ok post)
-      in
-      match board_result with
-      | Ok post ->
-        (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () ->
-           (match
-              Board_effect_hooks.earn
-                ~base_path:(board_base_path ())
-                ~agent_name:author
-                ~kind:Board_post
-                ~reason:"board post"
-                ()
-            with
-            | Ok () -> ()
-            | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-           Ok post
-         | Error e ->
-           rollback_fresh_post store post;
-           Error e)
-      | Error _ as e -> e)
+    else
+      with_lock store (fun () ->
+        match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
+        | Error e -> Error e
+        | Ok () ->
+          let post_id_string = Post_id.to_string post_id in
+          if Hashtbl.mem store.posts post_id_string
+          then Error (Already_exists post_id_string)
+          else
+            Ok
+              { id = post_id
+              ; author = author_id
+              ; title = normalized_title
+              ; body = normalized_body
+              ; content = normalized_body
+              ; post_kind = normalized_kind
+              ; meta_json = normalized_meta
+              ; visibility
+              ; created_at
+              ; updated_at = created_at
+              ; expires_at
+              ; votes_up = 0
+              ; votes_down = 0
+              ; reply_count = 0
+              ; pinned = false
+              ; hearth
+              ; thread_id
+              ; origin
+              })
+;;
+
+let same_post_creation (left : post) (right : post) =
+  String.equal (Post_id.to_string left.id) (Post_id.to_string right.id)
+  && String.equal (Agent_id.to_string left.author) (Agent_id.to_string right.author)
+  && String.equal left.title right.title
+  && String.equal left.body right.body
+  && String.equal left.content right.content
+  && left.post_kind = right.post_kind
+  && Option.equal Yojson.Safe.equal left.meta_json right.meta_json
+  && left.visibility = right.visibility
+  && Float.equal left.created_at right.created_at
+  && Float.equal left.expires_at right.expires_at
+  && Option.equal String.equal left.hearth right.hearth
+  && Option.equal String.equal left.thread_id right.thread_id
+  && left.origin = right.origin
+;;
+
+let earn_post_effect (post : post) =
+  let author = Agent_id.to_string post.author in
+  match
+    Board_effect_hooks.earn
+      ~base_path:(board_base_path ())
+      ~agent_name:author
+      ~kind:Board_post
+      ~reason:"board post"
+      ()
+  with
+  | Ok () -> ()
+  | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg
+;;
+
+let apply_prepared_post store (post : post)
+  : (post mutation_application, board_error) result
+  =
+  with_persist_lock store (fun () ->
+    let insertion =
+      with_lock store (fun () ->
+      let post_id = Post_id.to_string post.id in
+      match Hashtbl.find_opt store.posts post_id with
+      | Some existing when same_post_creation existing post ->
+        (match Hashtbl.find_opt store.pending_post_durability post_id with
+         | None -> Ok (`Replay (Already_applied existing))
+         | Some initial_detail ->
+           Ok (`Settle (existing, initial_detail, posts_jsonl_unlocked store)))
+      | Some _ -> Error (Already_exists post_id)
+      | None ->
+        Hashtbl.add store.posts post_id post;
+        index_post_origin store post;
+        Stdlib.incr store.post_count;
+        invalidate_post_caches store;
+        Ok (`Applied post))
+    in
+    match insertion with
+    | Error _ as error -> error
+    | Ok (`Replay replayed) -> Ok replayed
+    | Ok (`Settle (existing, initial_detail, posts_jsonl)) ->
+      let post_id = Post_id.to_string existing.id in
+      Result.map
+        (fun () -> Repaired_partial_apply existing)
+        (settle_unknown_durable_snapshot
+           store
+           ~initial_detail
+           ~retry:(fun () -> save_posts_jsonl_result posts_jsonl)
+           ~on_settled:(fun () ->
+             with_lock store (fun () ->
+               Hashtbl.remove store.pending_post_durability post_id)))
+    | Ok (`Applied post) ->
+      (match append_post post with
+     | Error (Persistence_commit_unknown initial_detail) ->
+       let post_id = Post_id.to_string post.id in
+       let posts_jsonl =
+         with_lock store (fun () ->
+           Hashtbl.replace store.pending_post_durability post_id initial_detail;
+           mark_dirty_post store post_id;
+           posts_jsonl_unlocked store)
+       in
+       Result.map
+         (fun () ->
+            earn_post_effect post;
+            Applied post)
+         (settle_unknown_durable_snapshot
+            store
+            ~initial_detail
+            ~retry:(fun () -> save_posts_jsonl_result posts_jsonl)
+            ~on_settled:(fun () ->
+              with_lock store (fun () ->
+                Hashtbl.remove store.pending_post_durability post_id)))
+     | Error error ->
+       rollback_fresh_post store post;
+       Error error
+     | Ok () ->
+       earn_post_effect post;
+       Ok (Applied post)))
+;;
+
+let create_post store ?post_id ~author ~content ?title ?body ~post_kind ?meta_json
+      ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+  =
+  Result.bind
+    (prepare_post
+       store
+       ?post_id
+       ~author
+       ~content
+       ?title
+       ?body
+       ~post_kind
+       ?meta_json
+       ?visibility
+       ?ttl_hours
+       ?hearth
+       ?thread_id
+       ?origin
+       ())
+    (fun post ->
+       Result.map
+         (function
+           | Applied applied
+           | Already_applied applied
+           | Repaired_partial_apply applied -> applied)
+         (apply_prepared_post store post))
 ;;
 
 (* Owner-gated in-place edit of an existing post's title/body. The edited content is
@@ -676,8 +859,9 @@ let update_post_with_outcome
   match Agent_id.of_string editor with
   | Error e -> Error e
   | Ok editor_id ->
-    let snapshot_result =
-      with_lock store (fun () ->
+    with_persist_lock store (fun () ->
+      let snapshot_result =
+        with_lock store (fun () ->
         let key = Post_id.to_string pid in
         match Hashtbl.find_opt store.posts key with
         | None -> Error (Post_not_found post_id)
@@ -740,10 +924,9 @@ let update_post_with_outcome
                 mark_dirty_post store key;
                 invalidate_post_caches store;
                 Ok (updated, posts_jsonl_unlocked store))))
-    in
-    match snapshot_result with
-    | Error _ as e -> e
-    | Ok (updated, posts_jsonl) ->
-      with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
-      Ok updated
+      in
+      match snapshot_result with
+      | Error _ as e -> e
+      | Ok (updated, posts_jsonl) ->
+        Result.map (fun () -> updated) (save_posts_jsonl_result posts_jsonl))
 ;;

@@ -13,7 +13,7 @@
       derivation, and the canonical [normalize_post_payload].
     - {b Local store + persistence} (this .mli's locally
       pinned surface) — sweeper / lock / cache /
-      JSONL-rotate / append helpers.
+      durable JSONL append / rewrite helpers.
     - {b Public board operations} — create / get / list /
       search post + comment APIs.
 
@@ -29,8 +29,7 @@
     Internal helpers stay private at this boundary
     ([persist_errors] atomic counter, [record_persist_error],
     [remove_from_list_index], [maybe_sweep],
-    [board_masc_dir], [ensure_dir], [max_jsonl_bytes],
-    [append_post], [append_comment]). *)
+    [board_masc_dir], [ensure_dir], [append_post], [append_comment]). *)
 
 include module type of struct
   include Board_core_classify
@@ -45,12 +44,20 @@ end
 (** Returns the cumulative count of persist failures since
     process start.  The counter is bumped by the internal
     [record_persist_error] path whenever a [Sys_error] is
-    swallowed during JSONL append / rotate; consumed by the
+    observed during durable JSONL persistence; consumed by the
     operator dashboard for at-a-glance health. *)
 val persist_error_count : unit -> int
 
 (** Record and log a board persistence failure. *)
 val record_persist_error : where:string -> string -> unit
+
+(** Record a persistence failure and return its explicit typed error. *)
+val persist_io_error : where:string -> string -> ('a, board_error) result
+
+(** Preserve commit-unknown as a distinct typed error; all pre-commit failures
+    map to [Io_error]. *)
+val persist_transaction_error :
+  where:string -> Fs_compat.private_jsonl_transaction_error -> ('a, board_error) result
 
 (** {1 Configuration} *)
 
@@ -77,9 +84,11 @@ val create_store : unit -> store
     every other reader / writer. *)
 val with_lock : store -> (unit -> 'a) -> 'a
 
-(** [with_persist_lock store f] serializes JSONL writes. Callers must not hold
-    [with_lock] while acquiring it; compute any state snapshot under
-    [with_lock], release it, then acquire [with_persist_lock]. *)
+(** [with_persist_lock store f] serializes durable state transitions and JSONL
+    writes. Mutation paths acquire it before briefly taking [with_lock], release
+    the state lock before filesystem I/O, and retain the persistence lock until
+    the write result is known. Callers must not acquire it while already holding
+    [with_lock]. *)
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 
 (** Clears [karma_cache] and [sorted_posts_cache].  Called
@@ -97,9 +106,13 @@ val invalidate_comment_caches : store -> unit
     in batches up to {!Limits.sweeper_batch_size}.  Permanent
     posts ([expires_at = 0.0]) are skipped.  Returns
     [(removed_posts, removed_comments)]. *)
-val sweep : store -> int * int
+val sweep :
+  ?protected_post_ids:string list ->
+  ?protected_comment_ids:string list ->
+  store ->
+  int * int
 
-(** {1 Persistence paths + rotation} *)
+(** {1 Persistence paths} *)
 
 (** Resolves the board base path from {!Env_config}.  Used by
     {!persist_path}, {!comments_path}, and the
@@ -122,13 +135,6 @@ val reactions_path : unit -> string
     every JSONL append. *)
 val ensure_masc_dir : unit -> unit
 
-(** Rotates the JSONL file at [path] when it exceeds
-    [max_jsonl_bytes] (10 MiB).  The previous file is
-    renamed with a timestamp suffix; rotation failures are
-    routed through the persist-error counter so the runtime
-    keeps appending to the live file rather than aborting. *)
-val rotate_if_needed : string -> unit
-
 (** {1 Append-only persistence} *)
 
 (** Appends one post snapshot to {!persist_path}. *)
@@ -140,28 +146,33 @@ val append_post : post -> (unit, board_error) result
     read.  A [None] origin is a no-op. *)
 val index_post_origin : store -> post -> unit
 
+(** Remove the origin-index entries owned by one post. *)
+val unindex_post_origin : store -> post -> unit
+
 (** Appends one comment snapshot to {!comments_path}. *)
 val append_comment : comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
 
-(** Atomically rewrites {!persist_path} from
-    [store.posts].  The implementation snapshots under [store.mutex]
-    and performs disk I/O under the persist lock after releasing the
-    state lock; callers must not invoke it while already holding
-    [store.mutex]. *)
-val rewrite_posts : store -> unit
+val rewrite_jsonl_durable_result :
+  where:string -> string -> string -> (unit, board_error) result
+(** Stable-lock, cursor-checked, payload-and-directory-fsynced JSONL rewrite
+    shared by Board projections. *)
 
-(** Atomically rewrites {!comments_path} from
-    [store.comments].  Same usage pattern as
-    {!rewrite_posts}. *)
-val rewrite_comments : store -> unit
+val posts_jsonl_unlocked : store -> string
+(** Serialize the current post projection. The caller must hold [with_lock]. *)
 
-(** Atomically rewrites {!reactions_path} from [store.reactions]. *)
-val rewrite_reactions : store -> unit
+val save_posts_jsonl_result : string -> (unit, board_error) result
+(** Durably rewrite the complete post projection. *)
 
-(** Rewrites reactions assuming the caller already owns [store.mutex]. *)
-val rewrite_reactions_unlocked : store -> unit
+val comments_jsonl_unlocked : store -> string
+(** Serialize the current comment projection. The caller must hold [with_lock]. *)
+
+val save_comments_jsonl_result : string -> (unit, board_error) result
+(** Durably rewrite the complete comment projection. *)
+
+val sub_boards_jsonl_unlocked : store -> string
+(** Serialize the current sub-board projection. The caller must hold [with_lock]. *)
 
 (** Marks one post for append-only deferred persistence.  Call with
     [store.mutex] already held. *)
@@ -198,6 +209,28 @@ val reaction_key
 
 (** {1 Post operations} *)
 
+val prepare_post
+  :  store
+  -> ?post_id:Post_id.t
+  -> author:string
+  -> content:string
+  -> ?title:string
+  -> ?body:string
+  -> post_kind:post_kind
+  -> ?meta_json:Yojson.Safe.t
+  -> ?visibility:visibility
+  -> ?ttl_hours:int
+  -> ?hearth:string
+  -> ?thread_id:string
+  -> ?origin:post_origin
+  -> unit
+  -> (post, board_error) result
+
+val apply_prepared_post
+  :  store
+  -> post
+  -> (post mutation_application, board_error) result
+
 (** Owner-gated in-place edit of an existing post's title/body.  Validates
     [editor] via {!Agent_id.of_string}, folds the canonical [title / body] via
     {!normalize_post_payload} (seeded with the existing [meta_json] so metadata
@@ -229,8 +262,11 @@ val update_post_with_outcome
     JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
+(** [post_id] lets the dispatch outbox persist mutation identity before the
+    Board write. Supplying an existing id returns [Already_exists]. *)
 val create_post
   :  store
+  -> ?post_id:Post_id.t
   -> author:string
   -> content:string
   -> ?title:string
@@ -301,8 +337,28 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 (** {1 Comment operations} *)
 
+val prepare_comment
+  :  store
+  -> ?comment_id:Comment_id.t
+  -> post_id:string
+  -> author:string
+  -> content:string
+  -> ?parent_id:string
+  -> ?ttl_hours:int
+  -> unit
+  -> (comment * post, board_error) result
+
+val apply_prepared_comment
+  :  store
+  -> parent_reply_count_before:int
+  -> comment
+  -> (comment mutation_application, board_error) result
+
+(** [comment_id] serves the same prepare-before-write recovery boundary for
+    comments. Supplying an existing id returns [Already_exists]. *)
 val add_comment
   :  store
+  -> ?comment_id:Comment_id.t
   -> post_id:string
   -> author:string
   -> content:string
@@ -324,6 +380,10 @@ val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 val list_comments : store -> ?limit:int -> unit -> comment list
 
 (** {1 Reaction operations} *)
+
+val normalize_reaction_emoji : string -> (string, board_error) result
+(** Canonical reaction emoji validation shared by live preparation and durable
+    command decoding. *)
 
 val list_reactions
   :  store
@@ -351,6 +411,26 @@ val toggle_reaction
   -> emoji:string
   -> (reaction_toggle_result, board_error) Result.t
 
+val prepare_reaction_toggle
+  :  store
+  -> target_type:reaction_target_type
+  -> target_id:string
+  -> user_id:string
+  -> emoji:string
+  -> (prepared_reaction, board_error) result
+
+val set_reaction
+  :  store
+  -> target_type:reaction_target_type
+  -> target_id:string
+  -> user_id:string
+  -> emoji:string
+  -> reacted:bool
+  -> created_at:float
+  -> (reaction_toggle_result, board_error) result
+(** Idempotent reaction state command. Persistence failure is returned and the
+    in-memory mutation is rolled back when it is still current. *)
+
 (** {1 SubBoard operations} *)
 
 (** Path to the sub-boards JSONL snapshot under
@@ -362,14 +442,11 @@ val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
-(** Snapshots [store.sub_boards] under the state lock, then atomically
-    rewrites {!sub_boards_path} under the persist lock. *)
-val rewrite_sub_boards : store -> unit
-
 (** Creates a new sub-board with the given slug (unique, lowercase).
     [members] are canonicalised agent ids; the owner is always included.
-    Returns [Validation_error] when the slug is invalid or already taken. JSONL append
-    persistence is performed outside the state lock. *)
+    Returns [Validation_error] when the slug is invalid or already taken. The
+    state transition and durable JSONL append share the persistence lock; an
+    append failure rolls back the in-memory insertion. *)
 val create_sub_board
   :  store
   -> slug:string

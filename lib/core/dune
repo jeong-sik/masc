@@ -26,6 +26,7 @@
   system_error_class
   executable_path
   safe_identifier
+  direct_mention
   text_similarity
   string_util
   list_util

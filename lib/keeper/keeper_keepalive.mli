@@ -70,7 +70,7 @@ val effective_keepalive_meta :
   keeper_meta
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Workspace.config -> Board_dispatch.board_signal -> unit
+  config:Workspace.config -> Board_dispatch.board_signal_event -> (unit, string) result
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)

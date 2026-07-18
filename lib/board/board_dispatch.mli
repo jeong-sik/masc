@@ -10,7 +10,7 @@
     flusher-started flag inside the [Active] variant since Tier D D-7,
     [start_flusher_actor], [ensure_flusher_actor],
     [board_signal_hook] / [board_sse_hook] Atomics,
-    [emit_board_signal], [backend], [sort_posts_in_memory],
+    the durable signal outbox, [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
     [all_sort_orders] convenience list, [is_initialized],
@@ -56,6 +56,23 @@ type board_signal = {
   updated_at : float option;
 }
 
+type board_signal_event = {
+  event_id : string;
+  audience : Board_signal_audience.t;
+  signal : board_signal;
+}
+(** Durable routing-event identity paired with the existing Board payload.
+    Retries reuse [event_id]; consumers must use it for idempotency instead of
+    deriving identity from mutable post text or timestamps. *)
+
+type board_signal_delivery =
+  | Atomic_sink_accepted
+  | Recipient_settlement_complete
+(** Typed completion proof for a Board signal hook.  An atomic sink has no
+    per-recipient fanout and is durably represented by an empty recipient plan.
+    A recipient-settled hook must have already planned and settled every
+    recipient in the Board outbox before returning. *)
+
 type board_sse_event =
   | Post_created of {
       post_id : string;
@@ -88,9 +105,11 @@ type board_sse_event =
       reacted : bool;
     }
 
-val set_board_signal_hook : (board_signal -> unit) -> unit
+val set_board_signal_hook :
+  (board_signal_event -> (board_signal_delivery, string) result) -> unit
 (** Replace the in-process hook invoked from {!create_post}, {!add_comment},
-    and {!toggle_reaction}. *)
+    and {!toggle_reaction}.  Committed outbox entries are marked delivered only
+    after the hook returns [Ok ()]; [Error _] remains pending for replay. *)
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating
@@ -316,8 +335,12 @@ val stats : unit -> Yojson.Safe.t
 
 (** {1 Persistence} *)
 
-val flush : unit -> unit
-(** Force-flush dirty posts/comments to disk. *)
+val flush : unit -> (unit, Board.board_error) result
+(** Force-flush dirty posts/comments to disk. Persistence failures are explicit. *)
+
+val sweep : unit -> ((int * int), string) result
+(** Expire unreferenced Board entities and durably flush their projections under
+    the routing-mutation and persistence transaction boundaries. *)
 
 (** {1 AI curation} *)
 

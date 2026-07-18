@@ -79,6 +79,7 @@ type wake_reason =
   | Explicit_mention
   | Thread_reply_after_self_comment
   | Reaction_after_self_activity
+  | Broadcast
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
     Replaces the prior [string option] contract; consumers match exhaustively
     so the previously dead ["board_activity"] generic bucket is gone. Semantic

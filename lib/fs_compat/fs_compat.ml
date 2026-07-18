@@ -1810,7 +1810,6 @@ type private_jsonl_transaction_operation =
   | Close_rewrite_stage
   | Rename_rewrite_stage
   | Sync_rewrite_parent
-  | Inspect_rewritten_data
   | Remove_rewrite_stage
 
 type private_jsonl_operation_failure =
@@ -1833,6 +1832,7 @@ type private_jsonl_transaction_error =
       { failure : private_jsonl_operation_failure
       ; cleanup_failures : private_jsonl_operation_failure list
       }
+  | Commit_unknown of private_jsonl_operation_failure
   | Transaction_append_failed of durable_append_error
 
 let private_jsonl_operation_to_string = function
@@ -1852,7 +1852,6 @@ let private_jsonl_operation_to_string = function
   | Close_rewrite_stage -> "close rewrite stage"
   | Rename_rewrite_stage -> "rename rewrite stage"
   | Sync_rewrite_parent -> "sync rewrite parent"
-  | Inspect_rewritten_data -> "inspect rewritten data"
   | Remove_rewrite_stage -> "remove rewrite stage"
 ;;
 
@@ -1902,6 +1901,9 @@ let private_jsonl_transaction_error_to_string = function
            |> String.concat "; ")
     in
     private_jsonl_operation_failure_to_string failure ^ cleanup
+  | Commit_unknown failure ->
+    "private JSONL commit status is unknown: "
+    ^ private_jsonl_operation_failure_to_string failure
   | Transaction_append_failed append_error ->
     durable_append_error_to_string append_error
 ;;
@@ -2137,25 +2139,38 @@ let private_jsonl_replace_locked ~dir path content =
       output_string output content;
       flush output);
     run_until_failure Sync_rewrite_stage (fun () -> Unix.fsync descriptor);
-    let operation_failure = !first_failure in
+    let committed_cursor =
+      match !first_failure with
+      | Some failure -> Error failure
+      | None ->
+        Result.map
+          (fun stats ->
+             Private_jsonl_cursor.Present
+               { device = stats.Unix.st_dev
+               ; inode = stats.Unix.st_ino
+               ; end_offset = stats.Unix.st_size
+               })
+          (private_jsonl_capture Inspect_transaction_data (fun () ->
+             Unix.fstat descriptor))
+    in
     let close_failure =
       match private_jsonl_capture Close_rewrite_stage (fun () -> close_out output) with
       | Ok () -> None
       | Error failure -> Some failure
     in
-    (match operation_failure, close_failure with
-     | Some failure, close_failure ->
+    (match committed_cursor, close_failure with
+     | Error failure, close_failure ->
        let cleanup_failures =
          [ close_failure; private_jsonl_remove_rewrite_stage temp_path ]
          |> List.filter_map Fun.id
        in
        Error (Rewrite_stage_failed { failure; cleanup_failures })
-     | None, Some failure ->
+     | Ok _, Some failure ->
        let cleanup_failures =
          private_jsonl_remove_rewrite_stage temp_path |> Option.to_list
        in
        Error (Rewrite_stage_failed { failure; cleanup_failures })
-     | None, None ->
+     | Ok committed_cursor, None ->
        (match private_jsonl_capture Rename_rewrite_stage (fun () ->
           Unix.rename temp_path path)
         with
@@ -2168,16 +2183,11 @@ let private_jsonl_replace_locked ~dir path content =
           (match private_jsonl_capture Sync_rewrite_parent (fun () ->
              fsync_parent_directory dir)
            with
-           | Error failure -> Error (Private_jsonl_operation_failed failure)
-           | Ok () ->
-             (match private_jsonl_capture Inspect_rewritten_data (fun () ->
-                Unix.stat path)
-              with
-              | Error failure -> Error (Private_jsonl_operation_failed failure)
-              | Ok stats -> private_jsonl_cursor_of_stats stats))))
+           | Error failure -> Error (Commit_unknown failure)
+           | Ok () -> Ok committed_cursor)))
 ;;
 
-let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
+let append_private_jsonl_durable_stable_locked_internal path ~expected suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
@@ -2187,9 +2197,10 @@ let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
   | Error failure -> Error (Private_jsonl_operation_failed failure)
     | Ok None ->
       let actual = Private_jsonl_cursor.Missing in
-      if not (Private_jsonl_cursor.equal expected actual)
-      then Error (Cursor_mismatch { expected; actual })
-      else private_jsonl_replace_locked ~dir path suffix
+      (match expected with
+       | Some expected when not (Private_jsonl_cursor.equal expected actual) ->
+         Error (Cursor_mismatch { expected; actual })
+       | None | Some _ -> private_jsonl_replace_locked ~dir path suffix)
     | Ok (Some fd) ->
       Fun.protect
         ~finally:(fun () -> Unix.close fd)
@@ -2201,9 +2212,10 @@ let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
              (match private_jsonl_cursor_of_stats stats with
               | Error _ as error -> error
               | Ok actual ->
-                if not (Private_jsonl_cursor.equal expected actual)
-                then Error (Cursor_mismatch { expected; actual })
-                else (
+                (match expected with
+                 | Some expected when not (Private_jsonl_cursor.equal expected actual) ->
+                   Error (Cursor_mismatch { expected; actual })
+                 | None | Some _ ->
                   match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
                   | Error _ as error -> error
                   | Ok () ->
@@ -2224,13 +2236,23 @@ let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
                         | Error append_error ->
                           Error (Transaction_append_failed append_error)
                         | Ok () ->
-                          (match private_jsonl_capture Inspect_transaction_data (fun () ->
-                             Unix.fstat fd)
-                           with
-                           | Error failure ->
-                             Error (Private_jsonl_operation_failed failure)
-                           | Ok committed_stats ->
-                             private_jsonl_cursor_of_stats committed_stats))))))
+                          Ok
+                            (Private_jsonl_cursor.Present
+                               { device = stats.Unix.st_dev
+                               ; inode = stats.Unix.st_ino
+                               ; end_offset =
+                                   stats.Unix.st_size + String.length suffix
+                               }))))))
+;;
+
+let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
+  append_private_jsonl_durable_stable_locked_internal path ~expected:(Some expected) suffix
+;;
+
+let append_private_jsonl_durable_stable_locked_result path suffix =
+  Result.map
+    (fun (_ : Private_jsonl_cursor.t) -> ())
+    (append_private_jsonl_durable_stable_locked_internal path ~expected:None suffix)
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_result
@@ -2249,6 +2271,68 @@ let rewrite_private_jsonl_durable_locked_at_cursor_result
       if not (Private_jsonl_cursor.equal expected actual)
       then Error (Cursor_mismatch { expected; actual })
       else private_jsonl_replace_locked ~dir path content
+;;
+
+let transact_private_jsonl_durable_locked_result path decide =
+  with_private_jsonl_stable_lock path @@ fun ~dir ->
+  match private_jsonl_open_existing path [ Unix.O_RDWR; Unix.O_APPEND ] with
+  | Error failure -> Error (Private_jsonl_operation_failed failure)
+  | Ok None ->
+    (match decide "" with
+     | Error decision_error -> Ok (Error decision_error)
+     | Ok (None, result) -> Ok (Ok result)
+     | Ok (Some suffix, result) ->
+       if String.equal suffix ""
+          || not (Char.equal suffix.[String.length suffix - 1] '\n')
+       then Error Invalid_transaction_suffix
+       else
+         private_jsonl_replace_locked ~dir path suffix
+         |> Result.map (fun _cursor -> Ok result))
+  | Ok (Some fd) ->
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+         match private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
+         with
+         | Error failure -> Error (Private_jsonl_operation_failed failure)
+         | Ok stats ->
+           (match private_jsonl_cursor_of_stats stats with
+            | Error _ as error -> error
+            | Ok _cursor ->
+              (match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
+               | Error _ as error -> error
+               | Ok () ->
+                 (match
+                    private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size
+                  with
+                  | Error _ as error -> error
+                  | Ok existing ->
+                    (match decide existing with
+                     | Error decision_error -> Ok (Error decision_error)
+                     | Ok (None, result) -> Ok (Ok result)
+                     | Ok (Some suffix, result) ->
+                       if String.equal suffix ""
+                          || not (Char.equal suffix.[String.length suffix - 1] '\n')
+                       then Error Invalid_transaction_suffix
+                       else
+                         (match
+                            private_jsonl_capture Set_transaction_data_permissions
+                              (fun () -> Unix.fchmod fd 0o600)
+                          with
+                          | Error failure ->
+                            Error (Private_jsonl_operation_failed failure)
+                          | Ok () ->
+                            ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+                            (match
+                               append_fd_durable
+                                 ~io:durable_append_unix_io
+                                 ~fd
+                                 ~original_length:stats.Unix.st_size
+                                 suffix
+                             with
+                             | Error append_error ->
+                               Error (Transaction_append_failed append_error)
+                             | Ok () -> Ok (Ok result))))))))
 ;;
 
 module Private_jsonl_slice = struct

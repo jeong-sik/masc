@@ -1332,6 +1332,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
             ; payload =
                 Keeper_event_queue.Board_signal
                   { kind = Keeper_event_queue.Post_created
+                  ; routing_event_id = None
                   ; author = ""
                   ; title = ""
                   ; content = ""
@@ -3070,6 +3071,7 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           ; payload =
               Keeper_event_queue.Board_signal
                 { kind = Keeper_event_queue.Post_created
+                ; routing_event_id = None
                 ; author = ""
                 ; title = ""
                 ; content = ""

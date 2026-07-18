@@ -14,6 +14,7 @@ let board_payload ?updated_at ~post_id:(_ : string) () :
   =
   Keeper_event_queue.Board_signal
     { kind = Keeper_event_queue.Post_created
+    ; routing_event_id = None
     ; author = "operator"
     ; title = "Ship reaction ledger"
     ; content = "Please react"

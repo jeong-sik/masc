@@ -102,11 +102,13 @@ let candidate
       ?(keeper_name = "sangsu")
       ?(instructions = "Use the lane context and complete the task")
       ?(signal = signal ())
+      ?routing_event_id
       ()
   =
   match
     A.of_board_evidence
       ~meta:(meta ~instructions keeper_name)
+      ~routing_event_id
       ~recorded_at:100.0
       ~signal
       ~post:(post ~id:signal.post_id ())
@@ -114,6 +116,18 @@ let candidate
   with
   | Ok candidate -> candidate
   | Error detail -> Alcotest.failf "candidate fixture invalid: %s" detail
+;;
+
+let test_routing_event_identity_distinguishes_repeated_signal_payloads () =
+  let first = candidate ~routing_event_id:"routing-event-1" () in
+  let second = candidate ~routing_event_id:"routing-event-2" () in
+  Alcotest.(check bool) "distinct routing mutations do not collapse" true
+    (not (String.equal first.candidate_id second.candidate_id));
+  match A.candidate_of_json (A.candidate_to_json first) with
+  | Ok roundtripped ->
+    Alcotest.(check string) "routing identity survives strict ledger roundtrip"
+      first.candidate_id roundtripped.candidate_id
+  | Error detail -> Alcotest.failf "routing candidate roundtrip failed: %s" detail
 ;;
 
 let judgment decision : A.judgment =
@@ -781,7 +795,7 @@ let test_same_length_rewrite_invalidates_cached_cursor_explicitly () =
        Some bytes, ())
    with
    | Ok () -> ()
-   | Error error -> Alcotest.fail (Fs_compat.durable_append_error_to_string error));
+   | Error error -> Alcotest.fail error);
   (match A.load_candidates ~base_path ~keeper_name with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "same-length inode replacement served a stale cache");
@@ -1261,6 +1275,10 @@ let () =
             "roundtrip preserves full evidence and Pending"
             `Quick
             test_roundtrip_preserves_full_evidence_and_pending_state
+        ; Alcotest.test_case
+            "routing event identity separates repeated payloads"
+            `Quick
+            test_routing_event_identity_distinguishes_repeated_signal_payloads
         ; Alcotest.test_case
             "record dedupes exact candidate identity"
             `Quick

@@ -128,7 +128,7 @@ val wakeup_keeper :
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Workspace.config -> Board_dispatch.board_signal -> unit
+  config:Workspace.config -> Board_dispatch.board_signal_event -> (unit, string) result
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

@@ -9,6 +9,8 @@ let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
     let post_key = Post_id.to_string comment.post_id in
     let comment_key = Comment_id.to_string comment.id in
     Hashtbl.remove store.comments comment_key;
+    Hashtbl.remove store.pending_comment_durability comment_key;
+    Hashtbl.remove store.pending_parent_projection_repairs comment_key;
     (match Hashtbl.find_opt store.comments_by_post post_key with
      | None -> ()
      | Some ids ->
@@ -209,15 +211,16 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
-let add_comment
+let prepare_comment
       store
+      ?comment_id
       ~post_id
       ~author
       ~content
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
       ()
-  : (comment, board_error) Result.t
+  : (comment * post, board_error) Result.t
   =
   maybe_sweep store;
   (* Validate all IDs first *)
@@ -227,6 +230,7 @@ let add_comment
     (match Agent_id.of_string author with
      | Error e -> Error e
      | Ok author_id ->
+       let comment_id = Option.value ~default:(Comment_id.generate ()) comment_id in
        let parent_result =
          match parent_id with
          | None -> Ok None
@@ -243,81 +247,248 @@ let add_comment
           then Error (Validation_error "ttl_hours must be non-negative")
           else if String.length content = 0
           then Error (Validation_error "Content cannot be empty")
-          else (
-            let board_result =
-              with_lock store (fun () ->
-                (* Verify post exists *)
-                match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-                | None -> Error (Post_not_found post_id)
-                | Some post ->
+          else
+            with_lock store (fun () ->
+              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+              | None -> Error (Post_not_found post_id)
+              | Some post ->
+                let comment_id_string = Comment_id.to_string comment_id in
+                if Hashtbl.mem store.comments comment_id_string
+                then Error (Already_exists comment_id_string)
+                else
                   match
                     validate_sub_board_post_policy_unlocked
                       store
                       ~author_id
                       ~hearth:post.hearth
                   with
-                      | Error e -> Error e
-                      | Ok () ->
-                    let now = Time_compat.now () in
+                  | Error e -> Error e
+                  | Ok () ->
+                    let created_at = Time_compat.now () in
                     let comment =
-                      { id = Comment_id.generate ()
+                      { id = comment_id
                       ; post_id = pid
                       ; parent_id = parent_cid
                       ; author = author_id
                       ; content
-                      ; created_at = now
+                      ; created_at
                       ; expires_at =
                           (if ttl_hours = 0
                            then 0.0
                            else
-                             now
+                             created_at
                              +. (Stdlib.Float.of_int ttl_hours
                                  *. Masc_time_constants.hour))
                       ; votes_up = 0
                       ; votes_down = 0
                       }
                     in
-                    Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
-                    (* Update comments_by_post index *)
-                    let post_key = Post_id.to_string pid in
-                    let existing =
-                      Hashtbl.find_opt store.comments_by_post post_key
-                      |> Option.value ~default:[]
-                    in
-                    Hashtbl.replace
-                      store.comments_by_post
-                      post_key
-                      (Comment_id.to_string comment.id :: existing);
-                    (* Update post reply count and updated_at *)
-                    Hashtbl.replace
-                      store.posts
-                      post_key
-                      { post with reply_count = post.reply_count + 1; updated_at = now };
-                    mark_dirty_post store post_key;
-                    mark_dirty_comment store (Comment_id.to_string comment.id);
-                    invalidate_post_caches store;
-                    invalidate_comment_caches store;
-                    Ok (comment, post, posts_jsonl_unlocked store))
-            in
-            match board_result with
-            | Ok (comment, previous_post, posts_jsonl) ->
-              (match
-                 with_persist_lock store (fun () ->
-                   match append_comment comment with
-                   | Error _ as e -> e
-                   | Ok () ->
-                     save_posts_jsonl posts_jsonl;
-                     Ok ())
-               with
-               | Ok () ->
-                 with_lock store (fun () ->
-                   mark_dirty_post store (Post_id.to_string comment.post_id);
-                   mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok comment
-               | Error e ->
-                 rollback_fresh_comment store ~comment ~previous_post;
-                 Error e)
-            | Error _ as e -> e)))
+                    Ok (comment, post))))
+;;
+
+let same_comment_creation (left : comment) (right : comment) =
+  String.equal (Comment_id.to_string left.id) (Comment_id.to_string right.id)
+  && String.equal (Post_id.to_string left.post_id) (Post_id.to_string right.post_id)
+  && Option.equal
+       (fun left_parent right_parent ->
+          String.equal
+            (Comment_id.to_string left_parent)
+            (Comment_id.to_string right_parent))
+       left.parent_id
+       right.parent_id
+  && String.equal (Agent_id.to_string left.author) (Agent_id.to_string right.author)
+  && String.equal left.content right.content
+  && Float.equal left.created_at right.created_at
+  && Float.equal left.expires_at right.expires_at
+;;
+
+let apply_prepared_comment store ~parent_reply_count_before (comment : comment)
+  : (comment mutation_application, board_error) result
+  =
+  if parent_reply_count_before < 0
+  then Error (Validation_error "parent_reply_count_before must be non-negative")
+  else with_persist_lock store (fun () ->
+    let comment_id = Comment_id.to_string comment.id in
+    let persist_parent_projection posts_jsonl =
+      with_lock store (fun () ->
+        Hashtbl.replace store.pending_parent_projection_repairs comment_id ());
+      match save_posts_jsonl_result posts_jsonl with
+      | Error _ as error -> error
+      | Ok () ->
+        with_lock store (fun () ->
+          Hashtbl.remove store.pending_parent_projection_repairs comment_id);
+        Ok ()
+    in
+    let insertion =
+      with_lock store (fun () ->
+      let post_id = Post_id.to_string comment.post_id in
+      match Hashtbl.find_opt store.comments comment_id with
+      | Some existing when same_comment_creation existing comment ->
+        (match Hashtbl.find_opt store.posts post_id with
+         | None -> Error (Post_not_found post_id)
+         | Some post ->
+           let previous_index = Hashtbl.find_opt store.comments_by_post post_id in
+           let indexed =
+             previous_index
+             |> Option.value ~default:[]
+             |> List.exists (String.equal comment_id)
+           in
+           let expected_reply_count = parent_reply_count_before + 1 in
+           let repaired_post =
+             { post with
+               reply_count = Int.max post.reply_count expected_reply_count;
+               updated_at = Float.max post.updated_at comment.created_at
+             }
+           in
+           let repair_pending =
+             Hashtbl.mem store.pending_parent_projection_repairs comment_id
+           in
+           let primary_pending =
+             Hashtbl.find_opt store.pending_comment_durability comment_id
+           in
+           if
+             indexed
+             && repaired_post = post
+             && not repair_pending
+             && Option.is_none primary_pending
+           then Ok (`Replay (Already_applied existing))
+           else (
+             if not indexed
+             then
+               Hashtbl.replace
+                 store.comments_by_post
+                 post_id
+                 (comment_id :: Option.value ~default:[] previous_index);
+             Hashtbl.replace store.posts post_id repaired_post;
+             mark_dirty_post store post_id;
+             invalidate_post_caches store;
+             invalidate_comment_caches store;
+             Ok
+               (`Repair
+                   ( existing
+                   , primary_pending
+                   , comments_jsonl_unlocked store
+                   , posts_jsonl_unlocked store ))))
+      | Some _ -> Error (Already_exists comment_id)
+      | None ->
+        (match Hashtbl.find_opt store.posts post_id with
+         | None -> Error (Post_not_found post_id)
+         | Some post ->
+           Hashtbl.add store.comments comment_id comment;
+           let existing =
+             Hashtbl.find_opt store.comments_by_post post_id
+             |> Option.value ~default:[]
+           in
+           Hashtbl.replace store.comments_by_post post_id (comment_id :: existing);
+           Hashtbl.replace
+             store.posts
+             post_id
+             { post with
+               reply_count = post.reply_count + 1;
+               updated_at = comment.created_at
+             };
+           mark_dirty_post store post_id;
+           mark_dirty_comment store comment_id;
+           invalidate_post_caches store;
+           invalidate_comment_caches store;
+           Ok
+             (`Applied
+                 ( post
+                 , comments_jsonl_unlocked store
+                 , posts_jsonl_unlocked store ))))
+    in
+    match insertion with
+    | Error _ as error -> error
+    | Ok (`Replay replayed) -> Ok replayed
+    | Ok (`Repair (existing, primary_pending, comments_jsonl, posts_jsonl)) ->
+      let settlement =
+        match primary_pending with
+        | None -> persist_parent_projection posts_jsonl
+        | Some initial_detail ->
+          settle_unknown_durable_snapshot
+            store
+            ~initial_detail
+            ~retry:(fun () ->
+              Result.bind
+                (persist_parent_projection posts_jsonl)
+                (fun () -> save_comments_jsonl_result comments_jsonl))
+            ~on_settled:(fun () ->
+              with_lock store (fun () ->
+                Hashtbl.remove store.pending_comment_durability comment_id))
+      in
+      Result.map (fun () -> Repaired_partial_apply existing) settlement
+    | Ok (`Applied (previous_post, comments_jsonl, posts_jsonl)) ->
+      let persistence =
+        match append_comment comment with
+        | Error error -> `Comment_append_failed error
+        | Ok () ->
+          (match persist_parent_projection posts_jsonl with
+           | Ok () -> `Persisted
+           | Error error -> `Parent_projection_failed error)
+      in
+      (match persistence with
+     | `Comment_append_failed (Persistence_commit_unknown initial_detail) ->
+       with_lock store (fun () ->
+         Hashtbl.replace store.pending_comment_durability comment_id initial_detail;
+         Hashtbl.replace store.pending_parent_projection_repairs comment_id ());
+       (match
+          settle_unknown_durable_snapshot
+            store
+            ~initial_detail
+            ~retry:(fun () ->
+              Result.bind
+                (persist_parent_projection posts_jsonl)
+                (fun () -> save_comments_jsonl_result comments_jsonl))
+            ~on_settled:(fun () ->
+              with_lock store (fun () ->
+                Hashtbl.remove store.pending_comment_durability comment_id))
+        with
+        | Error _ as error -> error
+        | Ok () -> Ok (Applied comment))
+     | `Comment_append_failed error ->
+       rollback_fresh_comment store ~comment ~previous_post;
+       Error error
+     | `Parent_projection_failed error ->
+       (* The comment row is already durable.  Retaining the exact in-memory
+          command makes the next replay enter the repair branch and rewrite only
+          the parent projection; rolling it back here would append the same
+          durable comment again on every same-process retry. *)
+       with_lock store (fun () ->
+         Hashtbl.replace
+           store.pending_parent_projection_repairs
+           comment_id
+           ());
+       Error error
+     | `Persisted ->
+       with_lock store (fun () ->
+         mark_dirty_post store (Post_id.to_string comment.post_id);
+         mark_dirty_comment store comment_id);
+       Ok (Applied comment)))
+;;
+
+let add_comment store ?comment_id ~post_id ~author ~content ?parent_id
+      ?ttl_hours ()
+  =
+  Result.bind
+    (prepare_comment
+       store
+       ?comment_id
+       ~post_id
+       ~author
+       ~content
+       ?parent_id
+       ?ttl_hours
+       ())
+    (fun (comment, post) ->
+       Result.map
+         (function
+           | Applied applied
+           | Already_applied applied
+           | Repaired_partial_apply applied -> applied)
+         (apply_prepared_comment
+            store
+            ~parent_reply_count_before:post.reply_count
+            comment))
 ;;
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =
@@ -498,38 +669,66 @@ let list_reactions_batch store ~targets ?user_id () =
   with_lock store (fun () -> reaction_summaries_batch_unlocked store ~targets ?user_id ())
 ;;
 
-let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
+let prepare_reaction_toggle store ~target_type ~target_id ~user_id ~emoji =
+  maybe_sweep store;
+  match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
+  | Error error, _ | _, Error error -> Error error
+  | Ok user_id, Ok emoji ->
+    let user_id = Agent_id.to_string user_id in
+    with_lock store (fun () ->
+      match ensure_reaction_target_unlocked store ~target_type ~target_id with
+      | Error error -> Error error
+      | Ok () ->
+        let key = reaction_key ~target_type ~target_id ~user_id ~emoji in
+        Ok
+          { user_id
+          ; emoji
+          ; reacted = not (Hashtbl.mem store.reactions key)
+          ; created_at = Time_compat.now ()
+          })
+;;
+
+let mutate_reaction store ~target_type ~target_id ~user_id ~emoji ~created_at ~decide
   : (reaction_toggle_result, board_error) Result.t
   =
-  maybe_sweep store;
   match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok user_id, Ok emoji ->
     let user_id_string = Agent_id.to_string user_id in
-    let result =
-      with_lock store (fun () ->
+    with_persist_lock store (fun () ->
+      let mutation =
+        with_lock store (fun () ->
         match ensure_reaction_target_unlocked store ~target_type ~target_id with
         | Error e -> Error e
         | Ok () ->
           let key = reaction_key ~target_type ~target_id ~user_id:user_id_string ~emoji in
-          let reacted =
-            match Hashtbl.find_opt store.reactions key with
-            | Some _ ->
-              Hashtbl.remove store.reactions key;
-              false
-            | None ->
+          let previous = Hashtbl.find_opt store.reactions key in
+          let reacted = decide (Option.is_some previous) in
+          let applied =
+            if reacted
+            then
+              match previous with
+              | Some reaction -> Some reaction
+              | None ->
+                Some
+                  { target_type
+                  ; target_id
+                  ; user_id
+                  ; emoji
+                  ; created_at
+                  }
+            else None
+          in
+          if not (Option.equal ( = ) previous applied)
+          then (
+            match applied with
+            | None -> Hashtbl.remove store.reactions key
+            | Some reaction ->
               Hashtbl.replace
                 store.reactions
                 key
-                { target_type
-                ; target_id
-                ; user_id
-                ; emoji
-                ; created_at = Time_compat.now ()
-                };
-              true
-          in
+                reaction);
           let summary =
             reaction_summaries_unlocked
               store
@@ -538,10 +737,54 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
               ~user_id:user_id_string
               ()
           in
-          Ok { target_type; target_id; user_id = user_id_string; emoji; reacted; summary })
-    in
-    Result.iter (fun _ -> rewrite_reactions store) result;
-    result
+          let result =
+            { target_type; target_id; user_id = user_id_string; emoji; reacted; summary }
+          in
+          let changed = not (Option.equal ( = ) previous applied) in
+          let content = if changed then Some (reactions_jsonl_unlocked store) else None in
+          Ok (result, key, previous, applied, content))
+      in
+      match mutation with
+      | Error _ as error -> error
+      | Ok (result, _key, _previous, _applied, None) -> Ok result
+      | Ok (result, key, previous, applied, Some content) ->
+        (match save_reactions_jsonl_result content with
+        | Ok () -> Ok result
+        | Error (Persistence_commit_unknown _ as error) ->
+          with_lock store (fun () -> store.dirty_posts <- true);
+          Error error
+        | Error error ->
+          with_lock store (fun () ->
+            let current = Hashtbl.find_opt store.reactions key in
+            if Option.equal ( = ) current applied
+            then
+              match previous with
+              | None -> Hashtbl.remove store.reactions key
+              | Some reaction -> Hashtbl.replace store.reactions key reaction);
+          Error error))
+;;
+
+let set_reaction store ~target_type ~target_id ~user_id ~emoji ~reacted ~created_at =
+  mutate_reaction
+    store
+    ~target_type
+    ~target_id
+    ~user_id
+    ~emoji
+    ~created_at
+    ~decide:(fun _current -> reacted)
+;;
+
+let toggle_reaction store ~target_type ~target_id ~user_id ~emoji =
+  maybe_sweep store;
+  mutate_reaction
+    store
+    ~target_type
+    ~target_id
+    ~user_id
+    ~emoji
+    ~created_at:(Time_compat.now ())
+    ~decide:not
 ;;
 
 (** {1 SubBoard Operations} *)
@@ -549,7 +792,6 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
 let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
 let dedupe_agent_ids = Board_sub_board_json.dedupe_agent_ids
 let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
-let parse_sub_board_members_lenient = Board_sub_board_json.parse_sub_board_members_lenient
 let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
 let sub_boards_jsonl_unlocked store =
@@ -566,25 +808,45 @@ let save_sub_boards_jsonl content =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+    rewrite_jsonl_durable_result ~where:"rewrite_sub_boards" path content
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+  | Sys_error msg -> persist_io_error ~where:"rewrite_sub_boards" msg
 ;;
 
-let rewrite_sub_boards store =
-  let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_sub_boards_jsonl content)
+let settle_unknown_sub_board_commit store content ~initial_detail =
+  with_lock store (fun () -> store.dirty_sub_boards <- true);
+  match save_sub_boards_jsonl content with
+  | Ok () ->
+    with_lock store (fun () -> store.dirty_sub_boards <- false);
+    Ok ()
+  | Error retry_error ->
+    let admission_detail =
+      match request_flush store with
+      | Ok () -> "dirty snapshot admitted to the Board flusher"
+      | Error detail -> "dirty snapshot flush admission failed: " ^ detail
+    in
+    Error
+      (Persistence_commit_unknown
+         (Printf.sprintf
+            "%s; idempotent snapshot settlement failed: %s; %s"
+            initial_detail
+            (show_board_error retry_error)
+            admission_detail))
 ;;
 
 let append_sub_board (sb : sub_board) =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n")
+    (match
+       Fs_compat.append_private_jsonl_durable_stable_locked_result
+         path
+         (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n")
+     with
+     | Ok () -> Ok ()
+     | Error error -> persist_transaction_error ~where:"append_sub_board" error)
   with
-  | Sys_error msg -> record_persist_error ~where:"append_sub_board" msg
+  | Sys_error msg -> persist_io_error ~where:"append_sub_board" msg
 ;;
 
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
@@ -618,8 +880,9 @@ let create_sub_board
       (match parse_sub_board_members ~owner:owner_id members with
        | Error e -> Error e
        | Ok members ->
-         let result =
-           with_lock store (fun () ->
+         with_persist_lock store (fun () ->
+           let result =
+             with_lock store (fun () ->
              if Hashtbl.mem store.sub_boards_by_slug slug
              then
                Error
@@ -641,12 +904,30 @@ let create_sub_board
                  Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
                  Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
                  Ok sb))
-         in
-         (match result with
-          | Ok sb ->
-            with_persist_lock store (fun () -> append_sub_board sb);
-            Ok sb
-          | Error _ as e -> e)))
+           in
+           match result with
+           | Error _ as error -> error
+           | Ok sb ->
+             (match append_sub_board sb with
+              | Ok () -> Ok sb
+              | Error (Persistence_commit_unknown initial_detail) ->
+                let content =
+                  with_lock store (fun () -> sub_boards_jsonl_unlocked store)
+                in
+                (match
+                   settle_unknown_sub_board_commit store content ~initial_detail
+                 with
+                 | Ok () -> Ok sb
+                 | Error _ as error -> error)
+              | Error error ->
+                with_lock store (fun () ->
+                  let id = Sub_board_id.to_string sb.id in
+                  match Hashtbl.find_opt store.sub_boards id with
+                  | Some current when current = sb ->
+                    Hashtbl.remove store.sub_boards id;
+                    Hashtbl.remove store.sub_boards_by_slug sb.slug
+                  | Some _ | None -> ());
+                Error error))))
 ;;
 
 
@@ -660,8 +941,9 @@ let update_sub_board
       ()
   : (sub_board, board_error) Result.t
   =
-  let result =
-    with_lock store (fun () ->
+  with_persist_lock store (fun () ->
+    let result =
+      with_lock store (fun () ->
       let sb_opt =
         match Hashtbl.find_opt store.sub_boards sub_board_id with
         | Some sb -> Some sb
@@ -674,27 +956,48 @@ let update_sub_board
       | None ->
         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
       | Some sb ->
-        let members =
+        let members_result =
           match members with
-          | None -> sb.members
-          | Some raw ->
-            (match parse_sub_board_members ~owner:sb.owner raw with
-             | Ok m -> m
-             | Error _ -> sb.members)
+          | None -> Ok sb.members
+          | Some raw -> parse_sub_board_members ~owner:sb.owner raw
         in
-        let updated =
-          { sb with
-            name = Option.value ~default:sb.name (Option.map String.trim name)
-          ; description = Option.value ~default:sb.description (Option.map String.trim description)
-          ; members
-          ; access = Option.value ~default:sb.access access
-          }
-        in
-        Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
-        Ok updated)
-  in
-  Result.iter (fun _ -> rewrite_sub_boards store) result;
-  result
+        Result.map
+          (fun members ->
+             let updated =
+               { sb with
+                 name = Option.value ~default:sb.name (Option.map String.trim name)
+               ; description =
+                   Option.value
+                     ~default:sb.description
+                     (Option.map String.trim description)
+               ; members
+               ; access = Option.value ~default:sb.access access
+               }
+             in
+             Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
+             sb, updated, sub_boards_jsonl_unlocked store)
+          members_result)
+    in
+    match result with
+    | Error _ as error -> error
+    | Ok (previous, updated, content) ->
+      (match save_sub_boards_jsonl content with
+       | Ok () ->
+         with_lock store (fun () -> store.dirty_sub_boards <- false);
+         Ok updated
+       | Error (Persistence_commit_unknown initial_detail) ->
+         (match
+            settle_unknown_sub_board_commit store content ~initial_detail
+          with
+          | Ok () -> Ok updated
+          | Error _ as error -> error)
+       | Error error ->
+         with_lock store (fun () ->
+           let id = Sub_board_id.to_string previous.id in
+           match Hashtbl.find_opt store.sub_boards id with
+           | Some current when current = updated -> Hashtbl.replace store.sub_boards id previous
+           | Some _ | None -> ());
+         Error error))
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
@@ -725,8 +1028,9 @@ let list_sub_boards store : sub_board list =
 ;;
 
 let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
-  let snapshot =
-    with_lock store (fun () ->
+  with_persist_lock store (fun () ->
+    let snapshot =
+      with_lock store (fun () ->
     let resolved_opt =
       match Hashtbl.find_opt store.sub_boards sub_board_id with
       | Some sb -> Some (sub_board_id, sb.slug)
@@ -742,6 +1046,16 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
     | None ->
       Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
     | Some (id, slug) ->
+      let removed = Hashtbl.find store.sub_boards id in
+      let affected_posts =
+        Hashtbl.fold
+          (fun key (post : post) affected ->
+             if Option.equal String.equal post.hearth (Some slug)
+             then (key, post) :: affected
+             else affected)
+          store.posts
+          []
+      in
       Hashtbl.remove store.sub_boards id;
       Hashtbl.remove store.sub_boards_by_slug slug;
       (* Orphan policy: clear hearth on posts that belonged to this sub-board *)
@@ -757,13 +1071,30 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
         store.posts;
       invalidate_post_caches store;
       let content = sub_boards_jsonl_unlocked store in
-      Ok content)
-  in
-  match snapshot with
-  | Error _ as e -> e
-  | Ok content ->
-    with_persist_lock store (fun () -> save_sub_boards_jsonl content);
-    Ok ()
+      Ok (id, slug, removed, affected_posts, content))
+    in
+    match snapshot with
+    | Error _ as error -> error
+    | Ok (id, slug, removed, affected_posts, content) ->
+      (match save_sub_boards_jsonl content with
+       | Ok () ->
+         with_lock store (fun () -> store.dirty_sub_boards <- false);
+         Ok ()
+       | Error (Persistence_commit_unknown initial_detail) ->
+         (match
+            settle_unknown_sub_board_commit store content ~initial_detail
+          with
+          | Ok () -> Ok ()
+          | Error _ as error -> error)
+       | Error error ->
+         with_lock store (fun () ->
+           Hashtbl.replace store.sub_boards id removed;
+           Hashtbl.replace store.sub_boards_by_slug slug id;
+           List.iter
+             (fun (key, post) -> Hashtbl.replace store.posts key post)
+             affected_posts;
+           invalidate_post_caches store);
+         Error error))
 ;;
 
 (** {1 Voting - Deduplicated} *)

@@ -29,6 +29,7 @@ and board_reaction_change = {
 
 type board_stimulus = {
   kind : board_stimulus_kind;
+  routing_event_id : string option;
   author : string;
   title : string;
   content : string;
@@ -403,6 +404,7 @@ let board_reaction_change_fields (reaction : board_reaction_change) =
 
 let board_stimulus_fields board =
   [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
+  ; "routing_event_id", option_json (fun value -> `String value) board.routing_event_id
   ; "author", `String board.author
   ; "title", `String board.title
   ; "content", `String board.content
@@ -581,12 +583,18 @@ let payload_of_yojson json =
         Ok (Reaction_changed { target_type; target_id; user_id; emoji; reacted })
       | _ -> board_stimulus_kind_of_string board_kind
     in
+    let* routing_event_id = optional_string_field ~context "routing_event_id" fields in
+    let* () =
+      match routing_event_id with
+      | Some "" -> Error "stimulus.payload.routing_event_id must not be empty"
+      | Some _ | None -> Ok ()
+    in
     let* author = string_field ~context "author" fields in
     let* title = string_field ~context "title" fields in
     let* content = string_field ~context "content" fields in
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
-    Ok { kind; author; title; content; hearth; updated_at }
+    Ok { kind; routing_event_id; author; title; content; hearth; updated_at }
   in
   match kind with
   | "board_signal" ->

@@ -103,6 +103,7 @@ let test_typed_payload_surface () =
       ~payload:
         (Board_signal
            { kind = Comment_added
+           ; routing_event_id = None
            ; author = "alice"
            ; title = "t"
            ; content = "c"

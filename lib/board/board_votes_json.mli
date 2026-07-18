@@ -7,6 +7,16 @@ end
 val visibility_of_string : string -> visibility option
 val post_of_yojson : Yojson.Safe.t -> post option
 val comment_of_yojson : Yojson.Safe.t -> comment option
+
+val strict_jsonl_rows
+  :  path:string
+  -> decode:(Yojson.Safe.t -> 'a option)
+  -> ('a list, string * exn) result
+(** Reads a stable, complete JSONL snapshot and validates every row before
+    returning any decoded value. Missing files are empty snapshots; malformed
+    JSON, duplicate top-level object fields, or schema-invalid rows fail the
+    whole load. *)
+
 val load_persisted_posts : store -> (int, string * exn) result
 (** Load posts from disk into [store].  Returns [Ok loaded_count] on success
     (including when the persistence file is absent: [Ok 0]).  Returns

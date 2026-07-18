@@ -48,6 +48,10 @@ and board_reaction_change = {
 
 type board_stimulus = {
   kind : board_stimulus_kind;
+  routing_event_id : string option;
+  (** Durable Board outbox identity. [None] is accepted only for historical
+      rows and attention-candidate payloads, whose [candidate_id] is already
+      the delivery identity. *)
   author : string;
   title : string;
   content : string;

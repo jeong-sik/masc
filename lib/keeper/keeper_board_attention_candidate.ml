@@ -224,8 +224,14 @@ let candidate_id_of_signal ~keeper_name signal =
   Digestif.SHA256.(digest_string identity |> to_hex)
 ;;
 
+let candidate_id_of_routing_event ~keeper_name ~routing_event_id =
+  Digestif.SHA256.(
+    digest_string (keeper_name ^ "\000" ^ routing_event_id) |> to_hex)
+;;
+
 let of_board_evidence
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~routing_event_id
       ~recorded_at
       ~(signal : Board_dispatch.board_signal)
       ~(post : Board.post)
@@ -234,15 +240,24 @@ let of_board_evidence
   match keeper_context_to_yojson meta with
   | Error _ as error -> error
   | Ok keeper_context ->
-    let candidate_id = candidate_id_of_signal ~keeper_name:meta.name signal in
+    let candidate_id =
+      match routing_event_id with
+      | None -> candidate_id_of_signal ~keeper_name:meta.name signal
+      | Some routing_event_id ->
+        candidate_id_of_routing_event ~keeper_name:meta.name ~routing_event_id
+    in
     let judgment_request =
       `Assoc
-        [ "candidate_id", `String candidate_id
-        ; "signal", signal_to_yojson signal
-        ; "post", Board.post_to_yojson post
-        ; "comments", `List (List.map Board.comment_to_yojson comments)
-        ; "keeper_context", keeper_context
-        ]
+        ([ "candidate_id", `String candidate_id
+         ; "signal", signal_to_yojson signal
+         ; "post", Board.post_to_yojson post
+         ; "comments", `List (List.map Board.comment_to_yojson comments)
+         ; "keeper_context", keeper_context
+         ]
+         @
+         match routing_event_id with
+         | None -> []
+         | Some event_id -> [ "routing_event_id", `String event_id ])
     in
     Ok
       { candidate_id
@@ -256,6 +271,7 @@ let of_board_evidence
 
 let of_board_signal
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ?routing_event_id
       ~recorded_at
       (signal : Board_dispatch.board_signal)
   =
@@ -269,7 +285,15 @@ let of_board_signal
        Board_signal.Unavailable
          { operation = Board_signal.Get_comments; post_id = signal.post_id; error }
      | Ok comments ->
-       (match of_board_evidence ~meta ~recorded_at ~signal ~post ~comments with
+       (match
+          of_board_evidence
+            ~meta
+            ~routing_event_id
+            ~recorded_at
+            ~signal
+            ~post
+            ~comments
+        with
         | Ok candidate -> Board_signal.Available candidate
         | Error detail -> raise (Candidate_unavailable detail)))
 ;;
@@ -558,7 +582,9 @@ let validate_status_payload candidate =
      | Prompt_contract_unavailable
      | Provider_unavailable
      | Response_contract_unavailable -> Ok ()
-     | Partition_membership_conflict | Durable_delivery_unavailable ->
+     | Durable_candidate_storage_unavailable
+     | Partition_membership_conflict
+     | Durable_delivery_unavailable ->
        Error
          (Printf.sprintf
             "candidate %s Pending status contains non-judge failure kind %s"
@@ -572,6 +598,7 @@ let validate_status_payload candidate =
      | Prompt_contract_unavailable
      | Provider_unavailable
      | Response_contract_unavailable
+     | Durable_candidate_storage_unavailable
      | Partition_membership_conflict ->
        Error
          (Printf.sprintf
@@ -589,14 +616,33 @@ let validate_status_payload candidate =
 ;;
 
 let validate_candidate_invariants candidate =
-  let expected_id = candidate_id_of_signal ~keeper_name:candidate.keeper_name candidate.signal in
+  let request_context = "board attention candidate.judgment_request" in
+  let* request_fields = assoc ~context:request_context candidate.judgment_request in
+  let* routing_event_id =
+    match List.assoc_opt "routing_event_id" request_fields with
+    | None -> Ok None
+    | Some json ->
+      let* event_id =
+        string_json ~context:(request_context ^ ".routing_event_id") json
+      in
+      if String.equal event_id ""
+      then Error (request_context ^ ".routing_event_id must not be empty")
+      else Ok (Some event_id)
+  in
+  let expected_id =
+    match routing_event_id with
+    | None ->
+      candidate_id_of_signal ~keeper_name:candidate.keeper_name candidate.signal
+    | Some routing_event_id ->
+      candidate_id_of_routing_event
+        ~keeper_name:candidate.keeper_name
+        ~routing_event_id
+  in
   let* () =
     if String.equal candidate.candidate_id expected_id
     then Ok ()
-    else Error "candidate_id does not match the exact Keeper and Board signal identity"
+    else Error "candidate_id does not match its durable Board routing-event identity"
   in
-  let request_context = "board attention candidate.judgment_request" in
-  let* request_fields = assoc ~context:request_context candidate.judgment_request in
   let* request_candidate_id_json =
     field ~context:request_context "candidate_id" request_fields
   in

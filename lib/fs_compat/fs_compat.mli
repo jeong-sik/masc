@@ -768,6 +768,104 @@ type durable_append_error =
   ; rollback_failures : durable_append_failure list
   }
 
+module Private_jsonl_cursor : sig
+  (** Durable identity of a private JSONL store. The file identity is part of
+      the cursor so an atomic rewrite cannot be mistaken for an append-only
+      continuation at the same byte offset. *)
+  type t
+
+  val equal : t -> t -> bool
+  val to_string : t -> string
+end
+
+type private_jsonl_snapshot =
+  { bytes : string
+  ; cursor : Private_jsonl_cursor.t
+  }
+
+type private_jsonl_transaction_operation =
+  | Create_parent_directory
+  | Open_stable_lock
+  | Set_stable_lock_permissions
+  | Sync_stable_lock_parent
+  | Acquire_stable_lock
+  | Open_transaction_data
+  | Set_transaction_data_permissions
+  | Inspect_transaction_data
+  | Read_transaction_data
+  | Create_rewrite_stage
+  | Set_rewrite_stage_permissions
+  | Write_rewrite_stage
+  | Sync_rewrite_stage
+  | Close_rewrite_stage
+  | Rename_rewrite_stage
+  | Sync_rewrite_parent
+  | Inspect_rewritten_data
+  | Remove_rewrite_stage
+
+type private_jsonl_operation_failure =
+  { operation : private_jsonl_transaction_operation
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type private_jsonl_transaction_error =
+  | Stable_lock_contended of { lock_path : string }
+  | Cursor_mismatch of
+      { expected : Private_jsonl_cursor.t
+      ; actual : Private_jsonl_cursor.t
+      }
+  | Unexpected_transaction_file_kind of Unix.file_kind
+  | Incomplete_transaction_tail of { end_offset : int }
+  | Invalid_transaction_suffix
+  | Private_jsonl_operation_failed of private_jsonl_operation_failure
+  | Rewrite_stage_failed of
+      { failure : private_jsonl_operation_failure
+      ; cleanup_failures : private_jsonl_operation_failure list
+      }
+  | Transaction_append_failed of durable_append_error
+
+val private_jsonl_transaction_error_to_string :
+  private_jsonl_transaction_error -> string
+
+(** Stable sibling lock owned by the private JSONL transaction protocol. It is
+    created with mode [0600] and must never be renamed or removed while the
+    store may be in use. *)
+val private_jsonl_lock_path : string -> string
+
+(** Read a private JSONL store under its stable sibling lock. [after = None]
+    returns the full store. [after = Some cursor] returns only bytes appended
+    after that exact file identity and offset. A replacement, truncation, or
+    disappearance is a typed [Cursor_mismatch], never an implicit full rescan.
+    The returned cursor distinguishes a missing store from a present empty
+    store. *)
+val read_private_jsonl_durable_locked_result :
+  string ->
+  after:Private_jsonl_cursor.t option ->
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result
+
+(** Append complete newline-terminated JSONL rows iff [expected] still names
+    the exact store identity and end offset observed by the caller. All
+    participants must use this stable-lock transaction family for [path]; the
+    sibling lock is never renamed, so atomic rewrites cannot strand an appender
+    on the old inode. Lock contention and stale cursors fail explicitly without
+    timeout, retry, or backoff policy. *)
+val append_private_jsonl_durable_locked_at_cursor_result :
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** Atomically replace a complete private JSONL store iff [expected] still
+    names the exact current store. The staged payload and parent directory are
+    fsynced; no directory-fsync failure is suppressed. The stable sibling lock
+    remains the serialization authority across the inode replacement. *)
+val rewrite_private_jsonl_durable_locked_at_cursor_result :
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 val durable_append_failure_to_string : durable_append_failure -> string
 
 (** Render a structured durable-append failure without discarding the original

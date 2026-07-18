@@ -1445,7 +1445,7 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check string) "agent_name preserved" "codex-local-admin"
     (assoc_string "agent_name" forwarded)
 
-let test_registered_hook_goal_list_strips_blank_optional_enums () =
+let test_registered_hook_goal_list_preserves_blank_optional_enums () =
   let args =
     `Assoc
       [
@@ -1460,8 +1460,10 @@ let test_registered_hook_goal_list_strips_blank_optional_enums () =
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "phase removed" true
-    (Yojson.Safe.Util.member "phase" forwarded = `Null)
+  Alcotest.(check string)
+    "blank phase reaches the owning handler for explicit rejection"
+    " "
+    (assoc_string "phase" forwarded)
 
 let test_registered_hook_goal_list_rejects_status_filter () =
   let args = `Assoc [ ("status", `String "active") ] in
@@ -2064,8 +2066,8 @@ let () =
         test_registered_hook_transition_preserves_canonical_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
-      Alcotest.test_case "masc_goal_list strips blank optional enum filters"
-        `Quick test_registered_hook_goal_list_strips_blank_optional_enums;
+      Alcotest.test_case "masc_goal_list preserves blank optional enum filters"
+        `Quick test_registered_hook_goal_list_preserves_blank_optional_enums;
       Alcotest.test_case "masc_goal_list rejects status filter" `Quick
         test_registered_hook_goal_list_rejects_status_filter;
       Alcotest.test_case "masc_goal_list preserves invalid enum filters" `Quick

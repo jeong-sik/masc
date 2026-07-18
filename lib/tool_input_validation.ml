@@ -50,43 +50,6 @@ let required_names schema =
   | _ -> []
 ;;
 
-let has_enum schema =
-  match Json_util.assoc_member_opt "enum" schema with
-  | Some (`List (_ :: _)) -> true
-  | _ -> false
-;;
-
-let optional_enum_fields schema =
-  let required = required_names schema in
-  match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc props) ->
-    List.filter_map
-      (fun (name, prop_schema) ->
-         if (not (List.mem name required)) && has_enum prop_schema
-         then Some name
-         else None)
-      props
-  | _ -> []
-;;
-
-let normalize_blank_optional_enum_args ?schema args =
-  match schema, args with
-  | Some schema, `Assoc fields ->
-    let optional_enums = optional_enum_fields schema in
-    if optional_enums = []
-    then args
-    else
-      `Assoc
-        (List.filter
-           (fun (key, value) ->
-              match value with
-              | `String raw when List.mem key optional_enums && String.trim raw = "" ->
-                false
-              | _ -> true)
-           fields)
-  | _ -> args
-;;
-
 let schema_property_names schema =
   match Json_util.assoc_member_opt "properties" schema with
   | Some (`Assoc props) -> List.map fst props
@@ -221,10 +184,7 @@ let schema_shape_json schema =
 
 let schema_has_property_name schema name = List.mem name (schema_property_names schema)
 
-let prepare_args ?schema ~name:_ args =
-  let args = strip_internal_marker_args args in
-  normalize_blank_optional_enum_args ?schema args
-;;
+let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
 
 let schema_has_properties = function
   | `Assoc fields ->

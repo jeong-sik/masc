@@ -188,7 +188,6 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
             "failed to persist reseeded keeper identity for %s: %s"
             meta.name err)
     in
-    Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
     Ok
       ( updated_meta,
         Some
@@ -255,8 +254,6 @@ let execute_keeper_up ctx args : tool_result =
         | None -> json
       in
       invalidate_keeper_list_cache ();
-      Keeper_status_detail.invalidate_status_cache_for
-        (get_string prepared_args "name" "");
       Ok (tool_result_ok_data (annotate_keeper_json ~runtime_class:"keeper" json))
   with
   | Ok result -> result
@@ -354,8 +351,6 @@ let keeper_list_row_json ~runtime_class config name =
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
-let invalidate_status_cache name =
-  Keeper_status_detail.invalidate_status_cache_for name
 let with_keeper_name args name =
   match args with
   | `Assoc fields ->
@@ -459,7 +454,6 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ]
           in
           invalidate_keeper_list_cache ();
-          invalidate_status_cache (get_string resolved_args "name" "");
           Ok (tool_result_ok_data json)
     with
     | Ok result -> result
@@ -622,7 +616,6 @@ let submit_keeper_invocation
       ctx
       ~request
   =
-  let name = Keeper_invocation_contract.target_name request in
   match
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
@@ -639,10 +632,7 @@ let submit_keeper_invocation
           let worker_ctx = { ctx with sw = request_sw } in
           let result = run_turn ?event_bus request worker_ctx in
           if tool_result_success result
-          then begin
-            invalidate_keeper_list_cache ();
-            invalidate_status_cache name
-          end;
+          then invalidate_keeper_list_cache ();
           result)
         ()
       |> Result.map_error (fun error ->
@@ -839,11 +829,10 @@ let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
     tool_result_error_data (Keeper_msg_async.access_rejection_to_json rejection)
 ;;
 
-let complete_keeper_msg_stream_result ~name result =
+let complete_keeper_msg_stream_result result =
   if not (tool_result_success result) then result
   else begin
     invalidate_keeper_list_cache ();
-    invalidate_status_cache name;
     tool_result_ok_data
       (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
   end
@@ -875,7 +864,7 @@ let handle_keeper_msg_stream
         ctx
         resolved_args
     in
-    complete_keeper_msg_stream_result ~name result
+    complete_keeper_msg_stream_result result
   in
   match resolve_keeper_name ctx args with
   | Ok name -> run name
@@ -928,7 +917,7 @@ let handle_keeper_msg_stream_if_free
      with
      | `Busy rejection -> `Busy rejection
      | `Ran result ->
-       `Ran (complete_keeper_msg_stream_result ~name result))
+       `Ran (complete_keeper_msg_stream_result result))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
@@ -945,5 +934,4 @@ let resolve_keeper_meta ctx args =
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
-  invalidate_status_cache (get_string args "name" "");
   Turn.handle_keeper_down ctx args

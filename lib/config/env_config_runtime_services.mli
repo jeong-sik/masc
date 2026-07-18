@@ -53,6 +53,16 @@ module Timeouts : sig
 
 end
 
+(** {1 Schedule runner} *)
+
+module ScheduleRunner : sig
+  val interval_sec : float
+  (** [MASC_SCHEDULE_RUNNER_INTERVAL_SEC] (default [15.0]). Floor [1.0].
+      Poll cadence of the schedule runner; a poll granularity, not a
+      wake authority. *)
+
+end
+
 (** {1 Operator snapshot cache} *)
 
 module Operator : sig

@@ -1,4 +1,4 @@
-let interval_sec = 15.0
+let interval_sec = Env_config_runtime_services.ScheduleRunner.interval_sec
 
 (* Four missed runner cadences means the production caller has failed to
    observe three complete due windows after the last successful tick. The value

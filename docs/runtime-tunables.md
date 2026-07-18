@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 227 unique knobs across 8 modules.
+**Total**: 228 unique knobs across 8 modules.
 
-**Typed getter classification**: 37/128 tagged (`operator`: 37, `algorithm`: 0, `unclassified`: 91).
+**Typed getter classification**: 38/129 tagged (`operator`: 38, `algorithm`: 0, `unclassified`: 91).
 
 ## Env_config_core (24 knobs; typed classification 2/5)
 
@@ -182,7 +182,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 213 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 209 | WebSocket server port. Default: 8937. |
 
-## Env_config_runtime_services (15 knobs; typed classification 2/11)
+## Env_config_runtime_services (16 knobs; typed classification 3/12)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -192,15 +192,16 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 36 |  |
 | `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 39 |  |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 42 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 89 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 85 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 98 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 103 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 99 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 112 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
 | `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 55 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 76 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 70 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 62 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 90 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
+| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 84 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 76 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 8 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 12 | Max age for rate limit entries before cleanup (seconds) |
+| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | Runtime | operator | 69 | Schedule runner poll cadence (seconds). The runner wakes on this interval to collect due occurrences; it is a poll gr... |
 
 ## Env_config_sandbox (15 knobs; typed classification 1/14)
 

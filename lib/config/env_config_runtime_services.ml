@@ -55,6 +55,20 @@ module Timeouts = struct
       (get_float ~default:60.0 "MASC_MAINTENANCE_PULSE_INTERVAL_SEC")
 end
 
+(** {1 Schedule Runner Configuration} *)
+
+module ScheduleRunner = struct
+  (** Schedule runner poll cadence (seconds). The runner wakes on this
+      interval to collect due occurrences; it is a poll granularity, not a
+      wake authority — due-time evidence decides what fires. Clamped to
+      >= 1.0 to prevent tight-loop when misconfigured.
+      @category Runtime
+      @ops_class operator *)
+  let interval_sec =
+    Float.max 1.0
+      (get_float ~default:15.0 "MASC_SCHEDULE_RUNNER_INTERVAL_SEC")
+end
+
 (** {1 Operator Snapshot Cache Configuration} *)
 
 module Operator = struct

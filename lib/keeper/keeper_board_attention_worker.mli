@@ -10,7 +10,8 @@
 
     The partition ledger is the work authority. Process-local wake state may
     coalesce or disappear across restart without losing work because startup
-    scans every candidate ledger. *)
+    scans every candidate ledger and replays owner wake for every durable
+    [Completed] partition. *)
 
 module Candidate = Keeper_board_attention_candidate
 module Partition = Keeper_board_attention_partition
@@ -37,7 +38,8 @@ val drain_completed_on_owner_lane :
 (** Apply completed durable partition results and resume current-schema
     crash-recovered [Judged] rows. This path never calls a provider. A
     partition is marked [Settled] only after all candidate deliveries are
-    durably [Consumed]. *)
+    durably [Consumed]. Any remaining delivery obligation is an [Error], never
+    a successful partial report. *)
 
 val health_json : base_path:string -> Yojson.Safe.t
 (** Combine exact durable partition state with process worker registration.

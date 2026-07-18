@@ -484,9 +484,16 @@ let compare_candidate (left : Candidate.candidate) (right : Candidate.candidate)
   | ordering -> ordering
 ;;
 
-let ensure_roots ~now ~base_path ~keeper_name candidates =
+let ensure_roots ~base_path ~keeper_name candidates =
   update ~base_path ~keeper_name (fun current ->
     let* owners = validate_live_membership current in
+    let existing_by_id =
+      List.fold_left
+        (fun partitions partition ->
+           Id_map.add partition.partition_id partition partitions)
+        Id_map.empty
+        current
+    in
     let unassigned =
       candidates
       |> List.filter (fun candidate ->
@@ -495,12 +502,6 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
         | Candidate.Judged _ | Candidate.Consumed _ -> false)
       |> List.sort compare_candidate
     in
-    let existing_ids =
-      List.fold_left
-        (fun ids partition -> Id_set.add partition.partition_id ids)
-        Id_set.empty
-        current
-    in
     let* roots =
       List.fold_left
         (fun result candidate ->
@@ -508,22 +509,27 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
               let* context_key = Candidate.keeper_context_key candidate in
               let candidate_ids = [ candidate.Candidate.candidate_id ] in
               let partition_id = root_id ~keeper_name ~context_key candidate_ids in
-              if Id_set.mem partition_id existing_ids
-              then
-                Error
-                  (Printf.sprintf
-                     "new pending cohort collides with existing partition %s"
-                     partition_id)
-              else
-                Ok
-                  ({ partition_id
-                   ; keeper_name
-                   ; context_key
-                   ; candidate_ids
-                   ; created_at = now
-                   ; state = Ready
-                   }
-                   :: roots))
+              (match Id_map.find_opt partition_id existing_by_id with
+               | Some historical
+                 when String.equal historical.keeper_name keeper_name
+                      && String.equal historical.context_key context_key
+                      && historical.candidate_ids = candidate_ids ->
+                 Ok roots
+               | Some _ ->
+                 Error
+                   (Printf.sprintf
+                      "new pending cohort collides with existing partition %s"
+                      partition_id)
+               | None ->
+                 Ok
+                   ({ partition_id
+                    ; keeper_name
+                    ; context_key
+                    ; candidate_ids
+                    ; created_at = candidate.recorded_at
+                    ; state = Ready
+                    }
+                    :: roots)))
         (Ok [])
         unassigned
       |> Result.map List.rev
@@ -708,7 +714,8 @@ let fail ~now ~worker_epoch ~base_path ~partition failure =
       | Candidate.Runtime_configuration_unavailable
         | Candidate.Prompt_contract_unavailable
         | Candidate.Provider_unavailable
-        | Candidate.Response_contract_unavailable ->
+        | Candidate.Response_contract_unavailable
+        | Candidate.Durable_candidate_storage_unavailable ->
         let deferred =
           { persisted with state = Deferred { failure; deferred_at = now } }
         in
@@ -919,6 +926,10 @@ let status_reasons summary =
   |> (fun reasons ->
     if count_state summary (function Deferred _ -> true | _ -> false) > 0
     then "deferred_partitions" :: reasons
+    else reasons)
+  |> (fun reasons ->
+    if count_state summary (function Completed _ -> true | _ -> false) > 0
+    then "completed_delivery_pending" :: reasons
     else reasons)
   |> (fun reasons ->
     if summary.read_errors <> [] then "partition_ledger_read_errors" :: reasons else reasons)

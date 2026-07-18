@@ -135,7 +135,6 @@ let failure kind detail : A.retryable_failure =
 let ensure ~base_path candidates =
   match
     P.ensure_roots
-      ~now:100.0
       ~base_path
       ~keeper_name:"partition-keeper"
       candidates
@@ -224,6 +223,126 @@ let test_response_failure_defers_without_split () =
     "deferred response failure requires operator action"
     true
     U.(health |> member "operator_action_required" |> to_bool)
+;;
+
+let test_settled_root_tolerates_stale_pending_snapshot () =
+  with_temp_base "board-partition-stale-snapshot" @@ fun base_path ->
+  let pending_snapshot = candidate 1 in
+  record_all ~base_path [ pending_snapshot ];
+  ignore (ensure ~base_path [ pending_snapshot ] : P.t list);
+  let root = claim ~base_path in
+  let completed =
+    match
+      P.complete
+        ~now:120.0
+        ~worker_epoch
+        ~base_path
+        ~partition:root
+        ~items:
+          [ { P.candidate_id = pending_snapshot.candidate_id
+            ; judgment = judgment 1
+            }
+          ]
+    with
+    | Ok (P.Partition_completed partition) -> partition
+    | Ok _ -> Alcotest.fail "expected completed partition"
+    | Error detail -> Alcotest.fail detail
+  in
+  ignore
+    (match
+       P.settle_many
+         ~now:130.0
+         ~base_path
+         ~keeper_name:"partition-keeper"
+         ~partition_ids:[ completed.partition_id ]
+     with
+     | Ok partitions -> partitions
+     | Error detail -> Alcotest.fail detail
+      : P.t list);
+  let replayed = ensure ~base_path [ pending_snapshot ] in
+  match replayed with
+  | [ { state = P.Settled _; _ } ] -> ()
+  | _ -> Alcotest.fail "stale Pending snapshot recreated or rejected a settled root"
+;;
+
+let test_claim_order_uses_candidate_recorded_identity () =
+  with_temp_base "board-partition-recorded-order" @@ fun base_path ->
+  let oldest = candidate 1 in
+  let newest = candidate 2 in
+  record_all ~base_path [ newest; oldest ];
+  let roots = ensure ~base_path [ newest; oldest ] in
+  Alcotest.(check (list (float 0.0)))
+    "root creation time is candidate recorded time"
+    [ oldest.recorded_at; newest.recorded_at ]
+    (List.map (fun partition -> partition.P.created_at) roots);
+  let first = claim ~base_path in
+  Alcotest.(check (list string))
+    "oldest candidate claims first"
+    [ oldest.candidate_id ]
+    first.candidate_ids
+;;
+
+let test_candidate_storage_failure_defers () =
+  with_temp_base "board-partition-storage-defer" @@ fun base_path ->
+  let pending = candidate 1 in
+  record_all ~base_path [ pending ];
+  ignore (ensure ~base_path [ pending ] : P.t list);
+  let root = claim ~base_path in
+  match
+    P.fail
+      ~now:120.0
+      ~worker_epoch
+      ~base_path
+      ~partition:root
+      (failure A.Durable_candidate_storage_unavailable "candidate ledger unavailable")
+  with
+  | Ok (P.Partition_deferred { state = P.Deferred _; _ }) ->
+    (match P.load ~base_path ~keeper_name:"partition-keeper" with
+     | Ok
+         [ { state =
+               P.Deferred
+                 { failure = { kind = A.Durable_candidate_storage_unavailable; _ }; _ }
+           ; _
+           }
+         ] ->
+       ()
+     | Ok _ -> Alcotest.fail "candidate storage failure did not round-trip"
+     | Error detail -> Alcotest.fail detail)
+  | Ok _ -> Alcotest.fail "candidate storage failure became terminal"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_completed_delivery_obligation_degrades_health () =
+  with_temp_base "board-partition-completed-health" @@ fun base_path ->
+  let pending = candidate 1 in
+  record_all ~base_path [ pending ];
+  ignore (ensure ~base_path [ pending ] : P.t list);
+  let root = claim ~base_path in
+  ignore
+    (match
+       P.complete
+         ~now:120.0
+         ~worker_epoch
+         ~base_path
+         ~partition:root
+         ~items:[ { P.candidate_id = pending.candidate_id; judgment = judgment 1 } ]
+     with
+     | Ok transition -> transition
+     | Error detail -> Alcotest.fail detail
+      : P.transition);
+  let health = P.fleet_summary_json ~base_path in
+  Alcotest.(check string)
+    "completed delivery obligation degrades health"
+    "degraded"
+    U.(health |> member "status" |> to_string);
+  Alcotest.(check bool)
+    "completed delivery obligation requires operator action"
+    true
+    U.(health |> member "operator_action_required" |> to_bool);
+  Alcotest.(check bool)
+    "completed delivery reason is explicit"
+    true
+    U.(health |> member "status_reasons" |> to_list |> List.mem (`String "completed_delivery_pending"))
 ;;
 
 let test_removed_split_state_is_rejected () =
@@ -440,6 +559,22 @@ let () =
             "response failure defers without split"
             `Quick
             test_response_failure_defers_without_split
+        ; Alcotest.test_case
+            "settled root tolerates stale Pending snapshot"
+            `Quick
+            test_settled_root_tolerates_stale_pending_snapshot
+        ; Alcotest.test_case
+            "claim order uses candidate recorded identity"
+            `Quick
+            test_claim_order_uses_candidate_recorded_identity
+        ; Alcotest.test_case
+            "candidate storage failure defers"
+            `Quick
+            test_candidate_storage_failure_defers
+        ; Alcotest.test_case
+            "completed delivery obligation degrades health"
+            `Quick
+            test_completed_delivery_obligation_degrades_health
         ; Alcotest.test_case
             "removed split state is rejected"
             `Quick

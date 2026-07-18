@@ -1,6 +1,7 @@
 module A = Masc.Keeper_board_attention_candidate
 module J = Masc.Keeper_board_attention_judgment
 module P = Masc.Keeper_board_attention_partition
+module R = Masc.Keeper_registry
 module W = Masc.Keeper_board_attention_worker
 module U = Yojson.Safe.Util
 
@@ -62,6 +63,15 @@ let judgment candidate : A.judgment =
   }
 ;;
 
+let relevant_judgment candidate : A.judgment =
+  { (judgment candidate) with
+    verdict =
+      { J.decision = J.Relevant
+      ; rationale = "worker exact relevant judgment for " ^ candidate.A.candidate_id
+      }
+  }
+;;
+
 let exact_map candidates =
   List.fold_left
     (fun map candidate ->
@@ -74,6 +84,26 @@ let record_candidate ~base_path candidate =
   match W.record_and_notify ~base_path candidate with
   | Ok acceptance -> acceptance
   | Error detail -> Alcotest.fail detail
+;;
+
+let persist_candidate ~base_path candidate =
+  match A.record ~base_path candidate with
+  | A.Recorded persisted | A.Duplicate persisted -> persisted
+  | A.Record_error detail -> Alcotest.fail detail
+;;
+
+let keeper_meta keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String ("agent-" ^ keeper_name)
+        ; "trace_id", `String ("trace-" ^ keeper_name)
+        ; "autoboot_enabled", `Bool false
+        ])
+  with
+  | Ok meta -> meta
+  | Error detail -> Alcotest.failf "keeper meta fixture failed: %s" detail
 ;;
 
 let rec await_registered ~base_path =
@@ -127,6 +157,14 @@ let rec await_lane_failure ~base_path =
   else (
     Eio.Fiber.yield ();
     await_lane_failure ~base_path)
+;;
+
+let rec await_owner_wake entry =
+  if Atomic.get entry.R.fiber_wakeup
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    await_owner_wake entry)
 ;;
 
 let within clock f =
@@ -335,6 +373,134 @@ let test_startup_scan_isolates_malformed_ledger () =
    with Test_done -> ())
 ;;
 
+let test_startup_replays_completed_owner_wake () =
+  with_temp_base "board-worker-completed-wake" @@ fun base_path ->
+  let keeper_name = "keeper-completed" in
+  let pending = candidate ~keeper_name 1 |> persist_candidate ~base_path in
+  let worker_epoch = P.Worker_epoch.generate () in
+  let root =
+    match P.ensure_roots ~base_path ~keeper_name [ pending ] with
+    | Error detail -> Alcotest.fail detail
+    | Ok _ ->
+      (match P.claim_next ~now:100.0 ~worker_epoch ~base_path ~keeper_name with
+       | Ok (Some root) -> root
+       | Ok None -> Alcotest.fail "expected a ready partition"
+       | Error detail -> Alcotest.fail detail)
+  in
+  ignore
+    (match
+       P.complete
+         ~now:110.0
+         ~worker_epoch
+         ~base_path
+         ~partition:root
+         ~items:[ { P.candidate_id = pending.candidate_id; judgment = judgment pending } ]
+     with
+     | Ok transition -> transition
+     | Error detail -> Alcotest.fail detail
+      : P.transition);
+  R.clear ();
+  Fun.protect
+    ~finally:R.clear
+    (fun () ->
+       let owner = R.register ~base_path keeper_name (keeper_meta keeper_name) in
+       Atomic.set owner.fiber_wakeup false;
+       Eio_main.run @@ fun env ->
+       let clock = Eio.Stdenv.clock env in
+       (try
+          Eio.Switch.run @@ fun sw ->
+          Eio.Fiber.fork ~sw (fun () ->
+            W.For_testing.start_with_judge
+              ~sw
+              ~base_path
+              ~worker_epoch:(P.Worker_epoch.generate ())
+              ~judge:(fun _ -> Alcotest.fail "Completed recovery called provider")
+              ());
+          within clock (fun () -> await_registered ~base_path);
+          within clock (fun () -> await_owner_wake owner);
+          Alcotest.(check bool)
+            "startup replayed durable Completed owner wake"
+            true
+            (Atomic.get owner.fiber_wakeup);
+          raise Test_done
+        with Test_done -> ()))
+;;
+
+let test_delivery_failure_degrades_worker_health () =
+  with_temp_base "board-worker-delivery-health" @@ fun base_path ->
+  let pending =
+    candidate ~keeper_name:"keeper-delivery" 1 |> persist_candidate ~base_path
+  in
+  let judged =
+    match A.record_judgment ~base_path pending (judgment pending) with
+    | Ok judged -> judged
+    | Error detail -> Alcotest.fail detail
+  in
+  ignore
+    (match
+       A.record_retryable_failure
+         ~base_path
+         judged
+         { A.kind = A.Durable_delivery_unavailable
+         ; detail = "event queue unavailable"
+         ; failed_at = 210.0
+         }
+     with
+     | Ok failed -> failed
+     | Error detail -> Alcotest.fail detail
+      : A.candidate);
+  let health = W.health_json ~base_path in
+  Alcotest.(check string)
+    "delivery failure degrades worker health"
+    "degraded"
+    U.(health |> member "status" |> to_string);
+  Alcotest.(check bool)
+    "delivery failure requires operator action"
+    true
+    U.(health |> member "operator_action_required" |> to_bool);
+  Alcotest.(check int)
+    "delivery failure count"
+    1
+    U.(health |> member "candidate_delivery_failure_count" |> to_int);
+  Alcotest.(check bool)
+    "delivery failure reason is explicit"
+    true
+    U.(health |> member "status_reasons" |> to_list |> List.mem (`String "candidate_delivery_failures"))
+;;
+
+let test_owner_drain_rejects_partial_delivery_success () =
+  with_temp_base "board-worker-owner-delivery-failure" @@ fun base_path ->
+  let keeper_name = "keeper-owner-failure" in
+  let pending = candidate ~keeper_name 1 |> persist_candidate ~base_path in
+  ignore
+    (match A.record_judgment ~base_path pending (relevant_judgment pending) with
+     | Ok judged -> judged
+     | Error detail -> Alcotest.fail detail
+      : A.candidate);
+  let queue_dir =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      (Filename.concat "keepers" keeper_name)
+  in
+  Fs_compat.mkdir_p queue_dir;
+  let queue_path = Filename.concat queue_dir "event-queue.json" in
+  let channel = open_out_bin queue_path in
+  output_string channel "{\"schema\":\"keeper.event_queue.state.v2\"}\n";
+  close_out channel;
+  (match W.drain_completed_on_owner_lane ~base_path ~keeper_name with
+   | Error detail ->
+     Alcotest.(check bool)
+       "remaining delivery is an explicit failure"
+       true
+       (String.length detail > 0)
+   | Ok _ -> Alcotest.fail "partial durable delivery returned success");
+  let health = W.health_json ~base_path in
+  Alcotest.(check int)
+    "failed owner delivery remains visible"
+    1
+    U.(health |> member "candidate_delivery_failure_count" |> to_int)
+;;
+
 let test_lane_cancellation_is_visible_and_sibling_survives () =
   with_temp_base "board-worker-lane-failure" @@ fun base_path ->
   Eio_main.run @@ fun env ->
@@ -453,6 +619,18 @@ let () =
             "startup scan isolates malformed ledger"
             `Quick
             test_startup_scan_isolates_malformed_ledger
+        ; Alcotest.test_case
+            "startup replays Completed owner wake"
+            `Quick
+            test_startup_replays_completed_owner_wake
+        ; Alcotest.test_case
+            "delivery failure degrades worker health"
+            `Quick
+            test_delivery_failure_degrades_worker_health
+        ; Alcotest.test_case
+            "owner drain rejects partial delivery success"
+            `Quick
+            test_owner_drain_rejects_partial_delivery_success
         ; Alcotest.test_case
             "lane cancellation is visible and sibling survives"
             `Quick

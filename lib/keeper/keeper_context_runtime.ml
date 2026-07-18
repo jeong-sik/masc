@@ -360,18 +360,12 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
 
 let resolve_max_context_resolution ~requested_override (labels : string list)
     : max_context_resolution =
-  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-  let clamp resolved =
-    let local_clamped = resolved in
-    max min_keeper_context local_clamped
-  in
-  let default_budget = Runtime.default_max_context () |> clamp in
+  let default_budget = Runtime.default_max_context () in
   let runtime_budget =
     labels
     |> List.find_map (fun label ->
            String.trim label
-           |> Runtime.max_context_of_runtime_id
-           |> Option.map clamp)
+           |> Runtime.max_context_of_runtime_id)
     (* Labels are an ordered runtime-budget preference list. If none resolve,
        the precomputed default runtime budget preserves config-less tests.
        DET-OK: dispatch still fail-fast validates the selected runtime id before
@@ -382,8 +376,7 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
   let primary_budget = runtime_budget in
   let requested_context_window =
     match requested_override with
-    | Some requested when requested > 0 ->
-      max min_keeper_context requested
+    | Some requested when requested > 0 -> requested
     | _ -> primary_budget
   in
   let effective_budget = min requested_context_window primary_budget in

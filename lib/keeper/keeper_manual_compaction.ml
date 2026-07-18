@@ -9,9 +9,8 @@ type failure =
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
 let primary_max_context meta =
-  let min_context = Keeper_config.min_keeper_context_tokens in
   let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
-  max min_context resolution.effective_budget
+  resolution.effective_budget
 ;;
 let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
   match recovery.Keeper_context_runtime.compaction.trigger with

@@ -20,16 +20,16 @@ One tool out, push in. The mirror of [[RFC-0203]] for Slack.
 > connector registration + `Keeper_chat_queue.Slack` deferred delivery. PR-3
 > (this batch) wires `Server_slack_in_process_gateway` + bootstrap + env
 > (`SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`,
-> and adds the `connector_kind:Slack` arm together with that gateway (per the
-> "add it together with the gateway, not before" note in `gate_keeper_backend`).
+> and supplies a Slack-owned immutable delivery projection to the generic
+> Keeper acceptance boundary.
 > PR-4 (pending) deletes the sidecar. Ambient recording + idle-keeper wake on
 > non-triggering messages and reaction-as-trigger are follow-up scope, not PR-3.
 
 ## Why
 
-- `sidecars/slack-bot/` is a Python slack-bolt process with its own
-  lifecycle, its own HTTP push path (`/api/v1/gate/message` with
-  `connector_kind = Generic`), and its own failure modes. The server
+- `sidecars/slack-bot/` was a Python slack-bolt process with its own
+  lifecycle, its own HTTP push path (`/api/v1/gate/message`), and its own
+  failure modes. The server
   already in-processes Discord (`lib/gate/discord_*`); Slack is the last
   connector that lives in a separate process. Removing it collapses two
   failure surfaces into one.
@@ -47,9 +47,11 @@ Slack WSS ↔ slack_socket_client (OCaml, Eio fiber, reuses discord_wss_connecti
                 ↓ parse envelope, ack, emit
           Slack_gateway_state (pure FSM: hello/connected/reconnect)
                 ↓ Emit_event (message/app_mention)
-          Channel_gate.handle_inbound_streaming (existing)
+          Channel_gate.handle_inbound (existing)
                 ↓
-          keeper workspace (existing)
+          Gate_keeper_backend.accept_connector
+                ↓ durable receipt
+          Keeper_chat_queue (existing)
 
 keeper → Channel_gate_slack_state.send_message → Masc_http_client.post_sync chat.postMessage
 ```
@@ -172,15 +174,15 @@ failure (DNS/TLS/handshake) is fed as `Wss_closed` — there is no separate
    it yet.
 2. **PR-2 (landed)**: `slack_rest_client` + `keeper_chat_slack` +
    `channel_gate_slack_state` rewrite (in-process) + connector registration +
-   `Keeper_chat_queue.Slack` deferred-delivery source. (`connector_kind` Slack
-   moved to PR-3: `gate_keeper_backend` withholds the arm until the gateway that
-   emits `dispatch ~connector_kind:Slack` exists, to avoid a dead branch.)
+   `Keeper_chat_queue.Slack` deferred-delivery source.
 3. **PR-3 (this batch)**: `server_slack_in_process_gateway` + bootstrap + env
    (`SLACK_APP_TOKEN`, `MASC_SLACK_TRIGGER_POLICY`) + `slack_observability`
-   + `slack_rest_client.auth_test` (bot identity) + the `connector_kind:Slack`
-   arm (with `route_busy_connector` + the surface/conversation-id arms). Bridges
+   + `slack_rest_client.auth_test` (bot identity) + the leaf-owned typed
+   delivery projection. Bridges
    triggered `Message_create`/`App_mention` to
-   `Channel_gate.handle_inbound_streaming` with a threaded streaming reply.
+   `Channel_gate.handle_inbound`, which durably accepts the exact leaf delivery
+   before returning the threaded queue acknowledgement. Final replies are owned
+   by the serial Keeper chat consumer and Slack outbound adapter.
    Ambient recording, idle-keeper wake, and reaction-as-trigger are deferred.
 4. **PR-4 (pending)**: delete `sidecars/slack-bot/` + remove Slack branch from
    `server_routes_http_routes_sidecar` + drop `channel_gate_sidecar_state`

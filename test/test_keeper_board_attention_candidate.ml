@@ -619,6 +619,15 @@ let all_not_relevant candidates =
        candidates)
 ;;
 
+let all_relevant candidates =
+  Ok
+    (List.fold_left
+       (fun map (candidate : A.candidate) ->
+          A.Candidate_map.add candidate.candidate_id (judgment J.Relevant) map)
+       A.Candidate_map.empty
+       candidates)
+;;
+
 let test_old_pending_is_judged_without_wall_clock_expiry () =
   with_temp_base "board-attention-no-wall-clock-expiry" @@ fun base_path ->
   let keeper_name = "sangsu" in
@@ -833,6 +842,92 @@ let test_successful_drain_runs_one_provider_batch_per_admission () =
   Alcotest.(check int) "next admission owns remainder" 1 report.remaining
 ;;
 
+let test_successful_batch_uses_two_candidate_ledger_rewrites () =
+  with_temp_base "board-attention-atomic-batch" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  List.iter
+    (fun index ->
+       let post_id = Printf.sprintf "post-%d" index in
+       ignore
+         (record_or_fail
+            ~base_path
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
+    (List.init A.batch_max_candidates (fun index -> index + 1));
+  let rewrites = ref 0 in
+  A.For_testing.set_ledger_rewrite_observer (fun () -> incr rewrites);
+  Fun.protect
+    ~finally:A.For_testing.reset_ledger_rewrite_observer
+    (fun () ->
+       let report =
+         match
+           A.For_testing.drain_pending_with_judge_batch
+             ~base_path
+             ~keeper_name
+             ~judge_batch:all_relevant
+         with
+         | Ok report -> report
+         | Error detail -> Alcotest.failf "atomic batch drain failed: %s" detail
+       in
+       Alcotest.(check int) "whole batch consumed" A.batch_max_candidates report.consumed;
+       Alcotest.(check int)
+         "one judgment commit plus one consumed commit"
+         2
+         !rewrites;
+       let queued =
+         Keeper_event_queue_persistence.load ~base_path ~keeper_name
+         |> Keeper_event_queue.length
+       in
+       Alcotest.(check int)
+         "every relevant verdict has one durable event"
+         A.batch_max_candidates
+         queued)
+;;
+
+let test_batch_delivery_failure_preserves_all_judgments () =
+  with_temp_base "board-attention-batch-delivery-error" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  List.iter
+    (fun index ->
+       let post_id = Printf.sprintf "post-%d" index in
+       ignore
+         (record_or_fail
+            ~base_path
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
+    [ 1; 2 ];
+  let keepers_path =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+  in
+  let oc = open_out_bin keepers_path in
+  output_string oc "event queue directory blocker";
+  close_out oc;
+  let report =
+    match
+      A.For_testing.drain_pending_with_judge_batch
+        ~base_path
+        ~keeper_name
+        ~judge_batch:all_relevant
+    with
+    | Ok report -> report
+    | Error detail -> Alcotest.failf "batch delivery failure drain failed: %s" detail
+  in
+  Alcotest.(check int) "delivery failure consumes none" 0 report.consumed;
+  Alcotest.(check int) "both judgments remain" 2 report.remaining;
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error detail -> Alcotest.failf "candidate load failed: %s" detail
+  | Ok candidates ->
+    List.iter
+      (fun (candidate : A.candidate) ->
+         match candidate.status with
+         | A.Judged
+             { last_failure = Some { kind = A.Durable_delivery_unavailable; _ }
+             ; _
+             } ->
+           ()
+         | A.Pending _ | A.Judged _ | A.Consumed _ ->
+           Alcotest.fail "batch delivery failure lost a durable judgment")
+      candidates
+;;
+
 let test_batch_never_mixes_persisted_keeper_contexts () =
   with_temp_base "board-attention-context-cohort" @@ fun base_path ->
   let keeper_name = "sangsu" in
@@ -1020,6 +1115,14 @@ let () =
             "successful drain runs one provider batch per admission"
             `Quick
             test_successful_drain_runs_one_provider_batch_per_admission
+        ; Alcotest.test_case
+            "successful batch uses two candidate-ledger rewrites"
+            `Quick
+            test_successful_batch_uses_two_candidate_ledger_rewrites
+        ; Alcotest.test_case
+            "batch delivery failure preserves all judgments"
+            `Quick
+            test_batch_delivery_failure_preserves_all_judgments
         ; Alcotest.test_case
             "batch never mixes persisted Keeper contexts"
             `Quick

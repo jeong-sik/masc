@@ -6,18 +6,14 @@
 # To add a new entry: run `bash scripts/lint-spawn-bounded.sh`, copy the
 # VIOLATION lines into this file, AND verify that the call site is
 # either:
-#   1. The Bounded_proc helper itself (the canonical bounded primitive), or
-#   2. Wrapped at the call layer in `Eio.Time.with_timeout_exn` +
+#   1. Wrapped at the call layer in `Eio.Time.with_timeout_exn` +
 #      a fresh `Eio.Switch.run`, with the wall-clock budget sourced from
 #      a typed configuration (no hard-coded literal), or
-#   3. Explicitly justified inline with a `(* SPAWN-UNBOUNDED-OK: <reason> *)`
+#   2. Explicitly justified inline with a `(* SPAWN-UNBOUNDED-OK: <reason> *)`
 #      comment on the same line (e.g. boot-time one-shot probes).
 #
 # Removal: an entry SHOULD be removed when the spawn site itself is removed,
 # never when a "we'll wrap it later" excuse appears.
-
-# lib/bounded_proc/bounded_proc.ml:37  — the canonical helper itself.
-lib/bounded_proc/bounded_proc.ml:37
 
 # lib/process/process_eio.ml:559, 593, 634 — `spawn_and_drain_{stdout,both}`
 # and `spawn_and_drain_both_streaming`.

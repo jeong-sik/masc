@@ -691,8 +691,6 @@ lib/session.ml:614
 lib/spawn.ml:122
 lib/spawn.ml:214
 lib/sse.ml:248
-lib/streamable_http.ml:95
-lib/streamable_http.ml:99
 lib/subscriptions.ml:241
 lib/supervisor.ml:171
 lib/telemetry_observe.ml:18

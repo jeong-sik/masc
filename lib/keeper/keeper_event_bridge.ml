@@ -53,8 +53,8 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
      Info, because it is a redundant TEXT rendering of events already carried by
      two authoritative planes: (1) for keeper agents, the keeper hook logs the
      richer "[Keeper] ... tool_call ... outcome=... out_len=" / "[Keeper/...] turn="
-     lines at Info; (2) for every agent, [Event_log.publish] + [Sse.broadcast]
-     (see [prepare_pending_event]) carry the structured stream the dashboard and
+     lines at Info; (2) for every agent, [Sse.broadcast]
+     (see [prepare_pending_event]) carries the structured stream the dashboard and
      REST/SSE subscribers actually consume. Demoting these four high-frequency
      arms removes the Info-level console doubling without losing the data — it
      stays retrievable at Debug and the structured/SSE planes are untouched. This
@@ -525,12 +525,6 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
-    (* P2-2: canonical in-memory event log. OAS events are published here so
-       REST/SSE subscribers and future replay tools have a single ordered
-       stream to consume. The log is bounded (10k events). *)
-    let (_ : Event_log.event_id) =
-      Event_log.publish ~source:"oas_event_bridge" ~kind:(relay_event_type json) json
-    in
     Some { json; attempts = 0; appended = false }
 ;;
 

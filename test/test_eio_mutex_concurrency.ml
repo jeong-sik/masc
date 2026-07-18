@@ -7,7 +7,6 @@
     - Rate_limit (token bucket under contention)
     - Failure_observation (outcome recording under contention)
     - Otel_metric_store (metric increments under contention)
-    - Streamable_http.Session (session CRUD under contention)
     - Client_registry_eio (identity resolution under contention)
 *)
 
@@ -16,7 +15,6 @@ open Alcotest
 module RL = Masc.Rate_limit
 module Observation = Failure_observation
 module Metrics = Masc.Otel_metric_store
-module SH = Masc.Streamable_http
 
 (** {1 Rate Limit Concurrency} *)
 
@@ -100,23 +98,6 @@ let test_otel_metric_store_gauge_concurrent () =
   check (float 0.0001) "gauge total" 250.0
     (Metrics.metric_total "test_concurrent_gauge")
 
-(** {1 Streamable HTTP Session Concurrency} *)
-
-let test_session_concurrent_create_find () =
-  Mirage_crypto_rng_unix.use_default ();
-  let created_ids = Array.make 20 "" in
-  (* Create 20 sessions concurrently *)
-  Eio.Fiber.all (List.init 20 (fun i -> fun () ->
-    let session = SH.Session.create ~transport:SH.Streamable_HTTP in
-    created_ids.(i) <- session.id
-  ));
-  (* All sessions should be findable *)
-  Array.iter (fun id ->
-    check bool "session findable" true (Option.is_some (SH.Session.find id))
-  ) created_ids;
-  (* Cleanup *)
-  Array.iter (fun id -> SH.Session.remove id) created_ids
-
 (** {1 Test Runner} *)
 
 let () =
@@ -136,8 +117,5 @@ let () =
     "Otel_metric_store", [
       test_case "concurrent counter" `Quick test_otel_metric_store_concurrent;
       test_case "concurrent gauge" `Quick test_otel_metric_store_gauge_concurrent;
-    ];
-    "Streamable HTTP Session", [
-      test_case "concurrent create/find" `Quick test_session_concurrent_create_find;
     ];
   ]

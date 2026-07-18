@@ -154,17 +154,6 @@ let autonomy_entries =
       "Vote decay factor";
   ]
 
-let level2_entries =
-  [
-    entry ~default:"0.85" "MASC_DRIFT_THRESHOLD" "Drift detection threshold";
-    entry ~default:"0.4" "MASC_DRIFT_JACCARD_WEIGHT" "Drift Jaccard weight";
-    entry ~default:"0.6" "MASC_DRIFT_COSINE_WEIGHT" "Drift cosine weight";
-    entry ~default:"0.075" "MASC_HEBBIAN_RATE" "Hebbian learning rate";
-    entry ~default:"0.01" "MASC_HEBBIAN_DECAY" "Hebbian decay rate";
-    entry ~default:"100" "MASC_LOCK_WARN_MS"
-      "Lock contention warning threshold (ms)";
-  ]
-
 let dashboard_entries =
   [
     entry ~default:"(none)" "MASC_BENCHMARK_RESULTS_DIR"
@@ -636,7 +625,6 @@ let all_categories () =
        @ keeper_tool_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
-    category "level2" level2_entries;
     category "dashboard" dashboard_entries;
     category "economy" economy_entries;
     category "operations"

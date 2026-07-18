@@ -523,5 +523,3 @@ let log_keeper_exn ~label exn =
     | _ -> "[UNEXPECTED] "
   in
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
-
-let checkpoint_generation_key = "keeper_generation"

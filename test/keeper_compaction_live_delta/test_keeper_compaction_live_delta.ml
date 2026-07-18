@@ -17,7 +17,7 @@ let checkpoint ?(session_id = "trace") ?(agent_name = "keeper")
   Agent_sdk.Context.set_scoped
     context
     Agent_sdk.Context.Session
-    "keeper_generation"
+    Masc.Keeper_checkpoint_store.keeper_generation_context_key
     (`Int generation);
   Agent_sdk.Checkpoint.
     { version = checkpoint_version

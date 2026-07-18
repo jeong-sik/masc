@@ -34,7 +34,7 @@ type instance =
   ; judge : judge
   ; sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
-  ; condition : Eio.Condition.t
+  ; wakeup : unit Eio.Stream.t
   ; mutable pending : lane_signal Key_map.t
   ; mutable active : Key_set.t
   ; mutable lane_failures : string Key_map.t
@@ -106,7 +106,7 @@ let signal_instance instance keeper_name signal =
           instance.pending <- Key_map.add keeper_name signal instance.pending;
           Signaled, true)
   in
-  if notify then Eio.Condition.broadcast instance.condition;
+  if notify then Eio.Stream.add instance.wakeup ();
   result
 ;;
 
@@ -329,7 +329,7 @@ let finish_lane instance keeper_name =
       instance.active <- Key_set.remove keeper_name instance.active;
       not instance.closed)
   in
-  if notify then Eio.Condition.broadcast instance.condition
+  if notify then Eio.Stream.add instance.wakeup ()
 ;;
 
 let record_lane_failure instance keeper_name detail =
@@ -417,9 +417,9 @@ let take_startable instance =
 ;;
 
 let rec run_dispatcher instance =
-  match Eio.Condition.loop_no_mutex instance.condition (fun () -> take_startable instance) with
-  | `Closed -> ()
-  | `Keeper (keeper_name, signal) ->
+  match take_startable instance with
+  | Some `Closed -> ()
+  | Some (`Keeper (keeper_name, signal)) ->
     (match
        Eio.Fiber.fork_promise ~sw:instance.sw (fun () ->
          run_lane instance keeper_name signal)
@@ -428,6 +428,9 @@ let rec run_dispatcher instance =
      | exception exn ->
        finish_lane instance keeper_name;
        raise exn);
+    run_dispatcher instance
+  | None ->
+    Eio.Stream.take instance.wakeup;
     run_dispatcher instance
 ;;
 
@@ -441,7 +444,7 @@ let close_instance instance =
         true))
   in
   ignore (unregister_instance instance : bool);
-  if notify then Eio.Condition.broadcast instance.condition
+  if notify then Eio.Stream.add instance.wakeup ()
 ;;
 
 let production_worker_epoch base_path =
@@ -458,7 +461,7 @@ let start_instance ~sw ~base_path ~worker_epoch ~judge =
     ; judge
     ; sw
     ; mutex = Stdlib.Mutex.create ()
-    ; condition = Eio.Condition.create ()
+    ; wakeup = Eio.Stream.create max_int
     ; pending = Key_map.empty
     ; active = Key_set.empty
     ; lane_failures = Key_map.empty

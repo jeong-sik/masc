@@ -91,7 +91,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.discovery_cache",
     "masc.local_runtime_pool",
     "masc.worker_execution_backend",
-    "masc.worker_runtime_config",
     "masc.worker_execution_spec",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
@@ -112,7 +111,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_id",
     "masc.keeper_terminal_reason",
     "masc.keeper_timing",
-    "masc.keeper_token_count",
     "masc.keeper_sandbox_error",
     "masc.keeper_provider_error_class",
     "masc.keeper_failure_taxonomy",

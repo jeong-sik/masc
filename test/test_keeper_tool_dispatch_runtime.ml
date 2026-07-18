@@ -214,7 +214,6 @@ let test_public_read_rejects_unsupported_range_fields () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name:"Read"
           ~input:
             (`Assoc
@@ -259,7 +258,6 @@ let test_public_read_rejects_offset_without_enrichment () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name:"Read"
           ~input:
             (`Assoc
@@ -551,7 +549,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
       mkdir_p (Filename.concat repo_dir ".git");
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work
           ~name:"Read"
           ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
           ()
@@ -693,7 +691,6 @@ let test_initializing_recovery_isolates_only_publication_writes () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name
            ~input
            ()
@@ -833,7 +830,6 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name
            ~input
            ()
@@ -907,7 +903,6 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~exec_cache:None
            ()
        in
        let masc_result = handler input in
@@ -970,7 +965,6 @@ let test_publication_initialization_crash_is_redacted () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1101,7 +1095,6 @@ let test_publication_reconciliation_evidence_is_redacted () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1164,7 +1157,6 @@ let test_publication_registry_evidence_is_redacted () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1214,7 +1206,6 @@ let test_publication_write_rereads_live_provider_after_initialization () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1241,7 +1232,6 @@ let test_publication_write_rereads_live_provider_after_initialization () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Edit"
            ~input:
              (`Assoc
@@ -1421,7 +1411,6 @@ let test_real_publication_release_failure_preserves_effect_truth () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1689,7 +1678,6 @@ let test_real_directory_release_failure_preserves_effect_truth () =
            ~meta
            ~publication_recovery
            ~ctx_work
-           ~exec_cache:None
            ~name:"Write"
            ~input:
              (`Assoc
@@ -1826,7 +1814,7 @@ let test_tool_search_without_session_searcher_is_unavailable () =
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -1855,7 +1843,7 @@ let test_tool_search_uses_exact_injected_searcher () =
       in
       let result =
         KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None ~search_fn
+          ~config ~meta ~publication_recovery ~ctx_work ~search_fn
           ~name:"keeper_tool_search"
           ~input:(`Assoc [])
           ()
@@ -1882,7 +1870,6 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name
           ~input
           ()
@@ -1961,7 +1948,6 @@ let test_keeper_task_claim_accepts_specific_task_id () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name:"keeper_task_claim"
           ~input:(`Assoc [ "task_id", `String "task-002" ])
           ()
@@ -1999,7 +1985,6 @@ let test_unknown_tool_returns_exact_error () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name:"Glob"
           ~input:(`Assoc [ "pattern", `String "*.ml" ])
           ()
@@ -2037,7 +2022,6 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
               ~meta
               ~publication_recovery
               ~ctx_work
-              ~exec_cache:None
               ~name:"WebSearch"
               ~input:
                 (`Assoc
@@ -2106,7 +2090,6 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
               ~meta
               ~publication_recovery
               ~ctx_work
-              ~exec_cache:None
               ~name:"WebFetch"
               ~input:
                 (`Assoc
@@ -2160,7 +2143,6 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
               ~meta
               ~publication_recovery
               ~ctx_work
-              ~exec_cache:None
               ~name:"WebFetch"
               ~input:(`Assoc [ ("url", `String "http://127.0.0.1:8935/health") ])
               ()
@@ -2198,7 +2180,6 @@ let test_manual_gate_defers_web_tools_before_network () =
                   ~meta
                   ~publication_recovery
                   ~ctx_work
-                  ~exec_cache:None
                   ~name:"WebSearch"
                   ~input:(`Assoc [ "query", `String "manual gate" ])
                   ()
@@ -2209,7 +2190,6 @@ let test_manual_gate_defers_web_tools_before_network () =
                   ~meta
                   ~publication_recovery
                   ~ctx_work
-                  ~exec_cache:None
                   ~name:"WebFetch"
                   ~input:(`Assoc [ "url", `String "http://127.0.0.1:8935/health" ])
                   ()
@@ -2263,7 +2243,6 @@ let test_manual_gate_defers_tool_execute_before_process () =
           ~meta
           ~publication_recovery
           ~ctx_work
-          ~exec_cache:None
           ~name:"tool_execute"
           ~input:
             (`Assoc
@@ -2295,7 +2274,7 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       in
       let run () =
         KET.execute_keeper_tool_call
-          ~config ~meta ~publication_recovery ~ctx_work ~exec_cache:None
+          ~config ~meta ~publication_recovery ~ctx_work
           ~name:"tool_execute" ~input ()
       in
       let outputs = List.init 4 (fun _ -> run ()) in
@@ -2391,7 +2370,6 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
               ~meta
               ~publication_recovery
               ~ctx_snapshot:(make_ctx ())
-              ~exec_cache:None
               ()
           in
           let result =
@@ -2477,7 +2455,6 @@ let execute_registered_probe ~fixture ~name ~make_result =
       ~meta
       ~publication_recovery
       ~ctx_work
-      ~exec_cache:None
       ~name
       ~input:(`Assoc [])
       ())
@@ -2689,29 +2666,6 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
-(* ── Exec cache data structure tests ───────────────────────── *)
-
-let test_exec_cache_stats_json () =
-  let cache = Masc_exec.Exec_cache.create () in
-  let json = Masc_exec.Exec_cache.to_json cache in
-  check int "initial hit_count" 0
-    Yojson.Safe.Util.(member "hit_count" json |> to_int);
-  check int "initial miss_count" 0
-    Yojson.Safe.Util.(member "miss_count" json |> to_int);
-  check int "initial entry_count" 0
-    Yojson.Safe.Util.(member "entry_count" json |> to_int);
-  (* Store an entry and check *)
-  Masc_exec.Exec_cache.store cache ~cmd:"test_cmd" ~exit_code:0
-    ~output:"test output" ~duration_ms:100;
-  let json2 = Masc_exec.Exec_cache.to_json cache in
-  check int "after store entry_count" 1
-    Yojson.Safe.Util.(member "entry_count" json2 |> to_int);
-  (* Lookup triggers a hit *)
-  ignore (Masc_exec.Exec_cache.lookup cache "test_cmd");
-  let json3 = Masc_exec.Exec_cache.to_json cache in
-  check int "after lookup hit_count" 1
-    Yojson.Safe.Util.(member "hit_count" json3 |> to_int)
-
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -2794,8 +2748,5 @@ let () =
         test_catalog_metadata_does_not_infer_oas_descriptors;
       test_case "model-visible aliases do not infer OAS descriptors" `Quick
         test_model_visible_tools_do_not_infer_oas_descriptors;
-    ]);
-    ("exec_cache", [
-      test_case "stats json" `Quick test_exec_cache_stats_json;
     ]);
   ]

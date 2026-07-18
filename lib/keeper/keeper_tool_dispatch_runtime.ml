@@ -116,7 +116,6 @@ let execute_keeper_tool_call_with_outcome
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
-      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
@@ -146,7 +145,6 @@ let execute_keeper_tool_call_with_outcome
                        ; publication_recovery
                        ; ctx_work
                        ; turn_sandbox_factory
-                       ; exec_cache
            ; search_fn = effective_search_fn
            ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
                 caller via labeled ? params.  Callers without Eio
@@ -219,7 +217,6 @@ let execute_keeper_tool_call
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
-      ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -233,7 +230,6 @@ let execute_keeper_tool_call
       ~publication_recovery
       ~ctx_work
                   ?turn_sandbox_factory
-                  ~exec_cache
       ?search_fn
       ~name
       ~input

@@ -1112,22 +1112,6 @@ let add_routes ~sw ~clock router =
                 (Reputation.reputation_to_json rep) reqd)
        ) request reqd)
 
-  (* Activity Feed API *)
-  |> Http.Router.get "/api/v1/activity" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let agent_name = query_param req "agent" in
-         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-         let items =
-           Activity_feed.recent_activity (Mcp_server.workspace_config state)
-             ?agent_name ~limit ()
-         in
-         let json = `Assoc [
-           ("items", `List (List.map Activity_feed.activity_item_to_json items));
-           ("count", `Int (List.length items));
-         ] in
-         Http.Response.json_value json reqd
-       ) request reqd)
-
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->

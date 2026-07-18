@@ -586,16 +586,6 @@ let worker_entries =
       "Local worker heartbeat interval (seconds, clamped >=1)";
   ]
 
-let worker_runtime_entries =
-  [
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_BACKEND"
-      "Worker execution backend (e.g. docker, local); None when unset";
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_DOCKER_IMAGE"
-      "Docker image for worker runtime; None when unset";
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL"
-      "Host MCP base URL for worker runtime; None when unset";
-  ]
-
 let all_categories () =
   [
     category "server"
@@ -630,7 +620,7 @@ let all_categories () =
     category "channel" channel_gate_entries;
     category "process"
       shutdown_entries;
-    category "worker" (worker_entries @ worker_runtime_entries);
+    category "worker" worker_entries;
     category "web_search" web_search_entries;
     category "session" (session_entries @ tempo_entries);
   ]

@@ -16,7 +16,6 @@ include Keeper_workspace_ops_setup
    command history and failure telemetry through Keeper_workspace_ops_setup. *)
 let handle_tool_search_files_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -66,10 +65,9 @@ let handle_tool_search_files_with_outcome
              ]))
 ;;
 
-let handle_tool_search_files ~turn_sandbox_factory ~exec_cache ~config ~meta ~args =
+let handle_tool_search_files ~turn_sandbox_factory ~config ~meta ~args =
   (handle_tool_search_files_with_outcome
      ~turn_sandbox_factory
-     ~exec_cache
      ~config
      ~meta
      ~args).raw_output

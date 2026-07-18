@@ -204,38 +204,3 @@ let session_min_surface_tools =
   ; "masc_heartbeat"
   ]
 ;;
-
-(* ================================================================ *)
-(* Role catalogs — curated subsets for agent role assignment.        *)
-(* These are NOT surfaces; they define what a role *should* see.    *)
-(* Consumers must filter them against the tools actually surfaced   *)
-(* before exposing them to agents.                                 *)
-(* ================================================================ *)
-
-let workspace_role_tools : string list =
-  [ "masc_status"
-  ; "masc_tasks"
-  ; "masc_add_task"
-  ; "masc_broadcast"
-  ; "masc_heartbeat"
-  ; "masc_messages"
-  ; "masc_board_list"
-  ; "masc_board_post"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_post_get"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_get"
-  ; "masc_transition"
-  ]
-;;
-
-let execution_role_tools : string list =
-  [ "masc_heartbeat"
-  ; "masc_transition"
-  ; "masc_broadcast"
-  ; "masc_run_init"
-  ; "masc_run_get"
-  ; "masc_tool_help"
-  ]
-;;

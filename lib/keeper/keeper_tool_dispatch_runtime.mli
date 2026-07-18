@@ -64,7 +64,6 @@ val execute_keeper_tool_call_with_outcome
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -91,7 +90,6 @@ val execute_keeper_tool_call
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> name:string
   -> input:Yojson.Safe.t

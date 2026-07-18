@@ -40,7 +40,6 @@
   (re_export masc.lockfree_atomic)
   (re_export masc.worker_execution_backend)
   (re_export masc.worker_execution_spec)
-  (re_export masc.worker_runtime_config)
   (re_export masc.otel_dispatch_hook)
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
@@ -78,8 +77,6 @@
   ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
   ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
   (re_export masc.dashboard_tla_specs)
-  ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
-  (re_export masc.chronicle_event)
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)

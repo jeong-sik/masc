@@ -63,7 +63,7 @@ let main_result () =
                 match
                   Lib.Worker_runtime.run_worker_oas ~sw
                     ~net:(Eio.Stdenv.net env)
-                    ~workspace_config:None spec ()
+                    spec ()
                 with
                 | Ok run_result ->
                     ( Lib.Worker_runtime_helper_protocol.success_json run_result,

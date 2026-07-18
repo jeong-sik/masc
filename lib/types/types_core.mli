@@ -148,14 +148,6 @@ type task_contract =
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
-  ; evidence_claims : Evidence_claim.t list [@default []]
-        (* RFC-0199 Phase B: typed deterministic completion criteria the
-           harness can check without verifier judgment. Declared by the task
-           author (masc_add_task contract arg), evaluated by
-           Deterministic_evidence_evaluator. Re-introduced with producer +
-           consumer wired (unlike the fan-in-0 required_evidence_typed removed
-           2026-06-03); legacy required_evidence strings are NOT auto-parsed
-           into claims (that would be a substring classifier). *)
   ; links : task_execution_links
         [@default { operation_id = None; session_id = None }]
   }

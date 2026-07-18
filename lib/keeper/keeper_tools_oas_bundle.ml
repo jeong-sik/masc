@@ -41,16 +41,12 @@ let make_tool_bundle
       ()
   : tool_bundle
   =
-  (* Phase B baseline (wise-nibbling-lerdorf plan): timestamp before the
-     bundle assembly work begins; observed at function exit. *)
-  let __t0 = Mtime_clock.now () in
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
      [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
      each tool call site that already knows its [cwd]. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
-  let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
   in
@@ -92,7 +88,6 @@ let make_tool_bundle
                  ~publication_recovery
                  ~ctx_snapshot
                    ?turn_sandbox_factory
-                 ~exec_cache
                  ?search_fn
                  ?clock
                  ?continuation_channel
@@ -128,17 +123,11 @@ let make_tool_bundle
                    input)))
       model_visible_descriptors
   in
-  let bundle =
-      { tools = descriptor_tools
-      ; cleanup =
-          (fun () ->
-            Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
-      }
-  in
-  Otel_metric_hotpath.observe
-    ~metric:Otel_metric_hotpath.metric_oas_make_tool_bundle_sec
-    ~start:__t0;
-  bundle
+  { tools = descriptor_tools
+  ; cleanup =
+      (fun () ->
+        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+  }
 ;;
 
 let make_tools

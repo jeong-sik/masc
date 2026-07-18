@@ -313,10 +313,6 @@ let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
     ~agents_path:(Workspace.agents_dir (Mcp_server.workspace_config state))
 
-let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir (Mcp_server.workspace_config state))
-
-
 (* Startup maintenance extracted to
    [Server_runtime_startup_maintenance] (godfile decomp). *)
 include Server_runtime_startup_maintenance
@@ -353,7 +349,6 @@ let lazy_startup_plan () =
         task_names =
           [
             "restore_sessions";
-            "reconcile_active_agents";
             "keeper_history_migration";
           ];
       };
@@ -543,7 +538,6 @@ let initialize_owner_state_blocking
     loop ());
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
-  Llm_metric_bridge.init ~base_path;
   Log.Server.info
     "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
   Backend.FileSystem.set_mutex_observers
@@ -781,7 +775,6 @@ let start_owner_lazy_tasks ~sw state =
   in
   let task_fn = function
     | "restore_sessions" -> fun () -> restore_persisted_sessions state
-    | "reconcile_active_agents" -> fun () -> reconcile_active_agents_gauge state
     | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
     | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
     | "jsonl_prune" -> fun () -> startup_prune_jsonl state

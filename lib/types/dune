@@ -10,8 +10,6 @@
   ids
   prompt_block_id
   turn_record
-  evidence_claim
-  deterministic_evidence_evaluator
   health_status
   types_core
   types_auth

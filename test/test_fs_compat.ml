@@ -127,6 +127,26 @@ let test_save_file_atomic_overwrites_existing () =
   check string "overwrite succeeded" "new" (Fs_compat.load_file target)
 ;;
 
+let test_save_file_atomic_returns_temp_creation_failure () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let blocked = Filename.concat base "blocked" in
+  let target = Filename.concat blocked "out.json" in
+  Unix.mkdir blocked 0o700;
+  Unix.chmod blocked 0o500;
+  let result =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod blocked 0o700)
+      (fun () -> Fs_compat.save_file_atomic target "new")
+  in
+  match result with
+  | Error message ->
+    check bool "temp creation error names the atomic operation" true
+      (String.starts_with message ~prefix:"save_file_atomic ")
+  | Ok () -> fail "atomic save unexpectedly wrote into a non-writable directory"
+;;
+
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   with_tmp_dir
   @@ fun base ->
@@ -422,6 +442,10 @@ let () =
             "overwrites existing target"
             `Quick
             test_save_file_atomic_overwrites_existing
+        ; test_case
+            "returns temp creation failure"
+            `Quick
+            test_save_file_atomic_returns_temp_creation_failure
         ; test_case
             "temp writer uses canonical shared shape"
             `Quick

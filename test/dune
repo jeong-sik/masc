@@ -60,7 +60,6 @@
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution
-  test_attribution_tagged
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -133,7 +132,6 @@
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
-  test_dashboard_branches
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
@@ -177,7 +175,6 @@
   test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
-  test_keeper_token_count
   test_keeper_behavior_trace
   test_keeper_noop_backoff
   test_keeper_chat_store
@@ -227,7 +224,6 @@
   test_metrics_rotation
   test_tool_error
   test_tool_token
-  test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_surface_post
@@ -254,9 +250,6 @@
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
-  test_chronicle_types
-  test_chronicle_ingest
-  test_chronicle_validate
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -326,16 +319,10 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_cognitive_gravity
-  test_intentional_projection
-  test_chronicle_event
-  test_chronicle_librarian
-  test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
-  test_event_log
   test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
@@ -375,7 +362,6 @@
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution
-  test_attribution_tagged
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -450,7 +436,6 @@
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
-  test_dashboard_branches
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
@@ -494,7 +479,6 @@
   test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
-  test_keeper_token_count
   test_keeper_behavior_trace
   test_keeper_noop_backoff
   test_keeper_chat_store
@@ -544,7 +528,6 @@
   test_metrics_rotation
   test_tool_error
   test_tool_token
-  test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_surface_post
@@ -571,9 +554,6 @@
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
-  test_chronicle_types
-  test_chronicle_ingest
-  test_chronicle_validate
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -647,16 +627,10 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_cognitive_gravity
-  test_intentional_projection
-  test_chronicle_event
-  test_chronicle_librarian
-  test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
-  test_event_log
   test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
@@ -891,7 +865,6 @@
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
-  test_streamable_http
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
@@ -1013,7 +986,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_state_product
   test_tool_result
   test_tool_hooks
   test_sse_external_sub
@@ -1034,8 +1006,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_evidence_claim_schema
-  test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
@@ -1059,7 +1029,6 @@
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
-  test_streamable_http
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
@@ -1180,7 +1149,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_state_product
   test_tool_result
   test_tool_hooks
   test_sse_external_sub
@@ -1201,8 +1169,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_evidence_claim_schema
-  test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
@@ -1283,13 +1249,6 @@
  (name test_goal_loop_broadcast)
  (modules test_goal_loop_broadcast)
  (libraries alcotest masc masc_server masc_test_deps eio_main))
-
-; Focused dashboard nudge feed projection.
-
-(test
- (name test_dashboard_operator_nudges)
- (modules test_dashboard_operator_nudges)
- (libraries masc_test_deps))
 
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
@@ -1457,7 +1416,6 @@
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage
-  test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
@@ -1501,7 +1459,6 @@
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage
-  test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
@@ -1618,8 +1575,6 @@
 ; To add a new test: create test/stanzas/test_name.inc and
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
-
-(include stanzas/test_activity_feed.inc)
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 
@@ -1789,11 +1744,9 @@
 
 (include stanzas/test_http_pages_asset_read.inc)
 
-(include stanzas/test_bounded_proc.inc)
 
 (include stanzas/test_bind_required_guard_counter.inc)
 
-(include stanzas/test_jsonl_atomic.inc)
 
 (include stanzas/test_k2_pipeline_e2e.inc)
 
@@ -2022,10 +1975,6 @@
 
 (include stanzas/test_telemetry_task_transition_10358.inc)
 
-(include stanzas/test_timeout_policy.inc)
-
-(include stanzas/test_timeout_policy_overshoot_counter.inc)
-
 (include stanzas/test_event_bus_subscription_contract.inc)
 
 (include stanzas/test_tool_call_replay_harness.inc)
@@ -2047,11 +1996,6 @@
 (include stanzas/test_hitl_summary_worker.inc)
 
 (include stanzas/test_ws_standalone_lifecycle.inc)
-
-(test
- (name test_dashboard_yjs)
- (modules test_dashboard_yjs)
- (libraries masc_test_deps))
 
 (test
  (name test_graphql_api_coverage)

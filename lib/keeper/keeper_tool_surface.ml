@@ -655,12 +655,12 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             else
               []
           in
-          let cleared_ctx =
-            {
-              wctx with
-              checkpoint = { messages = cleared_messages };
+          let checkpoint =
+            { (Keeper_context_runtime.checkpoint_of_context wctx) with
+              messages = cleared_messages
             }
           in
+          let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
              — the keeper_unified_turn retry loop uses meta.runtime.generation

@@ -372,7 +372,6 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
         Masc.Keeper_context_runtime.create
           ~eio:false
           ~system_prompt:"keeper fusion schema regression"
-          ~max_tokens:4000
       in
       Masc_test_deps.with_publication_recovery_registry
         ~sw

@@ -20,7 +20,6 @@ val log_keeper_exn : label:string -> exn -> unit
 (** Load keeper context from checkpoint for resumption. *)
 val load_context_from_checkpoint :
   trace_id:string ->
-  primary_model_max_tokens:int ->
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 

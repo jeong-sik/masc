@@ -119,13 +119,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_message:env_message_gate
                   ~fallback_token:env_token_gate
               in
-              let primary_max_context =
-                match p.max_context_override_opt with
-                | Some v -> v
-                (* Boundary: Keeper consumes an opaque context budget, not a
-                   provider/model identity. *)
-                | None -> Runtime.default_max_context ()
-              in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
@@ -210,7 +203,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
-          ~max_tokens:primary_max_context
       in
       (* next_generation keys the per-(keeper, trace) counter by the trace_id
          string; episodes live under that same string dir (ensure_dir/of

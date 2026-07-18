@@ -75,7 +75,7 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
     }
   in
   let context =
-    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
+    KC.create ~eio:false ~system_prompt:"system"
     |> fun ctx -> KC.append_many ctx [ user_text "question"; assistant ]
   in
   let checkpoint = KC.checkpoint_of_context context in

@@ -38,21 +38,13 @@ let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
 let oas_context_of_context (ctx : working_context) = ctx.checkpoint.context
 
-let max_tokens_of_context (ctx : working_context) =
-  ctx.max_tokens
-
-let with_max_tokens (ctx : working_context) max_tokens =
-  (* OAS no longer carries a cumulative-token cap on the checkpoint; the
-     working_context [max_tokens] is the per-response output limit only. *)
-  { ctx with max_tokens }
-
 let system_prompt_of_context (ctx : working_context) =
   Option.value ~default:"" ctx.checkpoint.system_prompt
 
 let messages_of_context (ctx : working_context) =
   ctx.checkpoint.messages
 
-let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
+let empty_runtime_checkpoint ~system_prompt ~messages
     ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
   {
     Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
@@ -88,12 +80,12 @@ let message_count (ctx : working_context) =
 let create_oas_context ~eio =
   if eio then Agent_sdk.Context.create () else Agent_sdk.Context.create_sync ()
 
-let create ~eio ~system_prompt ~max_tokens =
+let create ~eio ~system_prompt =
   let context = create_oas_context ~eio in
   let checkpoint =
-    empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
+    empty_runtime_checkpoint ~system_prompt ~messages:[] ~context
   in
-  { checkpoint; max_tokens }
+  { checkpoint }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
@@ -107,13 +99,13 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
   let checkpoint =
     { ctx.checkpoint with system_prompt = Some system_prompt; messages }
   in
-  { ctx with checkpoint }
+  { checkpoint }
 
 let append ctx (msg : Agent_sdk.Types.message) =
   let checkpoint =
     { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
   in
-  { ctx with checkpoint }
+  { checkpoint }
 
 let append_many ctx msgs =
   List.fold_left append ctx msgs
@@ -141,35 +133,11 @@ let serialize_context (ctx : working_context) : string =
       `String
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("max_tokens", `Int (max_tokens_of_context ctx));
   ] in
   Yojson.Safe.to_string json
 
 let serialized_bytes (ctx : working_context) : int =
   String.length (serialize_context ctx)
-
-let deserialize_context ~eio (s : string) ~max_tokens : working_context =
-  let json = Yojson.Safe.from_string s in
-  let system_prompt = (match Json_util.assoc_member_opt "system_prompt" json with Some (`String s) -> s | _ -> "") in
-  let messages =
-    (match Json_util.assoc_member_opt "messages" json with Some (`List l) -> l | _ -> []) |> List.map message_of_json
-  in
-  let context = create_oas_context ~eio in
-  let checkpoint =
-    empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
-  in
-  sync_oas_context
-    { checkpoint; max_tokens }
-
-let context_to_json (ctx : working_context) : Yojson.Safe.t =
-  `Assoc [
-    ( "system_prompt",
-      `String
-        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
-    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
-    ("max_tokens", `Int (max_tokens_of_context ctx));
-  ]
-
 
 let create_session ~session_id ~base_dir =
   let session_dir = Filename.concat base_dir session_id in

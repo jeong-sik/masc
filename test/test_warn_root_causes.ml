@@ -86,7 +86,6 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
       let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -138,7 +137,6 @@ let test_fusion_default_descriptor_is_bundle_visible () =
       let meta = make_meta ~name:"test-fusion-default-descriptor" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -175,7 +173,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
       let config = Workspace.default_config dir in
       let meta = make_meta ~name:"test-complete-tool-bundle" () in
       let ctx_snapshot =
-        Keeper_context_runtime.create ~eio:false ~system_prompt:"test" ~max_tokens:4000
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -234,7 +232,6 @@ let test_missing_current_task_reconciled_before_transition_hint () =
       in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -281,7 +278,6 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
       let meta = make_meta ~name:"test-assignment-bundle" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->

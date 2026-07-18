@@ -76,7 +76,6 @@ let make_meta ?(name = "keeper-completion-trust") () =
 
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-    ~max_tokens:4000
 
 let with_ws name fn =
   let dir = temp_dir name in

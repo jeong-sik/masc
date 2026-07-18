@@ -99,7 +99,6 @@ let test_regular_post_turn_does_not_auto_compact () =
       ~resilience_audit_store:None
       ~resilience_strategy_executor:None
       ~meta
-      ~primary_model_max_tokens:8192
       ~checkpoint:(Some checkpoint)
   in
   match result.checkpoint with
@@ -360,7 +359,6 @@ let test_manual_compaction_serializes_owner_lane () =
       let _, reinjectable =
         Masc.Keeper_context_runtime.load_context_from_checkpoint
           ~trace_id:checkpoint.session_id
-          ~primary_model_max_tokens:8192
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       in
       check int "compacted checkpoint available to same-lane injection" 8

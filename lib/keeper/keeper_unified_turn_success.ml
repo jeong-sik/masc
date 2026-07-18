@@ -16,7 +16,6 @@ let turn_cost result = KUM.estimate_usage_cost_usd result.Keeper_agent_run.usage
 let apply_lifecycle
       ~config
       ~meta
-      ~final_execution
       (result : Keeper_agent_run.run_result)
   =
   let resilience_handles = KCB.post_turn_resilience_handles ~config ~meta in
@@ -25,7 +24,6 @@ let apply_lifecycle
       ~resilience_audit_store:resilience_handles.resilience_audit_store
       ~resilience_strategy_executor:resilience_handles.resilience_strategy_executor
       ~meta
-      ~primary_model_max_tokens:final_execution.KCB.max_context
       ~checkpoint:result.checkpoint
     |> resilience_handles.sync_lifecycle_meta
   in
@@ -519,7 +517,6 @@ let handle
       ~meta
       ~turn_ctx_cell
       ~observation
-      ~final_execution
       ~latency_ms
       ~degraded_retry_applied
       ~degraded_retry_runtime
@@ -532,7 +529,6 @@ let handle
     apply_lifecycle
       ~config
       ~meta
-      ~final_execution
       result
   in
   let updated_meta =

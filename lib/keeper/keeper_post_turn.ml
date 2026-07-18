@@ -379,7 +379,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
     ~(meta : keeper_meta)
-    ~(primary_model_max_tokens : int)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
@@ -427,11 +426,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
         message_count = 0;
       }
   | Some cp ->
-      let ctx =
-        context_of_oas_checkpoint
-          cp
-          ~primary_model_max_tokens
-      in
+      let ctx = context_of_oas_checkpoint cp in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in
@@ -495,7 +490,6 @@ let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
-    ~(primary_model_max_tokens : int)
   : (compaction_recovery, compaction_recovery_error) result
   =
   let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
@@ -527,7 +521,7 @@ let recover_latest_checkpoint_for_compaction
     let turn_generation =
       checkpoint_generation checkpoint ~fallback:meta.runtime.generation
     in
-    let ctx = context_of_oas_checkpoint checkpoint ~primary_model_max_tokens in
+    let ctx = context_of_oas_checkpoint checkpoint in
     let retry_meta =
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta

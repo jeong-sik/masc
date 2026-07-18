@@ -226,7 +226,7 @@ let test_resume_checkpoint_preserves_all_messages_in_order () =
     List.init 130 (fun index -> text_message (Printf.sprintf "message-%03d" index))
   in
   let context =
-    C.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
+    C.create ~eio:false ~system_prompt:"system"
     |> fun context -> C.append_many context messages
   in
   let resumed = C.resume_checkpoint_of_context context in
@@ -262,7 +262,7 @@ let test_resume_checkpoint_preserves_full_tool_result () =
     }
   in
   let context =
-    C.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
+    C.create ~eio:false ~system_prompt:"system"
     |> fun context -> C.append context tool_result
   in
   let resumed = C.resume_checkpoint_of_context context in
@@ -287,7 +287,7 @@ let test_checkpoint_save_load_preserves_exact_messages () =
           text_message (Printf.sprintf "persisted-%03d" index))
       in
       let context =
-        C.create ~eio:true ~system_prompt:"system" ~max_tokens:4096
+        C.create ~eio:true ~system_prompt:"system"
         |> fun context -> C.append_many context messages
       in
       (match
@@ -309,7 +309,6 @@ let test_checkpoint_save_load_preserves_exact_messages () =
       let _, loaded =
         C.load_context_from_checkpoint
           ~trace_id:session_id
-          ~primary_model_max_tokens:4096
           ~base_dir
       in
       match loaded with

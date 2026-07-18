@@ -10,7 +10,7 @@ let token_pool = [ "a"; "Z"; "0"; "é"; "한"; "글"; "🙂" ]
 
 let gen_case =
   let open QCheck.Gen in
-  let* tokens = list_size (int_range 0 64) (oneofl token_pool) in
+  let* tokens = list_size (int_range 0 64) (oneof_list token_pool) in
   let text = String.concat "" tokens in
   let* max_bytes = int_range 0 (String.length text + 4) in
   return (tokens, text, max_bytes)

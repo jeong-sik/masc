@@ -366,86 +366,6 @@ let serialize partitions =
   |> String.concat ""
 ;;
 
-let durable_error_to_string = Fs_compat.durable_append_error_to_string
-
-let read_locked ledger_path =
-  match
-    Fs_compat.update_private_file_durable_locked_result ledger_path (fun content ->
-      None, parse_rows content)
-  with
-  | Private_file_failed error -> Error (durable_error_to_string error)
-  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "%s; descriptor settlement failed: %s"
-         (durable_error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-  | Private_file_succeeded result -> result
-  | Private_file_succeeded_with_cleanup_failure
-      { value = result; cleanup_failure } ->
-    Log.Keeper.error
-      "board attention partition read succeeded with descriptor settlement failure path=%s: %s"
-      ledger_path
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    result
-;;
-
-let load ~base_path ~keeper_name =
-  let* partitions = read_locked (path ~base_path ~keeper_name) in
-  match
-    List.find_opt
-      (fun partition -> not (String.equal partition.keeper_name keeper_name))
-      partitions
-  with
-  | None -> Ok partitions
-  | Some partition ->
-    Error
-      (Printf.sprintf
-         "Board attention partition ledger identity mismatch expected=%s observed=%s partition=%s"
-         keeper_name
-         partition.keeper_name
-         partition.partition_id)
-;;
-
-let update ~base_path ~keeper_name decide =
-  let ledger_path = path ~base_path ~keeper_name in
-  try
-    match
-      Fs_compat.rewrite_private_file_durable_locked_result ledger_path (fun content ->
-        match parse_rows content with
-        | Error detail -> None, Error detail
-        | Ok current ->
-          (match
-             List.find_opt
-               (fun partition -> not (String.equal partition.keeper_name keeper_name))
-               current
-           with
-           | Some partition ->
-             ( None
-             , Error
-                 (Printf.sprintf
-                    "Board attention partition ledger identity mismatch expected=%s observed=%s partition=%s"
-                    keeper_name
-                    partition.keeper_name
-                    partition.partition_id) )
-           | None ->
-          (match decide current with
-           | Error _ as error -> None, error
-           | Ok (changed, updated, result) ->
-             (if changed then Some (serialize updated) else None), Ok result)))
-    with
-    | Error error -> Error error
-    | Ok result -> result
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Error
-      (Printf.sprintf
-         "Board attention partition ledger update failed path=%s: %s"
-         ledger_path
-         (Printexc.to_string exn))
-;;
-
 let framed values =
   values
   |> List.map (fun value -> Printf.sprintf "%d:%s" (String.length value) value)
@@ -461,34 +381,482 @@ let root_id ~keeper_name ~context_key candidate_ids =
   digest_id "ba-root-" ("root" :: keeper_name :: context_key :: candidate_ids)
 ;;
 
+let compare_partition left right =
+  match Float.compare left.created_at right.created_at with
+  | 0 -> String.compare left.partition_id right.partition_id
+  | ordering -> ordering
+;;
+
+module Ready_order = struct
+  type t =
+    { created_at : float
+    ; partition_id : string
+    }
+
+  let compare left right =
+    match Float.compare left.created_at right.created_at with
+    | 0 -> String.compare left.partition_id right.partition_id
+    | ordering -> ordering
+  ;;
+end
+
+module Ready_set = Set.Make (Ready_order)
+
+type state_counts =
+  { ready : int
+  ; running : int
+  ; deferred : int
+  ; completed : int
+  ; settled : int
+  ; blocked : int
+  ; pending_candidates : int
+  }
+
+type view =
+  { cursor : Fs_compat.Private_jsonl_cursor.t
+  ; by_id : t Id_map.t
+  ; ready : Ready_set.t
+  ; completed : Id_set.t
+  ; live_candidate_owner : string Id_map.t
+  ; blocked : t Id_map.t
+  ; deferred : t Id_map.t
+  ; keeper_names : Id_set.t
+  ; counts : state_counts
+  }
+
+let empty_counts : state_counts =
+  { ready = 0
+  ; running = 0
+  ; deferred = 0
+  ; completed = 0
+  ; settled = 0
+  ; blocked = 0
+  ; pending_candidates = 0
+  }
+;;
+
+let empty_view cursor : view =
+  { cursor
+  ; by_id = Id_map.empty
+  ; ready = Ready_set.empty
+  ; completed = Id_set.empty
+  ; live_candidate_owner = Id_map.empty
+  ; blocked = Id_map.empty
+  ; deferred = Id_map.empty
+  ; keeper_names = Id_set.empty
+  ; counts = empty_counts
+  }
+;;
+
 let is_live_leaf = function
   | Ready | Running _ | Deferred _ | Completed _ | Blocked _ -> true
   | Settled _ -> false
 ;;
 
-let validate_live_membership partitions =
+let adjust_counts delta partition (counts : state_counts) =
+  let candidate_delta =
+    if is_live_leaf partition.state
+    then delta * List.length partition.candidate_ids
+    else 0
+  in
+  let counts =
+    { counts with pending_candidates = counts.pending_candidates + candidate_delta }
+  in
+  match partition.state with
+  | Ready -> { counts with ready = counts.ready + delta }
+  | Running _ -> { counts with running = counts.running + delta }
+  | Deferred _ -> { counts with deferred = counts.deferred + delta }
+  | Completed _ -> { counts with completed = counts.completed + delta }
+  | Settled _ -> { counts with settled = counts.settled + delta }
+  | Blocked _ -> { counts with blocked = counts.blocked + delta }
+;;
+
+let ready_order partition : Ready_order.t =
+  { created_at = partition.created_at; partition_id = partition.partition_id }
+;;
+
+let remove_partition_indexes (view : view) partition =
+  let ready =
+    match partition.state with
+    | Ready -> Ready_set.remove (ready_order partition) view.ready
+    | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _ -> view.ready
+  in
+  let completed =
+    match partition.state with
+    | Completed _ -> Id_set.remove partition.partition_id view.completed
+    | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> view.completed
+  in
+  let blocked =
+    match partition.state with
+    | Blocked _ -> Id_map.remove partition.partition_id view.blocked
+    | Ready | Running _ | Deferred _ | Completed _ | Settled _ -> view.blocked
+  in
+  let deferred =
+    match partition.state with
+    | Deferred _ -> Id_map.remove partition.partition_id view.deferred
+    | Ready | Running _ | Completed _ | Settled _ | Blocked _ -> view.deferred
+  in
+  let live_candidate_owner =
+    if is_live_leaf partition.state
+    then
+      List.fold_left
+        (fun owners candidate_id -> Id_map.remove candidate_id owners)
+        view.live_candidate_owner
+        partition.candidate_ids
+    else view.live_candidate_owner
+  in
+  { view with
+    ready
+  ; completed
+  ; blocked
+  ; deferred
+  ; live_candidate_owner
+  ; counts = adjust_counts (-1) partition view.counts
+  }
+;;
+
+let add_live_candidate_owners (view : view) partition =
+  if not (is_live_leaf partition.state)
+  then Ok view.live_candidate_owner
+  else
+    List.fold_left
+      (fun result candidate_id ->
+         let* owners = result in
+         match Id_map.find_opt candidate_id owners with
+         | None -> Ok (Id_map.add candidate_id partition.partition_id owners)
+         | Some existing ->
+           Error
+             (Printf.sprintf
+                "candidate %s belongs to live partitions %s and %s"
+                candidate_id
+                existing
+                partition.partition_id))
+      (Ok view.live_candidate_owner)
+      partition.candidate_ids
+;;
+
+let add_partition_indexes (view : view) partition =
+  let* live_candidate_owner = add_live_candidate_owners view partition in
+  let ready =
+    match partition.state with
+    | Ready -> Ready_set.add (ready_order partition) view.ready
+    | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _ -> view.ready
+  in
+  let completed =
+    match partition.state with
+    | Completed _ -> Id_set.add partition.partition_id view.completed
+    | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> view.completed
+  in
+  let blocked =
+    match partition.state with
+    | Blocked _ -> Id_map.add partition.partition_id partition view.blocked
+    | Ready | Running _ | Deferred _ | Completed _ | Settled _ -> view.blocked
+  in
+  let deferred =
+    match partition.state with
+    | Deferred _ -> Id_map.add partition.partition_id partition view.deferred
+    | Ready | Running _ | Completed _ | Settled _ | Blocked _ -> view.deferred
+  in
+  Ok
+    { view with
+      by_id = Id_map.add partition.partition_id partition view.by_id
+    ; ready
+    ; completed
+    ; live_candidate_owner
+    ; blocked
+    ; deferred
+    ; keeper_names = Id_set.add partition.keeper_name view.keeper_names
+    ; counts = adjust_counts 1 partition view.counts
+    }
+;;
+
+let same_partition_identity left right =
+  String.equal left.partition_id right.partition_id
+  && String.equal left.keeper_name right.keeper_name
+  && String.equal left.context_key right.context_key
+  && left.candidate_ids = right.candidate_ids
+  && Float.equal left.created_at right.created_at
+;;
+
+let legal_transition previous next =
+  match previous, next with
+  | Ready, Running _ -> true
+  | Running _, (Ready | Completed _ | Deferred _ | Blocked _) -> true
+  | Deferred _, Ready -> true
+  | Completed _, Settled _ -> true
+  | ( Ready
+    , (Ready | Deferred _ | Completed _ | Settled _ | Blocked _) )
+  | ( Running _
+    , (Running _ | Settled _) )
+  | ( Deferred _
+    , (Running _ | Deferred _ | Completed _ | Settled _ | Blocked _) )
+  | ( Completed _
+    , (Ready | Running _ | Deferred _ | Completed _ | Blocked _) )
+  | ( Settled _
+    , (Ready | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _) )
+  | ( Blocked _
+    , (Ready | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _) ) ->
+    false
+;;
+
+let validate_root_identity partition =
+  let expected =
+    root_id
+      ~keeper_name:partition.keeper_name
+      ~context_key:partition.context_key
+      partition.candidate_ids
+  in
+  if String.equal expected partition.partition_id
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "partition root identity mismatch expected=%s observed=%s"
+         expected
+         partition.partition_id)
+;;
+
+type failure_disposition =
+  | Defer_failure
+  | Block_failure
+
+let failure_disposition = function
+  | Candidate.Partition_membership_conflict
+    | Candidate.Durable_delivery_unavailable -> Block_failure
+  | Candidate.Runtime_configuration_unavailable
+    | Candidate.Prompt_contract_unavailable
+    | Candidate.Provider_unavailable
+    | Candidate.Response_contract_unavailable
+    | Candidate.Durable_candidate_storage_unavailable -> Defer_failure
+;;
+
+let validate_state_payload partition =
+  match partition.state with
+  | Ready | Running _ | Settled _ -> Ok ()
+  | Deferred { failure; _ } ->
+    (match failure_disposition failure.Candidate.kind with
+     | Defer_failure -> Ok ()
+     | Block_failure ->
+       Error
+         (Printf.sprintf
+            "partition %s defers terminal failure kind %s"
+            partition.partition_id
+            (Candidate.retryable_failure_kind_to_string failure.kind)))
+  | Blocked { failure; _ } ->
+    (match failure_disposition failure.Candidate.kind with
+     | Block_failure -> Ok ()
+     | Defer_failure ->
+       Error
+         (Printf.sprintf
+            "partition %s blocks retryable failure kind %s"
+            partition.partition_id
+            (Candidate.retryable_failure_kind_to_string failure.kind)))
+  | Completed { items; _ } ->
+    let* returned_ids =
+      List.fold_left
+        (fun result item ->
+           let* ids = result in
+           if Id_set.mem item.candidate_id ids
+           then
+             Error
+               (Printf.sprintf
+                  "partition %s completed payload duplicates candidate %s"
+                  partition.partition_id
+                  item.candidate_id)
+           else Ok (Id_set.add item.candidate_id ids))
+        (Ok Id_set.empty)
+        items
+    in
+    let requested_ids =
+      List.fold_left
+        (fun ids candidate_id -> Id_set.add candidate_id ids)
+        Id_set.empty
+        partition.candidate_ids
+    in
+    if not (Id_set.equal requested_ids returned_ids)
+    then
+      let missing = Id_set.diff requested_ids returned_ids |> Id_set.elements in
+      let unknown = Id_set.diff returned_ids requested_ids |> Id_set.elements in
+      Error
+        (Printf.sprintf
+           "partition %s completed payload identity mismatch missing=[%s] unknown=[%s]"
+           partition.partition_id
+           (String.concat "," missing)
+           (String.concat "," unknown))
+    else
+      let ordered_ids = List.map (fun item -> item.candidate_id) items in
+      if ordered_ids = partition.candidate_ids
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "partition %s completed payload order differs from immutable candidate order"
+             partition.partition_id)
+;;
+
+let apply_row (view : view) partition =
+  let* () = validate_root_identity partition in
+  let* () = validate_state_payload partition in
+  match Id_map.find_opt partition.partition_id view.by_id with
+  | None -> add_partition_indexes view partition
+  | Some previous ->
+    if not (same_partition_identity previous partition)
+    then
+      Error
+        (Printf.sprintf
+           "partition %s changed immutable identity"
+           partition.partition_id)
+    else if previous = partition
+    then Ok view
+    else if not (legal_transition previous.state partition.state)
+    then
+      Error
+        (Printf.sprintf
+           "partition %s illegal transition %s -> %s"
+           partition.partition_id
+           (state_to_string previous.state)
+           (state_to_string partition.state))
+    else
+      let view = remove_partition_indexes view previous in
+      add_partition_indexes view partition
+;;
+
+let apply_rows view rows =
   List.fold_left
     (fun result partition ->
-       let* owners = result in
-       if not (is_live_leaf partition.state)
-       then Ok owners
-       else
-         List.fold_left
-           (fun result candidate_id ->
-              let* owners = result in
-              match Id_map.find_opt candidate_id owners with
-              | None -> Ok (Id_map.add candidate_id partition.partition_id owners)
-              | Some existing ->
-                Error
-                  (Printf.sprintf
-                     "candidate %s belongs to live partitions %s and %s"
-                     candidate_id
-                     existing
-                     partition.partition_id))
-           (Ok owners)
-           partition.candidate_ids)
-    (Ok Id_map.empty)
-    partitions
+       let* view = result in
+       apply_row view partition)
+    (Ok view)
+    rows
+;;
+
+let view_partitions (view : view) =
+  view.by_id
+  |> Id_map.bindings
+  |> List.map snd
+  |> List.sort compare_partition
+;;
+
+type cache_entry =
+  { cached : view option Atomic.t
+  ; mutation_mutex : Stdlib.Mutex.t
+  }
+
+let cache_registry : (string, cache_entry) Hashtbl.t = Hashtbl.create 32
+let cache_registry_mutex = Stdlib.Mutex.create ()
+
+let cache_entry ledger_path =
+  Stdlib.Mutex.protect cache_registry_mutex (fun () ->
+    match Hashtbl.find_opt cache_registry ledger_path with
+    | Some entry -> entry
+    | None ->
+      let entry =
+        { cached = Atomic.make None; mutation_mutex = Stdlib.Mutex.create () }
+      in
+      Hashtbl.add cache_registry ledger_path entry;
+      entry)
+;;
+
+let run_blocking label operation =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> Eio_unix.run_in_systhread ~label operation
+  | exception Effect.Unhandled _ -> operation ()
+;;
+
+let store_error error = Fs_compat.private_jsonl_transaction_error_to_string error
+
+let invalidate_cached entry observed =
+  (* A failed CAS means another reader or the sole mutation lane already
+     published a newer durable cursor; that newer cache owns the slot. *)
+  ignore (Atomic.compare_and_set entry.cached observed None : bool)
+;;
+
+let publish_cached entry observed view =
+  (* The returned [view] is still an exact durable snapshot when publication
+     loses this race. Cache publication is an optimization, never the SSOT. *)
+  ignore (Atomic.compare_and_set entry.cached observed (Some view) : bool)
+;;
+
+let read_view_blocking ledger_path =
+  let entry = cache_entry ledger_path in
+  let observed = Atomic.get entry.cached in
+  let after = Option.map (fun view -> view.cursor) observed in
+  match Fs_compat.read_private_jsonl_durable_locked_result ledger_path ~after with
+  | Error error ->
+    invalidate_cached entry observed;
+    Error (store_error error)
+  | Ok snapshot ->
+    let* rows = parse_rows snapshot.bytes in
+    let base =
+      match observed with
+      | Some view -> view
+      | None -> empty_view snapshot.cursor
+    in
+    let* view = apply_rows base rows in
+    let view = { view with cursor = snapshot.cursor } in
+    publish_cached entry observed view;
+    Ok view
+;;
+
+let read_view ledger_path =
+  run_blocking "board-attention-partition-read" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      read_view_blocking ledger_path))
+;;
+
+let validate_keeper_identity ~keeper_name view =
+  match
+    Id_map.fold
+      (fun _ partition mismatch ->
+         match mismatch with
+         | Some _ -> mismatch
+         | None ->
+           if String.equal partition.keeper_name keeper_name
+           then None
+           else Some partition)
+      view.by_id
+      None
+  with
+  | None -> Ok ()
+  | Some partition ->
+    Error
+      (Printf.sprintf
+         "Board attention partition ledger identity mismatch expected=%s observed=%s partition=%s"
+         keeper_name
+         partition.keeper_name
+         partition.partition_id)
+;;
+
+let load ~base_path ~keeper_name =
+  let* view = read_view (path ~base_path ~keeper_name) in
+  let* () = validate_keeper_identity ~keeper_name view in
+  Ok (view_partitions view)
+;;
+
+let update ~base_path ~keeper_name decide =
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-update" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* view = read_view_blocking ledger_path in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let* rows, result = decide view in
+      match rows with
+      | [] -> Ok result
+      | _ :: _ ->
+        let* updated = apply_rows view rows in
+        let suffix = serialize rows in
+        (match
+           Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+             ledger_path
+             ~expected:view.cursor
+             suffix
+         with
+         | Error error -> Error (store_error error)
+         | Ok cursor ->
+           Atomic.set entry.cached (Some { updated with cursor });
+           Ok result)))
 ;;
 
 let compare_candidate (left : Candidate.candidate) (right : Candidate.candidate) =
@@ -498,129 +866,124 @@ let compare_candidate (left : Candidate.candidate) (right : Candidate.candidate)
 ;;
 
 let ensure_roots ~base_path ~keeper_name candidates =
-  update ~base_path ~keeper_name (fun current ->
-    let* owners = validate_live_membership current in
-    let existing_by_id =
-      List.fold_left
-        (fun partitions partition ->
-           Id_map.add partition.partition_id partition partitions)
-        Id_map.empty
-        current
-    in
+  update ~base_path ~keeper_name (fun view ->
     let unassigned =
       candidates
       |> List.filter (fun candidate ->
         match candidate.Candidate.status with
-        | Candidate.Pending _ -> not (Id_map.mem candidate.candidate_id owners)
+        | Candidate.Pending _ ->
+          not (Id_map.mem candidate.candidate_id view.live_candidate_owner)
         | Candidate.Judged _ | Candidate.Consumed _ -> false)
       |> List.sort compare_candidate
     in
-    let* roots =
+    let* roots, _new_ids =
       List.fold_left
         (fun result candidate ->
-              let* roots = result in
-              let* context_key = Candidate.keeper_context_key candidate in
-              let candidate_ids = [ candidate.Candidate.candidate_id ] in
-              let partition_id = root_id ~keeper_name ~context_key candidate_ids in
-              (match Id_map.find_opt partition_id existing_by_id with
-               | Some historical
-                 when String.equal historical.keeper_name keeper_name
-                      && String.equal historical.context_key context_key
-                      && historical.candidate_ids = candidate_ids ->
-                 Ok roots
-               | Some _ ->
-                 Error
-                   (Printf.sprintf
-                      "new pending cohort collides with existing partition %s"
-                      partition_id)
-               | None ->
-                 Ok
-                   ({ partition_id
-                    ; keeper_name
-                    ; context_key
-                    ; candidate_ids
-                    ; created_at = candidate.recorded_at
-                    ; state = Ready
-                    }
-                    :: roots)))
-        (Ok [])
+           let* roots, new_ids = result in
+           let* context_key = Candidate.keeper_context_key candidate in
+           let candidate_ids = [ candidate.Candidate.candidate_id ] in
+           let partition_id = root_id ~keeper_name ~context_key candidate_ids in
+           match Id_map.find_opt partition_id view.by_id with
+           | Some historical
+             when String.equal historical.keeper_name keeper_name
+                  && String.equal historical.context_key context_key
+                  && historical.candidate_ids = candidate_ids ->
+             Ok (roots, new_ids)
+           | Some _ ->
+             Error
+               (Printf.sprintf
+                  "new pending cohort collides with existing partition %s"
+                  partition_id)
+           | None when Id_set.mem partition_id new_ids ->
+             Error
+               (Printf.sprintf
+                  "new pending cohort duplicates partition %s"
+                  partition_id)
+           | None ->
+             Ok
+               ( { partition_id
+                 ; keeper_name
+                 ; context_key
+                 ; candidate_ids
+                 ; created_at = candidate.recorded_at
+                 ; state = Ready
+                 }
+                 :: roots
+               , Id_set.add partition_id new_ids ))
+        (Ok ([], Id_set.empty))
         unassigned
-      |> Result.map List.rev
+      |> Result.map (fun (roots, new_ids) -> List.rev roots, new_ids)
     in
-    match roots with
-    | [] -> Ok (false, current, current)
-    | _ :: _ ->
-      let updated = current @ roots in
-      Ok (true, updated, updated))
+    Ok (roots, roots))
 ;;
 
 let recover_for_process_start ~base_path ~keeper_name =
-  update ~base_path ~keeper_name (fun current ->
-    let recovered, changed, updated =
-      List.fold_left
-        (fun (recovered, changed, updated) partition ->
-           match partition.state with
-           | Running _ | Deferred _ ->
-             recovered + 1, true, { partition with state = Ready } :: updated
-           | Ready | Completed _ | Settled _ | Blocked _ ->
-             recovered, changed, partition :: updated)
-        (0, false, [])
-        current
-    in
-    Ok (changed, List.rev updated, recovered))
-;;
-
-let compare_partition left right =
-  match Float.compare left.created_at right.created_at with
-  | 0 -> String.compare left.partition_id right.partition_id
-  | ordering -> ordering
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-process-start" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      match Fs_compat.read_private_jsonl_durable_locked_result ledger_path ~after:None with
+      | Error error -> Error (store_error error)
+      | Ok snapshot ->
+        let* rows = parse_rows snapshot.bytes in
+        let* current = apply_rows (empty_view snapshot.cursor) rows in
+        let* () = validate_keeper_identity ~keeper_name current in
+        let recovered, latest =
+          view_partitions current
+          |> List.fold_left
+               (fun (recovered, latest) partition ->
+                  match partition.state with
+                  | Running _ | Deferred _ ->
+                    recovered + 1, { partition with state = Ready } :: latest
+                  | Ready | Completed _ | Settled _ | Blocked _ ->
+                    recovered, partition :: latest)
+               (0, [])
+        in
+        let latest = List.rev latest in
+        let canonical = serialize latest in
+        if String.equal canonical snapshot.bytes
+        then (
+          Atomic.set entry.cached (Some current);
+          Ok recovered)
+        else
+          (match
+             Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+               ledger_path
+               ~expected:snapshot.cursor
+               canonical
+           with
+           | Error error -> Error (store_error error)
+           | Ok cursor ->
+             let* compacted = apply_rows (empty_view cursor) latest in
+             Atomic.set entry.cached (Some compacted);
+             Ok recovered)))
 ;;
 
 let claim_next ~now ~worker_epoch ~base_path ~keeper_name =
-  update ~base_path ~keeper_name (fun current ->
-    let ready =
-      current
-      |> List.filter (fun partition -> partition.state = Ready)
-      |> List.sort compare_partition
-    in
-    match ready with
-    | [] -> Ok (false, current, None)
-    | selected :: _ ->
-      let claimed =
-        { selected with state = Running { worker_epoch; started_at = now } }
-      in
-      let updated =
-        List.map
-          (fun partition ->
-             if String.equal partition.partition_id selected.partition_id
-             then claimed
-             else partition)
-          current
-      in
-      Ok (true, updated, Some claimed))
+  update ~base_path ~keeper_name (fun view ->
+    match Ready_set.min_elt_opt view.ready with
+    | None -> Ok ([], None)
+    | Some selected_order ->
+      (match Id_map.find_opt selected_order.partition_id view.by_id with
+       | None ->
+         Error
+           ("ready index lost partition " ^ selected_order.partition_id)
+       | Some selected ->
+         let claimed =
+           { selected with state = Running { worker_epoch; started_at = now } }
+         in
+         Ok ([ claimed ], Some claimed)))
 ;;
 
 let recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition =
-  update ~base_path ~keeper_name:partition.keeper_name (fun current ->
-    match
-      List.find_opt
-        (fun persisted -> String.equal persisted.partition_id partition.partition_id)
-        current
-    with
+  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
+    match Id_map.find_opt partition.partition_id view.by_id with
     | None -> Error ("partition not found during claim recovery: " ^ partition.partition_id)
     | Some persisted ->
       (match persisted.state with
        | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
          let released = { persisted with state = Ready } in
-         let updated =
-           List.map
-             (fun current_partition ->
-                if String.equal current_partition.partition_id released.partition_id
-                then released
-                else current_partition)
-             current
-         in
-         Ok (true, updated, Claim_released released)
+         Ok ([ released ], Claim_released released)
        | Running running ->
          Error
            (Printf.sprintf
@@ -628,7 +991,7 @@ let recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition =
               partition.partition_id
               (Worker_epoch.to_string running.worker_epoch))
        | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
-         Ok (false, current, Claim_already_transitioned persisted)))
+         Ok ([], Claim_already_transitioned persisted)))
 ;;
 
 let requested_ids partition =
@@ -674,12 +1037,8 @@ let ordered_completed_items partition items =
     |> Result.map List.rev
 ;;
 
-let with_running_partition ~worker_epoch ~partition current f =
-  match
-    List.find_opt
-      (fun candidate -> String.equal candidate.partition_id partition.partition_id)
-      current
-  with
+let with_running_partition ~worker_epoch ~partition view f =
+  match Id_map.find_opt partition.partition_id view.by_id with
   | None -> Error ("partition not found: " ^ partition.partition_id)
   | Some persisted ->
     (match persisted.state with
@@ -699,55 +1058,44 @@ let with_running_partition ~worker_epoch ~partition current f =
             (state_to_string persisted.state)))
 ;;
 
-let replace_partition current updated_partition =
-  List.map
-    (fun partition ->
-       if String.equal partition.partition_id updated_partition.partition_id
-       then updated_partition
-       else partition)
-    current
-;;
-
 let complete ~now ~worker_epoch ~base_path ~partition ~items =
   let* items = ordered_completed_items partition items in
-  update ~base_path ~keeper_name:partition.keeper_name (fun current ->
-    with_running_partition ~worker_epoch ~partition current (fun persisted ->
+  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
+    with_running_partition ~worker_epoch ~partition view (fun persisted ->
       let completed = { persisted with state = Completed { items; completed_at = now } } in
-      Ok (true, replace_partition current completed, Partition_completed completed)))
+      Ok ([ completed ], Partition_completed completed)))
 ;;
 
 let fail ~now ~worker_epoch ~base_path ~partition failure =
-  update ~base_path ~keeper_name:partition.keeper_name (fun current ->
-    with_running_partition ~worker_epoch ~partition current (fun persisted ->
-      match failure.Candidate.kind with
-      | Candidate.Partition_membership_conflict
-      | Candidate.Durable_delivery_unavailable ->
+  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
+    with_running_partition ~worker_epoch ~partition view (fun persisted ->
+      match failure_disposition failure.Candidate.kind with
+      | Block_failure ->
         let blocked = { persisted with state = Blocked { failure; blocked_at = now } } in
-        Ok (true, replace_partition current blocked, Partition_blocked blocked)
-      | Candidate.Runtime_configuration_unavailable
-        | Candidate.Prompt_contract_unavailable
-        | Candidate.Provider_unavailable
-        | Candidate.Response_contract_unavailable
-        | Candidate.Durable_candidate_storage_unavailable ->
+        Ok ([ blocked ], Partition_blocked blocked)
+      | Defer_failure ->
         let deferred =
           { persisted with state = Deferred { failure; deferred_at = now } }
         in
-        Ok (true, replace_partition current deferred, Partition_deferred deferred)))
+        Ok ([ deferred ], Partition_deferred deferred)))
 ;;
 
 let completed ~base_path ~keeper_name =
-  let* partitions = load ~base_path ~keeper_name in
-  Ok
-    (partitions
-     |> List.filter (fun partition ->
-       match partition.state with
-       | Completed _ -> true
-       | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> false)
-     |> List.sort compare_partition)
+  let* view = read_view (path ~base_path ~keeper_name) in
+  let* () = validate_keeper_identity ~keeper_name view in
+  Id_set.fold
+    (fun partition_id result ->
+       let* completed = result in
+       match Id_map.find_opt partition_id view.by_id with
+       | Some partition -> Ok (partition :: completed)
+       | None -> Error ("completed index lost partition " ^ partition_id))
+    view.completed
+    (Ok [])
+  |> Result.map (List.sort compare_partition)
 ;;
 
 let settle_many ~now ~base_path ~keeper_name ~partition_ids =
-  let* requested =
+  let* (_requested : Id_set.t) =
     List.fold_left
       (fun result partition_id ->
          let* ids = result in
@@ -757,64 +1105,28 @@ let settle_many ~now ~base_path ~keeper_name ~partition_ids =
       (Ok Id_set.empty)
       partition_ids
   in
-  update ~base_path ~keeper_name (fun current ->
-    let* selected =
+  update ~base_path ~keeper_name (fun view ->
+    let* rows, settled =
       List.fold_left
         (fun result partition_id ->
-           let* selected = result in
-           match
-             List.find_opt
-               (fun partition -> String.equal partition.partition_id partition_id)
-               current
-           with
+           let* rows, settled = result in
+           match Id_map.find_opt partition_id view.by_id with
            | None -> Error ("partition settlement target not found: " ^ partition_id)
-           | Some ({ state = Completed _; _ } as partition)
-           | Some ({ state = Settled _; _ } as partition) -> Ok (partition :: selected)
+           | Some ({ state = Completed _; _ } as partition) ->
+             let partition = { partition with state = Settled { settled_at = now } } in
+             Ok (partition :: rows, partition :: settled)
+           | Some ({ state = Settled _; _ } as partition) ->
+             Ok (rows, partition :: settled)
            | Some partition ->
              Error
                (Printf.sprintf
                   "partition %s cannot settle from %s"
                   partition_id
                   (state_to_string partition.state)))
-        (Ok [])
+        (Ok ([], []))
         partition_ids
-      |> Result.map List.rev
     in
-    let updated =
-      List.map
-        (fun partition ->
-           if Id_set.mem partition.partition_id requested
-           then
-             match partition.state with
-             | Completed _ -> { partition with state = Settled { settled_at = now } }
-             | Settled _ -> partition
-             | Ready | Running _ | Deferred _ | Blocked _ -> partition
-           else partition)
-        current
-    in
-    let settled =
-      List.map
-        (fun selected_partition ->
-           match
-             List.find_opt
-               (fun partition ->
-                  String.equal partition.partition_id selected_partition.partition_id)
-               updated
-           with
-           | Some partition -> partition
-           | None -> selected_partition)
-        selected
-    in
-    let changed =
-      List.exists
-        (fun partition ->
-           Id_set.mem partition.partition_id requested
-           && match partition.state with
-              | Completed _ -> true
-              | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> false)
-        current
-    in
-    Ok (changed, updated, settled))
+    Ok (List.rev rows, List.rev settled))
 ;;
 
 let failure_detail_json partition failure timestamp_name timestamp =
@@ -836,9 +1148,23 @@ type ledger_read_error =
 
 type fleet_summary =
   { ledger_count : int
-  ; partitions : t list
+  ; keeper_names : Id_set.t
+  ; counts : state_counts
+  ; blocked : t list
+  ; deferred : t list
   ; read_errors : ledger_read_error list
   }
+
+let add_counts (left : state_counts) (right : state_counts) : state_counts =
+  { ready = left.ready + right.ready
+  ; running = left.running + right.running
+  ; deferred = left.deferred + right.deferred
+  ; completed = left.completed + right.completed
+  ; settled = left.settled + right.settled
+  ; blocked = left.blocked + right.blocked
+  ; pending_candidates = left.pending_candidates + right.pending_candidates
+  }
+;;
 
 let fleet_summary ~base_path =
   let directory = partition_dir base_path in
@@ -868,80 +1194,78 @@ let fleet_summary ~base_path =
           }
         ] )
   in
-  let partitions, read_errors =
+  let counts, keeper_names, blocked, deferred, read_errors =
     List.fold_left
-      (fun (partitions, errors) ledger_path ->
-         match read_locked ledger_path with
-         | Ok rows ->
+      (fun (counts, keeper_names, blocked, deferred, errors) ledger_path ->
+         match read_view ledger_path with
+         | Ok view ->
            let ledger_segment =
              ledger_path
              |> Filename.basename
              |> fun name -> Filename.chop_suffix name ".jsonl"
            in
            (match
-              List.find_opt
-                (fun partition ->
-                   let expected_segment =
-                     Workspace_utils_backend_setup.sanitize_namespace_segment
-                       partition.keeper_name
-                   in
-                   not (String.equal ledger_segment expected_segment))
-                rows
+              view.keeper_names
+              |> Id_set.elements
+              |> List.find_opt (fun keeper_name ->
+                let expected_segment =
+                  Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+                in
+                not (String.equal ledger_segment expected_segment))
             with
-            | None -> List.rev_append rows partitions, errors
-            | Some partition ->
-              ( partitions
+            | None ->
+              ( add_counts counts view.counts
+              , Id_set.union keeper_names view.keeper_names
+              , List.rev_append (Id_map.bindings view.blocked |> List.map snd) blocked
+              , List.rev_append (Id_map.bindings view.deferred |> List.map snd) deferred
+              , errors )
+            | Some keeper_name ->
+              ( counts
+              , keeper_names
+              , blocked
+              , deferred
               , { ledger_path
                 ; detail =
                     Printf.sprintf
-                      "partition path identity mismatch keeper=%s partition=%s"
-                      partition.keeper_name
-                      partition.partition_id
+                      "partition path identity mismatch keeper=%s"
+                      keeper_name
                 }
                 :: errors ))
          | Error detail ->
-           ( partitions
+           ( counts
+           , keeper_names
+           , blocked
+           , deferred
            , { ledger_path; detail }
              :: errors ))
-      ([], discovery_errors)
+      (empty_counts, Id_set.empty, [], [], discovery_errors)
       ledger_paths
   in
   { ledger_count = List.length ledger_paths
-  ; partitions = List.rev partitions
+  ; keeper_names
+  ; counts
+  ; blocked = List.rev blocked
+  ; deferred = List.rev deferred
   ; read_errors = List.rev read_errors
   }
 ;;
 
-let count_state summary predicate =
-  List.fold_left
-    (fun count partition -> if predicate partition.state then count + 1 else count)
-    0
-    summary.partitions
+let pending_candidate_count (summary : fleet_summary) =
+  summary.counts.pending_candidates
 ;;
 
-let pending_candidate_count summary =
-  List.fold_left
-    (fun count partition ->
-       match partition.state with
-       | Ready | Running _ | Deferred _ | Completed _ | Blocked _ ->
-         count + List.length partition.candidate_ids
-       | Settled _ -> count)
-    0
-    summary.partitions
-;;
-
-let status_reasons summary =
+let status_reasons (summary : fleet_summary) =
   []
   |> (fun reasons ->
-    if count_state summary (function Blocked _ -> true | _ -> false) > 0
+    if summary.counts.blocked > 0
     then "blocked_partitions" :: reasons
     else reasons)
   |> (fun reasons ->
-    if count_state summary (function Deferred _ -> true | _ -> false) > 0
+    if summary.counts.deferred > 0
     then "deferred_partitions" :: reasons
     else reasons)
   |> (fun reasons ->
-    if count_state summary (function Completed _ -> true | _ -> false) > 0
+    if summary.counts.completed > 0
     then "completed_delivery_pending" :: reasons
     else reasons)
   |> (fun reasons ->
@@ -949,7 +1273,9 @@ let status_reasons summary =
   |> List.rev
 ;;
 
-let operator_action_required summary = status_reasons summary <> []
+let operator_action_required (summary : fleet_summary) =
+  status_reasons summary <> []
+;;
 
 let ledger_read_error_to_yojson error =
   `Assoc
@@ -960,55 +1286,53 @@ let ledger_read_error_to_yojson error =
 
 let fleet_summary_schema = "masc.keeper_board_attention_partitions.fleet_summary.v1"
 
-let fleet_summary_detail_fields summary =
-  let count_state predicate =
-    List.fold_left
-      (fun count partition -> if predicate partition.state then count + 1 else count)
-      0
-      summary.partitions
-  in
-  let ready_count = count_state (function Ready -> true | _ -> false) in
-  let running_count = count_state (function Running _ -> true | _ -> false) in
-  let deferred_count = count_state (function Deferred _ -> true | _ -> false) in
-  let completed_count = count_state (function Completed _ -> true | _ -> false) in
-  let settled_count = count_state (function Settled _ -> true | _ -> false) in
-  let blocked_count = count_state (function Blocked _ -> true | _ -> false) in
+let fleet_summary_detail_fields (summary : fleet_summary) =
   let pending_candidate_count = pending_candidate_count summary in
-  let blocked, deferred =
-    List.fold_left
-      (fun (blocked, deferred) partition ->
+  let blocked =
+    List.map
+      (fun partition ->
          match partition.state with
          | Blocked { failure; blocked_at } ->
-           failure_detail_json partition failure "blocked_at" blocked_at :: blocked,
-           deferred
+           failure_detail_json partition failure "blocked_at" blocked_at
+         | Ready | Running _ | Deferred _ | Completed _ | Settled _ ->
+           invalid_arg "blocked partition index contains a non-blocked state")
+      summary.blocked
+  in
+  let deferred =
+    List.map
+      (fun partition ->
+         match partition.state with
          | Deferred { failure; deferred_at } ->
-           blocked,
-           failure_detail_json partition failure "deferred_at" deferred_at :: deferred
-         | Ready | Running _ | Completed _ | Settled _ -> blocked, deferred)
-      ([], [])
-      summary.partitions
+           failure_detail_json partition failure "deferred_at" deferred_at
+         | Ready | Running _ | Completed _ | Settled _ | Blocked _ ->
+           invalid_arg "deferred partition index contains a non-deferred state")
+      summary.deferred
   in
   let read_error_count = List.length summary.read_errors in
-  let keeper_names =
-    summary.partitions
-    |> List.map (fun partition -> partition.keeper_name)
-    |> List.sort_uniq String.compare
+  let keeper_names = Id_set.elements summary.keeper_names in
+  let partition_count =
+    summary.counts.ready
+    + summary.counts.running
+    + summary.counts.deferred
+    + summary.counts.completed
+    + summary.counts.settled
+    + summary.counts.blocked
   in
   [ "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", string_list_to_yojson keeper_names
     ; "ledger_count", `Int summary.ledger_count
-    ; "partition_count", `Int (List.length summary.partitions)
+    ; "partition_count", `Int partition_count
     ; "pending_candidate_count", `Int pending_candidate_count
-    ; "ready_count", `Int ready_count
-    ; "running_count", `Int running_count
-    ; "deferred_count", `Int deferred_count
-    ; "completed_count", `Int completed_count
-    ; "settled_count", `Int settled_count
-    ; "blocked_count", `Int blocked_count
+    ; "ready_count", `Int summary.counts.ready
+    ; "running_count", `Int summary.counts.running
+    ; "deferred_count", `Int summary.counts.deferred
+    ; "completed_count", `Int summary.counts.completed
+    ; "settled_count", `Int summary.counts.settled
+    ; "blocked_count", `Int summary.counts.blocked
     ; "read_error_count", `Int read_error_count
     ; "read_errors", `List (List.map ledger_read_error_to_yojson summary.read_errors)
-    ; "blocked", `List (List.rev blocked)
-    ; "deferred", `List (List.rev deferred)
+    ; "blocked", `List blocked
+    ; "deferred", `List deferred
   ]
 ;;
 
@@ -1027,7 +1351,13 @@ let fleet_summary_to_yojson summary = `Assoc (fleet_summary_fields summary)
 
 let empty_fleet_summary_detail_fields =
   fleet_summary_detail_fields
-    { ledger_count = 0; partitions = []; read_errors = [] }
+    { ledger_count = 0
+    ; keeper_names = Id_set.empty
+    ; counts = empty_counts
+    ; blocked = []
+    ; deferred = []
+    ; read_errors = []
+    }
 ;;
 
 let fleet_summary_json ~base_path =

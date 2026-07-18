@@ -94,14 +94,16 @@ val ensure_roots :
     [(recorded_at, candidate_id)] identity, not worker observation time.
     Existing live leaf membership is validated as a one-to-one assignment;
     an exact historical root is idempotent even when a concurrently-settled
-    candidate snapshot is stale. *)
+    candidate snapshot is stale. Returns only roots created by this call; an
+    idempotent replay returns the empty list. *)
 
 val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
-(** Change every [Running] and [Deferred] leaf to [Ready] in one durable
-    rewrite at process-worker startup. Ordinary candidate signals must not use
-    this operation to retry unrelated deferred work. Returns the number of
-    recovered rows. *)
+(** At process-worker startup, change every [Running] and [Deferred] leaf to
+    [Ready] and canonically compact the ledger to one latest row per partition.
+    [Settled] receipts remain durable. This is the only whole-ledger compaction
+    authority; ordinary signals append transitions and never retry unrelated
+    deferred work. Returns the number of recovered partitions. *)
 
 val claim_next :
   now:float ->

@@ -151,8 +151,6 @@ type scenario = {
   goal : string;                  (* Keeper에 주어지는 목표 *)
   tool_expectations : tool_expectation list;
   graders : grader list;
-  max_turns : int;
-  max_cost_usd : float;
   tags : string list;             (* "regression" | "smoke" 등 *)
 }
 ```
@@ -294,7 +292,6 @@ bisect-ppx-report html --coverage-path _coverage
 - **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.
 - **INV-T5**: `anti_fake` penalty 패턴에 매칭되는 테스트 파일은 `quality_tier`에서 경고 또는 위험으로 분류된다.
 - **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
-- **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd` 초과는 telemetry/warning only이다. Cost만으로 `trajectory_outcome`을 `CostExceeded`, `Gated`, `Failed`, 또는 `Timeout`으로 바꾸면 안 된다.
 
 ---
 

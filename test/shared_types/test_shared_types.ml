@@ -1,7 +1,7 @@
 (** Tier I4 — Shared types unit tests.
 
     Verifies the abstract-type invariants and JSON round-trips for
-    [Shared_types.{Confidence, Timestamp, Budget, Artifact_id}]. *)
+    [Shared_types.{Confidence, Timestamp, Artifact_id}]. *)
 
 open Alcotest
 
@@ -76,46 +76,6 @@ let test_timestamp_json_round_trip () =
   match T.of_json (T.to_json t) with
   | Ok back -> check (float 1e-9) "round-trip" 1700000123.456 (T.to_float back)
   | Error e -> fail e
-
-(* ──────────────────────────────────────────────────────────── *)
-(* Budget                                                        *)
-(* ──────────────────────────────────────────────────────────── *)
-
-module B = Shared_types.Budget
-
-let test_budget_zero_exhausted () =
-  check bool "zero is exhausted" true (B.is_exhausted B.zero)
-
-let test_budget_make_not_exhausted () =
-  let b = B.make ~tokens:100 ~turns:10 ~time_ms:60000 ~cost_usd:1.0 in
-  check bool "fresh budget not exhausted" false (B.is_exhausted b)
-
-let test_budget_sub_tokens_drains () =
-  let b = B.make ~tokens:50 ~turns:10 ~time_ms:60000 ~cost_usd:1.0 in
-  let b' = B.sub_tokens b 50 in
-  check bool "tokens=0 → exhausted" true (B.is_exhausted b')
-
-let test_budget_sub_turns_drains () =
-  let b = B.make ~tokens:100 ~turns:1 ~time_ms:60000 ~cost_usd:1.0 in
-  let b' = B.sub_turns b 1 in
-  check bool "turns=0 → exhausted" true (B.is_exhausted b')
-
-let test_budget_negative_cost_not_exhausted () =
-  (* cost_usd 부호는 gating 아님 — 정보 전용 *)
-  let b = B.make ~tokens:100 ~turns:10 ~time_ms:60000 ~cost_usd:(-5.0) in
-  check bool "negative cost OK" false (B.is_exhausted b)
-
-let test_budget_json_round_trip () =
-  let b = B.make ~tokens:1000 ~turns:50 ~time_ms:300000 ~cost_usd:2.5 in
-  match B.of_json (B.to_json b) with
-  | Ok back -> check bool "round-trip equal" true (B.equal b back)
-  | Error e -> fail e
-
-let test_budget_of_json_missing_field () =
-  let bad = `Assoc [ "tokens", `Int 100 ] in
-  match B.of_json bad with
-  | Ok _ -> fail "should reject missing fields"
-  | Error _ -> ()
 
 (* ──────────────────────────────────────────────────────────── *)
 (* Artifact_id (UUID v7)                                         *)
@@ -197,15 +157,6 @@ let () =
       test_case "ordering" `Quick test_timestamp_ordering;
       test_case "now is recent" `Quick test_timestamp_now_recent;
       test_case "json round-trip" `Quick test_timestamp_json_round_trip;
-    ];
-    "Budget", [
-      test_case "zero exhausted" `Quick test_budget_zero_exhausted;
-      test_case "fresh not exhausted" `Quick test_budget_make_not_exhausted;
-      test_case "sub_tokens drains" `Quick test_budget_sub_tokens_drains;
-      test_case "sub_turns drains" `Quick test_budget_sub_turns_drains;
-      test_case "negative cost OK" `Quick test_budget_negative_cost_not_exhausted;
-      test_case "json round-trip" `Quick test_budget_json_round_trip;
-      test_case "missing field rejected" `Quick test_budget_of_json_missing_field;
     ];
     "Artifact_id", [
       test_case "generate format" `Quick test_artifact_id_generate_format;

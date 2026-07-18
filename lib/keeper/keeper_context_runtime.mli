@@ -72,7 +72,7 @@ val save_oas_checkpoint
   -> agent_name:string
   -> ctx:working_context
   -> generation:int
-  -> (Agent_sdk.Checkpoint.t, string) result
+  -> (Agent_sdk.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta

@@ -57,6 +57,7 @@ type structural_error =
       { message_index : int
       ; tool_use_id : string
       }
+[@@deriving show]
 
 type partition =
   { closed_prefix : closed_unit list
@@ -66,3 +67,9 @@ type partition =
 val partition
   :  Agent_sdk.Types.message list
   -> (partition, structural_error) result
+
+(** Validate the same structural contract as {!partition} without exposing a
+    partition to persistence callers that must preserve every message exactly. *)
+val validate
+  :  Agent_sdk.Types.message list
+  -> (unit, structural_error) result

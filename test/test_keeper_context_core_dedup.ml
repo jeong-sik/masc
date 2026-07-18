@@ -8,6 +8,9 @@
 module C = Masc.Keeper_context_core
 module T = Agent_sdk.Types
 
+let checkpoint_write_error_to_string =
+  C.checkpoint_write_error_to_string ~persistence_error_to_string:Fun.id
+
 (* --- message_to_json: no flat [content] field --- *)
 
 let test_message_to_json_omits_flat_content () =
@@ -299,7 +302,10 @@ let test_checkpoint_save_load_preserves_exact_messages () =
        | Ok checkpoint ->
          Alcotest.(check bool) "save returns exact source messages" true
            (checkpoint.Agent_sdk.Checkpoint.messages = messages)
-       | Error error -> Alcotest.failf "checkpoint save failed: %s" error);
+       | Error error ->
+         Alcotest.failf
+           "checkpoint save failed: %s"
+           (checkpoint_write_error_to_string error));
       let _, loaded =
         C.load_context_from_checkpoint
           ~trace_id:session_id
@@ -311,6 +317,110 @@ let test_checkpoint_save_load_preserves_exact_messages () =
       | Some loaded_context ->
         Alcotest.(check bool) "load preserves every source message" true
           (C.messages_of_context loaded_context = messages))
+
+let test_checkpoint_write_accepts_exact_open_tool_cycle () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-checkpoint-open-cycle-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session =
+        C.create_session ~session_id:"checkpoint-open-cycle" ~base_dir
+      in
+      let open_tool_use : T.message =
+        { role = T.Assistant
+        ; content =
+            [ T.ToolUse { id = "open-call"; name = "test"; input = `Null } ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      in
+      let context =
+        C.create ~eio:true ~system_prompt:"system" ~max_tokens:4096
+        |> fun context -> C.append context open_tool_use
+      in
+      match
+        C.save_oas_checkpoint
+          ~multimodal_policy:Masc.Keeper_types_profile.Mm_inherit
+          ~keeper_name:"checkpoint-open-cycle"
+          ~session
+          ~agent_name:"checkpoint-open-cycle"
+          ~ctx:context
+          ~generation:1
+      with
+      | Ok checkpoint ->
+        Alcotest.(check bool) "open cycle is persisted exactly" true
+          (checkpoint.Agent_sdk.Checkpoint.messages = [ open_tool_use ])
+      | Error error ->
+        Alcotest.failf
+          "open tool cycle was rejected: %s"
+          (checkpoint_write_error_to_string error))
+
+let test_checkpoint_write_rejects_orphan_tool_result () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-checkpoint-orphan-result-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session_id = "checkpoint-orphan-result" in
+      let session = C.create_session ~session_id ~base_dir in
+      let orphan : T.message =
+        { role = T.User
+        ; content =
+            [ T.ToolResult
+                { tool_use_id = "orphan"
+                ; content = "must remain exact"
+                ; outcome = T.Tool_succeeded
+                ; json = None
+                ; content_blocks = None
+                }
+            ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      in
+      let context =
+        C.create ~eio:true ~system_prompt:"system" ~max_tokens:4096
+        |> fun context -> C.append context orphan
+      in
+      (match
+         C.save_oas_checkpoint
+           ~multimodal_policy:Masc.Keeper_types_profile.Mm_inherit
+           ~keeper_name:session_id
+           ~session
+           ~agent_name:session_id
+           ~ctx:context
+           ~generation:1
+       with
+       | Error
+           (C.Tool_history_invalid
+              (Masc.Keeper_compaction_unit.Orphan_tool_result
+                 { message_index = 0; tool_use_id = "orphan" })) ->
+         ()
+       | Error error ->
+         Alcotest.failf
+           "wrong checkpoint write error: %s"
+           (checkpoint_write_error_to_string error)
+       | Ok _ -> Alcotest.fail "orphan ToolResult checkpoint was persisted");
+      match
+        Masc.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id
+      with
+      | Error Masc.Keeper_checkpoint_store.Not_found -> ()
+      | Error
+          (Masc.Keeper_checkpoint_store.Store_error detail
+          | Parse_error detail
+          | Io_error detail
+          | Sdk_other_error detail) ->
+        Alcotest.failf
+          "invalid checkpoint produced an unexpected store result: %s"
+          detail
+      | Ok _ -> Alcotest.fail "invalid checkpoint created a durable file")
 
 let () =
   Alcotest.run "keeper_context_core_dedup"
@@ -352,5 +462,9 @@ let () =
             test_resume_checkpoint_preserves_full_tool_result;
           Alcotest.test_case "save/load preserves exact message list" `Quick
             test_checkpoint_save_load_preserves_exact_messages;
+          Alcotest.test_case "write accepts exact open tool cycle" `Quick
+            test_checkpoint_write_accepts_exact_open_tool_cycle;
+          Alcotest.test_case "write rejects orphan tool result" `Quick
+            test_checkpoint_write_rejects_orphan_tool_result;
         ] );
     ]

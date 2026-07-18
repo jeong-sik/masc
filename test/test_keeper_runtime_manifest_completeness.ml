@@ -124,18 +124,17 @@ let test_is_complete_turn () =
 let test_compaction_evidence_public_projection () =
   let evidence =
     Keeper_compaction_evidence.create
-      ~selected_runtime_id:(Some "compact-runtime")
+      ~selected_runtime_id:"compact-runtime"
       ~before_checkpoint_bytes:4096
       ~after_checkpoint_bytes:1024
       ~before_message_count:12
       ~after_message_count:4
-      ~summarized_message_count:6
-      ~dropped_message_count:1
-      ~pair_repair_dropped_message_count:2
+      ~summarized_message_count:4
+      ~dropped_message_count:8
       ~before_tool_use_count:3
-      ~after_tool_use_count:1
+      ~after_tool_use_count:3
       ~before_tool_result_count:3
-      ~after_tool_result_count:1
+      ~after_tool_result_count:3
     |> Result.get_ok
     |> Keeper_compaction_evidence.to_json
   in

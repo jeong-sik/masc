@@ -1,14 +1,13 @@
 (** Exact structural evidence for one LLM compaction result. *)
 type t =
   private
-  { selected_runtime_id : string option
+  { selected_runtime_id : string
   ; before_checkpoint_bytes : int
   ; after_checkpoint_bytes : int
   ; before_message_count : int
   ; after_message_count : int
   ; summarized_message_count : int
   ; dropped_message_count : int
-  ; pair_repair_dropped_message_count : int
   ; before_tool_use_count : int
   ; after_tool_use_count : int
   ; before_tool_result_count : int
@@ -22,7 +21,6 @@ type field =
   | After_message_count
   | Summarized_message_count
   | Dropped_message_count
-  | Pair_repair_dropped_message_count
   | Before_tool_use_count
   | After_tool_use_count
   | Before_tool_result_count
@@ -51,13 +49,6 @@ type decode_error =
       ; after_message_count : int
       ; summarized_message_count : int
       ; dropped_message_count : int
-      ; pair_repair_dropped_message_count : int
-      }
-  | Legacy_message_accounting_not_derivable of
-      { before_message_count : int
-      ; after_message_count : int
-      ; summarized_message_count : int
-      ; dropped_message_count : int
       }
   | No_messages_compacted
 
@@ -66,14 +57,13 @@ val wire_field_names : string list
 (** Canonical JSON field names for public projection and closed decoding. *)
 
 val create
-  :  selected_runtime_id:string option
+  :  selected_runtime_id:string
   -> before_checkpoint_bytes:int
   -> after_checkpoint_bytes:int
   -> before_message_count:int
   -> after_message_count:int
   -> summarized_message_count:int
   -> dropped_message_count:int
-  -> pair_repair_dropped_message_count:int
   -> before_tool_use_count:int
   -> after_tool_use_count:int
   -> before_tool_result_count:int
@@ -81,23 +71,23 @@ val create
   -> (t, decode_error) result
 (** Construct evidence through the same closed validation boundary used by
     persisted JSON restoration. Message accounting is exact:
-    [after = before - dropped - summarized + summary_message
-     - pair_repair_dropped], where [summary_message] is one exactly when
-    [summarized] is non-zero. *)
+    [after = before - dropped]. Every summarized source message is replaced in
+    place by exactly one summary message, so summarization changes bytes without
+    changing message cardinality. Tool-use and tool-result counts must remain
+    exactly equal because tool-bearing units are protected from compaction. *)
 
 val to_json : t -> Yojson.Safe.t
 (** Structural observation projection of the exact measured counts.
     [selected_runtime_id] remains the enclosing runtime projection. *)
 
 val of_json
-  :  selected_runtime_id:string option
+  :  selected_runtime_id:string
   -> Yojson.Safe.t
   -> (t, decode_error) result
 (** Restore persisted structural evidence. The Runtime identity is supplied
     from its enclosing typed projection rather than duplicated in the counts
-    object. Rows written before [pair_repair_dropped_message_count] was added
-    are migrated by deriving that count exactly from the other message counts;
-    an impossible derivation is rejected. Other unknown, duplicate, missing,
-    malformed, or objectively impossible evidence is rejected explicitly.
-    [Checkpoint_bytes] must strictly reduce; the other measures may stay equal
-    but cannot increase. *)
+    object. Unknown, duplicate, missing, malformed, or objectively impossible
+    evidence is rejected explicitly; no historical shape is inferred or
+    migrated.
+    [Checkpoint_bytes] must strictly reduce, message accounting must be exact,
+    and ToolUse/ToolResult counts must remain equal. *)

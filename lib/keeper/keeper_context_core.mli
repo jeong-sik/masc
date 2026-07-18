@@ -67,36 +67,6 @@ val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
     history classification. *)
 val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
-(** {1 Message repair} *)
-
-(** Drop dangling tool-use and orphan tool-result blocks so OAS checkpoint
-    replay never sees a mismatched pair.  The repair is intentionally
-    metadata-only: it must not fabricate visible text that can leak to the
-    model or dashboard. *)
-val repair_broken_tool_call_pairs :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
-
-type tool_pair_repair_stats =
-  { dropped_tool_uses : int
-  ; dropped_tool_results : int
-  ; dropped_tool_use_samples : (string * string) list
-  ; dropped_tool_result_ids : string list
-  }
-
-val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
-val pair_repair_diagnostic_max_bytes : int
-val bound_pair_repair_diagnostic_string : string -> string
-
-val pair_repair_metadata_key : string
-(** Message metadata key carrying bounded provenance for tool-pair repair
-    drops. Repaired messages also carry [was_repaired=true]. *)
-
-(** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
-    ToolUse/ToolResult blocks dropped from visible content. This keeps the
-    repair path observable without changing the legacy return type. *)
-val repair_broken_tool_call_pairs_with_stats :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
-
 (** {1 Context (de)serialization} *)
 
 val serialize_context : working_context -> string
@@ -146,9 +116,20 @@ val usage_of_response :
   Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
+type 'persistence_error checkpoint_write_error =
+  | Tool_history_invalid of Keeper_compaction_unit.structural_error
+  | Persistence_error of 'persistence_error
+
+val checkpoint_write_error_to_string
+  :  persistence_error_to_string:('persistence_error -> string)
+  -> 'persistence_error checkpoint_write_error
+  -> string
+
 (** Save the current working context as a generation-tagged OAS checkpoint.
-    Message order and typed content are preserved exactly. No implicit context
-    reduction is performed at this boundary. *)
+    Message order and typed content are preserved exactly. A structurally open
+    ToolUse suffix is valid and remains exact; malformed completed protocol
+    structure is rejected as [Tool_history_invalid] before any store call. No
+    repair, synthetic ToolResult, or implicit context reduction occurs here. *)
 val save_oas_checkpoint :
   multimodal_policy:Keeper_types_profile.multimodal_policy ->
   keeper_name:string ->
@@ -156,7 +137,7 @@ val save_oas_checkpoint :
   agent_name:string ->
   ctx:working_context ->
   generation:int ->
-  (Agent_sdk.Checkpoint.t, string) result
+  (Agent_sdk.Checkpoint.t, string checkpoint_write_error) result
 (** [multimodal_policy]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
     checkpoint write boundary (Store_only); required so every write path is
     compiler-forced to declare its policy (N-of-M closure). *)
@@ -169,24 +150,29 @@ val save_oas_checkpoint_classified :
   ctx:working_context ->
   generation:int ->
   ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_store.save_oas_outcome
-  , string )
+  , string checkpoint_write_error )
+  result
+
+(** Build and conditionally publish the same canonical checkpoint payload as
+    {!save_oas_checkpoint_classified}, but only while the durable source still
+    has [expected_source_ref]. Equal-turn content changes are rejected by the
+    checkpoint store's exact byte-identity CAS. *)
+val save_oas_checkpoint_if_source :
+  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  keeper_name:string ->
+  session:session_context ->
+  agent_name:string ->
+  ctx:working_context ->
+  generation:int ->
+  expected_source_ref:Keeper_checkpoint_ref.t ->
+  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
+  , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )
   result
 
 (** {1 OAS checkpoint inspection} *)
 
 val checkpoint_generation : Agent_sdk.Checkpoint.t -> fallback:int -> int
 val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
-
-(** Drop orphan [tool_result] blocks (those without a matching
-    preceding [tool_use]) so a checkpoint payload satisfies the
-    Anthropic API invariant that every tool_result references a known
-    tool_use. Public so [Keeper_post_turn] can
-    reuse it before persisting a checkpoint. *)
-val repair_orphan_tool_result_messages :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
-
-val repair_orphan_tool_result_messages_with_stats :
-  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
 
 (** Project an OAS checkpoint to a working context without rewriting its
     messages. *)

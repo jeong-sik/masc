@@ -602,7 +602,6 @@ describe('keeper tool telemetry fetchers', () => {
               before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
               before_message_count: 9, after_message_count: 3,
               summarized_message_count: 4, dropped_message_count: 1,
-              pair_repair_dropped_message_count: 2,
               before_tool_use_count: 2, after_tool_use_count: 1,
               before_tool_result_count: 2, after_tool_result_count: 1,
             },
@@ -632,11 +631,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[1]?.before_tokens).toBeNull()
     expect(result.items[1]?.runtime_id).toBeNull()
     expect(result.items[1]?.links.checkpoint_path).toBeNull()
-    // Rows persisted before #25037 lack pair_repair_dropped_message_count:
-    // the field decodes to null without voiding the rest of the evidence.
     expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
-    expect(result.items[0]?.exact_evidence?.pair_repair_dropped_message_count).toBeNull()
-    expect(result.items[2]?.exact_evidence?.pair_repair_dropped_message_count).toBe(2)
   })
 })
 

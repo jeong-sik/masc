@@ -6,8 +6,7 @@
     - [context_compact_oas]: [role_to_string]
     - [sdk_tool_contract]: [param_type_of_string] (strict [None] on unknown)
     - [keeper_run_tools_setup]: [params_to_input_schema]
-    - [keeper_context_tool_message_pairs] and peer consumers:
-      [Canonical_tool.tool_call_of_block]
+    - keeper prompt/telemetry consumers: [Canonical_tool.tool_call_of_block]
 
     These tests pin the exact OAS outputs MASC now emits on the wire (provider
     request tool schema, dashboard role labels, usage JSON). They are a boundary

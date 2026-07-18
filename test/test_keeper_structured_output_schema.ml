@@ -53,6 +53,7 @@ let all_provider_native_schema_cases =
   [ "librarian_episode", Keeper_structured_output_schema.librarian_episode_output_schema
   ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
+  ; "compaction_plan", Keeper_structured_output_schema.compaction_plan_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
@@ -233,6 +234,46 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   check bool "fusion schema exposes parser wire fields" true true
 ;;
 
+let test_compaction_plan_schema_uses_codec_ssot () =
+  let schema = Keeper_structured_output_schema.compaction_plan_output_schema in
+  check
+    (list string)
+    "compaction plan required fields"
+    [ Keeper_structured_output_schema.compaction_plan_field_decisions ]
+    (required_strings schema);
+  check bool "compaction plan is closed" false
+    (allows_additional_properties schema);
+  let decision_schema =
+    schema
+    |> schema_property Keeper_structured_output_schema.compaction_plan_field_decisions
+    |> schema_items
+  in
+  check
+    (list string)
+    "compaction decision required fields"
+    (List.sort
+       String.compare
+       [ Keeper_structured_output_schema.compaction_plan_field_unit_index
+       ; Keeper_structured_output_schema.compaction_plan_field_action
+       ; Keeper_structured_output_schema.compaction_plan_field_summary
+       ])
+    (required_strings decision_schema);
+  check bool "compaction decision is closed" false
+    (allows_additional_properties decision_schema);
+  check
+    (list string)
+    "compaction action enum"
+    (List.sort
+       String.compare
+       [ Keeper_structured_output_schema.compaction_plan_action_keep
+       ; Keeper_structured_output_schema.compaction_plan_action_drop
+       ; Keeper_structured_output_schema.compaction_plan_action_summarize
+       ])
+    (decision_schema
+     |> schema_property Keeper_structured_output_schema.compaction_plan_field_action
+     |> enum_strings)
+;;
+
 
 let test_anti_rationalization_verdict_schema_uses_task_ssot () =
   let schema =
@@ -322,6 +363,12 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
+        ] )
+    ; ( "compaction schemas"
+      , [ test_case
+            "compaction plan schema uses codec SSOT"
+            `Quick
+            test_compaction_plan_schema_uses_codec_ssot
         ] )
     ; ( "verdict schemas"
       , [ test_case

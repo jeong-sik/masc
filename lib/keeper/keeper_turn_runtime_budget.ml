@@ -590,10 +590,11 @@ let runtime_budget_logged : unit StringMap.t Atomic.t =
 let runtime_budget_log_key ~keeper_name ~primary_budget ~runtime_budget =
   Printf.sprintf "%s|%d|%d" keeper_name primary_budget runtime_budget
 
-let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
-  let resolution =
-    Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-  in
+let resolved_max_context_for_turn
+      ~(meta : keeper_meta)
+      (resolution : Keeper_context_runtime.max_context_resolution)
+  : int
+  =
   if resolution.primary_budget < resolution.runtime_budget then begin
     let key =
       runtime_budget_log_key

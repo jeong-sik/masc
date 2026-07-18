@@ -240,7 +240,10 @@ val post_turn_resilience_handles :
     per keeper to respect [Shared_audit.Store]'s single-writer chain
     contract. *)
 
-val resolved_max_context_for_turn : meta:keeper_meta -> int
+val resolved_max_context_for_turn
+  :  meta:keeper_meta
+  -> Keeper_context_runtime.max_context_resolution
+  -> int
 (** Resolve the initial keeper turn context budget from the keeper's routed
-    runtime, so lifecycle context math matches the provider that will receive
-    the first request. *)
+    runtime's prevalidated resolution, so lifecycle context math matches the
+    provider that will receive the first request. *)

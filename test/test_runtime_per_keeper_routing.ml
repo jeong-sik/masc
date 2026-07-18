@@ -958,6 +958,32 @@ let test_context_budget_uses_selected_runtime () =
       oversized_override.Keeper_context_runtime.effective_budget)
 ;;
 
+let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
+  with_runtime_initialized (fun () ->
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+         ~requested_override:None
+         ~runtime_id:"missing.runtime"
+     with
+     | Error
+         (Keeper_context_runtime.Runtime_context_window_unavailable
+            { runtime_id }) ->
+       Alcotest.(check string)
+         "typed error retains the exact unresolved runtime id"
+         "missing.runtime"
+         runtime_id
+     | Error _ -> Alcotest.fail "unexpected strict context resolution error"
+     | Ok _ -> Alcotest.fail "unknown runtime must not receive a default capacity");
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:(Some 0)
+        ~runtime_id:"openai.gpt"
+    with
+    | Error (Keeper_context_runtime.Invalid_requested_context_override 0) -> ()
+    | Error _ -> Alcotest.fail "unexpected invalid override error"
+    | Ok _ -> Alcotest.fail "non-positive override must not be silently ignored")
+;;
+
 let test_context_budget_source_is_shared_ssot () =
   with_runtime_initialized (fun () ->
     let source requested_override =
@@ -981,12 +1007,11 @@ let test_context_budget_source_is_shared_ssot () =
       (source (Some 1_000_000)))
 ;;
 
-(* Production path: [resolve_max_context_resolution_of_meta] must budget against
-   the keeper's routed runtime (openai.gpt = 64000), NOT [runtime].default
-   (runpod_mtp.qwen = 128000).  Without prepending [runtime_id_of_meta], the
-   projection labels (global, runtime-id-agnostic) would size against the
-   default and admit oversized prompts for a per-keeper routed runtime. *)
-let test_of_meta_budgets_against_routed_runtime () =
+(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
+   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
+   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
+   exercised separately through the strict runtime-ID resolver. *)
+let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let res =
@@ -1003,8 +1028,19 @@ let test_turn_context_window_uses_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let budget =
-      Keeper_turn_runtime_budget.resolved_max_context_for_turn
-        ~meta:(make_meta "budgettest")
+      let meta = make_meta "budgettest" in
+      let resolution =
+        match
+          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+            ~requested_override:meta.max_context_override
+            ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+        with
+        | Ok resolution -> resolution
+        | Error error ->
+          Alcotest.fail
+            (Keeper_context_runtime.max_context_resolution_error_to_string error)
+      in
+      Keeper_turn_runtime_budget.resolved_max_context_for_turn ~meta resolution
     in
     Alcotest.(check int)
       "turn context window uses routed runtime, not runtime-id-agnostic labels"
@@ -1875,9 +1911,13 @@ let () =
             `Quick
             test_context_budget_source_is_shared_ssot
         ; Alcotest.test_case
-            "of_meta budgets against the routed runtime (production path)"
+            "strict context budget rejects unavailable capacity and invalid override"
             `Quick
-            test_of_meta_budgets_against_routed_runtime
+            test_strict_context_budget_rejects_unavailable_and_invalid_override
+        ; Alcotest.test_case
+            "of_meta projection prefers the routed runtime"
+            `Quick
+            test_of_meta_projection_budgets_against_routed_runtime
         ; Alcotest.test_case
             "turn context window uses the routed runtime"
             `Quick

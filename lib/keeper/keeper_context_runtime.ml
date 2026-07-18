@@ -120,6 +120,18 @@ type max_context_resolution = {
   effective_budget : int;
 }
 
+type max_context_resolution_error =
+  | Invalid_requested_context_override of int
+  | Runtime_context_window_unavailable of { runtime_id : string }
+
+let max_context_resolution_error_to_string = function
+  | Invalid_requested_context_override requested ->
+    Printf.sprintf "requested context override must be positive, got %d" requested
+  | Runtime_context_window_unavailable { runtime_id } ->
+    Printf.sprintf
+      "no configured runtime context window resolved for runtime id %S"
+      runtime_id
+
 type context_budget_source =
   | Runtime_provider_cap
   | Requested_override
@@ -387,18 +399,49 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
   ; effective_budget
   }
 
+let resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  =
+  match requested_override with
+  | Some requested when requested <= 0 ->
+    Error (Invalid_requested_context_override requested)
+  | Some _ | None ->
+    (match Runtime.get_runtime_by_id runtime_id with
+     | None -> Error (Runtime_context_window_unavailable { runtime_id })
+     | Some runtime ->
+       (match Runtime.resolve_max_context_of_runtime runtime with
+        | None -> Error (Runtime_context_window_unavailable { runtime_id })
+        | Some (runtime_budget, _) ->
+          let requested_context_window =
+            match requested_override with
+            | None -> runtime_budget
+            | Some requested -> requested
+          in
+          let effective_budget = min requested_context_window runtime_budget in
+          Ok
+            { requested_override
+            ; primary_budget = runtime_budget
+            ; runtime_budget
+            ; requested_context_window
+            ; effective_budget
+            }))
+
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =
-  (* RFC-0207: the per-keeper routed runtime ([runtime_id_of_meta] — the same id
-     [keeper_turn_driver] dispatches to) is the authoritative budget source.
+  (* Projection-only compatibility path for manual compaction, operator/status,
+     dashboard, and tool surfaces that do not yet return typed capacity errors.
+     Actual direct/unified turn admission uses
+     [resolve_max_context_resolution_for_runtime_id] and never falls through
+     this ordered-label/default path.
+
      [effective_model_labels_for_turn] projects through
      [Provider_runtime_projection.default_execution_model_strings], which ignores
      the runtime id and returns the GLOBAL preferred labels (an RFC-0206
      single-binding artifact), so on its own the budget would size against
      [runtime].default and could admit prompts exceeding a smaller per-keeper
-     model's window.  Prepend the routed id so [resolve_max_context_resolution]'s
-     [find_map] sizes against it first; the projection labels remain as
-     fallback. *)
+     model's window. Prepend the routed id so these remaining projections prefer
+     it until their typed hard-cut removes this fallback API. *)
   let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
   resolve_max_context_resolution
     ~requested_override:m.max_context_override labels

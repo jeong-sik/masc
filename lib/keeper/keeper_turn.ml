@@ -552,20 +552,31 @@ let run_keeper_invocation_turn_admitted
             Progress.stop_tracking turn_task_id;
             tool_result_error ("" ^ e)
 	      | Ok () ->
+	        (match
+	           Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+	             ~requested_override:meta.max_context_override
+	             ~runtime_id:turn_runtime_id
+	         with
+	         | Error error ->
+	           Progress.stop_tracking turn_task_id;
+	           tool_result_error
+	             (Keeper_context_runtime.max_context_resolution_error_to_string error)
+	         | Ok resolution ->
 	            let max_runtime_context =
-	              let resolution =
-	                Keeper_context_runtime.resolve_max_context_resolution
-	                  ~requested_override:meta.max_context_override effective_models
+              let () =
+                match resolution.requested_override with
+                | Some requested ->
+                  Log.Keeper.debug
+                    "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
+                    meta.name
+                    requested
+                    resolution.requested_context_window
+                    resolution.primary_budget
+                    resolution.effective_budget
+                | None -> ()
               in
-            (match resolution.requested_override with
-            | Some requested ->
-              Log.Keeper.debug
-                "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
-                meta.name requested resolution.requested_context_window resolution.primary_budget
-                resolution.effective_budget
-	            | None -> ());
-	              resolution.effective_budget
-	            in
+              resolution.effective_budget
+            in
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -1036,7 +1047,7 @@ let run_keeper_invocation_turn_admitted
               in
               tool_result_ok_data reply_json
 
-)))))))))
+))))))))))
 
 let handle_keeper_invocation
       ?on_text_delta

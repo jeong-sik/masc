@@ -731,6 +731,8 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_reaction_evidence |> member "stimulus_seen" |> to_bool);
       check bool "reaction evidence turn not started yet" false
         (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check bool "queued stimulus has no fabricated reaction kind" true
+        (pending_reaction_evidence |> member "reaction_kind" = `Null);
       check int "one matched ledger row before turn" 1
         (pending_reaction_evidence |> member "matched_record_count" |> to_int);
       let lease, leased =
@@ -785,6 +787,8 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (reaction_evidence |> member "projection_status" |> to_string);
       check bool "reaction evidence turn started" true
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
+      check string "reaction evidence kind comes from turn evidence" "turn_started"
+        (reaction_evidence |> member "reaction_kind" |> to_string);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
       (match
@@ -822,6 +826,8 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (acked_reaction_evidence |> member "projection_status" |> to_string);
       check bool "reaction evidence event queue acked" true
         (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
+      check string "reaction evidence kind prefers consumed ack" "event_queue_ack"
+        (acked_reaction_evidence |> member "reaction_kind" |> to_string);
       check int "three matched ledger rows after ack" 3
         (acked_reaction_evidence |> member "matched_record_count" |> to_int))
 ;;
@@ -980,6 +986,8 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
     "dashboard typed quarantine reason"
     "unknown_reaction_kind"
     (quarantined |> member "reason" |> to_string);
+  check bool "quarantined evidence has no reaction kind" true
+    (quarantined |> member "reaction_kind" = `Null);
   let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
   rm_rf ledger_dir;
   write_empty_file ledger_dir;
@@ -991,7 +999,9 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
   check bool
     "storage failure reason is explicit"
     true
-    (unreadable |> member "reason" |> to_string |> String.length > 0)
+    (unreadable |> member "reason" |> to_string |> String.length > 0);
+  check bool "read failure has no reaction kind" true
+    (unreadable |> member "reaction_kind" = `Null)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =

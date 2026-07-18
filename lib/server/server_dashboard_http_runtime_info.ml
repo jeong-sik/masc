@@ -2654,10 +2654,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
             ; "schedule_id", `String schedule_id
             ; "post_id", `String post_id
             ; "stimulus", `String stimulus
-            ; ( "reaction_kind"
-              , `String
-                  (Keeper_reaction_ledger.reaction_kind_to_string
-                     Keeper_reaction_ledger.Turn_started) )
             ; ( "stimulus_kind"
               , `String
                   (Keeper_reaction_ledger.stimulus_kind_to_string
@@ -2707,16 +2703,33 @@ let schedule_keeper_reaction_evidence_dashboard_json
                     , unix_iso_option_json evidence.latest_recorded_at )
                   ]
              in
-             let projection_json ?reason ?(extra_fields=[]) status evidence =
+             let projection_json
+                   ?reason
+                   ?reaction_kind
+                   ?(extra_fields=[])
+                   status
+                   evidence
+               =
                let reason_fields =
                  match reason with
                  | Some value -> [ "reason", `String value ]
+                 | None -> []
+               in
+               let reaction_kind_fields =
+                 match reaction_kind with
+                 | Some reaction_kind ->
+                   [ ( "reaction_kind"
+                     , `String
+                         (Keeper_reaction_ledger.reaction_kind_to_string
+                            reaction_kind) )
+                   ]
                  | None -> []
                in
                `Assoc
                  (("projection_status", `String status)
                   :: base_fields
                   @ evidence_fields evidence
+                  @ reaction_kind_fields
                   @ reason_fields
                   @ extra_fields)
              in
@@ -2750,16 +2763,21 @@ let schedule_keeper_reaction_evidence_dashboard_json
                    :: base_fields
                    @ [ "stimulus_id", `String stimulus_id ])
               | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-                let projection_status =
-                  if evidence.event_queue_ack_seen
-                  then "matched_consumed_ack"
-                  else if evidence.turn_started_seen
-                  then "matched_turn_started"
-                  else if evidence.stimulus_seen
-                  then "matched_stimulus"
-                  else "not_found"
-                in
-                projection_json projection_status evidence
+                if evidence.event_queue_ack_seen
+                then
+                  projection_json
+                    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
+                    "matched_consumed_ack"
+                    evidence
+                else if evidence.turn_started_seen
+                then
+                  projection_json
+                    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+                    "matched_turn_started"
+                    evidence
+                else if evidence.stimulus_seen
+                then projection_json "matched_stimulus" evidence
+                else projection_json "not_found" evidence
               | Ok
                   (Keeper_reaction_ledger.Evidence_quarantined
                     { evidence; first_reason }) ->

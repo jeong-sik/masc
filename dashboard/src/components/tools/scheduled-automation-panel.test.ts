@@ -464,7 +464,6 @@ describe('ScheduledAutomationPanel', () => {
           stimulus: 'schedule_due',
           stimulus_id: 'stimulus:keeper-wake-digest',
           stimulus_kind: 'schedule_due',
-          reaction_kind: 'turn_started',
           stimulus_seen: true,
           turn_started_seen: false,
           matched_record_count: 1,
@@ -497,6 +496,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(reactionEvidence?.getAttribute('data-schedule-keeper-reaction-evidence-source')).toBe('keeper_reaction_ledger')
     expect(container.querySelector('[data-keeper-reaction-evidence-row="stimulus_id"]')?.textContent).toContain('stimulus:keeper-wake-digest')
     expect(container.querySelector('[data-keeper-reaction-evidence-row="turn_started_seen"]')?.textContent).toContain('false')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')).toBeNull()
 
     render(null, container)
     render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
@@ -550,6 +550,7 @@ describe('ScheduledAutomationPanel', () => {
         keeper_reaction_evidence: {
           ...wakeRequest.keeper_reaction_evidence!,
           projection_status: 'matched_turn_started',
+          reaction_kind: 'turn_started',
           turn_started_seen: true,
           matched_record_count: 2,
           turn_started_recorded_at: 202,
@@ -580,7 +581,7 @@ describe('ScheduledAutomationPanel', () => {
     const turnReactionEvidence = container.querySelector('[data-schedule-keeper-reaction-evidence="matched_turn_started"]')
     expect(turnReactionEvidence).not.toBeNull()
     expect(turnReactionEvidence?.textContent).toContain('matched turn started')
-    expect(turnReactionEvidence?.textContent).toContain('turn_started')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')?.textContent).toContain('turn_started')
     expect(turnReactionEvidence?.textContent).toContain('true')
 
     const ackedAuto = automation([
@@ -603,6 +604,7 @@ describe('ScheduledAutomationPanel', () => {
         keeper_reaction_evidence: {
           ...wakeRequest.keeper_reaction_evidence!,
           projection_status: 'matched_consumed_ack',
+          reaction_kind: 'event_queue_ack',
           turn_started_seen: true,
           event_queue_ack_seen: true,
           matched_record_count: 3,
@@ -637,6 +639,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(ackReactionEvidence?.textContent).toContain('matched consumed ack')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
     expect(ackReactionEvidence?.textContent).toContain('true')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')?.textContent).toContain('event_queue_ack')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
   })
 

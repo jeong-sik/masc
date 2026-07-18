@@ -54,11 +54,8 @@ let binding_store =
     ~binding_audit_path ~binding_audit_read_path:binding_audit_path
     ~guild_id_field:Store.Omit
 
-let read_bindings () = Store.read_bindings binding_store
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
-let save_bindings bindings = Store.save_bindings binding_store bindings
-let append_audit_event event = Store.append_audit_event binding_store event
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 let stale_after_sec () =
@@ -121,9 +118,17 @@ let status_json ?(audit_limit = 10) () =
   let app_present = Option.is_some (app_token_opt ()) in
   (* Socket Mode needs the app token; without it the gateway never starts. *)
   let startup_ok = Option.is_none startup_error in
-  let available = app_present && startup_ok in
+  let configured_bindings_result = read_bindings_result () in
+  let binding_store_read_ok = Result.is_ok configured_bindings_result in
+  let configured_bindings, binding_store_error =
+    match configured_bindings_result with
+    | Ok bindings -> bindings, ""
+    | Error error -> [], Store.binding_store_error_to_string error
+  in
+  let available = app_present && startup_ok && binding_store_read_ok in
   let connected =
     startup_ok
+    && binding_store_read_ok
     && match gateway_state with
        | Connected -> true
        | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
@@ -132,7 +137,7 @@ let status_json ?(audit_limit = 10) () =
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  let error =
+  let transport_error =
     match startup_error with
     | Some message -> message
     | None ->
@@ -142,7 +147,9 @@ let status_json ?(audit_limit = 10) () =
        | Failed msg -> msg
        | Awaiting_hello | Connected | Reconnect_pending _ -> "")
   in
-  let configured_bindings = read_bindings () in
+  let error =
+    if not binding_store_read_ok then binding_store_error else transport_error
+  in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let configured_binding_json = List.map binding_json configured_bindings in
   `Assoc
@@ -160,6 +167,8 @@ let status_json ?(audit_limit = 10) () =
     ; ("binding_store_path", `String (binding_store_path ()))
     ; ("audit_path", `String (binding_audit_path ()))
     ; ("binding_source", `String "persisted")
+    ; ("binding_store_read_ok", `Bool binding_store_read_ok)
+    ; ("binding_store_error", `String binding_store_error)
     ; ("runtime_bindings_count", `Int (List.length configured_bindings))
     ; ("configured_bindings", `List configured_binding_json)
     ; ("recent_audit", `List recent_audit)
@@ -214,17 +223,13 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       :: without_identity)
   | other -> other
 
-let rollback_bindings original = save_bindings original
-
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in
   let keeper_name = String.trim keeper_name in
   if String.equal channel_id "" then Error "channel_id is required"
   else if String.equal keeper_name "" then Error "keeper_name is required"
   else
-    match read_bindings_result () with
-    | Error error -> Error (Store.binding_store_error_to_string error)
-    | Ok original_bindings ->
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
       let previous_keeper =
         match
           List.find_map
@@ -245,11 +250,9 @@ let bind ~channel_id ~keeper_name ~actor_name =
         |> List.sort (fun (a : binding) (b : binding) ->
                String.compare a.channel_id b.channel_id)
       in
-      try
-        save_bindings updated_bindings;
-        append_audit_event
-          Store.
-            { timestamp =
+      let event =
+        Store.
+          { timestamp =
                 (* NDT-OK: binding audit wall-clock is operator-facing
                    telemetry only. *)
                 Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
@@ -259,17 +262,17 @@ let bind ~channel_id ~keeper_name ~actor_name =
             ; keeper_name
             ; actor_id = actor_name
             ; actor_name
-            ; previous_keeper };
-        Ok (status_json ())
-      with Sys_error msg -> rollback_bindings original_bindings; Error msg
+            ; previous_keeper }
+      in
+      Ok (updated_bindings, event, ()))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 let unbind ~channel_id ~actor_name =
   let channel_id = String.trim channel_id in
   if String.equal channel_id "" then Error "channel_id is required"
   else
-    match read_bindings_result () with
-    | Error error -> Error (Store.binding_store_error_to_string error)
-    | Ok original_bindings -> (
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
       match
         original_bindings
         |> List.find_opt (fun (b : binding) ->
@@ -283,11 +286,9 @@ let unbind ~channel_id ~actor_name =
               not (String.equal b.channel_id channel_id))
             original_bindings
         in
-        try
-          save_bindings updated_bindings;
-          append_audit_event
-            Store.
-              { timestamp =
+        let event =
+          Store.
+            { timestamp =
                   (* NDT-OK: binding audit wall-clock is operator-facing
                      telemetry only. *)
                   Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
@@ -297,9 +298,11 @@ let unbind ~channel_id ~actor_name =
               ; keeper_name = removed.keeper_name
               ; actor_id = actor_name
               ; actor_name
-              ; previous_keeper = removed.keeper_name };
-          Ok (status_json ())
-        with Sys_error msg -> rollback_bindings original_bindings; Error msg)
+              ; previous_keeper = removed.keeper_name }
+        in
+        Ok (updated_bindings, event, ()))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 (* ---- In-process gateway support (replaces sidecars/slack-bot/) ---- *)
 
@@ -324,7 +327,7 @@ let resolve_keeper_for_channel_result ~channel_id =
   if String.equal normalized "" then Ok None
   else
     match read_bindings_result () with
-    | Error error -> Error (Store.binding_store_error_to_string error)
+    | Error error -> Error error
     | Ok candidates -> (
       match binding_for_channel candidates ~channel_id:normalized with
       | Some b ->
@@ -336,30 +339,9 @@ let resolve_keeper_for_channel_result ~channel_id =
              ; via_parent = false })
       | None -> Ok None)
 
-let resolve_keeper_for_channel ~channel_id =
-  let normalized = String.trim channel_id in
-  match resolve_keeper_for_channel_result ~channel_id:normalized with
-  | Ok resolution -> resolution
-  | Error msg ->
-    if not (String.equal normalized "") then
-      Log.Slack.warn "slack binding lookup failed for channel_id=%s: %s"
-        normalized msg;
-    None
-
-let keeper_for_channel ~channel_id =
-  match resolve_keeper_for_channel ~channel_id with
-  | None -> None
-  | Some resolution -> Some resolution.keeper_name
-
 (* RFC-0223 P2 presence surface. Recomputed per call — no cached state. *)
 let bound_channels ~keeper_name =
-  let normalized = String.trim keeper_name in
-  if String.equal normalized "" then []
-  else
-    read_bindings ()
-    |> List.filter_map (fun (b : binding) ->
-           if String.equal b.keeper_name normalized then Some b.channel_id
-           else None)
+  Store.bound_channels_result binding_store ~keeper_name
 
 let connected () =
   (* The in-process gateway (RFC-0317) is the only Slack transport; its run

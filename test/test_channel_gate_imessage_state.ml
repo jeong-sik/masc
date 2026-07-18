@@ -88,6 +88,23 @@ let test_connector_json_keeps_redacted_guid () =
     check string "self-chat guid redacted" "any;-;[redacted]"
       (json |> U.member "self_chat_guid" |> U.to_string))
 
+let test_malformed_binding_store_is_explicit () =
+  with_temp_dir @@ fun dir ->
+  with_imessage_paths dir (fun () ->
+    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
+    let oc = open_out_bin (Filename.concat dir "bindings.json") in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not-json");
+    let json = IMessage_state.connector_json () in
+    check bool "binding read failed" false
+      (json |> U.member "binding_store_read_ok" |> U.to_bool);
+    check bool "connector unavailable" false
+      (json |> U.member "available" |> U.to_bool);
+    check bool "binding error retained" true
+      (json |> U.member "binding_store_error" |> U.to_string
+       |> String.length |> ( < ) 0))
+
 let () =
   run "channel_gate_imessage_state"
     [
@@ -97,5 +114,7 @@ let () =
             test_status_json_redacts_self_chat_guid;
           test_case "connector json keeps redacted self-chat guid" `Quick
             test_connector_json_keeps_redacted_guid;
+          test_case "malformed binding store is explicit" `Quick
+            test_malformed_binding_store_is_explicit;
         ] );
     ]

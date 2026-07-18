@@ -49,10 +49,13 @@ module type S = sig
     (Yojson.Safe.t, string) result
   (** Remove a channel-to-keeper binding. *)
 
-  val bound_channels : keeper_name:string -> string list
+  val bound_channels :
+    keeper_name:string ->
+    (string list, Channel_gate_binding_store.binding_store_error) result
   (** Channel ids currently bound to [keeper_name], freshly read from
       the connector's binding store on each call (no cached state).
-      Sorted by channel id. RFC-0223 P2. *)
+      Sorted by channel id. Binding-store failure is distinct from an
+      unbound keeper. RFC-0223 P2. *)
 
   val connected : unit -> bool
   (** Whether the connector's transport is currently believed live.

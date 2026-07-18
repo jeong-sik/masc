@@ -17,6 +17,7 @@ let base_observation : WO.world_observation =
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
+    connected_surface_failures = [];
   }
 
 let sample_board_event : WO.pending_board_event =

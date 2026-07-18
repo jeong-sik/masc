@@ -642,6 +642,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             true)
       observation.connected_surfaces
   in
+  let connector_presence_failures = observation.connected_surface_failures in
   let turn_decision =
     (* RFC-0315: prefer the scheduler's actual decision (threaded through the
        turn runner) over a local recompute. The recompute cannot see
@@ -681,7 +682,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        dashboard is attached: every keeper has the dashboard, so dashboard-only
        presence carries no signal. *)
     | Keeper_context_layers.Connected_surfaces ->
-      if connector_presence <> [] then (
+      if connector_presence <> [] || connector_presence_failures <> [] then (
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf "### Connected Surfaces\n";
         List.iter
@@ -689,6 +690,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             Buffer.add_string ubuf
               (Printf.sprintf "- %s\n" (format_surface_presence p)))
           observation.connected_surfaces;
+        List.iter
+          (fun (failure : Gate_surface.presence_failure) ->
+            Buffer.add_string ubuf
+              (Printf.sprintf "- %s binding presence unavailable: %s\n"
+                 failure.connector_id
+                 (Channel_gate_binding_store.binding_store_error_to_string
+                    failure.error)))
+          connector_presence_failures;
         Buffer.add_string ubuf (connected_surface_discretion_prompt ());
         Buffer.add_char ubuf '\n';
         Buffer.add_char ubuf '\n';

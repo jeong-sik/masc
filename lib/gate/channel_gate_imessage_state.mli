@@ -55,9 +55,11 @@ val unbind :
 
 (** {1 Presence (RFC-0223 P2)} *)
 
-val bound_channels : keeper_name:string -> string list
+val bound_channels :
+  keeper_name:string ->
+  (string list, Channel_gate_binding_store.binding_store_error) result
 (** Channel ids bound to [keeper_name], freshly read from the binding
-    store on each call. *)
+    store on each call. Store failure is distinct from no bindings. *)
 
 val connected : unit -> bool
 (** Whether the sidecar's status file reports a live, non-stale

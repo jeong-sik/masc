@@ -117,6 +117,10 @@ type world_observation = {
       Recomputed from binding stores + connector liveness on every
       observation; the dashboard entry is always present. Presence
       only — no conversation content, no counts. *)
+
+  connected_surface_failures : Gate_surface.presence_failure list;
+  (** Connector binding stores that could not be read during presence
+      observation. Healthy connector surfaces remain available. *)
 }
 
 type keeper_cycle_channel =

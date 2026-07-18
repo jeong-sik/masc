@@ -212,27 +212,36 @@ let directory_presence_of_stat path (stat : Unix.stats) =
 ;;
 
 let inspect_directory_result ~missing_is_empty path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) when missing_is_empty ->
-    Ok Directory_missing
-  | exception Unix.Unix_error (error, _, _) ->
-    Error
-      (Io_error
-         { operation = Inspect; path; detail = Unix.error_message error })
-  | exception Sys_error detail ->
-    Error (Io_error { operation = Inspect; path; detail })
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-    (match Unix.stat path with
-     | stat -> directory_presence_of_stat path stat
-     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-       Error (Dangling_symbolic_link { path })
-     | exception Unix.Unix_error (error, _, _) ->
-       Error
-         (Io_error
-            { operation = Inspect; path; detail = Unix.error_message error })
-     | exception Sys_error detail ->
-       Error (Io_error { operation = Inspect; path; detail }))
-  | stat -> directory_presence_of_stat path stat
+  let ( let* ) = Result.bind in
+  let inspected =
+    match Unix.lstat path with
+    | stat -> Ok (Some stat)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) when missing_is_empty ->
+      Ok None
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Io_error
+           { operation = Inspect; path; detail = Unix.error_message error })
+    | exception Sys_error detail ->
+      Error (Io_error { operation = Inspect; path; detail })
+  in
+  let* stat = inspected in
+  match stat with
+  | None -> Ok Directory_missing
+  | Some stat ->
+    if stat.Unix.st_kind <> Unix.S_LNK
+    then directory_presence_of_stat path stat
+    else
+      (match Unix.stat path with
+       | stat -> directory_presence_of_stat path stat
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+         Error (Dangling_symbolic_link { path })
+       | exception Unix.Unix_error (error, _, _) ->
+         Error
+           (Io_error
+              { operation = Inspect; path; detail = Unix.error_message error })
+       | exception Sys_error detail ->
+         Error (Io_error { operation = Inspect; path; detail }))
 ;;
 
 let list_directory_result ~missing_is_empty path =

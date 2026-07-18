@@ -32,6 +32,7 @@
   masc_eio_context
   masc.config
   masc.keeper_registry
+  masc.keeper_checkpoint_ref
   masc.keeper_toml
   masc.config_dir_resolver
   masc.fs_compat

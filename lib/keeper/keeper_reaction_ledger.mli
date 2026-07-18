@@ -30,6 +30,7 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
+  | Event_queue_no_compaction
   | Event_queue_requeued
   | Event_queue_escalated
   | Cursor_ack

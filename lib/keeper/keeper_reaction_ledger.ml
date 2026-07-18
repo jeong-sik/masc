@@ -21,6 +21,7 @@ type stimulus_kind =
 type reaction_kind =
   | Turn_started
   | Event_queue_ack
+  | Event_queue_no_compaction
   | Event_queue_requeued
   | Event_queue_escalated
   | Cursor_ack
@@ -69,6 +70,7 @@ let stimulus_kind_of_string = function
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
   | Event_queue_ack -> "event_queue_ack"
+  | Event_queue_no_compaction -> "event_queue_no_compaction"
   | Event_queue_requeued -> "event_queue_requeued"
   | Event_queue_escalated -> "event_queue_escalated"
   | Cursor_ack -> "cursor_ack"
@@ -79,6 +81,7 @@ let reaction_kind_to_string = function
 let reaction_kind_of_string = function
   | "turn_started" -> Ok Turn_started
   | "event_queue_ack" -> Ok Event_queue_ack
+  | "event_queue_no_compaction" -> Ok Event_queue_no_compaction
   | "event_queue_requeued" -> Ok Event_queue_requeued
   | "event_queue_escalated" -> Ok Event_queue_escalated
   | "cursor_ack" -> Ok Cursor_ack
@@ -291,6 +294,7 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
 
 let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
+  | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
 ;;
@@ -663,16 +667,27 @@ let require_finite_float ~missing ~non_finite field json =
 let reaction_kind_matches_settlement reaction_kind settlement =
   match reaction_kind, settlement with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
+  | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
-    (Keeper_event_queue_state.Requeue _ | Keeper_event_queue_state.Escalate _)
+    ( Keeper_event_queue_state.No_compaction _
+    | Keeper_event_queue_state.Requeue _
+    | Keeper_event_queue_state.Escalate _ )
+  | Event_queue_no_compaction,
+    ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Requeue _
+    | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
-    (Keeper_event_queue_state.Ack | Keeper_event_queue_state.Escalate _)
+    ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.No_compaction _
+    | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
-    (Keeper_event_queue_state.Ack | Keeper_event_queue_state.Requeue _) -> false
+    ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.No_compaction _
+    | Keeper_event_queue_state.Requeue _ ) -> false
 ;;
 
 let decode_reaction_stimulus_reference reaction =
@@ -790,7 +805,8 @@ let decode_reaction_row ~event_id metadata reaction =
     if String.equal event_id expected_event_id
     then Ok (Current_reaction { metadata; reaction_kind; transition_receipt = None })
     else Error Event_identity_mismatch
-  | (Event_queue_ack | Event_queue_requeued | Event_queue_escalated),
+  | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_requeued
+    | Event_queue_escalated ),
     "keeper_event_queue_settlement" ->
     let* transition_receipt =
       decode_transition_reaction
@@ -807,12 +823,13 @@ let decode_reaction_row ~event_id metadata reaction =
   | Cursor_ack, "keeper_world_observation.board_cursor" ->
     Error Reaction_source_mismatch
   | Turn_started, "keeper_event_queue_settlement"
-  | (Event_queue_ack | Event_queue_requeued | Event_queue_escalated),
+  | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_requeued
+    | Event_queue_escalated ),
     "keeper_event_queue"
   | Cursor_ack, ("keeper_event_queue" | "keeper_event_queue_settlement") ->
     Error Reaction_source_mismatch
-  | ( Turn_started | Event_queue_ack | Event_queue_requeued
-    | Event_queue_escalated | Cursor_ack ),
+  | ( Turn_started | Event_queue_ack | Event_queue_no_compaction
+    | Event_queue_requeued | Event_queue_escalated | Cursor_ack ),
     _ -> Error Unknown_reaction_source
 ;;
 
@@ -1053,7 +1070,8 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
              := max_recorded_at !event_queue_ack_recorded_at recorded_at
          | Current_reaction
              { reaction_kind =
-                 Event_queue_requeued | Event_queue_escalated | Cursor_ack
+                 ( Event_queue_no_compaction | Event_queue_requeued
+                 | Event_queue_escalated | Cursor_ack )
              ; _
              }
          | Current_cursor_ack _ -> ())
@@ -1291,6 +1309,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let reaction_count = ref 0 in
   let turn_started_count = ref 0 in
   let event_queue_ack_count = ref 0 in
+  let event_queue_no_compaction_count = ref 0 in
   let event_queue_requeue_count = ref 0 in
   let event_queue_escalation_count = ref 0 in
   let event_queue_external_input_count = ref 0 in
@@ -1354,6 +1373,7 @@ let summarize_rows ~keeper_name ~limit rows =
     match reaction_kind, transition_receipt with
     | Turn_started, None -> incr turn_started_count
     | Event_queue_ack, Some _ -> incr event_queue_ack_count
+    | Event_queue_no_compaction, Some _ -> incr event_queue_no_compaction_count
     | Event_queue_requeued, Some _ -> incr event_queue_requeue_count
     | Event_queue_escalated, Some receipt ->
       incr event_queue_escalation_count;
@@ -1361,10 +1381,13 @@ let summarize_rows ~keeper_name ~limit rows =
        | Keeper_event_queue_state.Escalate { reason; _ } ->
          if Keeper_event_queue_state.escalation_reason_requests_external_input reason
          then incr event_queue_external_input_count
-       | Keeper_event_queue_state.Ack | Keeper_event_queue_state.Requeue _ -> ())
+       | Keeper_event_queue_state.Ack
+       | Keeper_event_queue_state.No_compaction _
+       | Keeper_event_queue_state.Requeue _ -> ())
     | Cursor_ack, None -> incr cursor_ack_count
     | Turn_started, Some _
-    | (Event_queue_ack | Event_queue_requeued | Event_queue_escalated), None
+    | ( Event_queue_ack | Event_queue_no_compaction | Event_queue_requeued
+      | Event_queue_escalated ), None
     | Cursor_ack, Some _ -> ()
   in
   let note_current_row current_row =
@@ -1431,6 +1454,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "reaction_count", `Int !reaction_count
     ; "turn_started_count", `Int !turn_started_count
     ; "event_queue_ack_count", `Int !event_queue_ack_count
+    ; "event_queue_no_compaction_count", `Int !event_queue_no_compaction_count
     ; "event_queue_requeue_count", `Int !event_queue_requeue_count
     ; "event_queue_escalation_count", `Int !event_queue_escalation_count
     ; "event_queue_external_input_count", `Int !event_queue_external_input_count
@@ -1464,6 +1488,7 @@ let error_summary ~keeper_name ~limit error =
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
+    ; "event_queue_no_compaction_count", `Int 0
     ; "event_queue_requeue_count", `Int 0
     ; "event_queue_escalation_count", `Int 0
     ; "cursor_ack_count", `Int 0

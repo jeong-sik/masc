@@ -23,6 +23,17 @@ type escalation_reason =
       ; rationale : string
       }
 
+type no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+
+type no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
 let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
@@ -31,6 +42,7 @@ let escalation_reason_requests_external_input = function
 
 type settlement =
   | Ack
+  | No_compaction of no_compaction
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -353,6 +365,7 @@ let escalation_reason_of_wire ~label ~detail_json =
 
 let settlement_kind_label = function
   | Ack -> "ack"
+  | No_compaction _ -> "no_compaction"
   | Requeue _ -> "requeue"
   | Escalate _ -> "escalate"
 ;;
@@ -376,14 +389,18 @@ let successor_equal left right =
 let settlement_equal left right =
   match left, right with
   | Ack, Ack -> true
+  | No_compaction left, No_compaction right ->
+    Keeper_checkpoint_ref.equal left.source right.source
+    && left.reason = right.reason
   | Requeue left, Requeue right -> left = right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
     left_reason = right_reason
     && successor_equal left_successor right_successor
-  | Ack, (Requeue _ | Escalate _)
-  | Requeue _, (Ack | Escalate _)
-  | Escalate _, (Ack | Requeue _) ->
+  | Ack, (No_compaction _ | Requeue _ | Escalate _)
+  | No_compaction _, (Ack | Requeue _ | Escalate _)
+  | Requeue _, (Ack | No_compaction _ | Escalate _)
+  | Escalate _, (Ack | No_compaction _ | Requeue _) ->
     false
 ;;
 
@@ -397,7 +414,7 @@ let transition_receipt_equal left right =
 ;;
 
 let validate_settlement = function
-  | Ack | Requeue _ -> Ok ()
+  | Ack | No_compaction _ | Requeue _ -> Ok ()
   | Escalate
       { reason = Failure_judgment_requested
       ; successor =
@@ -509,7 +526,7 @@ let settle ~settled_at ~lease ~settlement state =
   | Some committed ->
     let pending =
       match settlement with
-      | Ack -> state.pending
+      | Ack | No_compaction _ -> state.pending
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
@@ -671,6 +688,13 @@ let float_field ~context name fields =
   | _ -> Error (Printf.sprintf "%s.%s must be a number" context name)
 ;;
 
+let int_field ~context name fields =
+  let* value = required_field ~context name fields in
+  match value with
+  | `Int value -> Ok value
+  | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
+;;
+
 let int64_field ~context name fields =
   let* value = required_field ~context name fields in
   match value with
@@ -747,8 +771,62 @@ let lease_of_yojson json =
   else Ok { lease_id; sequence; kind; claimed_at; stimuli }
 ;;
 
+let no_compaction_reason_label = function
+  | No_eligible_history -> "no_eligible_history"
+  | Invalid_structural_source -> "invalid_structural_source"
+  | Structurally_unchanged -> "structurally_unchanged"
+  | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+;;
+
+let no_compaction_reason_of_label = function
+  | "no_eligible_history" -> Ok No_eligible_history
+  | "invalid_structural_source" -> Ok Invalid_structural_source
+  | "structurally_unchanged" -> Ok Structurally_unchanged
+  | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
+  | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
+;;
+
+let checkpoint_source_to_yojson (source : Keeper_checkpoint_ref.t) =
+  `Assoc
+    [ "trace_id", `String (Keeper_id.Trace_id.to_string source.trace_id)
+    ; "generation", `Int source.generation
+    ; "turn_count", `Int source.turn_count
+    ; "sha256", `String source.sha256
+    ]
+;;
+
+let checkpoint_source_of_yojson json =
+  let context = "no-compaction checkpoint source" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:[ "trace_id"; "generation"; "turn_count"; "sha256" ]
+      fields
+  in
+  let* trace_id_raw = string_field ~context "trace_id" fields in
+  let* trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
+  let* generation = int_field ~context "generation" fields in
+  let* turn_count = int_field ~context "turn_count" fields in
+  let* sha256 = string_field ~context "sha256" fields in
+  Keeper_checkpoint_ref.of_persisted ~trace_id ~generation ~turn_count ~sha256
+  |> Result.map_error (function
+    | Keeper_checkpoint_ref.Negative_generation value ->
+      Printf.sprintf "no-compaction checkpoint generation is negative: %d" value
+    | Negative_turn_count value ->
+      Printf.sprintf "no-compaction checkpoint turn count is negative: %d" value
+    | Invalid_sha256 value ->
+      Printf.sprintf "no-compaction checkpoint digest is invalid: %s" value)
+;;
+
 let settlement_to_yojson = function
   | Ack -> `Assoc [ "kind", `String "ack" ]
+  | No_compaction { source; reason } ->
+    `Assoc
+      [ "kind", `String "no_compaction"
+      ; "reason", `String (no_compaction_reason_label reason)
+      ; "source", checkpoint_source_to_yojson source
+      ]
   | Requeue reason ->
     `Assoc
       [ "kind", `String "requeue"
@@ -774,6 +852,15 @@ let settlement_of_yojson json =
   | "ack" ->
     let* () = exact_fields ~context ~expected:[ "kind" ] fields in
     Ok Ack
+  | "no_compaction" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "reason"; "source" ] fields
+    in
+    let* reason_label = string_field ~context "reason" fields in
+    let* reason = no_compaction_reason_of_label reason_label in
+    let* source_json = required_field ~context "source" fields in
+    let* source = checkpoint_source_of_yojson source_json in
+    Ok (No_compaction { source; reason })
   | "requeue" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in

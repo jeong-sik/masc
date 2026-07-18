@@ -72,6 +72,10 @@ type transition =
   | Partition_deferred of t
   | Partition_blocked of t
 
+type claim_recovery =
+  | Claim_released of t
+  | Claim_already_transitioned of t
+
 val state_to_string : state -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
@@ -102,6 +106,16 @@ val claim_next :
   keeper_name:string ->
   (t option, string) result
 (** Claim the oldest [Ready] partition. *)
+
+val recover_claim_after_lane_abort :
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  (claim_recovery, string) result
+(** Release a [Running] claim owned by [worker_epoch] back to [Ready] when its
+    process lane aborts before returning a typed transition. If the durable
+    partition already reached another state, report [Claim_already_transitioned]
+    without rewriting it. A different live worker epoch is never revoked. *)
 
 val complete :
   now:float ->

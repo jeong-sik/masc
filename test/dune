@@ -187,7 +187,6 @@
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
   test_keeper_board_attention_partition
-  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -506,7 +505,6 @@
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
   test_keeper_board_attention_partition
-  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -668,6 +666,13 @@
  (libraries
   masc_test_deps masc.keeper_chat_delivery_identity masc_schedule multimodal
   bigstringaf))
+
+; The worker regression directly exercises Eio's system-thread boundary. Keep
+; that dependency local instead of exposing Eio_unix to every standard test.
+(test
+ (name test_keeper_board_attention_worker)
+ (modules test_keeper_board_attention_worker)
+ (libraries alcotest eio_main eio.unix masc_test_deps yojson))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test

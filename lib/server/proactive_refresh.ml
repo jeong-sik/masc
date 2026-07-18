@@ -96,6 +96,21 @@ let notify_error config exn =
   | None -> ()
 
 let start ~sw ~clock ~config:raw_config ~compute ~on_result =
+  (* Run [compute] off the serving domain.  Every refresh loop that goes
+     through [start] (operator_snapshot, operator_digest, execution,
+     execution_trust, mission, full_health_snapshot, …) used to run its
+     blocking file I/O + JSON construction inline on the main Eio domain,
+     starving HTTP/WS/keeper fibers — the measured 60s dashboard_execution
+     renders with keepers=0 and the per-refresh 24-60s timeouts.  The CPU
+     pool already exists for exactly this (Dashboard_snapshot.refresh_loop
+     and the single-flight bootstrap use it).  [submit_cpu_or_inline]
+     reserves one worker slot and falls back to inline before the pool is
+     installed at boot.  Concurrent runs of different loops may touch the
+     same Jsonl_incremental_projection tables from different worker domains;
+     those projections are designed to tolerate racing rebuilds of the same
+     key (idempotent re-fold, later Hashtbl.replace wins — see
+     jsonl_incremental_projection.ml "Concurrency"). *)
+  let compute () = Domain_pool_ref.submit_cpu_or_inline compute in
   (* Clamp timeout below interval to prevent overlapping refreshes.
      When timeout >= interval, a timed-out compute runs past the next
      scheduled refresh, causing cascading failures (#7164). *)

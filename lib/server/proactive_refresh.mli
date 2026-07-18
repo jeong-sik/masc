@@ -40,5 +40,11 @@ val start :
     to a ref).  A warm-cache run executes synchronously before the async
     loop, bounded by [config.timeout_s].
 
+    [compute] runs off the serving domain via
+    {!Domain_pool_ref.submit_cpu_or_inline} (one CPU-pool worker slot;
+    inline fallback before the pool is installed at boot), so blocking
+    file I/O and JSON construction in refresh loops no longer starve
+    HTTP/WS/keeper fibers on the main Eio domain.
+
     When [config.on_error] is set, it is called on timeout or exception,
     allowing callers to record the failure (e.g. mark_cached_surface_error). *)

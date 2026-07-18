@@ -14,7 +14,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml`, `lib/verifier_core.ml`, `lib/verifier_oas.ml` |
+| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml` |
 | Dependencies | (all subsystem specs) |
 | Test Files | `test/dune`와 포함 stanza가 SSOT |
 
@@ -188,11 +188,11 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 
 **trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
 
-### 5.5 Verifier (lib/verifier_core.ml, lib/verifier_oas.ml)
+### 5.5 Judgment boundary tests
 
-`lib/keeper/keeper_verifier.ml`가 단일 모듈로 제공하던 Generator–Verifier 루프는 `lib/verifier_core.ml`(코어 판정 로직)과 `lib/verifier_oas.ml`(OAS-bound execution path)로 2분할됐다. `pre_tool_use`는 시간 관측만 하며, 외부 효과 승인은 normalized Gate 경계에서 별도로 판정한다 (구 `keeper_verifier.ml`는 제거, #2589 및 05-keeper-agent 스펙 참조).
-
-현 루프:
+LLM judgment tests are owned by the product contract they exercise. Shared
+tests do not manufacture a generic action-verifier lifecycle or infer
+semantics from tool names and prose.
 
 ```
 typed effect request -> objective structure/path/sandbox invariants

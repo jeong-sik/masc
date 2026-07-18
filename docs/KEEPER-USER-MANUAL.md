@@ -68,7 +68,6 @@ MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
 
 | 어댑터 | 역할 |
 |--------|------|
-| `verifier_oas.ml` | OAS verifier/model bridge |
 | `oas_events.ml` | MASC 조율 이벤트를 OAS Event_bus `Custom("masc:*")` 포맷으로 발행 |
 
 ### 1.3 Persona와 Agent의 관계

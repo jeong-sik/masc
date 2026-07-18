@@ -55,7 +55,6 @@ let all_provider_native_schema_cases =
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
-  ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
   ; ( "board_attention_judgment_batch"
     , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
@@ -235,32 +234,6 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
 ;;
 
 
-let test_verification_verdict_schema_uses_core_ssot () =
-  let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
-  check
-    (list string)
-    "verification verdict required fields"
-    [ "evidence"; "reason"; "verdict" ]
-    (required_strings schema);
-  check
-    (list string)
-    "verification verdict enum"
-    (List.sort String.compare Verifier_core.valid_verdict_strings)
-    (schema |> schema_property "verdict" |> enum_strings);
-  check bool "verification verdict is closed" false
-    (allows_additional_properties schema);
-  let evidence_schema =
-    schema |> schema_property "evidence" |> schema_items
-  in
-  check
-    (list string)
-    "verification evidence required fields"
-    [ "line"; "path"; "quote" ]
-    (required_strings evidence_schema);
-  check bool "verification evidence is closed" false
-    (allows_additional_properties evidence_schema)
-;;
-
 let test_anti_rationalization_verdict_schema_uses_task_ssot () =
   let schema =
     Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
@@ -352,10 +325,6 @@ let () =
         ] )
     ; ( "verdict schemas"
       , [ test_case
-            "verification verdict schema uses core SSOT"
-            `Quick
-            test_verification_verdict_schema_uses_core_ssot
-        ; test_case
             "anti-rationalization verdict schema uses task SSOT"
             `Quick
             test_anti_rationalization_verdict_schema_uses_task_ssot

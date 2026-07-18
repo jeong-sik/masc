@@ -91,7 +91,7 @@ OAS  ──does not know──→ MASC
 
 | Module / Surface | Classification | Why |
 |------------------|----------------|-----|
-| `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
+| `lib/oas_worker*.ml`, `lib/worker_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, and product judgment usage |
 | `lib/keeper/keeper_compact_policy.ml`, `keeper_manual_compaction.ml` | MASC product owner | Configured LLM planning and checkpoint mutation stay in MASC; OAS supplies only generic model/runtime execution. |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Correct boundary | Keeper recovery reads canonical OAS checkpoints. MASC does not parse assistant replies into continuity state; owner-specific typed adapter metadata remains separate from the transcript. |
 

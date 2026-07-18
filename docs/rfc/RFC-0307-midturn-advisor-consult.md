@@ -3,7 +3,7 @@ rfc: "0307"
 title: "Mid-turn advisor consult for keepers — evaluation and deferral"
 status: Draft
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-18
 author: vincent
 supersedes: []
 superseded_by: null
@@ -34,10 +34,10 @@ conditions that would reopen it, so the axis is not re-litigated ad hoc.
 A second, higher-capability model already participates in keeper workflows — but
 *after* the producing turn, as a verifier/judge, never *inside* it:
 
-- **Structured judge runtime**: a dedicated second runtime resolved via
-  `Runtime.runtime_id_for_structured_judge ()`, consumed at
-  `lib/verifier_oas.ml:133`. Validation of the judge runtime lives at
-  `lib/runtime/runtime.ml` (`validate_structured_judge_runtime`, ~L185–213).
+- **Structured judgment lanes**: Keeper failure judgment and board attention
+  resolve the configured second runtime via
+  `Runtime.runtime_id_for_structured_judge ()`. Runtime validation lives in
+  `lib/runtime/runtime.ml`.
 - **Fusion judge**: `lib/fusion/fusion_judge.ml:188` `run_composed
   ~judge_model …` (and `run` / `run_refine` wrappers) — a distinct judge model
   scores/refines fusion panel output.

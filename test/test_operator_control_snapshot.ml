@@ -366,10 +366,20 @@ let init_context_test_runtime () =
 ;;
 
 let write_raw_metrics_row config keeper_name row =
-  let metrics_dir = Keeper_types_support.keeper_metrics_dir config keeper_name in
-  let month_dir = Filename.concat metrics_dir "2026-07" in
-  Fs_compat.mkdir_p month_dir;
-  let path = Filename.concat month_dir "18.jsonl" in
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  Dated_jsonl.append store (`Assoc [ "fixture", `Bool true ]);
+  let only_entry label directory =
+    match Sys.readdir directory |> Array.to_list with
+    | [ entry ] -> Filename.concat directory entry
+    | entries ->
+      Alcotest.failf
+        "expected one %s entry under %s, found %d"
+        label
+        directory
+        (List.length entries)
+  in
+  let month_dir = only_entry "month" (Dated_jsonl.base_dir store) in
+  let path = only_entry "day file" month_dir in
   Fs_compat.save_file path (row ^ "\n");
   path
 ;;
@@ -473,7 +483,9 @@ let test_context_snapshot_storage_failure_is_unavailable () =
        Alcotest.(check string) "typed storage failure" "storage_read_failed"
          Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
        Alcotest.(check string) "exact storage reason" "not_a_directory"
-         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string))
+         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string);
+       Alcotest.(check string) "exact storage path" metrics_dir
+         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
 ;;
 
 let test_keeper_up_clears_dead_tombstone_resume_state () =

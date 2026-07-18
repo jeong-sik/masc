@@ -129,12 +129,22 @@ let dated_jsonl_read_error_code = function
   | Dated_jsonl.Io_error _ -> "io_error"
 ;;
 
+let dated_jsonl_read_error_path = function
+  | Dated_jsonl.Invalid_offset _ -> None
+  | Dated_jsonl.Not_a_directory { path }
+  | Dated_jsonl.Non_regular_file { path; _ }
+  | Dated_jsonl.Io_error { path; _ } -> Some path
+  | Dated_jsonl.Invalid_layout_entry { parent; entry; _ } ->
+    Some (Filename.concat parent entry)
+;;
+
 let context_metrics_unavailable_json = function
   | None -> `Null
   | Some (Storage_read_failed error) ->
     `Assoc
       [ "kind", `String "storage_read_failed"
       ; "reason", `String (dated_jsonl_read_error_code error)
+      ; "path", Json_util.string_opt_to_json (dated_jsonl_read_error_path error)
       ; "detail", `String (Dated_jsonl.read_error_to_string error)
       ]
   | Some (Malformed_metrics_row { path; line_number; detail }) ->

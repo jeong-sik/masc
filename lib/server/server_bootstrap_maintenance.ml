@@ -568,6 +568,75 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
                else 0
              in
+             (* Age-based pruners for stores that do not use the dated-JSONL
+                layout.  All share the same retention knob. *)
+             let cutoff = now -. (float_of_int days *. Masc_time_constants.day) in
+             let mtime_of path =
+               try (Unix.stat path).Unix.st_mtime with
+               | Unix.Unix_error _ -> cutoff
+             in
+             (* traces/<trace-id> dirs hold per-turn snapshots; the dir mtime
+                tracks the last snapshot write (snapshot saves are atomic
+                renames into the dir), so a dir older than the cutoff is
+                finished and cold.  Top-level trace-*.checkpoint.lock files
+                follow the same horizon. *)
+             let prune_trace_dirs dir =
+               if not (Sys.file_exists dir)
+               then 0
+               else (
+                 let deleted = ref 0 in
+                 (try Sys.readdir dir with
+                  | Sys_error _ -> [||])
+                 |> Array.iter (fun name ->
+                      if String.starts_with ~prefix:"trace-" name
+                      then (
+                        let path = Filename.concat dir name in
+                        if mtime_of path < cutoff
+                        then (
+                          (try
+                             if Sys.is_directory path
+                             then Fs_compat.remove_tree path
+                             else Sys.remove path
+                           with
+                           | Sys_error _ | Unix.Unix_error _ -> ());
+                          incr deleted)));
+                 !deleted)
+             in
+             (* trajectories/<keeper>/ and tool_blobs/<shard>/ accumulate
+                regular files; delete files older than the cutoff, then drop
+                emptied subdirectories.  tool_blobs is safe to age-prune
+                because [Tool_blob_store.put] atomically rewrites a blob on
+                every put, refreshing its mtime — so a blob's mtime is the
+                date of its newest referencing tool_calls row, and rows older
+                than the retention window are pruned in this same round. *)
+             let prune_files_by_mtime dir =
+               if not (Sys.file_exists dir)
+               then 0
+               else (
+                 let deleted = ref 0 in
+                 let rec walk path =
+                   (match Sys.readdir path with
+                    | entries ->
+                      Array.iter
+                        (fun name ->
+                           let p = Filename.concat path name in
+                           if (try Sys.is_directory p with
+                               | Sys_error _ -> false)
+                           then walk p
+                           else if mtime_of p < cutoff
+                           then (
+                             (try Sys.remove p with
+                              | Sys_error _ -> ());
+                             incr deleted))
+                        entries
+                    | exception Sys_error _ -> ());
+                   if not (String.equal path dir)
+                   then (try Unix.rmdir path with
+                         | Unix.Unix_error _ -> ())
+                 in
+                 walk dir;
+                 !deleted)
+             in
              let prune_recall_injections () =
                match
                  Keeper_recall_injection_ledger.prune_older_than
@@ -594,11 +663,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                   introduction (RFC-0002) — 82 MB across 3 month-dirs by
                   2026-06-10, scanned by every store-fallback read. *)
                + prune_dir (Filename.concat masc "transition-audit")
+               (* 2026-07-18: oas-events and costs share the dated layout;
+                  traces, trajectories and tool_blobs had no retention at
+                  all (114k/177k cold files observed) and are pruned by age
+                  on the same knob. *)
+               + prune_dir (Filename.concat masc "oas-events")
+               + prune_dir (Filename.concat masc "costs")
+               + prune_trace_dirs (Filename.concat masc "traces")
+               + prune_files_by_mtime (Filename.concat masc "trajectories")
+               + prune_files_by_mtime (Filename.concat masc "tool_blobs")
              in
              if total > 0
              then
                Log.Server.info
-                 "periodic JSONL prune: pruned %d day-files (retention=%dd)"
+                 "periodic JSONL prune: pruned %d day-files/dirs (retention=%dd)"
                  total
                  days;
                (* Schedule terminal-row GC on the same 24h cadence: terminal

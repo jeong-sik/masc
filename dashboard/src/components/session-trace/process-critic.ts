@@ -118,7 +118,6 @@ export function evaluateProcessTrace({
 
 function isFailureEvent(event: UnifiedTraceEvent): boolean {
   if (event.error) return true
-  if (event.gate?.status === 'reject') return true
   return event.detail.durable_kind === 'error_occurred'
 }
 
@@ -165,8 +164,7 @@ function findRepeatedToolCluster(events: readonly UnifiedTraceEvent[]): ToolRunC
 
 function compactEvidence(events: readonly UnifiedTraceEvent[], fallback: string[] = []): string[] {
   const evidence = events.slice(0, 4).map(event => {
-    const reason = event.error ?? (event.gate?.reason ? `gate ${event.gate.reason}` : null)
-    return reason ? `${event.summary}: ${reason}` : event.summary
+    return event.error ? `${event.summary}: ${event.error}` : event.summary
   })
   return evidence.length > 0 ? evidence : fallback
 }

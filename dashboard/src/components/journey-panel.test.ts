@@ -25,19 +25,14 @@ function trajectory(): TrajectoryResponse {
     decode: {
       tool_call_count: 1,
       thinking_count: 0,
-      passed_gate_count: 1,
-      rejected_gate_count: 0,
       skipped_summary_count: 0,
       invalid_line_count: 0,
       invalid_reasons: {
         missing_required_field: 0,
         invalid_field: 0,
+        unexpected_field: 0,
+        duplicate_field: 0,
         unsupported_row_type: 0,
-        missing_gate: 0,
-        invalid_gate_shape: 0,
-        missing_gate_status: 0,
-        unsupported_gate_status: 0,
-        missing_reject_reason: 0,
         malformed_json: 0,
       },
     },
@@ -50,7 +45,6 @@ function trajectory(): TrajectoryResponse {
         round: 1,
         tool_name: 'fs_read',
         args: { path: '/tmp/old' },
-        gate: { status: 'pass' },
         result: 'old result',
         duration_ms: 120,
         error: null,
@@ -226,7 +220,7 @@ describe('JourneyPanel', () => {
       expect(screen.getByText('trajectory + I/O')).toBeInTheDocument()
     })
 
-    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true, true)
+    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true)
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('keeper-a', 200, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))

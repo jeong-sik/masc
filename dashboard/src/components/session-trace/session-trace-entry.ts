@@ -485,7 +485,6 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 // ── Components ─────────────────────────────────────────
 
 function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
-  const gateRejected = event.gate?.status === 'reject'
   const toolIoRedacted = event.detail.tool_io_redacted === true
   const resultText = event.error ?? event.toolResult ?? null
   const hint = resultText ? detectContentHint(resultText) : 'plain'
@@ -521,17 +520,12 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ${resultText ? html`
         <${ResultViewer} text=${resultText} hint=${hint} isError=${Boolean(event.error)} />
       ` : null}
-      ${gateRejected ? html`
-        <div class="text-3xs px-2 py-1 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)] inline-block">
-          거부: ${event.gate?.reason ?? ''}
-        </div>
-      ` : null}
       ${toolIoRedacted ? html`
         <div class="inline-block rounded-[var(--r-1)] border border-[var(--warn-25)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
           Tool I/O preview redacted
         </div>
       ` : null}
-      ${!event.toolArgs && !resultText && !gateRejected && !toolIoRedacted ? html`
+      ${!event.toolArgs && !resultText && !toolIoRedacted ? html`
         <div class="text-3xs text-[var(--color-fg-disabled)] italic px-2 py-1">
           세부 정보가 기록되지 않았습니다.
         </div>
@@ -773,7 +767,6 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     ? toolStyle(event.toolName)
     : durable ?? kindStyle
 
-  const gateRejected = event.kind === 'tool_call' && event.gate?.status === 'reject'
   const contextLinks = traceRouteLinks(event)
 
   // Summary text
@@ -796,7 +789,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || contextLinks.length > 0
 
   const row = html`
-    <div class="v2-monitoring-trace-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
+    <div class="v2-monitoring-trace-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)]">
       ${'' /* Icon */}
       <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
@@ -826,11 +819,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           ` : null}
           ${event.error
             ? html`<${TraceBadge} tone="bad">오류</${TraceBadge}>`
-            : gateRejected
-              ? html`<${TraceBadge} tone="bad">거부</${TraceBadge}>`
-              : event.kind === 'tool_call'
-                ? html`<${TraceBadge} tone="ok">완료</${TraceBadge}>`
-                : null}
+            : event.kind === 'tool_call'
+              ? html`<${TraceBadge} tone="ok">완료</${TraceBadge}>`
+              : null}
         </div>
         <div class="mt-0.5 text-2xs text-[var(--color-fg-muted)] font-mono truncate max-w-full" title=${event.summary}>
           <${HighlightedText} text=${summaryText} query=${searchQuery ?? ''} />

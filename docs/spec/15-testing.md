@@ -181,17 +181,17 @@ Keeper Tool/Thinking의 JSONL 기반 궤적 로깅. 결정적 재생, 정확한 
 | `round` | int | 턴 내 단조 증가 도구 라운드 |
 | `tool_name` | string | 호출된 도구 |
 | `args` | object | 구조화된 도구 입력 |
-| `gate` | Pass/Reject | 사전 게이트 결과. Reject는 명시적 reason 필수 |
-| `result` | string option | 실행 결과 (게이트 차단 시 None) |
+| `result` | string option | 실행 결과 |
 | `duration_ms` | int | 실행 시간 |
 | `error` | string option | 실행 오류 |
 | `execution_id` | string option | tool-call ledger와의 typed join key |
 
 **trajectory_outcome**: `Completed | Failed | Timeout | Gated`.
 
-Tool/Thinking/summary 이외의 row, 필수 필드 누락, 잘못된 gate 및 malformed
-JSON은 기본값으로 복구하지 않는다. 유효 row는 계속 읽고, row별 decode 실패와
-file별 I/O 실패는 구조화된 관측으로 함께 반환한다.
+Tool/Thinking/summary 이외의 row, 필수·중복·예상 밖 필드 및 malformed JSON은
+기본값이나 폐기된 계약으로 복구하지 않는다. 유효 row는 계속 읽고, row별
+decode 실패와 file별 I/O 실패는 구조화된 관측으로 함께 반환한다. Tool gate
+판정은 effect Gate의 별도 감사 계약이며 Trajectory Tool row가 복제하지 않는다.
 
 ### 5.5 Judgment boundary tests
 

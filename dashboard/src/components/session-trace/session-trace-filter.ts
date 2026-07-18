@@ -32,7 +32,6 @@ const STATUS_CHIPS: Array<{ key: StatusKey; label: string }> = [
   { key: 'all',           label: '전체' },
   { key: 'success',       label: '성공' },
   { key: 'failure',       label: '실패' },
-  { key: 'gate_rejected', label: '게이트 거부' },
 ]
 
 export function SessionTraceFilter({ agentName }: { agentName: string }) {

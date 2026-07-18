@@ -315,19 +315,14 @@ describe('keeper tool telemetry fetchers', () => {
         keeper: 'keeper-alpha',
         window_hours: 24,
         total_entries: 0,
-        gate_decode: {
-          passed_gate_count: 0,
-          rejected_gate_count: 0,
+        decode: {
           invalid_entry_count: 0,
           invalid_reasons: {
             missing_required_field: 0,
             invalid_field: 0,
+            unexpected_field: 0,
+            duplicate_field: 0,
             unsupported_row_type: 0,
-            missing_gate: 0,
-            invalid_gate_shape: 0,
-            missing_gate_status: 0,
-            unsupported_gate_status: 0,
-            missing_reject_reason: 0,
             malformed_json: 0,
           },
         },
@@ -362,9 +357,7 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolStats('keeper-alpha')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
-    expect(result.gate_decode).toMatchObject({
-      passed_gate_count: 0,
-      rejected_gate_count: 0,
+    expect(result.decode).toMatchObject({
       invalid_entry_count: 0,
     })
     expect(result.io_errors).toEqual([])
@@ -384,19 +377,14 @@ describe('keeper tool telemetry fetchers', () => {
       keeper: 'keeper-alpha',
       window_hours: 24,
       total_entries: 1,
-      gate_decode: {
-        passed_gate_count: 1,
-        rejected_gate_count: 0,
+      decode: {
         invalid_entry_count: 0,
         invalid_reasons: {
           missing_required_field: 0,
           invalid_field: 0,
+          unexpected_field: 0,
+          duplicate_field: 0,
           unsupported_row_type: 0,
-          missing_gate: 0,
-          invalid_gate_shape: 0,
-          missing_gate_status: 0,
-          unsupported_gate_status: 0,
-          missing_reject_reason: 0,
           malformed_json: 0,
         },
       },
@@ -436,19 +424,14 @@ describe('keeper tool telemetry fetchers', () => {
       decode: {
         tool_call_count: 0,
         thinking_count: 1,
-        passed_gate_count: 0,
-        rejected_gate_count: 0,
         skipped_summary_count: 0,
         invalid_line_count: 0,
         invalid_reasons: {
           missing_required_field: 0,
           invalid_field: 0,
+          unexpected_field: 0,
+          duplicate_field: 0,
           unsupported_row_type: 0,
-          missing_gate: 0,
-          invalid_gate_shape: 0,
-          missing_gate_status: 0,
-          unsupported_gate_status: 0,
-          missing_reject_reason: 0,
           malformed_json: 0,
         },
       },
@@ -473,16 +456,13 @@ describe('keeper tool telemetry fetchers', () => {
     )
   })
 
-  it('preserves exact strings and rejects whitespace-only gate reasons', async () => {
+  it('preserves exact strings and rejects retired trajectory fields', async () => {
     const invalidReasons = {
       missing_required_field: 0,
       invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
       unsupported_row_type: 0,
-      missing_gate: 0,
-      invalid_gate_shape: 0,
-      missing_gate_status: 0,
-      unsupported_gate_status: 0,
-      missing_reject_reason: 0,
       malformed_json: 0,
     }
     const response = (entry: Record<string, unknown>, decode: Record<string, unknown>) =>
@@ -519,8 +499,6 @@ describe('keeper tool telemetry fetchers', () => {
       }, {
         tool_call_count: 0,
         thinking_count: 1,
-        passed_gate_count: 0,
-        rejected_gate_count: 0,
       }))
       .mockResolvedValueOnce(response({
         ts: 1,
@@ -536,8 +514,6 @@ describe('keeper tool telemetry fetchers', () => {
       }, {
         tool_call_count: 1,
         thinking_count: 0,
-        passed_gate_count: 0,
-        rejected_gate_count: 1,
       }))
     vi.stubGlobal('fetch', fetchMock)
 

@@ -24,7 +24,7 @@ let trajectory_read_failure_data ~keeper_name ~trace_id
     [ ("error", `String "trajectory_read_failed")
     ; ("keeper", `String keeper_name)
     ; ("trace_id", `String trace_id)
-    ; ("gate_decode", Trajectory.gate_decode_summary_to_json read.gate_decode)
+    ; ("decode", Trajectory.entry_decode_summary_to_json read.decode)
     ; ("io_errors", Trajectory.trajectory_read_errors_to_json read.io_errors)
     ]
 
@@ -277,7 +277,7 @@ let handle_keeper_trajectory ctx args : tool_result =
           ("generation", `Int m.runtime.generation);
           ("total_entries", `Int total);
           ("showing", `Int (List.length recent));
-          ("gate_decode", Trajectory.gate_decode_summary_to_json read.gate_decode);
+          ("decode", Trajectory.entry_decode_summary_to_json read.decode);
           ("io_errors", Trajectory.trajectory_read_errors_to_json read.io_errors);
           ("entries", `List json_list);
         ] in
@@ -302,14 +302,14 @@ let handle_keeper_eval ctx args : tool_result =
       if read.io_errors <> [] then
         tool_result_error_data
           (trajectory_read_failure_data ~keeper_name:m.name ~trace_id read)
-      else if entries = [] && read.gate_decode.invalid_entry_count > 0 then
+      else if entries = [] && read.decode.invalid_entry_count > 0 then
         tool_result_error_data
           (`Assoc
              [ ("error", `String "trajectory_has_no_valid_entries")
              ; ("keeper", `String m.name)
              ; ("trace_id", `String trace_id)
-             ; ( "gate_decode",
-                 Trajectory.gate_decode_summary_to_json read.gate_decode )
+             ; ( "decode",
+                 Trajectory.entry_decode_summary_to_json read.decode )
              ])
       else if entries = [] then
         tool_result_ok
@@ -356,7 +356,7 @@ let handle_keeper_eval ctx args : tool_result =
           ("total_tool_calls", `Int total);
           ("unique_tools", `Int (List.length unique_tools));
           ("tool_distribution", `List tool_stats);
-          ("gate_decode", Trajectory.gate_decode_summary_to_json read.gate_decode);
+          ("decode", Trajectory.entry_decode_summary_to_json read.decode);
           ("scenario_file", scenario_info);
           ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in

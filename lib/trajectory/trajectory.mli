@@ -6,15 +6,6 @@
 
 (** {1 Types} *)
 
-type rejection_reason
-
-val rejection_reason_of_string : string -> rejection_reason option
-val rejection_reason_to_string : rejection_reason -> string
-
-type gate_decision =
-  | Pass
-  | Reject of rejection_reason
-
 type tool_call_entry = {
   ts : float;
   ts_iso : string;
@@ -24,7 +15,6 @@ type tool_call_entry = {
   arguments : (string * Yojson.Safe.t) list;
       (** Structured Tool arguments. The association-list type makes the JSON
           object invariant explicit and prevents a parallel string form. *)
-  gate_decision : gate_decision;
   result : string option;
   duration_ms : int;
   error : string option;
@@ -37,18 +27,13 @@ type tool_call_entry = {
 type invalid_entry_counts = {
   missing_required_field : int;
   invalid_field : int;
+  unexpected_field : int;
+  duplicate_field : int;
   unsupported_row_type : int;
-  missing_gate : int;
-  invalid_gate_shape : int;
-  missing_gate_status : int;
-  unsupported_gate_status : int;
-  missing_reject_reason : int;
   malformed_json : int;
 }
 
-type gate_decode_summary = {
-  passed_gate_count : int;
-  rejected_gate_count : int;
+type entry_decode_summary = {
   invalid_entry_count : int;
   invalid_reasons : invalid_entry_counts;
 }
@@ -60,16 +45,9 @@ type trajectory_read_error = {
 
 type entries_read_result = {
   entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
+  decode : entry_decode_summary;
   io_errors : trajectory_read_error list;
 }
-
-type gate_decode_error =
-  | Missing_gate
-  | Invalid_gate_shape
-  | Missing_gate_status
-  | Unsupported_gate_status of string
-  | Missing_reject_reason
 
 type entry_field =
   | Row_type
@@ -90,8 +68,9 @@ type entry_field =
 type entry_decode_error =
   | Missing_required_field of entry_field
   | Invalid_field of entry_field
+  | Unexpected_field of string
+  | Duplicate_field of string
   | Unsupported_row_type of string
-  | Invalid_gate of gate_decode_error
   | Malformed_json
 
 type tool_call_entry_decode =
@@ -139,8 +118,6 @@ type trajectory_line =
 type trajectory_line_decode_summary = {
   tool_call_count : int;
   thinking_count : int;
-  passed_gate_count : int;
-  rejected_gate_count : int;
   skipped_summary_count : int;
   invalid_line_count : int;
   invalid_reasons : invalid_entry_counts;
@@ -154,7 +131,6 @@ type trajectory_lines_read_result = {
 
 (** {1 JSON serialization} *)
 
-val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
@@ -167,16 +143,13 @@ val entry_to_json :
 val tool_call_entry_of_json :
   Yojson.Safe.t -> tool_call_entry_decode
 (** Decode one persisted JSONL row back into a [tool_call_entry].
-    Gate status is a closed codec: only exact [pass] and [reject] values are
-    accepted, and [reject] requires a non-blank reason. Invalid gate data is a
-    row-local [Invalid_entry]; it never defaults to [Pass], never masquerades
-    as an explicit [Reject], and does not stop
-    other rows from decoding. *)
+    Invalid data is a row-local [Invalid_entry] and does not stop other rows
+    from decoding. *)
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 val invalid_entry_counts_to_json : invalid_entry_counts -> Yojson.Safe.t
-val gate_decode_summary_to_json : gate_decode_summary -> Yojson.Safe.t
+val entry_decode_summary_to_json : entry_decode_summary -> Yojson.Safe.t
 val trajectory_line_decode_summary_to_json :
   trajectory_line_decode_summary -> Yojson.Safe.t
 val trajectory_read_errors_to_json :

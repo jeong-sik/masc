@@ -57,7 +57,6 @@ let make_entry ~tid ~seq : Trajectory.tool_call_entry =
     tool_name = Printf.sprintf "tool_%d" tid;
     arguments =
       [("k", `String kor); ("tid", `Int tid); ("seq", `Int seq)];
-    gate_decision = Trajectory.Pass;
     result = None;
     duration_ms = 0;
     error = None;

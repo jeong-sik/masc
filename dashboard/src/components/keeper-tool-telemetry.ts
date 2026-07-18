@@ -25,23 +25,18 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
   timeline: HourlyBucket[]
   totalEntries: number
   windowHours: number
-  gateDecode: ToolStatsResponse['gate_decode']
+  decode: ToolStatsResponse['decode']
   ioErrors: ToolStatsResponse['io_errors']
 }
 
-const EMPTY_GATE_DECODE: ToolStatsResponse['gate_decode'] = {
-  passed_gate_count: 0,
-  rejected_gate_count: 0,
+const EMPTY_DECODE: ToolStatsResponse['decode'] = {
   invalid_entry_count: 0,
   invalid_reasons: {
     missing_required_field: 0,
     invalid_field: 0,
     unsupported_row_type: 0,
-    missing_gate: 0,
-    invalid_gate_shape: 0,
-    missing_gate_status: 0,
-    unsupported_gate_status: 0,
-    missing_reject_reason: 0,
+    unexpected_field: 0,
+    duplicate_field: 0,
     malformed_json: 0,
   },
 }
@@ -50,23 +45,20 @@ const INVALID_REASON_LABELS = {
   missing_required_field: 'missing required field',
   invalid_field: 'invalid field',
   unsupported_row_type: 'unsupported row type',
-  missing_gate: 'missing gate',
-  invalid_gate_shape: 'invalid gate shape',
-  missing_gate_status: 'missing gate status',
-  unsupported_gate_status: 'unsupported gate status',
-  missing_reject_reason: 'missing reject reason',
+  unexpected_field: 'unexpected field',
+  duplicate_field: 'duplicate field',
   malformed_json: 'malformed JSON',
-} satisfies Record<keyof ToolStatsResponse['gate_decode']['invalid_reasons'], string>
+} satisfies Record<keyof ToolStatsResponse['decode']['invalid_reasons'], string>
 
 function DecodeObservation({ state }: { state: TelemetryState }) {
-  const invalidReasons = Object.entries(state.gateDecode.invalid_reasons)
+  const invalidReasons = Object.entries(state.decode.invalid_reasons)
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${INVALID_REASON_LABELS[reason as keyof typeof INVALID_REASON_LABELS]} ${count.toLocaleString()}`)
-  if (state.gateDecode.invalid_entry_count === 0 && state.ioErrors.length === 0) return null
+  if (state.decode.invalid_entry_count === 0 && state.ioErrors.length === 0) return null
   return html`
     <div class="mt-1 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
-      ${state.gateDecode.invalid_entry_count > 0
-        ? html`<div>decode invalid ${state.gateDecode.invalid_entry_count.toLocaleString()} rows · ${invalidReasons.join(' · ')}</div>`
+      ${state.decode.invalid_entry_count > 0
+        ? html`<div>decode invalid ${state.decode.invalid_entry_count.toLocaleString()} rows · ${invalidReasons.join(' · ')}</div>`
         : null}
       ${state.ioErrors.map(error => html`
         <div key=${`${error.path}:${error.message}`} class="break-all">
@@ -211,7 +203,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     timeline: [],
     totalEntries: 0,
     windowHours: 24,
-    gateDecode: EMPTY_GATE_DECODE,
+    decode: EMPTY_DECODE,
     ioErrors: [],
   })
   const [query, setQuery] = useState('')
@@ -237,7 +229,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       timeline: data.timeline,
       totalEntries: data.total_entries,
       windowHours: data.window_hours,
-      gateDecode: data.gate_decode,
+      decode: data.decode,
       ioErrors: data.io_errors,
     }
   }, [keeperName])
@@ -267,7 +259,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     timeline: [],
     totalEntries: 0,
     windowHours: 24,
-    gateDecode: EMPTY_GATE_DECODE,
+    decode: EMPTY_DECODE,
     ioErrors: [],
   }
 
@@ -313,11 +305,6 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1 text-[var(--color-fg-disabled)]">
           ${s.windowHours}h 기간
         <//>
-        ${s.gateDecode.rejected_gate_count > 0 ? html`
-          <${StatusChip} tone="warn" uppercase=${false} class="gap-1 py-1">
-            gate rejected ${s.gateDecode.rejected_gate_count.toLocaleString()}
-          <//>
-        ` : null}
       </div>
       <${FreshnessLine} data=${s} />
       <${DecodeObservation} state=${s} />

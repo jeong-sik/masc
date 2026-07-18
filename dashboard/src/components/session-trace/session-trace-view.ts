@@ -204,6 +204,12 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
     void loadSessionTrace(agentName, isKeeper)
   }, [agentName, isKeeper])
 
+  const observationWarning = observationErrors.length > 0 ? html`
+    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
+      ${observationErrors.map(observation => html`<div class="break-all">${observation}</div>`)}
+    </div>
+  ` : null
+
   // Loading state
   if (loading && events.length === 0) {
     return html`<${LoadingState}>활동 추적 불러오는 중...<//>`
@@ -228,7 +234,8 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
         ? '아직 시작되지 않은 키퍼입니다. 활동 기록이 없습니다.'
         : '현재 세대에서 기록된 활동이 없습니다.'
     return html`
-      <div class="py-4">
+      <div class="flex flex-col gap-3 py-4">
+        ${observationWarning}
         <${EmptyState} message=${msg} compact />
       </div>
     `
@@ -236,11 +243,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   return html`
     <div class="v2-monitoring-trace-surface flex flex-col gap-3">
-      ${observationErrors.length > 0 ? html`
-        <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
-          ${observationErrors.map(observation => html`<div class="break-all">${observation}</div>`)}
-        </div>
-      ` : null}
+      ${observationWarning}
       ${'' /* Filter + Refresh */}
       <div class="flex items-center justify-between gap-3">
         <${SessionTraceFilter} agentName=${agentName} />

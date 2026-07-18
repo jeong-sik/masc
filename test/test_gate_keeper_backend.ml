@@ -897,7 +897,6 @@ let trajectory_entry_of_provider_call ~ts ~turn ~round
       (match call.input with
        | `Assoc fields -> fields
        | _ -> Alcotest.fail "canonical provider Tool input must be an object")
-  ; gate_decision = Trajectory.Pass
   ; result = Some {|{"ok":true}|}
   ; duration_ms = 1
   ; error = None

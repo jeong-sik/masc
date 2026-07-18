@@ -13,7 +13,7 @@ import {
 } from './session-trace/session-trace-state'
 
 type WaterfallEntryKind = 'thinking' | 'tool_call'
-type WaterfallEntryStatus = 'success' | 'failure' | 'gate_rejected' | 'unknown'
+type WaterfallEntryStatus = 'success' | 'failure' | 'unknown'
 type WaterfallEntrySource = 'trajectory' | 'trajectory+tool_call_log' | 'tool_call_log' | 'unknown'
 
 export interface JourneyWaterfallEntry {
@@ -32,7 +32,6 @@ export interface JourneyWaterfallEntry {
   thinkingContent: string | null
   thinkingRedacted: boolean
   durationMs: number | null
-  gateReason: string | null
   error: string | null
   sessionId: string | null
   traceId: string | null
@@ -65,7 +64,6 @@ export interface JourneyWaterfallTurn {
   thinkingCount: number
   toolCallCount: number
   failureCount: number
-  gateRejectedCount: number
   totalDurationMs: number
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
 }
@@ -76,7 +74,6 @@ export interface JourneyWaterfallSummary {
   thinkingCount: number
   toolCallCount: number
   failureCount: number
-  gateRejectedCount: number
   totalDurationMs: number
   timelineStartTs: number | null
   timelineEndTs: number | null
@@ -130,7 +127,6 @@ function traceEventTraceId(event: UnifiedTraceEvent): string | null {
 }
 
 function traceEventStatus(event: UnifiedTraceEvent): WaterfallEntryStatus {
-  if (event.gate?.status === 'reject') return 'gate_rejected'
   if (event.error) return 'failure'
   if (event.kind === 'tool_call') return 'success'
   return 'unknown'
@@ -155,7 +151,6 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     thinkingContent: event.thinkingContent ?? null,
     thinkingRedacted: event.thinkingRedacted === true,
     durationMs: event.duration_ms ?? null,
-    gateReason: event.gate?.reason ?? null,
     error: event.error ?? null,
     sessionId: event.sessionId ?? null,
     traceId: traceEventTraceId(event),
@@ -222,7 +217,6 @@ function buildTurn(
     thinkingCount: sortedEntries.filter(entry => entry.kind === 'thinking').length,
     toolCallCount: toolEntries.length,
     failureCount: sortedEntries.filter(entry => entry.status === 'failure').length,
-    gateRejectedCount: sortedEntries.filter(entry => entry.status === 'gate_rejected').length,
     totalDurationMs: toolEntries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
     runtimeEvidence,
   }
@@ -279,7 +273,6 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
       thinkingCount: allTurnEntries.filter(entry => entry.kind === 'thinking').length,
       toolCallCount: allTurnEntries.filter(entry => entry.kind === 'tool_call').length,
       failureCount: allTurnEntries.filter(entry => entry.status === 'failure').length,
-      gateRejectedCount: allTurnEntries.filter(entry => entry.status === 'gate_rejected').length,
       totalDurationMs: turns.reduce((sum, turn) => sum + turn.totalDurationMs, 0),
       timelineStartTs: allTurnEntries[0]?.ts ?? null,
       timelineEndTs: allTurnEntries.at(-1)?.ts ?? null,

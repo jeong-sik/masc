@@ -7,27 +7,6 @@ let () =
   ignore (Unix.gettimeofday ())
 
 (* ================================================================ *)
-(* Test: gate_decision types                                         *)
-(* ================================================================ *)
-
-let rejection_reason value =
-  match Trajectory.rejection_reason_of_string value with
-  | Some reason -> reason
-  | None -> Alcotest.fail "expected non-blank rejection reason"
-
-let test_gate_decision_pass () =
-  match Trajectory.Pass with
-  | Trajectory.Pass -> ()
-  | Trajectory.Reject _ -> Alcotest.fail "Expected Pass"
-
-let test_gate_decision_reject () =
-  match Trajectory.Reject (rejection_reason "test reason") with
-  | Trajectory.Reject reason ->
-      Alcotest.(check string) "reject reason" "test reason"
-        (Trajectory.rejection_reason_to_string reason)
-  | Trajectory.Pass -> Alcotest.fail "Expected Reject"
-
-(* ================================================================ *)
 (* Test: create_accumulator and basic state                          *)
 (* ================================================================ *)
 
@@ -64,7 +43,6 @@ let test_record_entry () =
       round = 0;
       tool_name = "tool_execute";
       arguments = [("command", `String "pwd")];
-      gate_decision = Trajectory.Pass;
       result = Some "/home/test";
       duration_ms = 50;
       error = None;
@@ -102,7 +80,6 @@ let test_finalize () =
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
       turn = 1; round = 0;
       tool_name = "tool_execute"; arguments = [];
-      gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 100;
       error = None;
       execution_id = None;
@@ -138,7 +115,6 @@ let test_calls_in_current_turn () =
     let mk tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
       tool_name = tool; arguments = [];
-      gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None;
       execution_id = None;
@@ -152,11 +128,10 @@ let test_calls_in_current_turn () =
 (* Test: aggregate_tool_stats                                        *)
 (* ================================================================ *)
 
-let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur ts_iso =
+let mk_entry ?(ts = 1000.0) ?(error = None) name dur ts_iso =
   { Trajectory.
     ts; ts_iso; turn = 1; round = 0;
     tool_name = name; arguments = [];
-    gate_decision = gate;
     result = Some "ok"; duration_ms = dur;
     error;
     execution_id = None;
@@ -184,8 +159,8 @@ let test_aggregate_with_errors () =
   let entries = [
     mk_entry "tool_execute" 100 "2026-04-06T10:00:00Z";
     mk_entry ~error:(Some "timeout") "tool_execute" 5000 "2026-04-06T10:01:00Z";
-    mk_entry ~gate:(Trajectory.Reject (rejection_reason "denied"))
-      "tool_execute" 0 "2026-04-06T10:02:00Z";
+    mk_entry ~error:(Some "denied") "tool_execute" 0
+      "2026-04-06T10:02:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 1 (List.length stats);
@@ -280,7 +255,6 @@ let test_entry_to_json_preserves_typed_fields () =
     round = 1;
     tool_name = "tool_execute";
     arguments = [("command", `String "pwd")];
-    gate_decision = Trajectory.Pass;
     result = Some "/tmp/work";
     duration_ms = 25;
     error = None;
@@ -299,7 +273,6 @@ let test_execution_id_roundtrip () =
   let entry : Trajectory.tool_call_entry = {
     ts = 1000.0; ts_iso = "2026-06-12T00:00:00Z"; turn = 3; round = 1;
     tool_name = "tool_execute"; arguments = [];
-    gate_decision = Trajectory.Pass;
     result = Some "ok"; duration_ms = 10; error = None;
     execution_id = Some "exec-1718150400000-0001";
   } in
@@ -319,48 +292,20 @@ let test_execution_id_roundtrip () =
   | Trajectory.Non_entry_row | Trajectory.Invalid_entry _ ->
       Alcotest.fail "entry without execution_id did not decode"
 
-let test_gate_codec_rejects_noncanonical_rows () =
-  let base_fields =
-    [ ("ts", `Float 1000.0)
-    ; ("ts_iso", `String "2026-06-12T00:00:00Z")
-    ; ("turn", `Int 1)
-    ; ("round", `Int 1)
-    ; ("tool_name", `String "tool_execute")
-    ; ("args", `Assoc [])
-    ; ("result", `String "ok")
-    ; ("duration_ms", `Int 1)
-    ; ("error", `Null)
-    ]
+let test_retired_gate_field_is_rejected () =
+  let canonical =
+    Trajectory.entry_to_json
+      (mk_entry "tool_execute" 1 "2026-06-12T00:00:00Z")
   in
-  let base = `Assoc base_fields in
-  (match Trajectory.tool_call_entry_of_json base with
-   | Trajectory.Invalid_entry (Trajectory.Invalid_gate Trajectory.Missing_gate) -> ()
-   | _ -> Alcotest.fail "missing gate must reject the row");
-  let with_gate gate = `Assoc (("gate", gate) :: base_fields) in
-  (match
-     Trajectory.tool_call_entry_of_json
-       (with_gate (`Assoc [("status", `String "passed")]))
-   with
-   | Trajectory.Invalid_entry
-       (Trajectory.Invalid_gate
-          (Trajectory.Unsupported_gate_status "passed")) -> ()
-   | _ -> Alcotest.fail "gate aliases must not decode");
-  (match
-     Trajectory.tool_call_entry_of_json
-       (with_gate (`Assoc [("status", `String "reject")]))
-   with
-   | Trajectory.Invalid_entry
-       (Trajectory.Invalid_gate Trajectory.Missing_reject_reason) -> ()
-   | _ -> Alcotest.fail "reject requires an explicit reason");
-  match
-    Trajectory.tool_call_entry_of_json
-      (with_gate
-         (`Assoc
-            [("status", `String "reject"); ("reason", `String " \t ")]))
-  with
-  | Trajectory.Invalid_entry
-      (Trajectory.Invalid_gate Trajectory.Missing_reject_reason) -> ()
-  | _ -> Alcotest.fail "reject requires a non-blank reason"
+  let with_retired_gate =
+    match canonical with
+    | `Assoc fields ->
+        `Assoc (("gate", `Assoc [("status", `String "pass")]) :: fields)
+    | _ -> Alcotest.fail "entry serializer must return an object"
+  in
+  match Trajectory.tool_call_entry_of_json with_retired_gate with
+  | Trajectory.Invalid_entry (Trajectory.Unexpected_field "gate") -> ()
+  | _ -> Alcotest.fail "retired gate field must not remain a hidden legacy input"
 
 let test_closed_row_codec_rejects_invalid_fields_and_types () =
   let valid_entry =
@@ -420,7 +365,7 @@ let test_read_entries_since () =
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null}|}
       ts
     in
     let oc = open_out path in
@@ -435,8 +380,8 @@ let test_read_entries_since () =
     in
     Alcotest.(check int) "entries since 1500" 2
       (List.length entries.Trajectory.entries);
-    Alcotest.(check int) "all filtered rows pass" 2
-      entries.Trajectory.gate_decode.passed_gate_count;
+    Alcotest.(check int) "no invalid filtered rows" 0
+      entries.Trajectory.decode.invalid_entry_count;
     Alcotest.(check int) "no read errors" 0
       (List.length entries.Trajectory.io_errors);
     (* Read since ts=0 should get all 3 *)
@@ -447,7 +392,7 @@ let test_read_entries_since () =
     Alcotest.(check int) "all entries" 3
       (List.length all.Trajectory.entries))
 
-let test_read_entries_since_result_rejects_invalid_gate_rows () =
+let test_read_entries_since_result_rejects_retired_fields () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
@@ -456,9 +401,9 @@ let test_read_entries_since_result_rejects_invalid_gate_rows () =
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
       [
-        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|};
-        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked"}|};
-        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"result":"missing gate","duration_ms":10,"error":null}|};
+        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null}|};
+        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"result":null,"duration_ms":0,"error":"blocked"}|};
+        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"legacy","duration_ms":10,"error":null}|};
       ]
     in
     let oc = open_out path in
@@ -470,21 +415,12 @@ let test_read_entries_since_result_rejects_invalid_gate_rows () =
     in
     Alcotest.(check int) "invalid row excluded" 2
       (List.length result.Trajectory.entries);
-    Alcotest.(check int) "passed gate count" 1
-      result.Trajectory.gate_decode.passed_gate_count;
-    Alcotest.(check int) "explicit rejected gate count" 1
-      result.Trajectory.gate_decode.rejected_gate_count;
     Alcotest.(check int) "invalid row count" 1
-      result.Trajectory.gate_decode.invalid_entry_count;
-    Alcotest.(check int) "missing gate reason count" 1
-      result.Trajectory.gate_decode.invalid_reasons.missing_gate;
+      result.Trajectory.decode.invalid_entry_count;
+    Alcotest.(check int) "retired field reason count" 1
+      result.Trajectory.decode.invalid_reasons.unexpected_field;
     Alcotest.(check int) "no read errors" 0
-      (List.length result.Trajectory.io_errors);
-    match List.nth result.Trajectory.entries 1 with
-    | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
-      Alcotest.(check string) "reject reason parsed" "blocked"
-        (Trajectory.rejection_reason_to_string reason)
-    | _ -> Alcotest.fail "expected persisted reject gate")
+      (List.length result.Trajectory.io_errors))
 
 let test_read_entries_since_no_dir () =
   with_tmpdir (fun dir ->
@@ -554,7 +490,7 @@ let test_read_recent_lines_skips_malformed_rows () =
 let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
-      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":10,"error":null}|}
+      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null}|}
     ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
@@ -584,7 +520,6 @@ let next_round_row ~turn ~round : Yojson.Safe.t =
       ("round", `Int round);
       ("tool_name", `String "tool_execute");
       ("args", `Assoc []);
-      ("gate", `Assoc [("status", `String "pass")]);
       ("result", `String "ok");
       ("duration_ms", `Int 1);
       ("error", `Null);
@@ -661,6 +596,22 @@ let test_next_round_counts_current_turn () =
         ~turn:7
     in
     Alcotest.(check int) "3 current-turn entries -> round 4" 4 r)
+
+let test_next_round_concurrent_cold_miss_is_unique () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k"
+      ~trace_id:"t-concurrent"
+      (List.init 3 (fun i -> next_round_row ~turn:7 ~round:i));
+    let issue () =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"t-concurrent" ~turn:7
+    in
+    let peer = Domain.spawn issue in
+    let local = issue () in
+    let issued = List.sort Int.compare [ local; Domain.join peer ] in
+    Alcotest.(check (list int)) "concurrent cold miss allocates unique rounds"
+      [ 4; 5 ] issued)
 
 let test_next_round_ignores_summary_rows_without_turn () =
   with_tmpdir (fun dir ->
@@ -762,54 +713,6 @@ let test_next_round_evicts_past_turn_keys () =
     in
     Alcotest.(check int) "turn 5 after eviction stays monotonic" 5 r5c)
 
-let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
-  Trajectory.Thinking
-    {
-      ts;
-      ts_iso = "2026-06-29T00:00:00Z";
-      turn = 1;
-      content;
-      content_length = String.length content;
-      redacted;
-    }
-
-let check_thinking_content label expected = function
-  | Trajectory.Thinking entry ->
-      Alcotest.(check string) label expected entry.Trajectory.content
-  | Trajectory.Tool_call _ -> Alcotest.fail (label ^ ": expected thinking line")
-
-let check_tool_call label expected = function
-  | Trajectory.Tool_call entry ->
-      Alcotest.(check string) label expected entry.Trajectory.tool_name
-  | Trajectory.Thinking _ -> Alcotest.fail (label ^ ": expected tool call line")
-
-let test_dedupe_thinking_lines_uses_structural_key () =
-  let tool_call =
-    Trajectory.Tool_call
-      (mk_entry ~ts:1000.5 "tool_execute" 20 "2026-06-29T00:00:00Z")
-  in
-  let lines =
-    [
-      thinking_line ~ts:1000.0 "same";
-      tool_call;
-      thinking_line ~ts:1000.0 "same";
-      thinking_line ~ts:1001.0 "same";
-      thinking_line ~ts:1000.0 ~redacted:true "same";
-    ]
-  in
-  let deduped =
-    Server_dashboard_http_keeper_api_trace.dedupe_thinking_lines lines
-  in
-  Alcotest.(check int) "one exact duplicate removed" 4 (List.length deduped);
-  check_thinking_content "first thinking preserved" "same" (List.nth deduped 0);
-  check_tool_call "tool call preserved" "tool_execute" (List.nth deduped 1);
-  check_thinking_content "same content at a new timestamp preserved" "same"
-    (List.nth deduped 2);
-  (match List.nth deduped 3 with
-   | Trajectory.Thinking entry ->
-       Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
-   | Trajectory.Tool_call _ -> Alcotest.fail "expected redacted thinking line")
-
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -832,6 +735,49 @@ let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
       in
       loop [])
   end
+
+let test_tool_results_are_persisted_untruncated () =
+  with_tmpdir (fun dir ->
+    let result = String.make 12000 'r' in
+    let entry : Trajectory.tool_call_entry =
+      { ts = 1000.0
+      ; ts_iso = "2026-07-18T00:00:00Z"
+      ; turn = 1
+      ; round = 1
+      ; tool_name = "tool_execute"
+      ; arguments = []
+      ; result = Some result
+      ; duration_ms = 10
+      ; error = None
+      ; execution_id = Some "exec-lossless-1"
+      }
+    in
+    Trajectory.append_entry ~masc_root:dir ~keeper_name:"k"
+      ~trace_id:"tool-direct" entry;
+    let direct =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"tool-direct"
+    in
+    let acc =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"tool-batched" ~generation:0 ()
+    in
+    Trajectory.record_entry acc { entry with execution_id = Some "exec-lossless-2" };
+    Trajectory.flush_pending acc;
+    let batched =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"tool-batched"
+    in
+    let open Yojson.Safe.Util in
+    let persisted_result rows =
+      match rows with
+      | [ row ] -> row |> member "result" |> to_string
+      | _ -> Alcotest.fail "expected exactly one persisted tool row"
+    in
+    Alcotest.(check string) "direct append is lossless" result
+      (persisted_result direct);
+    Alcotest.(check string) "batched append is lossless" result
+      (persisted_result batched))
 
 (* append_thinking persists the complete text supplied by the caller. *)
 let test_append_thinking_persists_untruncated () =
@@ -877,10 +823,6 @@ let test_persist_response_content_per_turn_full () =
 
 let () =
   Alcotest.run "Trajectory" [
-    ("gate_decision", [
-      Alcotest.test_case "pass" `Quick test_gate_decision_pass;
-      Alcotest.test_case "reject" `Quick test_gate_decision_reject;
-    ]);
     ("accumulator", [
       Alcotest.test_case "create" `Quick test_create_accumulator;
       Alcotest.test_case "record_entry" `Quick test_record_entry;
@@ -895,7 +837,7 @@ let () =
     ]);
     ("aggregate_tool_stats", [
       Alcotest.test_case "basic aggregation" `Quick test_aggregate_basic;
-      Alcotest.test_case "with errors and rejected gates" `Quick test_aggregate_with_errors;
+      Alcotest.test_case "with errors" `Quick test_aggregate_with_errors;
       Alcotest.test_case "empty input" `Quick test_aggregate_empty;
       Alcotest.test_case "p95 calculation" `Quick test_aggregate_p95;
     ]);
@@ -911,8 +853,8 @@ let () =
         test_entry_to_json_preserves_typed_fields;
       Alcotest.test_case "execution_id JSONL round-trip + optional None" `Quick
         test_execution_id_roundtrip;
-      Alcotest.test_case "gate codec rejects noncanonical rows" `Quick
-        test_gate_codec_rejects_noncanonical_rows;
+      Alcotest.test_case "retired gate field is rejected" `Quick
+        test_retired_gate_field_is_rejected;
       Alcotest.test_case "closed row codec rejects invalid fields and types"
         `Quick test_closed_row_codec_rejects_invalid_fields_and_types;
     ]);
@@ -923,6 +865,8 @@ let () =
         test_next_round_past_turns_only;
       Alcotest.test_case "counts current-turn entries" `Quick
         test_next_round_counts_current_turn;
+      Alcotest.test_case "concurrent cold miss remains unique" `Quick
+        test_next_round_concurrent_cold_miss_is_unique;
       Alcotest.test_case "ignores summary rows without turn" `Quick
         test_next_round_ignores_summary_rows_without_turn;
       Alcotest.test_case "widens window past initial 512" `Quick
@@ -936,19 +880,17 @@ let () =
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
-      Alcotest.test_case "rejects invalid gate rows" `Quick
-        test_read_entries_since_result_rejects_invalid_gate_rows;
+      Alcotest.test_case "rejects retired fields" `Quick
+        test_read_entries_since_result_rejects_retired_fields;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;
       Alcotest.test_case "summary row not counted as malformed" `Quick
         test_summary_row_not_counted_as_malformed;
     ]);
-    ("keeper_trace", [
-      Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick
-        test_dedupe_thinking_lines_uses_structural_key;
-    ]);
     ("thinking_trajectory", [
+      Alcotest.test_case "tool results persist without display truncation" `Quick
+        test_tool_results_are_persisted_untruncated;
       Alcotest.test_case "append_thinking persists full untruncated text" `Quick
         test_append_thinking_persists_untruncated;
       Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick

@@ -349,7 +349,6 @@ let record_runtime_mcp_keeper_trajectory
         round;
         tool_name;
         arguments;
-        gate_decision = Trajectory.Pass;
         result = Some safe_output;
         duration_ms;
         error;

@@ -24,6 +24,7 @@ import {
   getTraceError,
   getTraceObservationErrors,
   buildTraceEvents,
+  loadSessionTrace,
   scheduleSessionTraceReload,
   traceSlots,
 } from './session-trace-state'
@@ -62,19 +63,14 @@ const ONE_TOOL_TRAJECTORY_OBSERVATION = {
   decode: {
     tool_call_count: 1,
     thinking_count: 0,
-    passed_gate_count: 1,
-    rejected_gate_count: 0,
     skipped_summary_count: 0,
     invalid_line_count: 0,
     invalid_reasons: {
       missing_required_field: 0,
       invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
       unsupported_row_type: 0,
-      missing_gate: 0,
-      invalid_gate_shape: 0,
-      missing_gate_status: 0,
-      unsupported_gate_status: 0,
-      missing_reject_reason: 0,
       malformed_json: 0,
     },
   },
@@ -256,19 +252,14 @@ describe('scheduleSessionTraceReload', () => {
       decode: {
         tool_call_count: 0,
         thinking_count: 1,
-        passed_gate_count: 0,
-        rejected_gate_count: 0,
         skipped_summary_count: 0,
         invalid_line_count: 1,
         invalid_reasons: {
           missing_required_field: 0,
           invalid_field: 1,
+          unexpected_field: 0,
+          duplicate_field: 0,
           unsupported_row_type: 0,
-          missing_gate: 0,
-          invalid_gate_shape: 0,
-          missing_gate_status: 0,
-          unsupported_gate_status: 0,
-          missing_reject_reason: 0,
           malformed_json: 0,
         },
       },
@@ -314,6 +305,42 @@ describe('scheduleSessionTraceReload', () => {
   })
 })
 
+describe('loadSessionTrace source isolation', () => {
+  it('preserves successful timeline and tool-call sources when trajectory fails', async () => {
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValue({
+      ...emptyTimeline(),
+      events: [{
+        type: 'broadcast',
+        ts: '2026-07-18T00:00:00Z',
+        detail: { content: 'timeline source remains visible after trajectory failure' },
+      }],
+    })
+    dashboardApiMocks.fetchKeeperTrajectory.mockRejectedValue(new Error('strict decode failed'))
+    dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
+      keeper: 'keeper-a',
+      count: 1,
+      entries: [{
+        ts: 1_768_608_001,
+        keeper: 'keeper-a',
+        tool: 'fs_read',
+        input: { path: '/tmp/a' },
+        output: 'ok',
+        success: true,
+      }],
+    })
+
+    await loadSessionTrace('keeper-a', true)
+
+    expect(getTraceEvents('keeper-a').map(event => event.kind)).toEqual(
+      expect.arrayContaining(['broadcast', 'tool_call']),
+    )
+    expect(getTraceError('keeper-a')).toBeNull()
+    expect(getTraceObservationErrors('keeper-a')).toContain(
+      'trajectory read failed: strict decode failed',
+    )
+  })
+})
+
 describe('buildTraceEvents', () => {
   it('deduplicates by id', () => {
     const events = buildTraceEvents(
@@ -338,7 +365,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: '/tmp/test.txt' },
           result: 'file contents',
           duration_ms: 50,
-          gate: { status: 'pass' },
           error: null,
         }],
       },
@@ -407,7 +433,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: 'trajectory.txt' },
           result: 'trajectory result',
           duration_ms: 50,
-          gate: { status: 'pass' },
           error: null,
         }],
       },
@@ -463,7 +488,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: 'trajectory.txt' },
           result: 'trajectory result',
           duration_ms: 812,
-          gate: { status: 'pass' },
           error: null,
           execution_id: 'exec-1712397700000-duration',
         }],
@@ -561,7 +585,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: '/tmp/trajectory.txt' },
           result: 'trajectory result',
           duration_ms: 50,
-          gate: { status: 'pass' },
           error: null,
           execution_id: 'exec-1712397700000-002a',
         }],
@@ -622,7 +645,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: '/tmp/a.txt' },
           result: 'a',
           duration_ms: 50,
-          gate: { status: 'pass' },
           error: null,
           execution_id: 'exec-1712397700000-0001',
         }],
@@ -675,7 +697,6 @@ describe('buildTraceEvents', () => {
           args: { file_path: '/tmp/legacy.txt' },
           result: 'legacy',
           duration_ms: 50,
-          gate: { status: 'pass' },
           error: null,
         }],
       },
@@ -990,7 +1011,6 @@ describe('status filter', () => {
         events: [
           { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
           { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'timeout' },
-          { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'rejected', detail: {}, gate: { status: 'reject', reason: 'unsafe' } },
           { id: '4', ts: 4000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -1005,8 +1025,7 @@ describe('status filter', () => {
     const counts = getStatusCounts('keeper-a')
     expect(counts.success).toBe(1)
     expect(counts.failure).toBe(1)
-    expect(counts.gate_rejected).toBe(1)
-    expect(counts.all).toBe(3) // broadcast has no status
+    expect(counts.all).toBe(2) // broadcast has no status
   })
 
   it('filters events by status', () => {

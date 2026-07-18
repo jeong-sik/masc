@@ -40,7 +40,7 @@ export type TraceEventKind =
   | 'oas_turn'
   | 'oas_context'
 
-export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
+export type TraceStatus = 'success' | 'failure'
 
 type TraceSourceLane = 'masc' | 'oas'
 
@@ -61,7 +61,6 @@ export interface UnifiedTraceEvent {
   toolArgs?: Record<string, unknown> | string
   toolResult?: string | null
   duration_ms?: number
-  gate?: { status: string; reason?: string }
   turn?: number
   round?: number
   cost_usd?: number
@@ -166,7 +165,6 @@ export function getTraceSearchQuery(agent: string): string {
 // ── Status classification ────────────────────────────────
 
 function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
-  if (e.gate?.status === 'reject') return 'gate_rejected'
   if (e.error) return 'failure'
   if (e.kind === 'tool_call' || e.kind === 'oas_tool') return 'success'
   return null
@@ -206,14 +204,12 @@ export function getStatusCounts(agent: string): Record<TraceStatus | 'all', numb
   const events = getTraceEvents(agent)
   let success = 0
   let failure = 0
-  let gate_rejected = 0
   for (const e of events) {
     const s = getEventStatus(e)
     if (s === 'success') success++
     else if (s === 'failure') failure++
-    else if (s === 'gate_rejected') gate_rejected++
   }
-  return { all: success + failure + gate_rejected, success, failure, gate_rejected }
+  return { all: success + failure, success, failure }
 }
 
 function detailNumber(detail: Record<string, unknown>, ...keys: string[]): number | null {
@@ -449,7 +445,7 @@ function toolEventTurn(event: UnifiedTraceEvent): number | undefined {
 }
 
 function toolEventSuccess(event: UnifiedTraceEvent): boolean {
-  return event.gate?.status !== 'reject' && event.error == null
+  return event.error == null
 }
 
 function toolCallEntryMatchesTraceEvent(
@@ -457,7 +453,6 @@ function toolCallEntryMatchesTraceEvent(
   event: UnifiedTraceEvent,
 ): boolean {
   if (event.kind !== 'tool_call' || !event.toolName) return false
-  if (event.gate?.status === 'reject') return false
 
   // RFC-0233: when both sides carry the canonical execution_id, identity
   // equality is the whole answer — the heuristic below only exists for
@@ -740,7 +735,6 @@ function trajectoryEntryToTrace(
     toolArgs: entry.args,
     toolResult: entry.result,
     duration_ms: entry.duration_ms,
-    gate: entry.gate,
     turn: entry.turn,
     round: entry.round,
     executionId: entry.execution_id,
@@ -753,11 +747,11 @@ function trajectoryEntryToTrace(
 /** Build a deduplicated, time-sorted trace from timeline + trajectory data.
  *  Extracted from loadSessionTrace for reuse in task detail overlay. */
 export function buildTraceEvents(
-  timeline: AgentTimelineResponse,
+  timeline: AgentTimelineResponse | null,
   trajectory: TrajectoryResponse | null,
   toolCalls: ToolCallsResponse | null = null,
 ): UnifiedTraceEvent[] {
-  const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
+  const timelineTraces = (timeline?.events ?? []).map(timelineEventToTrace)
   const trajectoryTraces = trajectory
     ? (trajectory.entries ?? []).map((entry, index) =>
         trajectoryEntryToTrace(entry, index, trajectory.trace_id),
@@ -824,13 +818,13 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
     const trajectoryPromise = isKeeper
-      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true, true)
+      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true)
       : Promise.resolve(null)
     const toolCallsPromise = isKeeper
       ? fetchKeeperToolCalls(agentName, TOOL_CALL_LIMIT)
       : Promise.resolve(null)
 
-    const [timeline, trajectory, toolCalls] = await Promise.all([
+    const [timelineResult, trajectoryResult, toolCallsResult] = await Promise.allSettled([
       timelinePromise,
       trajectoryPromise,
       toolCallsPromise,
@@ -839,15 +833,32 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
     // Discard result if slot was closed or a newer fetch was started during await.
     if (getSlot(agentName).fetchToken !== token) return
 
+    const timeline = timelineResult.status === 'fulfilled' ? timelineResult.value : null
+    const trajectory = trajectoryResult.status === 'fulfilled' ? trajectoryResult.value : null
+    const toolCalls = toolCallsResult.status === 'fulfilled' ? toolCallsResult.value : null
+    const sourceErrors = [
+      ...(timelineResult.status === 'rejected'
+        ? [`agent timeline read failed: ${timelineResult.reason instanceof Error ? timelineResult.reason.message : String(timelineResult.reason)}`]
+        : []),
+      ...(trajectoryResult.status === 'rejected'
+        ? [`trajectory read failed: ${trajectoryResult.reason instanceof Error ? trajectoryResult.reason.message : String(trajectoryResult.reason)}`]
+        : []),
+      ...(toolCallsResult.status === 'rejected'
+        ? [`tool-call log read failed: ${toolCallsResult.reason instanceof Error ? toolCallsResult.reason.message : String(toolCallsResult.reason)}`]
+        : []),
+    ]
     const deduped = buildTraceEvents(timeline, trajectory, toolCalls)
-    const observationErrors = trajectory === null
-      ? []
-      : [
+    const observationErrors = [
+      ...sourceErrors,
+      ...(trajectory === null
+        ? []
+        : [
           ...(trajectory.decode.invalid_line_count > 0
             ? [`trajectory decode invalid ${trajectory.decode.invalid_line_count} rows ${JSON.stringify(trajectory.decode.invalid_reasons)}`]
             : []),
           ...trajectory.io_errors.map(error => `trajectory read failed ${error.path}: ${error.message}`),
-        ]
+        ]),
+    ]
 
     // Final stale check before writing
     if (getSlot(agentName).fetchToken !== token) return

@@ -135,19 +135,14 @@ describe('KeeperToolTelemetry render', () => {
       keeper: 'analyst',
       window_hours: 24,
       total_entries: 0,
-      gate_decode: {
-        passed_gate_count: 0,
-        rejected_gate_count: 0,
+      decode: {
         invalid_entry_count: 2,
         invalid_reasons: {
           missing_required_field: 0,
           invalid_field: 0,
+          unexpected_field: 2,
+          duplicate_field: 0,
           unsupported_row_type: 0,
-          missing_gate: 2,
-          invalid_gate_shape: 0,
-          missing_gate_status: 0,
-          unsupported_gate_status: 0,
-          missing_reject_reason: 0,
           malformed_json: 0,
         },
       },
@@ -179,7 +174,7 @@ describe('KeeperToolTelemetry render', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Tool trajectory write failed · 1 recorded gap')
-    expect(container.textContent).toContain('decode invalid 2 rows · missing gate 2')
+    expect(container.textContent).toContain('decode invalid 2 rows · unexpected field 2')
     expect(container.textContent).toContain('trajectory read failed · /trajectory/t.jsonl · permission denied')
     expect(container.textContent).toContain('reason trajectory_append_failed')
     expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')

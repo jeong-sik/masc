@@ -27,19 +27,14 @@ function trajectory(entries: TrajectoryEntry[]): TrajectoryResponse {
     decode: {
       tool_call_count: toolEntries.length,
       thinking_count: thinkingCount,
-      passed_gate_count: toolEntries.filter(entry => entry.gate.status === 'pass').length,
-      rejected_gate_count: toolEntries.filter(entry => entry.gate.status === 'reject').length,
       skipped_summary_count: 0,
       invalid_line_count: 0,
       invalid_reasons: {
         missing_required_field: 0,
         invalid_field: 0,
+        unexpected_field: 0,
+        duplicate_field: 0,
         unsupported_row_type: 0,
-        missing_gate: 0,
-        invalid_gate_shape: 0,
-        missing_gate_status: 0,
-        unsupported_gate_status: 0,
-        missing_reject_reason: 0,
         malformed_json: 0,
       },
     },
@@ -167,7 +162,6 @@ describe('buildJourneyWaterfall', () => {
           round: 1,
           tool_name: 'fs_read',
           args: { path: '/tmp/old' },
-          gate: { status: 'pass' },
           result: 'old result',
           duration_ms: 250,
           error: null,
@@ -237,7 +231,6 @@ describe('buildJourneyWaterfall', () => {
           round: 1,
           tool_name: 'fs_read',
           args: {},
-          gate: { status: 'reject', reason: 'policy' },
           result: null,
           duration_ms: 0,
           error: 'rejected',
@@ -248,7 +241,7 @@ describe('buildJourneyWaterfall', () => {
     })
 
     expect(model.turns[0]?.turn).toBe(9)
-    expect(model.turns[0]?.gateRejectedCount).toBe(1)
+    expect(model.turns[0]?.failureCount).toBe(1)
     expect(model.turns[0]?.runtimeEvidence).toBeNull()
     expect(model.summary.runtimeEvidence?.keeperTurnId).toBe(2)
   })

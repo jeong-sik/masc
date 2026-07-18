@@ -1469,7 +1469,7 @@ let handle_keeper_get_subroutes state req request reqd =
                   ( "coverage_gap",
                     Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
               | [], None
-                when read_result.Trajectory.gate_decode.invalid_entry_count > 0 ->
+                when read_result.Trajectory.decode.invalid_entry_count > 0 ->
                   ("coverage_gap", "trajectory_decode_invalid")
               | [], None -> (
                   match latest_age_s with
@@ -1498,9 +1498,9 @@ let handle_keeper_get_subroutes state req request reqd =
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
-              ( "gate_decode",
-                Trajectory.gate_decode_summary_to_json
-                  read_result.Trajectory.gate_decode );
+              ( "decode",
+                Trajectory.entry_decode_summary_to_json
+                  read_result.Trajectory.decode );
               ( "io_errors",
                 Trajectory.trajectory_read_errors_to_json
                   read_result.Trajectory.io_errors );
@@ -1852,39 +1852,27 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:trajectory_default_limit
            |> max 1 |> min trajectory_max_limit
          in
-         (* Allow caller to request more result text up to a safe max.
-            Default 2000 chars is enough for the collapsed list view;
-            set result_max_len=10000 (or higher, capped at 10000) to
-            get full detail for an expanded entry. *)
+         (* Zero requests the complete persisted result. Positive values are
+            display truncation only; they never change the stored trace. *)
          let result_max_len =
            Server_utils.int_query_param req "result_max_len"
              ~default:2000
-           |> max 0 |> min 10000
+           |> max 0
          in
          let content_max_len =
            Server_utils.int_query_param req "content_max_len"
              ~default:Trajectory.default_thinking_truncation
            |> max 0 |> min 50000
          in
-         let include_thinking =
-           Server_utils.bool_query_param req "include_thinking"
-             ~default:false
-         in
-         let tail_scan_lines =
-           let multiplier = if include_thinking then 3 else 8 in
-           max 500 (min 5000 (limit * multiplier))
-         in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             "keeper:trajectory:%s:%s:%s:%d:%d:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
              result_max_len
              content_max_len
-             include_thinking
-             tail_scan_lines
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
@@ -1893,29 +1881,10 @@ let handle_keeper_get_subroutes state req request reqd =
                let trajectory_read =
                  Trajectory.read_recent_lines_result ~masc_root
                    ~keeper_name:m.name
-                   ~trace_id ~max_lines:tail_scan_lines
+                   ~trace_id ~max_lines:limit
                in
-               let trajectory_lines = trajectory_read.Trajectory.lines in
-               let all_lines =
-                 if include_thinking then
-                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-                 else
-                   trajectory_lines
-               in
-               (* Filter out thinking entries if not requested *)
-               let lines =
-                 if include_thinking then all_lines
-                 else List.filter (function
-                   | Trajectory.Tool_call _ -> true
-                   | Trajectory.Thinking _ -> false) all_lines
-               in
+               let lines = trajectory_read.Trajectory.lines in
                let total = List.length lines in
-               let recent =
-                 if total <= limit then lines
-                 else
-                   let drop = total - limit in
-                   List.filteri (fun i _e -> i >= drop) lines
-               in
                `Assoc [
                  ("keeper", `String name);
                  ("trace_id", `String trace_id);
@@ -1923,8 +1892,8 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries", `Int total);
                  ("total_entries_scope", `String "tail");
                  ("total_entries_exact", `Bool false);
-                 ("tail_scan_lines", `Int tail_scan_lines);
-                 ("showing", `Int (List.length recent));
+                 ("tail_scan_lines", `Int limit);
+                 ("showing", `Int total);
                  ( "decode",
                    Trajectory.trajectory_line_decode_summary_to_json
                      trajectory_read.Trajectory.line_decode );
@@ -1932,7 +1901,7 @@ let handle_keeper_get_subroutes state req request reqd =
                    Trajectory.trajectory_read_errors_to_json
                      trajectory_read.Trajectory.io_errors );
                  ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) lines));
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

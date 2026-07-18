@@ -17,17 +17,6 @@
 (* Types                                                            *)
 (* ================================================================ *)
 
-type rejection_reason = string
-
-let rejection_reason_of_string value =
-  if String.trim value = "" then None else Some value
-
-let rejection_reason_to_string reason = reason
-
-type gate_decision =
-  | Pass
-  | Reject of rejection_reason
-
 type tool_call_entry = {
   ts : float;                       (** Unix timestamp *)
   ts_iso : string;                  (** ISO8601 string *)
@@ -37,8 +26,7 @@ type tool_call_entry = {
   arguments : (string * Yojson.Safe.t) list;
       (** Structured Tool arguments. The association-list type enforces the
           JSON object invariant without a second string representation. *)
-  gate_decision : gate_decision;    (** Pre-execution gate result *)
-  result : string option;           (** None if gated/pending, Some output *)
+  result : string option;
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
   execution_id : string option;
@@ -52,18 +40,13 @@ type tool_call_entry = {
 type invalid_entry_counts = {
   missing_required_field : int;
   invalid_field : int;
+  unexpected_field : int;
+  duplicate_field : int;
   unsupported_row_type : int;
-  missing_gate : int;
-  invalid_gate_shape : int;
-  missing_gate_status : int;
-  unsupported_gate_status : int;
-  missing_reject_reason : int;
   malformed_json : int;
 }
 
-type gate_decode_summary = {
-  passed_gate_count : int;
-  rejected_gate_count : int;
+type entry_decode_summary = {
   invalid_entry_count : int;
   invalid_reasons : invalid_entry_counts;
 }
@@ -75,16 +58,9 @@ type trajectory_read_error = {
 
 type entries_read_result = {
   entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
+  decode : entry_decode_summary;
   io_errors : trajectory_read_error list;
 }
-
-type gate_decode_error =
-  | Missing_gate
-  | Invalid_gate_shape
-  | Missing_gate_status
-  | Unsupported_gate_status of string
-  | Missing_reject_reason
 
 type entry_field =
   | Row_type
@@ -105,8 +81,9 @@ type entry_field =
 type entry_decode_error =
   | Missing_required_field of entry_field
   | Invalid_field of entry_field
+  | Unexpected_field of string
+  | Duplicate_field of string
   | Unsupported_row_type of string
-  | Invalid_gate of gate_decode_error
   | Malformed_json
 
 type tool_call_entry_decode =
@@ -152,8 +129,6 @@ type trajectory_line =
 type trajectory_line_decode_summary = {
   tool_call_count : int;
   thinking_count : int;
-  passed_gate_count : int;
-  rejected_gate_count : int;
   skipped_summary_count : int;
   invalid_line_count : int;
   invalid_reasons : invalid_entry_counts;
@@ -169,14 +144,6 @@ type trajectory_lines_read_result = {
 (* JSON serialization                                               *)
 (* ================================================================ *)
 
-let gate_decision_to_json = function
-  | Pass -> `Assoc [("status", `String "pass")]
-  | Reject reason ->
-      `Assoc
-        [ ("status", `String "reject")
-        ; ("reason", `String (rejection_reason_to_string reason))
-        ]
-
 let outcome_to_json = function
   | Completed -> `String "completed"
   | Failed msg -> `Assoc [("status", `String "failed"); ("reason", `String msg)]
@@ -189,7 +156,7 @@ let outcome_to_string = function
   | Timeout -> "timeout"
   | Gated reason -> Printf.sprintf "gated: %s" reason
 
-(** Default truncation limit for result text in JSONL persistence. *)
+(** Default truncation limit for result text in display projections. *)
 let default_result_truncation = 500
 
 let entry_to_json ?(result_max_len = default_result_truncation)
@@ -202,7 +169,6 @@ let entry_to_json ?(result_max_len = default_result_truncation)
        ("round", `Int e.round);
        ("tool_name", `String e.tool_name);
        ("args", `Assoc e.arguments);
-       ("gate", gate_decision_to_json e.gate_decision);
        ( "result",
          (match e.result with
           | None -> `Null
@@ -247,6 +213,11 @@ let trajectory_line_to_json ?(result_max_len = default_result_truncation)
   | Tool_call e -> entry_to_json ~result_max_len e
   | Thinking e -> thinking_entry_to_json ~content_max_len e
 
+(* Durable trajectory rows are the trace authority.  Keep their serializer
+   separate from display projections so a caller cannot accidentally make a
+   presentation limit destructive. *)
+let persisted_entry_to_json = entry_to_json ~result_max_len:0
+
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   `Assoc [
     ("keeper_name", `String t.keeper_name);
@@ -257,27 +228,22 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
-    ("entries", `List (List.map entry_to_json t.entries));
+    ("entries", `List (List.map persisted_entry_to_json t.entries));
   ]
 
 let invalid_entry_counts_to_json (counts : invalid_entry_counts) =
   `Assoc
     [ ("missing_required_field", `Int counts.missing_required_field)
     ; ("invalid_field", `Int counts.invalid_field)
+    ; ("unexpected_field", `Int counts.unexpected_field)
+    ; ("duplicate_field", `Int counts.duplicate_field)
     ; ("unsupported_row_type", `Int counts.unsupported_row_type)
-    ; ("missing_gate", `Int counts.missing_gate)
-    ; ("invalid_gate_shape", `Int counts.invalid_gate_shape)
-    ; ("missing_gate_status", `Int counts.missing_gate_status)
-    ; ("unsupported_gate_status", `Int counts.unsupported_gate_status)
-    ; ("missing_reject_reason", `Int counts.missing_reject_reason)
     ; ("malformed_json", `Int counts.malformed_json)
     ]
 
-let gate_decode_summary_to_json (summary : gate_decode_summary) =
+let entry_decode_summary_to_json (summary : entry_decode_summary) =
   `Assoc
-    [ ("passed_gate_count", `Int summary.passed_gate_count)
-    ; ("rejected_gate_count", `Int summary.rejected_gate_count)
-    ; ("invalid_entry_count", `Int summary.invalid_entry_count)
+    [ ("invalid_entry_count", `Int summary.invalid_entry_count)
     ; ("invalid_reasons", invalid_entry_counts_to_json summary.invalid_reasons)
     ]
 
@@ -286,8 +252,6 @@ let trajectory_line_decode_summary_to_json
   `Assoc
     [ ("tool_call_count", `Int summary.tool_call_count)
     ; ("thinking_count", `Int summary.thinking_count)
-    ; ("passed_gate_count", `Int summary.passed_gate_count)
-    ; ("rejected_gate_count", `Int summary.rejected_gate_count)
     ; ("skipped_summary_count", `Int summary.skipped_summary_count)
     ; ("invalid_line_count", `Int summary.invalid_line_count)
     ; ("invalid_reasons", invalid_entry_counts_to_json summary.invalid_reasons)
@@ -308,23 +272,6 @@ let trajectory_read_errors_to_json errors =
 (* ================================================================ *)
 (* Decoders live next to the serializers above and are shared by the read
    paths. *)
-
-let gate_decision_of_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "status" fields with
-      | None -> Error Missing_gate_status
-      | Some (`String status) ->
-          if String.equal status "pass" then Ok Pass
-          else if String.equal status "reject" then
-            (match List.assoc_opt "reason" fields with
-             | Some (`String reason) ->
-                 (match rejection_reason_of_string reason with
-                  | Some reason -> Ok (Reject reason)
-                  | None -> Error Missing_reject_reason)
-             | _ -> Error Missing_reject_reason)
-          else Error (Unsupported_gate_status status)
-      | Some _ -> Error Invalid_gate_shape)
-  | _ -> Error Invalid_gate_shape
 
 let required_member field key json =
   match Json_util.assoc_member_opt key json with
@@ -367,8 +314,34 @@ let decode_optional_execution_id json =
   | Some (`String value) when String.trim value <> "" -> Ok (Some value)
   | Some _ -> Error (Invalid_field Execution_id)
 
+let validate_object_fields ~allowed = function
+  | `Assoc fields ->
+      let rec loop seen = function
+        | [] -> Ok ()
+        | (key, _) :: rest ->
+            if Set_util.StringSet.mem key seen then Error (Duplicate_field key)
+            else if not (Set_util.StringSet.mem key allowed) then
+              Error (Unexpected_field key)
+            else loop (Set_util.StringSet.add key seen) rest
+      in
+      loop Set_util.StringSet.empty fields
+  | _ -> Error (Invalid_field Row_type)
+
+let tool_call_fields =
+  Set_util.StringSet.of_list
+    [ "ts"; "ts_iso"; "turn"; "round"; "tool_name"; "args"; "result"
+    ; "duration_ms"; "error"; "execution_id"
+    ]
+
+let thinking_fields =
+  Set_util.StringSet.of_list
+    [ "type"; "ts"; "ts_iso"; "turn"; "content"; "content_length"
+    ; "redacted"
+    ]
+
 let decode_tool_call_entry json =
   let ( let* ) = Result.bind in
+  let* () = validate_object_fields ~allowed:tool_call_fields json in
   let* ts_json = required_member Timestamp "ts" json in
   let* ts = decode_finite_number Timestamp ts_json in
   let* ts_iso_json = required_member Timestamp_iso "ts_iso" json in
@@ -381,16 +354,6 @@ let decode_tool_call_entry json =
   let* tool_name = decode_non_blank_string Tool_name tool_name_json in
   let* args_value = required_member Arguments "args" json in
   let* arguments = decode_arguments args_value in
-  let* gate_json =
-    match Json_util.assoc_member_opt "gate" json with
-    | Some value -> Ok value
-    | None -> Error (Invalid_gate Missing_gate)
-  in
-  let* gate_decision =
-    match gate_decision_of_json gate_json with
-    | Ok decision -> Ok decision
-    | Error error -> Error (Invalid_gate error)
-  in
   let* result_json = required_member Result "result" json in
   let* result = decode_nullable_string Result result_json in
   let* duration_json = required_member Duration_ms "duration_ms" json in
@@ -406,7 +369,6 @@ let decode_tool_call_entry json =
       round;
       tool_name;
       arguments;
-      gate_decision;
       result;
       duration_ms;
       error;
@@ -428,77 +390,52 @@ let empty_invalid_entry_counts : invalid_entry_counts =
   {
     missing_required_field = 0;
     invalid_field = 0;
+    unexpected_field = 0;
+    duplicate_field = 0;
     unsupported_row_type = 0;
-    missing_gate = 0;
-    invalid_gate_shape = 0;
-    missing_gate_status = 0;
-    unsupported_gate_status = 0;
-    missing_reject_reason = 0;
     malformed_json = 0;
   }
 
-let empty_gate_decode_summary : gate_decode_summary =
+let empty_entry_decode_summary : entry_decode_summary =
   {
-    passed_gate_count = 0;
-    rejected_gate_count = 0;
     invalid_entry_count = 0;
     invalid_reasons = empty_invalid_entry_counts;
   }
 
 type decode_accumulator = {
-  mutable passed_gate_count : int;
-  mutable rejected_gate_count : int;
   mutable invalid_entry_count : int;
   mutable missing_required_field : int;
   mutable invalid_field : int;
+  mutable unexpected_field : int;
+  mutable duplicate_field : int;
   mutable unsupported_row_type : int;
-  mutable missing_gate : int;
-  mutable invalid_gate_shape : int;
-  mutable missing_gate_status : int;
-  mutable unsupported_gate_status : int;
-  mutable missing_reject_reason : int;
   mutable malformed_json : int;
 }
 
 let create_decode_accumulator () =
   {
-    passed_gate_count = 0;
-    rejected_gate_count = 0;
     invalid_entry_count = 0;
     missing_required_field = 0;
     invalid_field = 0;
+    unexpected_field = 0;
+    duplicate_field = 0;
     unsupported_row_type = 0;
-    missing_gate = 0;
-    invalid_gate_shape = 0;
-    missing_gate_status = 0;
-    unsupported_gate_status = 0;
-    missing_reject_reason = 0;
     malformed_json = 0;
   }
 
-let decode_accumulator_snapshot accumulator : gate_decode_summary =
+let decode_accumulator_snapshot accumulator : entry_decode_summary =
   {
-    passed_gate_count = accumulator.passed_gate_count;
-    rejected_gate_count = accumulator.rejected_gate_count;
     invalid_entry_count = accumulator.invalid_entry_count;
     invalid_reasons =
       {
         missing_required_field = accumulator.missing_required_field;
         invalid_field = accumulator.invalid_field;
+        unexpected_field = accumulator.unexpected_field;
+        duplicate_field = accumulator.duplicate_field;
         unsupported_row_type = accumulator.unsupported_row_type;
-        missing_gate = accumulator.missing_gate;
-        invalid_gate_shape = accumulator.invalid_gate_shape;
-        missing_gate_status = accumulator.missing_gate_status;
-        unsupported_gate_status = accumulator.unsupported_gate_status;
-        missing_reject_reason = accumulator.missing_reject_reason;
         malformed_json = accumulator.malformed_json;
       };
   }
-
-let record_decoded_gate accumulator = function
-  | Pass -> accumulator.passed_gate_count <- accumulator.passed_gate_count + 1
-  | Reject _ ->
-      accumulator.rejected_gate_count <- accumulator.rejected_gate_count + 1
 
 let record_invalid_entry accumulator error =
   accumulator.invalid_entry_count <- accumulator.invalid_entry_count + 1;
@@ -507,25 +444,18 @@ let record_invalid_entry accumulator error =
       accumulator.missing_required_field <-
         accumulator.missing_required_field + 1
   | Invalid_field _ -> accumulator.invalid_field <- accumulator.invalid_field + 1
+  | Unexpected_field _ ->
+      accumulator.unexpected_field <- accumulator.unexpected_field + 1
+  | Duplicate_field _ ->
+      accumulator.duplicate_field <- accumulator.duplicate_field + 1
   | Unsupported_row_type _ ->
       accumulator.unsupported_row_type <- accumulator.unsupported_row_type + 1
-  | Invalid_gate Missing_gate -> accumulator.missing_gate <- accumulator.missing_gate + 1
-  | Invalid_gate Invalid_gate_shape ->
-      accumulator.invalid_gate_shape <- accumulator.invalid_gate_shape + 1
-  | Invalid_gate Missing_gate_status ->
-      accumulator.missing_gate_status <- accumulator.missing_gate_status + 1
-  | Invalid_gate (Unsupported_gate_status _) ->
-      accumulator.unsupported_gate_status <-
-        accumulator.unsupported_gate_status + 1
-  | Invalid_gate Missing_reject_reason ->
-      accumulator.missing_reject_reason <- accumulator.missing_reject_reason + 1
   | Malformed_json -> accumulator.malformed_json <- accumulator.malformed_json + 1
 
 (** Single definition of "this tool call counts as a failure" for dashboard
     aggregation. *)
 let entry_is_failure (e : tool_call_entry) : bool =
   Option.is_some e.error
-  || (match e.gate_decision with Reject _ -> true | Pass -> false)
 
 (* ================================================================ *)
 (* File I/O                                                         *)
@@ -703,26 +633,36 @@ let evict_past_turn_keys ~(keeper_name : string) ~(trace_id : string)
     This avoids reading the entire JSONL file on every tool call. *)
 let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string) ~(turn : int) : int =
   let key = (keeper_name, trace_id, turn) in
-  Stdlib.Mutex.protect round_counters_mu (fun () ->
-    let current =
-      match Hashtbl.find_opt round_counters key with
-      | Some n -> n
-      | None ->
-        let hydrated =
-          hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
-        in
-        let issued =
-          match Hashtbl.find_opt round_high_water key with
-          | Some n -> n
-          | None -> 0
-        in
-        max hydrated issued
-    in
+  let issue_locked current =
     let next = current + 1 in
     Hashtbl.replace round_counters key next;
     Hashtbl.replace round_high_water key next;
     evict_past_turn_keys ~keeper_name ~trace_id ~turn;
-    next)
+    next
+  in
+  match
+    Stdlib.Mutex.protect round_counters_mu (fun () ->
+      Option.map issue_locked (Hashtbl.find_opt round_counters key))
+  with
+  | Some next -> next
+  | None ->
+      (* Disk hydration must never run under the process-wide counter lock: one
+         cold or large trace must not block unrelated Keeper lanes. A second
+         lock phase resolves concurrent cold misses for the same key. *)
+      let hydrated =
+        hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
+      in
+      Stdlib.Mutex.protect round_counters_mu (fun () ->
+        let current =
+          match Hashtbl.find_opt round_counters key with
+          | Some current -> current
+          | None ->
+              let issued =
+                Option.value (Hashtbl.find_opt round_high_water key) ~default:0
+              in
+              max hydrated issued
+        in
+        issue_locked current)
 
 (** Reset round counters for testing. *)
 let reset_round_counters_for_testing () =
@@ -769,7 +709,7 @@ let append_entry ~(masc_root : string)
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  let json = entry_to_json entry in
+  let json = persisted_entry_to_json entry in
   Fs_compat.append_jsonl path json
 
 (* ================================================================ *)
@@ -838,7 +778,7 @@ let record_entry ?on_persist_error
    | Some cb, None -> acc.on_flush_error <- Some cb
    | _ -> ());
   (* Enqueue for batched write instead of synchronous disk I/O *)
-  let json = entry_to_json entry in
+  let json = persisted_entry_to_json entry in
   Stdlib.Mutex.protect acc.pending_mu (fun () ->
     Queue.push { pe_json = json } acc.pending_queue)
 
@@ -1023,7 +963,7 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
     ~(since : float) : entries_read_result =
   let dir = trajectories_dir masc_root keeper_name in
   let empty_result io_errors =
-    { entries = []; gate_decode = empty_gate_decode_summary; io_errors }
+    { entries = []; decode = empty_entry_decode_summary; io_errors }
   in
   match Fs_compat.path_kind dir with
   | exception Sys_error message -> empty_result [{ path = dir; message }]
@@ -1041,7 +981,7 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
         empty_result [{ path = dir; message = Printexc.to_string exn }]
     | files ->
         let all_entries = ref [] in
-        let gate_decode = create_decode_accumulator () in
+        let decode = create_decode_accumulator () in
         let io_errors = ref [] in
         let row_may_be_in_window json =
           match Json_util.assoc_member_opt "ts" json with
@@ -1064,17 +1004,15 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
                           | exception
                               (Yojson.Json_error _
                               | Yojson.Safe.Util.Type_error _) ->
-                              record_invalid_entry gate_decode Malformed_json
+                              record_invalid_entry decode Malformed_json
                           | json ->
                               match tool_call_entry_of_json json with
                               | Decoded_entry entry when entry.ts >= since ->
-                                  record_decoded_gate gate_decode
-                                    entry.gate_decision;
                                   all_entries := entry :: !all_entries
                               | Decoded_entry _ | Non_entry_row -> ()
                               | Invalid_entry error
                                 when row_may_be_in_window json ->
-                                  record_invalid_entry gate_decode error
+                                  record_invalid_entry decode error
                               | Invalid_entry _ -> ())
                in
                match Fs_compat.exact_path_kind path with
@@ -1098,7 +1036,7 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
               (fun (a : tool_call_entry) (b : tool_call_entry) ->
                  compare a.ts b.ts)
               !all_entries;
-          gate_decode = decode_accumulator_snapshot gate_decode;
+          decode = decode_accumulator_snapshot decode;
           io_errors = List.rev !io_errors;
         }
 
@@ -1110,10 +1048,10 @@ let read_entries_result ~(masc_root : string) ~(keeper_name : string)
     ~(trace_id : string) : entries_read_result =
   let path = trajectory_path masc_root keeper_name trace_id in
   let empty_result io_errors =
-    { entries = []; gate_decode = empty_gate_decode_summary; io_errors }
+    { entries = []; decode = empty_entry_decode_summary; io_errors }
   in
   let decode content =
-      let gate_decode = create_decode_accumulator () in
+      let decode_summary = create_decode_accumulator () in
       let entries_rev =
         String.split_on_char '\n' content
         |> List.filter (fun line -> String.trim line <> "")
@@ -1122,22 +1060,20 @@ let read_entries_result ~(masc_root : string) ~(keeper_name : string)
                 match Yojson.Safe.from_string line with
                 | exception
                     (Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) ->
-                    record_invalid_entry gate_decode Malformed_json;
+                    record_invalid_entry decode_summary Malformed_json;
                     entries
                 | json ->
                     match tool_call_entry_of_json json with
-                    | Decoded_entry entry ->
-                        record_decoded_gate gate_decode entry.gate_decision;
-                        entry :: entries
+                    | Decoded_entry entry -> entry :: entries
                     | Non_entry_row -> entries
                     | Invalid_entry error ->
-                        record_invalid_entry gate_decode error;
+                        record_invalid_entry decode_summary error;
                         entries)
              []
       in
       {
         entries = List.rev entries_rev;
-        gate_decode = decode_accumulator_snapshot gate_decode;
+        decode = decode_accumulator_snapshot decode_summary;
         io_errors = [];
       }
   in
@@ -1163,6 +1099,7 @@ type trajectory_line_decode_result =
 
 let decode_thinking_entry json =
   let ( let* ) = Result.bind in
+  let* () = validate_object_fields ~allowed:thinking_fields json in
   let* ts_json = required_member Timestamp "ts" json in
   let* ts = decode_finite_number Timestamp ts_json in
   let* ts_iso_json = required_member Timestamp_iso "ts_iso" json in
@@ -1214,8 +1151,6 @@ let line_decode_accumulator_snapshot accumulator
   {
     tool_call_count = accumulator.tool_call_count;
     thinking_count = accumulator.thinking_count;
-    passed_gate_count = invalid.passed_gate_count;
-    rejected_gate_count = invalid.rejected_gate_count;
     skipped_summary_count = accumulator.skipped_summary_count;
     invalid_line_count = invalid.invalid_entry_count;
     invalid_reasons = invalid.invalid_reasons;
@@ -1225,8 +1160,6 @@ let empty_trajectory_line_decode_summary : trajectory_line_decode_summary =
   {
     tool_call_count = 0;
     thinking_count = 0;
-    passed_gate_count = 0;
-    rejected_gate_count = 0;
     skipped_summary_count = 0;
     invalid_line_count = 0;
     invalid_reasons = empty_invalid_entry_counts;
@@ -1245,10 +1178,9 @@ let trajectory_lines_of_jsonl_lines lines =
                  Invalid_line Malformed_json
            in
            match decode with
-           | Parsed_line (Tool_call entry as parsed) ->
+           | Parsed_line (Tool_call _ as parsed) ->
                decode_summary.tool_call_count <-
                  decode_summary.tool_call_count + 1;
-               record_decoded_gate decode_summary.invalid entry.gate_decision;
                parsed :: acc
            | Parsed_line (Thinking _ as parsed) ->
                decode_summary.thinking_count <- decode_summary.thinking_count + 1;

@@ -6,20 +6,13 @@ import { get } from './core'
 export type TrajectoryInvalidReasons = {
   missing_required_field: number
   invalid_field: number
+  unexpected_field: number
+  duplicate_field: number
   unsupported_row_type: number
-  missing_gate: number
-  invalid_gate_shape: number
-  missing_gate_status: number
-  unsupported_gate_status: number
-  missing_reject_reason: number
   malformed_json: number
 }
 
 export type TrajectoryReadError = { path: string; message: string }
-
-export type TrajectoryGate =
-  | { status: 'pass' }
-  | { status: 'reject'; reason: string }
 
 export type TrajectoryToolEntry = {
   type?: undefined
@@ -30,7 +23,6 @@ export type TrajectoryToolEntry = {
   round: number
   tool_name: string
   args: Record<string, unknown>
-  gate: TrajectoryGate
   result: string | null
   duration_ms: number
   error: string | null
@@ -51,8 +43,6 @@ export type TrajectoryEntry = TrajectoryToolEntry | TrajectoryThinkingEntry
 export type TrajectoryLineDecode = {
   tool_call_count: number
   thinking_count: number
-  passed_gate_count: number
-  rejected_gate_count: number
   skipped_summary_count: number
   invalid_line_count: number
   invalid_reasons: TrajectoryInvalidReasons
@@ -91,33 +81,24 @@ export function decodeTrajectoryInvalidReasons(raw: unknown): TrajectoryInvalidR
   if (!isRecord(raw)) return null
   const missingRequiredField = decodeTrajectoryCount(raw.missing_required_field)
   const invalidField = decodeTrajectoryCount(raw.invalid_field)
+  const unexpectedField = decodeTrajectoryCount(raw.unexpected_field)
+  const duplicateField = decodeTrajectoryCount(raw.duplicate_field)
   const unsupportedRowType = decodeTrajectoryCount(raw.unsupported_row_type)
-  const missingGate = decodeTrajectoryCount(raw.missing_gate)
-  const invalidGateShape = decodeTrajectoryCount(raw.invalid_gate_shape)
-  const missingGateStatus = decodeTrajectoryCount(raw.missing_gate_status)
-  const unsupportedGateStatus = decodeTrajectoryCount(raw.unsupported_gate_status)
-  const missingRejectReason = decodeTrajectoryCount(raw.missing_reject_reason)
   const malformedJson = decodeTrajectoryCount(raw.malformed_json)
   if (
     missingRequiredField === null
     || invalidField === null
+    || unexpectedField === null
+    || duplicateField === null
     || unsupportedRowType === null
-    || missingGate === null
-    || invalidGateShape === null
-    || missingGateStatus === null
-    || unsupportedGateStatus === null
-    || missingRejectReason === null
     || malformedJson === null
   ) return null
   return {
     missing_required_field: missingRequiredField,
     invalid_field: invalidField,
+    unexpected_field: unexpectedField,
+    duplicate_field: duplicateField,
     unsupported_row_type: unsupportedRowType,
-    missing_gate: missingGate,
-    invalid_gate_shape: invalidGateShape,
-    missing_gate_status: missingGateStatus,
-    unsupported_gate_status: unsupportedGateStatus,
-    missing_reject_reason: missingRejectReason,
     malformed_json: malformedJson,
   }
 }
@@ -150,25 +131,26 @@ function decodeNullableString(value: unknown): string | null | undefined {
   return decoded === null ? undefined : decoded
 }
 
-function decodeGate(raw: unknown): TrajectoryGate | null {
-  if (!isRecord(raw)) return null
-  if (raw.status === 'pass') return { status: 'pass' }
-  if (raw.status === 'reject') {
-    const reason = decodeTrajectoryNonBlankString(raw.reason)
-    return reason === null ? null : { status: 'reject', reason }
-  }
-  return null
+const TOOL_ENTRY_KEYS = new Set([
+  'ts', 'ts_iso', 'turn', 'round', 'tool_name', 'args', 'result',
+  'duration_ms', 'error', 'execution_id',
+])
+const THINKING_ENTRY_KEYS = new Set([
+  'type', 'ts', 'ts_iso', 'turn', 'content', 'content_length', 'redacted',
+])
+
+function hasOnlyKeys(raw: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(raw).every(key => allowed.has(key))
 }
 
 function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | null {
-  if (raw.type !== undefined) return null
+  if (raw.type !== undefined || !hasOnlyKeys(raw, TOOL_ENTRY_KEYS)) return null
   const ts = decodeFiniteNumber(raw.ts)
   const tsIso = decodeTrajectoryNonBlankString(raw.ts_iso)
   const turn = decodeTrajectoryCount(raw.turn)
   const round = decodeTrajectoryCount(raw.round)
   const toolName = decodeTrajectoryNonBlankString(raw.tool_name)
   const args = isRecord(raw.args) ? raw.args : null
-  const gate = decodeGate(raw.gate)
   const result = decodeNullableString(raw.result)
   const durationMs = decodeTrajectoryCount(raw.duration_ms)
   const error = decodeNullableString(raw.error)
@@ -182,7 +164,6 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
     || round === null
     || toolName === null
     || args === null
-    || gate === null
     || result === undefined
     || durationMs === null
     || error === undefined
@@ -195,7 +176,6 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
     round,
     tool_name: toolName,
     args,
-    gate,
     result,
     duration_ms: durationMs,
     error,
@@ -204,7 +184,7 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
 }
 
 function decodeThinkingEntry(raw: Record<string, unknown>): TrajectoryThinkingEntry | null {
-  if (raw.type !== 'thinking') return null
+  if (raw.type !== 'thinking' || !hasOnlyKeys(raw, THINKING_ENTRY_KEYS)) return null
   const ts = decodeFiniteNumber(raw.ts)
   const tsIso = decodeTrajectoryNonBlankString(raw.ts_iso)
   const turn = decodeTrajectoryCount(raw.turn)
@@ -238,27 +218,20 @@ function decodeLineDecode(raw: unknown): TrajectoryLineDecode | null {
   if (!isRecord(raw)) return null
   const toolCallCount = decodeTrajectoryCount(raw.tool_call_count)
   const thinkingCount = decodeTrajectoryCount(raw.thinking_count)
-  const passedGateCount = decodeTrajectoryCount(raw.passed_gate_count)
-  const rejectedGateCount = decodeTrajectoryCount(raw.rejected_gate_count)
   const skippedSummaryCount = decodeTrajectoryCount(raw.skipped_summary_count)
   const invalidLineCount = decodeTrajectoryCount(raw.invalid_line_count)
   const invalidReasons = decodeTrajectoryInvalidReasons(raw.invalid_reasons)
   if (
     toolCallCount === null
     || thinkingCount === null
-    || passedGateCount === null
-    || rejectedGateCount === null
     || skippedSummaryCount === null
     || invalidLineCount === null
     || invalidReasons === null
-    || passedGateCount + rejectedGateCount !== toolCallCount
     || trajectoryInvalidReasonCount(invalidReasons) !== invalidLineCount
   ) return null
   return {
     tool_call_count: toolCallCount,
     thinking_count: thinkingCount,
-    passed_gate_count: passedGateCount,
-    rejected_gate_count: rejectedGateCount,
     skipped_summary_count: skippedSummaryCount,
     invalid_line_count: invalidLineCount,
     invalid_reasons: invalidReasons,
@@ -313,14 +286,12 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
 export function fetchKeeperTrajectory(
   name: string,
   limit?: number,
-  includeThinking = true,
   fullOutput = false,
 ): Promise<TrajectoryResponse> {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
-  params.set('include_thinking', includeThinking ? 'true' : 'false')
   if (fullOutput) {
-    params.set('result_max_len', '10000')
+    params.set('result_max_len', '0')
     params.set('content_max_len', '0')
   }
   const qs = params.toString()

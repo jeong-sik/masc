@@ -71,7 +71,7 @@ async function fetchWaterfallSources(
   const [trajectory, toolCalls, runtimeTrace] = await Promise.all([
     settleSource<TrajectoryResponse>(
       'trajectory',
-      fetchKeeperTrajectory(keeperName, 200, true, true),
+      fetchKeeperTrajectory(keeperName, 200, true),
     ),
     settleSource<ToolCallsResponse>(
       'tool-calls',
@@ -157,8 +157,6 @@ function statusTone(entry: JourneyWaterfallEntry): string {
       return 'ok'
     case 'failure':
       return 'bad'
-    case 'gate_rejected':
-      return 'warn'
     case 'unknown':
     default:
       return 'neutral'
@@ -167,7 +165,6 @@ function statusTone(entry: JourneyWaterfallEntry): string {
 
 function turnTone(turn: JourneyWaterfallTurn): string {
   if (turn.failureCount > 0) return 'bad'
-  if (turn.gateRejectedCount > 0) return 'warn'
   if (turn.toolCallCount > 0) return 'ok'
   return 'neutral'
 }
@@ -270,9 +267,7 @@ function WaterfallEntryRow({
   const widthPct = entry.durationMs && maxDurationMs > 0
     ? Math.max(8, Math.min(100, Math.round((entry.durationMs / maxDurationMs) * 100)))
     : 8
-  const status = entry.status === 'gate_rejected'
-    ? 'gate rejected'
-    : entry.status
+  const status = entry.status
   const resultPreview = entry.error ?? entry.toolResult ?? entry.thinkingContent ?? ''
 
   return html`
@@ -317,10 +312,6 @@ function WaterfallEntryRow({
             </div>
           `}
 
-      ${entry.gateReason
-        ? html`<div class="text-xs text-[var(--color-status-warn)]">gate: ${entry.gateReason}</div>`
-        : null}
-
       ${resultPreview && isTool
         ? html`
             <details class="v2-monitoring-detail text-xs text-[var(--color-fg-muted)]">
@@ -356,7 +347,6 @@ function WaterfallTurnRow({
             <span>tools ${turn.toolCallCount}</span>
             <span>thinking ${turn.thinkingCount}</span>
             <span>failures ${turn.failureCount}</span>
-            <span>gate ${turn.gateRejectedCount}</span>
           </div>
         </div>
         <div class="flex flex-wrap gap-1.5 text-3xs">

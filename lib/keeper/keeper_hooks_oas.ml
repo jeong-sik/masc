@@ -557,7 +557,6 @@ let make_hooks
                     round = Trajectory.calls_in_current_turn acc + 1;
                     tool_name;
                     arguments;
-                    gate_decision = Trajectory.Pass;
                     result = Some safe_output;
                     duration_ms = trajectory_duration_ms duration_ms;
                     error =

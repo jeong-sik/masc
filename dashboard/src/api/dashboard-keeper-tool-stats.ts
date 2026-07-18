@@ -35,9 +35,7 @@ export type ToolStatsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   window_hours: number
   total_entries: number
-  gate_decode: {
-    passed_gate_count: number
-    rejected_gate_count: number
+  decode: {
     invalid_entry_count: number
     invalid_reasons: TrajectoryInvalidReasons
   }
@@ -97,27 +95,22 @@ function decodeToolStatsResponse(raw: unknown): ToolStatsResponse | null {
   const keeper = decodeTrajectoryNonBlankString(raw.keeper)
   const windowHours = decodeTrajectoryCount(raw.window_hours)
   const totalEntries = decodeTrajectoryCount(raw.total_entries)
-  const gateDecode = raw.gate_decode
+  const decode = raw.decode
   if (
     keeper === null
     || windowHours === null
     || windowHours === 0
     || totalEntries === null
-    || !isRecord(gateDecode)
+    || !isRecord(decode)
   ) return null
-  const passedGateCount = decodeTrajectoryCount(gateDecode.passed_gate_count)
-  const rejectedGateCount = decodeTrajectoryCount(gateDecode.rejected_gate_count)
-  const invalidEntryCount = decodeTrajectoryCount(gateDecode.invalid_entry_count)
-  const invalidReasons = decodeTrajectoryInvalidReasons(gateDecode.invalid_reasons)
+  const invalidEntryCount = decodeTrajectoryCount(decode.invalid_entry_count)
+  const invalidReasons = decodeTrajectoryInvalidReasons(decode.invalid_reasons)
   if (
-    passedGateCount === null
-    || rejectedGateCount === null
-    || invalidEntryCount === null
+    invalidEntryCount === null
     || invalidReasons === null
   ) return null
   if (
-    passedGateCount + rejectedGateCount !== totalEntries
-    || trajectoryInvalidReasonCount(invalidReasons) !== invalidEntryCount
+    trajectoryInvalidReasonCount(invalidReasons) !== invalidEntryCount
   ) return null
   const ioErrors = decodeTrajectoryReadErrors(raw.io_errors)
   if (ioErrors === null) return null
@@ -143,9 +136,7 @@ function decodeToolStatsResponse(raw: unknown): ToolStatsResponse | null {
     keeper,
     window_hours: windowHours,
     total_entries: totalEntries,
-    gate_decode: {
-      passed_gate_count: passedGateCount,
-      rejected_gate_count: rejectedGateCount,
+    decode: {
       invalid_entry_count: invalidEntryCount,
       invalid_reasons: invalidReasons,
     },

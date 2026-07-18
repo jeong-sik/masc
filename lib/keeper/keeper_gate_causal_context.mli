@@ -13,3 +13,11 @@ val record_tool_result :
   t -> operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit
 
 val snapshot : t -> Keeper_gate.causal_context
+
+(** Bind one exact OAS model-tool occurrence to an immutable turn snapshot.
+    Provider [tool_use_id] values may be blank or repeated, so [turn] and
+    [planned_index] remain part of the occurrence identity. *)
+val with_oas_tool_occurrence :
+  Keeper_gate.causal_context ->
+  Agent_sdk.Tool.Invocation.t ->
+  Keeper_gate.causal_context

@@ -53,3 +53,23 @@ let snapshot t : Keeper_gate.causal_context =
         ]
   }
 ;;
+
+let with_oas_tool_occurrence
+      (context : Keeper_gate.causal_context)
+      invocation
+  =
+  { context with
+    snapshot =
+      `Assoc
+        [ "turn_context", context.snapshot
+        ; ( "oas_tool_occurrence"
+          , `Assoc
+              [ ( "tool_use_id"
+                , `String (Agent_sdk.Tool.Invocation.tool_use_id invocation) )
+              ; "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
+              ; ( "planned_index"
+                , `Int (Agent_sdk.Tool.Invocation.planned_index invocation) )
+              ] )
+        ]
+  }
+;;

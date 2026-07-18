@@ -177,6 +177,71 @@ let test_second_tool_snapshot_contains_first_tool_result () =
   | _ -> failf "expected one completed call, got %d" (List.length calls)
 ;;
 
+let oas_invocation ~tool_use_id ~turn ~planned_index =
+  Agent_sdk.Tool.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool.Serial
+      }
+;;
+
+let deferred_id = function
+  | Keeper_gate.Deferred { approval_id; _ } -> approval_id
+  | Keeper_gate.Allow _ -> fail "manual Gate unexpectedly allowed an effect"
+  | Keeper_gate.Unavailable reason ->
+    fail (Keeper_gate.unavailable_reason_to_string reason)
+;;
+
+let test_oas_occurrence_partitions_fresh_gate_decisions () =
+  with_clean_gate_runtime @@ fun () ->
+  let base_path = temp_dir "keeper-gate-oas-occurrence" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
+   | Ok _ -> ()
+   | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  let turn_context =
+    Keeper_gate_causal_context.create
+      ~turn_id:(Some 41)
+      ~initial:(`Assoc [ "runtime_id", `String "run-41" ])
+  in
+  let request invocation : Keeper_gate.request =
+    { keeper_name = "occurrence-keeper"
+    ; operation = "external-effect"
+    ; input = `Assoc [ "target", `String "same" ]
+    ; base_path
+    ; causal_context =
+        Some
+          (Keeper_gate_causal_context.with_oas_tool_occurrence
+             (Keeper_gate_causal_context.snapshot turn_context)
+             invocation)
+    ; task_id = None
+    ; goal_ids = []
+    ; continuation_channel = None
+    }
+  in
+  let first_occurrence = oas_invocation ~tool_use_id:"" ~turn:7 ~planned_index:0 in
+  let second_occurrence = oas_invocation ~tool_use_id:"" ~turn:7 ~planned_index:1 in
+  let decide invocation =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      (request invocation)
+    |> deferred_id
+  in
+  let first = decide first_occurrence in
+  let duplicate_delivery = decide first_occurrence in
+  let second = decide second_occurrence in
+  check string "same occurrence delivery is idempotent" first duplicate_delivery;
+  check bool "independent occurrence gets a fresh decision" true
+    (not (String.equal first second));
+  check int "two occurrences are durably pending" 2
+    (Keeper_approval_queue.pending_count ())
+;;
+
 let test_keeper_effects_defer_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "keeper-gate-deferred" in
@@ -438,6 +503,10 @@ let () =
             "second tool snapshot contains first tool result"
             `Quick
             test_second_tool_snapshot_contains_first_tool_result
+        ; test_case
+            "OAS occurrence partitions fresh Gate decisions"
+            `Quick
+            test_oas_occurrence_partitions_fresh_gate_decisions
         ] )
     ; ( "keeper_effects"
       , [ test_case

@@ -32,6 +32,16 @@ let execute_with_observers
   =
   let t0 = Time_compat.now () in
   let invocation_fields = oas_invocation_fields oas_invocation in
+  let gate_context =
+    match gate_context, oas_invocation with
+    | Some current_context, Some invocation ->
+      Some (fun () ->
+        Keeper_gate_causal_context.with_oas_tool_occurrence
+          (current_context ())
+          invocation)
+    | (Some _ as context), None -> context
+    | None, (Some _ | None) -> None
+  in
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->

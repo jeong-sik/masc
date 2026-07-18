@@ -2,7 +2,7 @@
 # Exact runtime-artifact identity contract shared by start-masc.sh and the
 # process supervisor.  This file is both sourceable and directly executable.
 
-MASC_RUNTIME_ARTIFACT_SCHEMA="masc.runtime_artifact.v1"
+MASC_RUNTIME_ARTIFACT_SCHEMA="masc.runtime_artifact.v2"
 
 masc_runtime_artifact_hash () {
   local path="${1:-}"
@@ -35,12 +35,34 @@ masc_runtime_artifact_valid_port () {
   [ "$value" -ge 1 ] && [ "$value" -le 65535 ]
 }
 
+masc_runtime_artifact_valid_host () {
+  local value="${1:-}"
+  case "$value" in
+    ''|*[[:space:]/?#@]*|*$'\n'*|*$'\r'*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+masc_runtime_artifact_probe_host () {
+  local bind_host="${1:-}"
+
+  masc_runtime_artifact_valid_host "$bind_host" || return 1
+  case "$bind_host" in
+    0.0.0.0|'*') printf '%s\n' '127.0.0.1' ;;
+    ::|'[::]') printf '%s\n' '[::1]' ;;
+    \[*\]) printf '%s\n' "$bind_host" ;;
+    *:*) printf '[%s]\n' "$bind_host" ;;
+    *) printf '%s\n' "$bind_host" ;;
+  esac
+}
+
 masc_runtime_artifact_descriptor_write () {
   local file="${1:-}"
   local mode="${2:-}"
   local path="${3:-}"
   local sha256="${4:-}"
-  local port="${5:-}"
+  local bind_host="${5:-}"
+  local port="${6:-}"
   local parent temp
 
   [ -n "$file" ] || return 2
@@ -53,14 +75,16 @@ masc_runtime_artifact_descriptor_write () {
     *$'\n'*|*$'\r'*) return 2 ;;
   esac
   masc_runtime_artifact_valid_hash "$sha256" || return 2
+  masc_runtime_artifact_valid_host "$bind_host" || return 2
   masc_runtime_artifact_valid_port "$port" || return 2
 
   parent="$(dirname "$file")"
   mkdir -p "$parent" || return 1
   temp="$file.tmp.$$"
   umask 077
-  if ! printf '%s\n%s\n%s\n%s\n%s\n' \
-      "$MASC_RUNTIME_ARTIFACT_SCHEMA" "$mode" "$path" "$sha256" "$port" \
+  if ! printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+      "$MASC_RUNTIME_ARTIFACT_SCHEMA" "$mode" "$path" "$sha256" \
+      "$bind_host" "$port" \
       >"$temp"
   then
     rm -f "$temp"
@@ -75,7 +99,7 @@ masc_runtime_artifact_descriptor_write () {
 
 masc_runtime_artifact_descriptor_read () {
   local file="${1:-}"
-  local schema mode path sha256 port
+  local schema mode path sha256 bind_host port
 
   [ -f "$file" ] || return 1
   {
@@ -83,6 +107,7 @@ masc_runtime_artifact_descriptor_read () {
     IFS= read -r mode || return 1
     IFS= read -r path || return 1
     IFS= read -r sha256 || return 1
+    IFS= read -r bind_host || return 1
     IFS= read -r port || return 1
     if IFS= read -r _; then
       return 1
@@ -96,13 +121,16 @@ masc_runtime_artifact_descriptor_read () {
     *) return 1 ;;
   esac
   masc_runtime_artifact_valid_hash "$sha256" || return 1
+  masc_runtime_artifact_valid_host "$bind_host" || return 1
   masc_runtime_artifact_valid_port "$port" || return 1
 
   MASC_ARTIFACT_MODE="$mode"
   MASC_ARTIFACT_PATH="$path"
   MASC_ARTIFACT_SHA256="$sha256"
+  MASC_ARTIFACT_BIND_HOST="$bind_host"
   MASC_ARTIFACT_PORT="$port"
-  export MASC_ARTIFACT_MODE MASC_ARTIFACT_PATH MASC_ARTIFACT_SHA256 MASC_ARTIFACT_PORT
+  export MASC_ARTIFACT_MODE MASC_ARTIFACT_PATH MASC_ARTIFACT_SHA256
+  export MASC_ARTIFACT_BIND_HOST MASC_ARTIFACT_PORT
 }
 
 masc_runtime_artifact_descriptor_verify () {
@@ -120,23 +148,26 @@ masc_runtime_artifact_promote () {
   local candidate_file="${1:-}"
   local lkg_file="${2:-}"
   local repo_root="${3:-}"
-  local source_path source_hash mode port promoted_path promoted_dir temp actual
+  local source_path source_hash mode bind_host port promoted_path promoted_dir temp actual
 
   masc_runtime_artifact_descriptor_verify "$candidate_file" || return 1
   source_path="$MASC_ARTIFACT_PATH"
   source_hash="$MASC_ARTIFACT_SHA256"
   mode="$MASC_ARTIFACT_MODE"
+  bind_host="$MASC_ARTIFACT_BIND_HOST"
   port="$MASC_ARTIFACT_PORT"
   promoted_path="$source_path"
 
-  # Local Dune outputs are mutable.  Preserve the exact healthy bytes beside
-  # the selected executable so Sys.executable_name keeps the same repo/layout
-  # ancestry on fallback.  Release and installed artifacts remain at their
-  # already-stable path and are still protected by the descriptor hash.
+  # Local Dune outputs are mutable and `dune clean` deletes all of _build.
+  # Preserve exact healthy bytes beside the durable LKG descriptor, outside
+  # _build but still beneath the configured repository by default. Release and
+  # installed artifacts remain at their already-stable path and are hash-bound.
   case "$source_path" in
     "$repo_root"/_build/*)
-      promoted_dir="$(dirname "$source_path")"
-      promoted_path="$promoted_dir/.masc-lkg-$source_hash-$(basename "$source_path")"
+      promoted_dir="$(dirname "$lkg_file")/.masc-runtime-artifacts"
+      mkdir -p "$promoted_dir" || return 1
+      chmod 700 "$promoted_dir" || return 1
+      promoted_path="$promoted_dir/$source_hash-$(basename "$source_path")"
       if [ ! -f "$promoted_path" ]; then
         temp="$promoted_path.tmp.$$"
         cp -p "$source_path" "$temp" || {
@@ -166,7 +197,7 @@ masc_runtime_artifact_promote () {
   esac
 
   masc_runtime_artifact_descriptor_write "$lkg_file" "$mode" \
-    "$promoted_path" "$source_hash" "$port"
+    "$promoted_path" "$source_hash" "$bind_host" "$port"
 }
 
 masc_runtime_artifact_cli () {
@@ -178,8 +209,8 @@ masc_runtime_artifact_cli () {
       masc_runtime_artifact_hash "$1"
       ;;
     write)
-      [ "$#" -eq 5 ] || return 2
-      masc_runtime_artifact_descriptor_write "$1" "$2" "$3" "$4" "$5"
+      [ "$#" -eq 6 ] || return 2
+      masc_runtime_artifact_descriptor_write "$1" "$2" "$3" "$4" "$5" "$6"
       ;;
     verify)
       [ "$#" -eq 1 ] || return 2
@@ -190,7 +221,7 @@ masc_runtime_artifact_cli () {
       masc_runtime_artifact_promote "$1" "$2" "$3"
       ;;
     *)
-      printf 'usage: %s {hash FILE|write FILE MODE PATH SHA256 PORT|verify FILE|promote CANDIDATE LKG REPO_ROOT}\n' \
+      printf 'usage: %s {hash FILE|write FILE MODE PATH SHA256 BIND_HOST PORT|verify FILE|promote CANDIDATE LKG REPO_ROOT}\n' \
         "$0" >&2
       return 2
       ;;

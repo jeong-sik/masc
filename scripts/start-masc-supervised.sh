@@ -16,7 +16,7 @@
 #   MASC_RESTART_COOLDOWN_SEC       — sleep between restart attempts
 #                                     (default: 5)
 #   MASC_RUNTIME_LKG_FILE           — health-verified artifact descriptor
-#                                     (default: <repo-root>/logs/masc-runtime-lkg.v1)
+#                                     (default: <repo-root>/logs/masc-runtime-lkg.v2)
 #   MASC_SUPERVISOR_HEALTH_PROBE_SEC — observation cadence only; never a
 #                                     readiness timeout (default: 1)
 #
@@ -45,15 +45,17 @@ mkdir -p "$(dirname "$LOG_FILE")"
 COOLDOWN_SEC="${MASC_RESTART_COOLDOWN_SEC:-5}"
 HEALTH_PROBE_SEC="${MASC_SUPERVISOR_HEALTH_PROBE_SEC:-1}"
 ARTIFACT_CONTRACT="${MASC_RUNTIME_ARTIFACT_CONTRACT:-$REPO_ROOT/scripts/lib/runtime-artifact-contract.sh}"
-LKG_FILE="${MASC_RUNTIME_LKG_FILE:-$REPO_ROOT/logs/masc-runtime-lkg.v1}"
+LKG_FILE="${MASC_RUNTIME_LKG_FILE:-$REPO_ROOT/logs/masc-runtime-lkg.v2}"
 ATTEMPT_DIR="$(dirname "$LKG_FILE")"
-CANDIDATE_FILE="$ATTEMPT_DIR/masc-runtime-candidate.$$.v1"
-PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.v1"
-HEALTH_PROOF_SCHEMA="masc.runtime_health_proof.v1"
+CANDIDATE_FILE="$ATTEMPT_DIR/masc-runtime-candidate.$$.v2"
+PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.v2"
+HEALTH_PROOF_SCHEMA="masc.runtime_health_proof.v2"
 active_pid=""
 active_kind=""
+active_nonce=""
 monitor_pid=""
 completed_pid=""
+completed_nonce=""
 stop_signal=""
 stop_exit_code=0
 stop_forwarded_pid=""
@@ -77,29 +79,43 @@ if [ "$HEALTH_PROBE_SEC" -lt 1 ]; then
   log "ERROR: MASC_SUPERVISOR_HEALTH_PROBE_SEC must be at least 1"
   exit 78
 fi
-for required_command in lsof curl; do
+for required_command in lsof curl od tr; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     log "ERROR: required runtime health-proof command unavailable: $required_command"
     exit 78
   fi
 done
+if [ ! -r /dev/urandom ]; then
+  log "ERROR: supervisor-owned health proof randomness unavailable: /dev/urandom"
+  exit 78
+fi
 # shellcheck source=/dev/null
 source "$ARTIFACT_CONTRACT"
 mkdir -p "$ATTEMPT_DIR"
 
+generate_health_nonce() {
+  local nonce
+
+  nonce="$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" || return 1
+  masc_runtime_artifact_valid_hash "$nonce" || return 1
+  printf '%s\n' "$nonce"
+}
+
 write_health_proof() {
   local child_pid="$1"
   local artifact_hash="$2"
+  local nonce="$3"
   local temp="$PROOF_FILE.tmp.$$"
 
   case "$child_pid" in
     ''|*[!0-9]*) return 2 ;;
   esac
   masc_runtime_artifact_valid_hash "$artifact_hash" || return 2
+  masc_runtime_artifact_valid_hash "$nonce" || return 2
 
   umask 077
-  if ! printf '%s\n%s\n%s\n' \
-      "$HEALTH_PROOF_SCHEMA" "$child_pid" "$artifact_hash" >"$temp"
+  if ! printf '%s\n%s\n%s\n%s\n' \
+      "$HEALTH_PROOF_SCHEMA" "$child_pid" "$artifact_hash" "$nonce" >"$temp"
   then
     rm -f "$temp"
     return 1
@@ -113,13 +129,15 @@ write_health_proof() {
 
 verify_health_proof() {
   local expected_pid="$1"
-  local schema proof_pid proof_hash
+  local expected_nonce="$2"
+  local schema proof_pid proof_hash proof_nonce
 
   [ -f "$PROOF_FILE" ] || return 1
   {
     IFS= read -r schema || return 1
     IFS= read -r proof_pid || return 1
     IFS= read -r proof_hash || return 1
+    IFS= read -r proof_nonce || return 1
     if IFS= read -r _; then
       return 1
     fi
@@ -128,21 +146,25 @@ verify_health_proof() {
   [ "$schema" = "$HEALTH_PROOF_SCHEMA" ] || return 1
   [ "$proof_pid" = "$expected_pid" ] || return 1
   masc_runtime_artifact_valid_hash "$proof_hash" || return 1
+  [ "$proof_nonce" = "$expected_nonce" ] || return 1
   masc_runtime_artifact_descriptor_read "$CANDIDATE_FILE" || return 1
   [ "$proof_hash" = "$MASC_ARTIFACT_SHA256" ]
 }
 
 monitor_runtime_candidate() {
   local child_pid="$1"
+  local nonce="$2"
   local listener_pid=""
   local actual_hash=""
+  local probe_host=""
 
   while kill -0 "$child_pid" 2>/dev/null; do
     if masc_runtime_artifact_descriptor_read "$CANDIDATE_FILE"; then
       listener_pid="$(lsof -ti "tcp:$MASC_ARTIFACT_PORT" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+      probe_host="$(masc_runtime_artifact_probe_host "$MASC_ARTIFACT_BIND_HOST")" || return
       if [ "$listener_pid" = "$child_pid" ] \
         && curl -fsS --max-time 1 \
-          "http://127.0.0.1:$MASC_ARTIFACT_PORT/health" >/dev/null 2>&1
+          --url "http://$probe_host:$MASC_ARTIFACT_PORT/health" >/dev/null 2>&1
       then
         actual_hash="$(masc_runtime_artifact_hash "$MASC_ARTIFACT_PATH")" || return
         if [ "$actual_hash" != "$MASC_ARTIFACT_SHA256" ]; then
@@ -150,7 +172,7 @@ monitor_runtime_candidate() {
           return
         fi
         if masc_runtime_artifact_promote "$CANDIDATE_FILE" "$LKG_FILE" "$REPO_ROOT"; then
-          if write_health_proof "$child_pid" "$actual_hash"; then
+          if write_health_proof "$child_pid" "$actual_hash" "$nonce"; then
             log "health-verified runtime artifact promoted sha256=$actual_hash pid=$child_pid"
           else
             log "ERROR: healthy runtime artifact promotion lacked an exact health proof"
@@ -202,10 +224,22 @@ run_active() {
   active_kind="$kind"
   "$@" &
   active_pid=$!
+  active_nonce=""
   stop_forwarded_pid=""
   monitor_pid=""
   if [ "$kind" = "masc" ]; then
-    monitor_runtime_candidate "$active_pid" &
+    if ! active_nonce="$(generate_health_nonce)"; then
+      log "ERROR: unable to generate supervisor-owned health proof nonce"
+      kill -TERM "$active_pid" 2>/dev/null || true
+      wait "$active_pid" 2>/dev/null || true
+      completed_pid="$active_pid"
+      completed_nonce=""
+      active_pid=""
+      active_kind=""
+      stop_forwarded_pid=""
+      return 78
+    fi
+    monitor_runtime_candidate "$active_pid" "$active_nonce" &
     monitor_pid=$!
   fi
   forward_stop_to_active
@@ -227,8 +261,10 @@ run_active() {
   fi
 
   completed_pid="$active_pid"
+  completed_nonce="$active_nonce"
   active_pid=""
   active_kind=""
+  active_nonce=""
   stop_forwarded_pid=""
   return "$status"
 }
@@ -286,7 +322,7 @@ while true; do
     log "terminal startup state: no runtime candidate was published; refusing restart amplification"
     exit "$exit_code"
   fi
-  if ! verify_health_proof "$completed_pid"; then
+  if ! verify_health_proof "$completed_pid" "$completed_nonce"; then
     log "terminal startup state: runtime candidate lacks an exact PID-bound health proof; refusing restart amplification"
     exit "$exit_code"
   fi

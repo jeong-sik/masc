@@ -242,7 +242,8 @@ recover_verified_lkg_after_build_failure() {
 publish_runtime_candidate() {
     local candidate_file="${MASC_RUNTIME_CANDIDATE_FILE:-}"
     local selected_exe="$1"
-    local selected_port="$2"
+    local selected_host="$2"
+    local selected_port="$3"
     local sha256
 
     [ -n "$candidate_file" ] || return 0
@@ -251,7 +252,7 @@ publish_runtime_candidate() {
         return 1
     }
     if ! masc_runtime_artifact_descriptor_write "$candidate_file" http \
-        "$selected_exe" "$sha256" "$selected_port"
+        "$selected_exe" "$sha256" "$selected_host" "$selected_port"
     then
         echo "Error: failed to publish runtime candidate descriptor: $candidate_file" >&2
         return 1
@@ -1107,8 +1108,7 @@ launch_from_base_path() {
     if [ -n "${MASC_LOG_FILE:-}" ]; then
         mkdir -p "$(dirname "$MASC_LOG_FILE")"
         echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
-        set -o pipefail
-        exec "$@" 2>&1 | tee -a "$MASC_LOG_FILE"
+        exec "$@" > >(tee -a "$MASC_LOG_FILE") 2>&1
     else
         exec "$@"
     fi
@@ -1134,7 +1134,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
         echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
-    if ! publish_runtime_candidate "$SELECTED_EXE" "$PORT"; then
+    if ! publish_runtime_candidate "$SELECTED_EXE" "$HOST" "$PORT"; then
         exit 78
     fi
     launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"

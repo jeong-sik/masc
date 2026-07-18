@@ -7,7 +7,7 @@
     - 8 phantom witness types ([idle], [perceiving], [intending],
       [planning], [executing], [verifying], [reflecting], [adapting])
       that exist purely as compile-time tags carried by the [_ any]
-      GADT and the [Autonomous_state] context indices.
+      GADT.
     - {!tag} regular variant for runtime indexing + ppx_tla derive parity.
     - {!any} 1-parameter GADT existential wrapping each phantom type.
     - {!any_to_tag} / {!any_to_string} projections.
@@ -70,8 +70,7 @@ type tag =
 (** {1 Existential phase wrapper}
 
     [_ any] binds a runtime phase value to a compile-time-checked
-    phantom witness. [Autonomous_state.t] (Tier B4) carries values of
-    type ['phase any] to ensure that phase-indexed contexts cannot be
+    phantom witness, ensuring that phase-indexed contexts cannot be
     mismatched at runtime. *)
 type _ any =
   | Any_idle : idle any

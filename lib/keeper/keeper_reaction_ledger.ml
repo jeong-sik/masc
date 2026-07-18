@@ -443,13 +443,18 @@ let list_field name json =
 ;;
 
 type row_quarantine_reason =
+  | Malformed_json_row
   | Missing_schema
   | Retired_schema
   | Missing_event_id
+  | Empty_event_id
   | Missing_keeper_name
+  | Empty_keeper_name
   | Keeper_name_mismatch
   | Missing_recorded_at
+  | Non_finite_recorded_at
   | Missing_stimulus_id
+  | Empty_stimulus_id
   | Missing_record_kind
   | Unknown_record_kind
   | Missing_stimulus
@@ -470,16 +475,23 @@ type row_quarantine_reason =
   | Transition_settlement_mismatch
   | Missing_cursor
   | Missing_cursor_ts
+  | Non_finite_cursor_ts
+  | Non_finite_board_updated_at
   | Invalid_cursor_reaction
 
 let row_quarantine_reason_to_string = function
+  | Malformed_json_row -> "malformed_json"
   | Missing_schema -> "missing_schema"
   | Retired_schema -> "retired_schema"
   | Missing_event_id -> "missing_event_id"
+  | Empty_event_id -> "empty_event_id"
   | Missing_keeper_name -> "missing_keeper_name"
+  | Empty_keeper_name -> "empty_keeper_name"
   | Keeper_name_mismatch -> "keeper_name_mismatch"
   | Missing_recorded_at -> "missing_recorded_at"
+  | Non_finite_recorded_at -> "non_finite_recorded_at"
   | Missing_stimulus_id -> "missing_stimulus_id"
+  | Empty_stimulus_id -> "empty_stimulus_id"
   | Missing_record_kind -> "missing_record_kind"
   | Unknown_record_kind -> "unknown_record_kind"
   | Missing_stimulus -> "missing_stimulus"
@@ -500,6 +512,8 @@ let row_quarantine_reason_to_string = function
   | Transition_settlement_mismatch -> "transition_settlement_mismatch"
   | Missing_cursor -> "missing_cursor"
   | Missing_cursor_ts -> "missing_cursor_ts"
+  | Non_finite_cursor_ts -> "non_finite_cursor_ts"
+  | Non_finite_board_updated_at -> "non_finite_board_updated_at"
   | Invalid_cursor_reaction -> "invalid_cursor_reaction"
 ;;
 
@@ -531,10 +545,18 @@ let require_string reason field json =
   | None -> Error reason
 ;;
 
-let require_float reason field json =
-  match float_field field json with
+let require_non_empty_string ~missing ~empty field json =
+  match string_field field json with
+  | None -> Error missing
+  | Some "" -> Error empty
   | Some value -> Ok value
-  | None -> Error reason
+;;
+
+let require_finite_float ~missing ~non_finite field json =
+  match float_field field json with
+  | None -> Error missing
+  | Some value when Float.is_finite value -> Ok value
+  | Some _ -> Error non_finite
 ;;
 
 let reaction_kind_matches_settlement reaction_kind settlement =
@@ -623,7 +645,13 @@ let decode_cursor_ack_row metadata row =
     | Some value -> Ok value
     | None -> Error Missing_cursor
   in
-  let* cursor_ts = require_float Missing_cursor_ts "cursor_ts" cursor in
+  let* cursor_ts =
+    require_finite_float
+      ~missing:Missing_cursor_ts
+      ~non_finite:Non_finite_cursor_ts
+      "cursor_ts"
+      cursor
+  in
   let post_id = string_field "post_id" cursor in
   let* reaction =
     match assoc_field "reaction" row with
@@ -653,15 +681,39 @@ let decode_current_row ~keeper_name row =
   let ( let* ) = Result.bind in
   let* row_schema = require_string Missing_schema "schema" row in
   let* () = if String.equal row_schema schema then Ok () else Error Retired_schema in
-  let* event_id = require_string Missing_event_id "event_id" row in
-  let* row_keeper_name = require_string Missing_keeper_name "keeper_name" row in
+  let* event_id =
+    require_non_empty_string
+      ~missing:Missing_event_id
+      ~empty:Empty_event_id
+      "event_id"
+      row
+  in
+  let* row_keeper_name =
+    require_non_empty_string
+      ~missing:Missing_keeper_name
+      ~empty:Empty_keeper_name
+      "keeper_name"
+      row
+  in
   let* () =
     if String.equal row_keeper_name keeper_name
     then Ok ()
     else Error Keeper_name_mismatch
   in
-  let* recorded_at = require_float Missing_recorded_at "recorded_at_unix" row in
-  let* stimulus_id = require_string Missing_stimulus_id "stimulus_id" row in
+  let* recorded_at =
+    require_finite_float
+      ~missing:Missing_recorded_at
+      ~non_finite:Non_finite_recorded_at
+      "recorded_at_unix"
+      row
+  in
+  let* stimulus_id =
+    require_non_empty_string
+      ~missing:Missing_stimulus_id
+      ~empty:Empty_stimulus_id
+      "stimulus_id"
+      row
+  in
   let metadata = { event_id; stimulus_id; recorded_at; raw = row } in
   let* record_kind = require_string Missing_record_kind "record_kind" row in
   match record_kind with
@@ -682,6 +734,16 @@ let decode_current_row ~keeper_name row =
       if String.equal source "keeper_event_queue"
       then Ok ()
       else Error Unknown_stimulus_source
+    in
+    let* () =
+      match stimulus_kind, float_field "board_updated_at_unix" stimulus with
+      | Board_signal, Some value when not (Float.is_finite value) ->
+        Error Non_finite_board_updated_at
+      | Board_signal, (Some _ | None)
+      | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
+        | Connector_attention | Hitl_resolved | Failure_judgment
+        | Manual_compaction | Goal_assigned ),
+        _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
     if String.equal event_id expected_event_id
@@ -1431,8 +1493,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
             match string_field "reason" item with
             | Some reason ->
               let count = int_field "count" item in
-              let prior = Option.value ~default:0 (Hashtbl.find_opt tbl reason) in
-              Hashtbl.replace tbl reason (prior + count)
+              (match Hashtbl.find_opt tbl reason with
+               | Some prior -> Hashtbl.replace tbl reason (prior + count)
+               | None -> Hashtbl.add tbl reason count)
             | None -> ())
           (list_field "quarantine_reason_counts" summary))
       summaries;

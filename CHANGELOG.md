@@ -6,6 +6,7 @@
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
 
 ### Removed
+- Removed the never-read `Exec_cache` plumbing from `masc.masc_exec`, the `masc.worker_runtime_config` library, and the three `MASC_WORKER_RUNTIME_*` env knobs (backend/docker-image/host-MCP-URL) whose only reader was that library — the knobs no longer appear in the operator snapshot or the tunables catalog. No replacement: nothing dispatched on them.
 - Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
 - Removed the per-turn prefix/string heuristic that rewrote unknown-looking
   prompt tokens. Keeper prompt prose now describes behaviour, while the active

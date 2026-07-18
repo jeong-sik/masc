@@ -2477,14 +2477,7 @@ let schedule_dispatch_receipt_dashboard_json
 let schedule_queue_read_error_dashboard_json
   (error : Keeper_event_queue_persistence.snapshot_read_error)
   =
-  `Assoc
-    [ "kind", `String (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind)
-    ; ( "path"
-      , match error.path with
-        | None -> `Null
-        | Some path -> `String path )
-    ; "message", `String error.message
-    ]
+  Keeper_event_queue_persistence.snapshot_read_error_to_yojson error
 ;;
 
 type schedule_queue_snapshot_index =
@@ -2549,7 +2542,9 @@ let schedule_queue_evidence_lookup observation executions =
             | Keeper_event_queue.Schedule_due _ ->
               let identity = Keeper_event_queue.stimulus_identity_id stimulus in
               let existing =
-                Option.value (Hashtbl.find_opt matches identity) ~default:[]
+                match Hashtbl.find_opt matches identity with
+                | None -> []
+                | Some existing -> existing
               in
               Hashtbl.replace matches identity ((bucket, stimulus) :: existing)
             | _ -> ())
@@ -2727,7 +2722,11 @@ let schedule_reaction_evidence_lookup config executions =
       match keeper_reaction_identity_of_execution execution with
       | None -> ()
       | Some (keeper_name, stimulus_id) ->
-        let current = Option.value (Hashtbl.find_opt grouped keeper_name) ~default:[] in
+        let current =
+          match Hashtbl.find_opt grouped keeper_name with
+          | None -> []
+          | Some current -> current
+        in
         Hashtbl.replace grouped keeper_name (stimulus_id :: current))
     executions;
   let evidence = Hashtbl.create (List.length executions) in

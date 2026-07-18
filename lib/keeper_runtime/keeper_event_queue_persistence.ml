@@ -50,9 +50,16 @@ let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
 let lease_sequence (lease : lease) = lease.sequence
 
-let snapshot_filename = "event-queue.json"
-let settlement_wal_filename = "event-queue-settlements.jsonl"
-let unsupported_inflight_filename = "event-queue-inflight.json"
+let snapshot_filename = "event-queue-v4.json"
+let settlement_wal_filename = "event-queue-v4-settlements.jsonl"
+
+(* These names identify the retired epoch only. They are never passed to a
+   queue decoder, WAL replay, writer, rename, or deletion path. Observation
+   reports their raw presence so an operator can decide what to do with the
+   quarantined bytes without turning them back into queue authority. *)
+let retired_snapshot_filename = "event-queue.json"
+let retired_settlement_wal_filename = "event-queue-settlements.jsonl"
+let retired_inflight_filename = "event-queue-inflight.json"
 let reaction_coordination_lock_filename = "event-queue-reaction-coordination.lock"
 
 let before_reaction_coordination_lock_hook = Atomic.make (fun () -> ())
@@ -99,8 +106,12 @@ let compact_settlement_wal_unlocked owner =
          detail)
 ;;
 
-let unsupported_inflight_path_of_owner owner =
-  Filename.concat (keeper_runtime_dir_of_owner owner) unsupported_inflight_filename
+let retired_epoch_paths_of_owner owner =
+  let runtime_dir = keeper_runtime_dir_of_owner owner in
+  [ Filename.concat runtime_dir retired_snapshot_filename
+  ; Filename.concat runtime_dir retired_settlement_wal_filename
+  ; Filename.concat runtime_dir retired_inflight_filename
+  ]
 ;;
 
 let save_json_atomic path json =
@@ -144,6 +155,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Retired_epoch_residue
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -155,6 +167,19 @@ let snapshot_read_error_kind_to_string = function
   | Invalid_path -> "invalid_path"
   | Read_failed -> "read_failed"
   | Parse_failed -> "parse_failed"
+  | Retired_epoch_residue -> "retired_epoch_residue"
+;;
+
+let snapshot_read_error_to_yojson error =
+  `Assoc
+    [ "kind", `String (snapshot_read_error_kind_to_string error.kind)
+    ; ( "path"
+      , match error.path with
+        | None -> `Null
+        | Some path -> `String path )
+    ; "message", `String error.message
+    ; "operator_action_required", `Bool true
+    ]
 ;;
 
 let read_json_if_present path =
@@ -199,22 +224,6 @@ let read_primary_unlocked owner =
         | Error message -> Error (Printf.sprintf "%s: %s" path message))
      | Ok schema ->
        Error (Printf.sprintf "%s: unsupported snapshot schema %s" path schema))
-;;
-
-let reject_unsupported_inflight owner =
-  let path = unsupported_inflight_path_of_owner owner in
-  try
-    if Sys.file_exists path
-    then
-      Error
-        (Printf.sprintf
-           "unsupported event queue sidecar remains at %s; remove it before starting the keeper"
-           path)
-    else Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error (Printf.sprintf "failed to inspect unsupported sidecar %s: %s" path (Printexc.to_string exn))
 ;;
 
 let bump_revision state =
@@ -313,13 +322,10 @@ let replay_settlement_wal_unlocked owner state =
 ;;
 
 let load_state_unlocked owner =
-  match reject_unsupported_inflight owner with
+  match read_primary_unlocked owner with
   | Error _ as error -> error
-  | Ok () ->
-    (match read_primary_unlocked owner with
-     | Error _ as error -> error
-     | Ok (Primary_current state) -> replay_settlement_wal_unlocked owner state
-     | Ok Primary_missing -> replay_settlement_wal_unlocked owner State.empty)
+  | Ok (Primary_current state) -> replay_settlement_wal_unlocked owner state
+  | Ok Primary_missing -> replay_settlement_wal_unlocked owner State.empty
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -446,6 +452,7 @@ type snapshot_source_generation =
 type snapshot_observation =
   { pending : Keeper_event_queue.t
   ; inflight : Keeper_event_queue.t
+  ; transition_outbox_count : int
   ; source_generation : snapshot_source_generation option
   ; read_errors : snapshot_read_error list
   }
@@ -496,22 +503,25 @@ let read_primary_for_observation_unlocked owner =
       (snapshot_read_error Read_failed ~path (Printexc.to_string exn))
 ;;
 
-let reject_unsupported_inflight_for_observation owner =
-  let path = unsupported_inflight_path_of_owner owner in
+let retired_epoch_residue_for_path path =
   try
-    if Sys.file_exists path
-    then
-      Error
-        (snapshot_read_error
-           Parse_failed
-           ~path
-           "unsupported event queue sidecar is present")
-    else Ok ()
+    let _retired_path_stats = Unix.lstat path in
+    Some
+      (snapshot_read_error
+         Retired_epoch_residue
+         ~path
+         "retired non-authoritative event queue epoch residue requires operator disposition; it was not decoded or used")
   with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> None
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Error
+    Some
       (snapshot_read_error Read_failed ~path (Printexc.to_string exn))
+;;
+
+let retired_epoch_residue_errors owner =
+  retired_epoch_paths_of_owner owner
+  |> List.filter_map retired_epoch_residue_for_path
 ;;
 
 let replay_settlement_wal_for_observation_unlocked owner state =
@@ -537,6 +547,7 @@ let replay_settlement_wal_for_observation_unlocked owner state =
 let empty_snapshot_observation read_errors =
   { pending = Keeper_event_queue.empty
   ; inflight = Keeper_event_queue.empty
+  ; transition_outbox_count = 0
   ; source_generation = None
   ; read_errors
   }
@@ -546,33 +557,31 @@ let observe_snapshot ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error error ->
     empty_snapshot_observation
-      [ snapshot_read_error Invalid_path (owner_error_to_string error) ]
+      [ snapshot_read_error Invalid_path error ]
   | Ok owner ->
+    let retired_epoch_read_errors = retired_epoch_residue_errors owner in
     (match
        try
          Owner_lock.with_lock owner (fun () ->
-           match reject_unsupported_inflight_for_observation owner with
+           match read_primary_for_observation_unlocked owner with
            | Error error -> Error error
-           | Ok () ->
-             (match read_primary_for_observation_unlocked owner with
+           | Ok (snapshot_present, snapshot_state) ->
+             let snapshot_revision = State.revision snapshot_state in
+             (match
+                replay_settlement_wal_for_observation_unlocked
+                  owner
+                  snapshot_state
+              with
               | Error error -> Error error
-              | Ok (snapshot_present, snapshot_state) ->
-                let snapshot_revision = State.revision snapshot_state in
-                (match
-                   replay_settlement_wal_for_observation_unlocked
-                     owner
-                     snapshot_state
-                 with
-                 | Error error -> Error error
-                 | Ok (observed_state, settlement_wal_end_offset, settlement_wal_row_count) ->
-                   Ok
-                     ( observed_state
-                     , { snapshot_present
-                       ; snapshot_revision
-                       ; observed_revision = State.revision observed_state
-                       ; settlement_wal_end_offset
-                       ; settlement_wal_row_count
-                       } ))))
+              | Ok (observed_state, settlement_wal_end_offset, settlement_wal_row_count) ->
+                Ok
+                  ( observed_state
+                  , { snapshot_present
+                    ; snapshot_revision
+                    ; observed_revision = State.revision observed_state
+                    ; settlement_wal_end_offset
+                    ; settlement_wal_row_count
+                    } )))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
@@ -582,12 +591,14 @@ let observe_snapshot ~base_path ~keeper_name =
               ~path:(snapshot_path_of_owner owner)
               (Printexc.to_string exn))
      with
-     | Error error -> empty_snapshot_observation [ error ]
+     | Error error ->
+       empty_snapshot_observation (error :: retired_epoch_read_errors)
      | Ok (state, source_generation) ->
        { pending = State.pending state
        ; inflight = inflight_queue state
+       ; transition_outbox_count = List.length (State.transition_outbox state)
        ; source_generation = Some source_generation
-       ; read_errors = []
+       ; read_errors = retired_epoch_read_errors
        })
 ;;
 
@@ -595,6 +606,36 @@ type snapshot_discovery =
   { keeper_names : string list
   ; read_error : string option
   }
+
+let queue_epoch_filenames =
+  [ snapshot_filename
+  ; settlement_wal_filename
+  ; retired_snapshot_filename
+  ; retired_settlement_wal_filename
+  ; retired_inflight_filename
+  ]
+;;
+
+let inspect_queue_epoch_paths keeper_dir =
+  List.fold_left
+    (fun (present, errors) filename ->
+       let path = Filename.concat keeper_dir filename in
+       try
+         let _queue_epoch_path_stats = Unix.lstat path in
+         true, errors
+       with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> present, errors
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         ( present
+         , Printf.sprintf
+             "failed to inspect durable event queue epoch path %s: %s"
+             path
+             (Printexc.to_string exn)
+           :: errors ))
+    (false, [])
+    queue_epoch_filenames
+;;
 
 let discover_keeper_names_with_snapshots ~base_path =
   match Owner_lock.canonical_base_path base_path with
@@ -616,21 +657,26 @@ let discover_keeper_names_with_snapshots ~base_path =
            |> Array.fold_left
                 (fun (names, errors) name ->
                    let keeper_dir = Filename.concat keepers_dir name in
-                   let primary = Filename.concat keeper_dir snapshot_filename in
                    if
                      not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
-                     || not (Sys.file_exists primary)
                    then names, errors
                    else
-                     match Keeper_id.Keeper_name.of_string name with
-                     | Ok keeper_name ->
-                       Keeper_id.Keeper_name.to_string keeper_name :: names, errors
-                     | Error reason ->
-                       names,
-                       Printf.sprintf
-                         "invalid keeper name with durable event queue snapshot: %s"
-                         reason
-                       :: errors)
+                     let epoch_present, inspection_errors =
+                       inspect_queue_epoch_paths keeper_dir
+                     in
+                     let errors = List.rev_append inspection_errors errors in
+                     if not epoch_present
+                     then names, errors
+                     else
+                       match Keeper_id.Keeper_name.of_string name with
+                       | Ok keeper_name ->
+                         Keeper_id.Keeper_name.to_string keeper_name :: names, errors
+                       | Error reason ->
+                         names,
+                         Printf.sprintf
+                           "invalid keeper name with durable event queue epoch evidence: %s"
+                           reason
+                         :: errors)
                 ([], [])
          in
          { keeper_names = List.sort_uniq String.compare names
@@ -1115,39 +1161,27 @@ type keeper_summary =
   ; read_errors : string list
   }
 
+let snapshot_read_error_to_string error =
+  let kind = snapshot_read_error_kind_to_string error.kind in
+  match error.path with
+  | None -> Printf.sprintf "%s: %s" kind error.message
+  | Some path -> Printf.sprintf "%s path=%s: %s" kind path error.message
+;;
+
 let keeper_summary ~base_path keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state ->
-    let pending = State.pending state in
-    let inflight = inflight_queue state in
-    let pending_oldest = queue_oldest_arrived_at pending in
-    let inflight_oldest = queue_oldest_arrived_at inflight in
-    let outbox = State.transition_outbox state in
-    { keeper_name
-    ; pending_count = Keeper_event_queue.length pending
-    ; inflight_count = Keeper_event_queue.length inflight
-    ; pending_oldest
-    ; inflight_oldest
-    ; oldest = min_float_opt pending_oldest inflight_oldest
-    ; outbox_count = List.length outbox
-    ; counts_complete = true
-    ; read_errors = []
-    }
-  | Error message ->
-    let read_errors =
-      diagnose_snapshot_read_error ~base_path ~keeper_name message
-      |> List.map (fun error -> error.message)
-    in
-    { keeper_name
-    ; pending_count = 0
-    ; inflight_count = 0
-    ; pending_oldest = None
-    ; inflight_oldest = None
-    ; oldest = None
-    ; outbox_count = 0
-    ; counts_complete = false
-    ; read_errors
-    }
+  let snapshot = observe_snapshot ~base_path ~keeper_name in
+  let pending_oldest = queue_oldest_arrived_at snapshot.pending in
+  let inflight_oldest = queue_oldest_arrived_at snapshot.inflight in
+  { keeper_name
+  ; pending_count = Keeper_event_queue.length snapshot.pending
+  ; inflight_count = Keeper_event_queue.length snapshot.inflight
+  ; pending_oldest
+  ; inflight_oldest
+  ; oldest = min_float_opt pending_oldest inflight_oldest
+  ; outbox_count = snapshot.transition_outbox_count
+  ; counts_complete = Option.is_some snapshot.source_generation
+  ; read_errors = List.map snapshot_read_error_to_string snapshot.read_errors
+  }
 ;;
 
 let keeper_summary_json ~now (summary : keeper_summary) =

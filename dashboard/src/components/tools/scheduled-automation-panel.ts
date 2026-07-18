@@ -434,7 +434,9 @@ function queueEvidenceRows(
 ): Array<{ label: string; value: string }> {
   if (!evidence) return []
   const readErrors = (evidence.read_errors ?? [])
-    .map(error => [error.kind, error.path, error.message].filter(Boolean).join(': '))
+    .map(error => [error.kind, error.path, error.message, error.operator_action_required ? 'operator action required' : '']
+      .filter(Boolean)
+      .join(': '))
     .filter(value => value.trim() !== '')
     .join(' | ')
   const rows: Array<{

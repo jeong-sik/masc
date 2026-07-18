@@ -1,7 +1,7 @@
 (** Per-keeper event-queue access.
 
     SSOT for enqueueing / draining the per-keeper stimulus queue.
-    The MASC-owned v3 envelope is authoritative.  Mutations commit that one
+    The MASC-owned v4 state envelope is authoritative. Mutations commit that one
     durable state first, then publish its pending projection into the
     entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
     registry Atomic is touched. *)

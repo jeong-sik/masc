@@ -217,6 +217,7 @@ export interface DashboardEventQueueReadError {
   kind: string
   path: string | null
   message: string
+  operator_action_required: true
 }
 
 interface DashboardScheduledAutomationKeeperQueueEvidenceBase {

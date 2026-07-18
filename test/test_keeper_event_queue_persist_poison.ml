@@ -24,7 +24,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
+    "event-queue-v4.json"
 
 let () =
   Eio_main.run @@ fun env ->

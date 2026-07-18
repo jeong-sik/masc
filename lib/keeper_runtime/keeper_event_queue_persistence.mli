@@ -1,9 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] keeps the v3 envelope containing pending stimuli, active
-    typed leases, the monotonic lease sequence and the transition outbox.
-    Older schemas are unsupported. [event-queue-inflight.json] is rejected
-    explicitly rather than migrated or treated as a second authority. *)
+    [event-queue-v4.json] and [event-queue-v4-settlements.jsonl] are the sole
+    current authority. The retired [event-queue.json],
+    [event-queue-settlements.jsonl], and [event-queue-inflight.json] epoch is
+    never decoded, migrated, renamed, deleted, or used as fallback authority.
+    Its raw presence is reported as operator-action residue while an absent v4
+    authority is a valid empty lane. *)
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
@@ -94,6 +96,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Retired_epoch_residue
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -110,7 +113,7 @@ type snapshot_source_generation =
   }
 (** Immutable evidence identifying the exact durable queue generation that an
     observation projected. [snapshot_revision] is the revision encoded in the
-    primary v3 snapshot (or the empty-state revision when no snapshot exists).
+    primary v4 snapshot (or the empty-state revision when no snapshot exists).
     [observed_revision] includes a committed settlement WAL replay performed
     only in memory. The WAL byte boundary and decoded-row count make that
     distinction explicit without creating another authority. *)
@@ -118,12 +121,15 @@ type snapshot_source_generation =
 type snapshot_observation =
   { pending : Keeper_event_queue.t
   ; inflight : Keeper_event_queue.t
+  ; transition_outbox_count : int
   ; source_generation : snapshot_source_generation option
   ; read_errors : snapshot_read_error list
   }
 (** Read-only projection of one Keeper lane. [source_generation = None] iff
-    durable state could not be observed; [read_errors] then carries the typed
-    failure instead of silently substituting an authoritative empty queue. *)
+    the current v4 authority could not be observed. [read_errors] may coexist
+    with [Some source_generation] when retired-epoch residue is present; that
+    residue is operator evidence and never invalidates or augments current
+    queue contents. *)
 
 val snapshot_source_generation_to_yojson :
   snapshot_source_generation -> Yojson.Safe.t
@@ -136,18 +142,22 @@ type snapshot_discovery =
   }
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
+val snapshot_read_error_to_yojson : snapshot_read_error -> Yojson.Safe.t
+(** Lossless dashboard encoding. Every error carries its typed kind, exact
+    path when one exists, message, and [operator_action_required = true]. *)
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
 val observe_snapshot :
   base_path:string -> keeper_name:string -> snapshot_observation
-(** Read the primary v3 snapshot and complete committed settlement WAL under
+(** Read the primary v4 snapshot and complete committed settlement WAL under
     the lane owner lock, replaying the WAL through the typed state machine only
     in memory. This function never checkpoints, rewrites, creates, or compacts
     queue files, so dashboard observation cannot mutate the state it reports. *)
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection. A malformed v3
-    envelope or v3-plus-legacy residue is an [Error], never an empty queue.
+(** Strict state read used by tests and operator projection. A malformed v4
+    envelope is an [Error], never an empty queue. Retired-epoch residue is not
+    consulted by this authority path and cannot block a current lane.
     Committed WAL rows are replayed idempotently, checkpointed, and then
     compacted to the exact empty suffix before the state is returned. *)
 

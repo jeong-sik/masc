@@ -872,8 +872,8 @@ let test_queue_observation_replays_wal_without_mutating_files () =
       (Common.keepers_runtime_dir_of_base ~base_path:canonical_base_path)
       keeper_name
   in
-  let snapshot_path = Filename.concat runtime_dir "event-queue.json" in
-  let wal_path = Filename.concat runtime_dir "event-queue-settlements.jsonl" in
+  let snapshot_path = Filename.concat runtime_dir "event-queue-v4.json" in
+  let wal_path = Filename.concat runtime_dir "event-queue-v4-settlements.jsonl" in
   let wal_bytes =
     `Assoc
       [ "schema", `String "masc.keeper_event_queue.settlement.v1"

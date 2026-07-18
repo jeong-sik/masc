@@ -263,14 +263,7 @@ let read_error_row ?keeper_name ~waiting_on ~next_action detail =
 ;;
 
 let queue_read_error_detail (error : Keeper_event_queue_persistence.snapshot_read_error) =
-  `Assoc
-    [ ( "kind"
-      , `String
-          (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string
-             error.kind) )
-    ; "path", Json_util.string_opt_to_json error.path
-    ; "message", `String error.message
-    ]
+  Keeper_event_queue_persistence.snapshot_read_error_to_yojson error
 ;;
 
 let queue_observation_json keeper_name

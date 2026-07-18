@@ -71,7 +71,7 @@ type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let schema = "keeper.event_queue.state.v3"
+let schema = "keeper.event_queue.state.v4"
 
 let empty =
   { revision = 0L

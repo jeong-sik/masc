@@ -425,7 +425,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v4.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in

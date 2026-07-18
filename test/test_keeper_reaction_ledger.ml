@@ -118,7 +118,7 @@ let expect_queue context = function
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
+    "event-queue-v4.json"
 ;;
 
 let check_cursor

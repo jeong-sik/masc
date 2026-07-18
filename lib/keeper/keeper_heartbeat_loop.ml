@@ -811,7 +811,7 @@ let run_keepalive_unified_turn
       in
       (* Queue ownership follows the typed cycle outcome.  Pending removal,
          lease removal, an optional judgment successor, and the transition
-         outbox receipt commit in one event-queue.json rename. *)
+         outbox receipt commit in one event-queue-v4.json rename. *)
       (match !claimed_lease with
        | None ->
          (match !cycle_outcome_ref with

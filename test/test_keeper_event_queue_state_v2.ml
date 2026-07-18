@@ -733,19 +733,17 @@ let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
 ;;
 
-let write_queue path queue =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Queue.queue_to_yojson queue
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
-  |> require_ok ("write fixture " ^ path)
-;;
-
 let write_state path state =
   Fs_compat.mkdir_p (Filename.dirname path);
   State.to_yojson state
   |> Yojson.Safe.pretty_to_string
   |> Fs_compat.save_file_atomic path
+  |> require_ok ("write fixture " ^ path)
+;;
+
+let write_bytes path bytes =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file_atomic path bytes
   |> require_ok ("write fixture " ^ path)
 ;;
 
@@ -762,7 +760,7 @@ let test_settlement_wal_commit_replay_and_owner_fence () =
       |> require_some "WAL lease"
     in
     let owner_dir = keeper_dir ~base_path ~keeper_name in
-    let wal_path = Filename.concat owner_dir "event-queue-settlements.jsonl" in
+    let wal_path = Filename.concat owner_dir "event-queue-v4-settlements.jsonl" in
     Fs_compat.save_file_atomic wal_path "" |> require_ok "create WAL";
     Unix.chmod owner_dir 0o500;
     let outcome =
@@ -810,7 +808,7 @@ let test_settlement_wal_commit_replay_and_owner_fence () =
     let peer_wal =
       Filename.concat
         (keeper_dir ~base_path ~keeper_name:peer)
-        "event-queue-settlements.jsonl"
+        "event-queue-v4-settlements.jsonl"
     in
     Fs_compat.save_file_atomic peer_wal committed_wal
     |> require_ok "copy stale owner WAL";
@@ -954,32 +952,189 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
     | _ -> Alcotest.fail "retained retry was not left pending after peer work claimed")
 ;;
 
-let test_unsupported_snapshots_fail_closed () =
-  with_temp_dir "keeper-event-queue-v3-hardcut" (fun base_path ->
-    let keeper_name = "hardcut_keeper" in
+let test_retired_epoch_is_quarantined_while_v4_continues () =
+  with_temp_dir "keeper-event-queue-v4-epoch" (fun base_path ->
+    let keeper_name = "epoch_cutover_keeper" in
     let dir = keeper_dir ~base_path ~keeper_name in
-    let primary = Filename.concat dir "event-queue.json" in
-    let unsupported = Filename.concat dir "event-queue-inflight.json" in
-    write_state
-      primary
-      (State.with_pending (queue [ stimulus "pending" 1.0 ]) State.empty);
-    write_queue unsupported (queue [ stimulus "obsolete" 2.0 ]);
-    (match Persistence.load_state_result ~base_path ~keeper_name with
-     | Error message ->
-       Alcotest.(check bool)
-         "unsupported sidecar is named"
-         true
-         (String.starts_with ~prefix:"unsupported event queue sidecar remains" message)
-     | Ok _ -> Alcotest.fail "current state silently accepted unsupported sidecar");
+    let retired_snapshot = Filename.concat dir "event-queue.json" in
+    let retired_wal = Filename.concat dir "event-queue-settlements.jsonl" in
+    let retired_inflight = Filename.concat dir "event-queue-inflight.json" in
+    let current_snapshot = Filename.concat dir "event-queue-v4.json" in
+    let current_wal = Filename.concat dir "event-queue-v4-settlements.jsonl" in
+    let retired_stimulus = stimulus "retired-work" 1.0 in
+    let retired_queue =
+      `Assoc
+        [ "schema", `String "keeper.event_queue.v2"
+        ; "length", `Int 1
+        ; "items", `List [ Queue.stimulus_to_yojson retired_stimulus ]
+        ]
+    in
+    let retired_snapshot_bytes =
+      `Assoc
+        [ "schema", `String "keeper.event_queue.state.v3"
+        ; "revision", `Int 7
+        ; "next_lease_sequence", `Int 8
+        ; "pending", retired_queue
+        ; "leases", `List []
+        ; "last_settlement", `Null
+        ; "transition_outbox", `List []
+        ]
+      |> Yojson.Safe.pretty_to_string
+    in
+    let retired_wal_bytes = "retired WAL bytes are quarantine evidence\n" in
+    let retired_inflight_bytes = Yojson.Safe.pretty_to_string retired_queue in
+    write_bytes retired_snapshot retired_snapshot_bytes;
+    write_bytes retired_wal retired_wal_bytes;
+    write_bytes retired_inflight retired_inflight_bytes;
+
+    let discovery =
+      Persistence.discover_keeper_names_with_snapshots ~base_path
+    in
+    Alcotest.(check (list string))
+      "retired-only Keeper remains discoverable"
+      [ keeper_name ]
+      discovery.keeper_names;
+    Alcotest.(check (option string))
+      "retired evidence discovery is readable"
+      None
+      discovery.read_error;
+
+    let empty_current =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load absent v4 authority"
+    in
+    Alcotest.(check int)
+      "retired work is never loaded"
+      0
+      (Queue.length (State.pending empty_current));
     Alcotest.(check bool)
-      "hard cut does not delete unsupported input"
+      "read-only empty load does not synthesize v4 authority"
+      false
+      (Sys.file_exists current_snapshot);
+    let before = Persistence.observe_snapshot ~base_path ~keeper_name in
+    let before_generation =
+      require_some "empty v4 source generation" before.source_generation
+    in
+    Alcotest.(check bool)
+      "absent v4 snapshot is a known empty authority"
+      false
+      before_generation.snapshot_present;
+    Alcotest.(check int64)
+      "empty v4 revision is known"
+      0L
+      before_generation.observed_revision;
+    Alcotest.(check int)
+      "all retired files are explicit residue"
+      3
+      (List.length before.read_errors);
+    Alcotest.(check bool)
+      "retired residue is typed"
       true
-      (Sys.file_exists unsupported);
-    Sys.remove unsupported;
-    write_queue primary (queue [ stimulus "old-schema" 3.0 ]);
-    (match Persistence.load_state_result ~base_path ~keeper_name with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "old primary schema was migrated"))
+      (List.for_all
+         (fun (error : Persistence.snapshot_read_error) ->
+            match error.kind with
+            | Persistence.Retired_epoch_residue -> true
+            | Persistence.Invalid_path
+            | Persistence.Read_failed
+            | Persistence.Parse_failed -> false)
+         before.read_errors);
+    let observed_paths =
+      List.filter_map
+        (fun (error : Persistence.snapshot_read_error) -> error.path)
+        before.read_errors
+      |> List.sort String.compare
+    in
+    Alcotest.(check (list string))
+      "residue evidence keeps exact paths"
+      (List.sort String.compare [ retired_snapshot; retired_wal; retired_inflight ])
+      observed_paths;
+
+    let current_stimulus = stimulus "current-work" 2.0 in
+    (match
+       Persistence.enqueue_stimulus_if_absent_result
+         ~base_path
+         ~keeper_name
+         current_stimulus
+       |> require_ok "enqueue current v4 work"
+     with
+     | Persistence.Enqueued _ -> ()
+     | Persistence.Already_present _ ->
+       Alcotest.fail "empty v4 authority reported current work already present");
+    Alcotest.(check bool)
+      "enqueue writes the v4 snapshot"
+      true
+      (Sys.file_exists current_snapshot);
+    Alcotest.(check bool)
+      "enqueue does not synthesize a v4 settlement WAL"
+      false
+      (Sys.file_exists current_wal);
+    Alcotest.(check string)
+      "retired v3 snapshot remains byte-identical"
+      retired_snapshot_bytes
+      (Fs_compat.load_file retired_snapshot);
+    Alcotest.(check string)
+      "retired settlement WAL remains byte-identical"
+      retired_wal_bytes
+      (Fs_compat.load_file retired_wal);
+    Alcotest.(check string)
+      "retired inflight sidecar remains byte-identical"
+      retired_inflight_bytes
+      (Fs_compat.load_file retired_inflight);
+    let current =
+      Persistence.load_result ~base_path ~keeper_name
+      |> require_ok "load current v4 work"
+    in
+    Alcotest.(check (list string))
+      "load projects only current work"
+      [ "current-work" ]
+      (post_ids current);
+    let after = Persistence.observe_snapshot ~base_path ~keeper_name in
+    let after_generation =
+      require_some "readable v4 generation with residue" after.source_generation
+    in
+    Alcotest.(check bool)
+      "readable current snapshot remains known despite residue"
+      true
+      after_generation.snapshot_present;
+    Alcotest.(check (list string))
+      "observation projects only current work"
+      [ "current-work" ]
+      (post_ids after.pending);
+    Alcotest.(check int)
+      "residue errors coexist with current generation"
+      3
+      (List.length after.read_errors);
+    let encoded_residue =
+      match after.read_errors with
+      | error :: _ -> Persistence.snapshot_read_error_to_yojson error
+      | [] -> Alcotest.fail "retired residue encoding fixture is empty"
+    in
+    let fleet = Persistence.fleet_summary_json ~now:3.0 ~base_path in
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool)
+      "typed residue requires operator action"
+      true
+      (encoded_residue |> member "operator_action_required" |> to_bool);
+    Alcotest.(check bool)
+      "typed residue keeps a concrete path"
+      true
+      (encoded_residue |> member "path" <> `Null);
+    Alcotest.(check string)
+      "dashboard reports residue degradation"
+      "degraded"
+      (fleet |> member "status" |> to_string);
+    Alcotest.(check bool)
+      "current counts remain complete"
+      true
+      (fleet |> member "counts_complete" |> to_bool);
+    Alcotest.(check int)
+      "dashboard counts only current work"
+      1
+      (fleet |> member "pending_count" |> to_int);
+    Alcotest.(check bool)
+      "dashboard requests operator disposition"
+      true
+      (fleet |> member "operator_action_required" |> to_bool))
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -1049,7 +1204,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       0
       (List.length (State.transition_outbox state));
     write_state
-      (Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json")
+      (Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue-v4.json")
       unprojected_state;
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "replay committed transition after outbox retirement loss";
@@ -1138,7 +1293,7 @@ let test_registration_preparation_is_atomic_and_fail_closed () =
     let malformed_path =
       Filename.concat
         (keeper_dir ~base_path ~keeper_name:malformed_keeper)
-        "event-queue.json"
+        "event-queue-v4.json"
     in
     Fs_compat.mkdir_p (Filename.dirname malformed_path);
     Fs_compat.save_file_atomic malformed_path "{}"
@@ -1235,9 +1390,9 @@ let () =
             `Quick
             test_settlement_wal_commit_replay_and_owner_fence
         ; Alcotest.test_case
-            "unsupported snapshots fail closed"
+            "retired epoch is quarantined while v4 continues"
             `Quick
-            test_unsupported_snapshots_fail_closed
+            test_retired_epoch_is_quarantined_while_v4_continues
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

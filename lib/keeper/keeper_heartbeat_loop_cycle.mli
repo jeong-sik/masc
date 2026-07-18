@@ -20,6 +20,10 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_manual_compaction.failure
       }
+  | Manual_compaction_not_applied of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; no_compaction : Keeper_post_turn.no_compaction
+      }
   | Manual_compaction_applied of cycle_outcome
 
 and failure_judgment_terminal =

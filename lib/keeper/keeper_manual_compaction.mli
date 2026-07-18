@@ -3,6 +3,10 @@ type success =
   ; manifest : (unit, string) result
   }
 
+type operation_outcome =
+  | Compacted of success
+  | No_compaction of Keeper_post_turn.no_compaction
+
 type lifecycle_stage =
   | Operator_request
   | Compaction_started
@@ -27,12 +31,13 @@ type failure =
 val run
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> (success, failure) result
+  -> (operation_outcome, failure) result
 
 val run_admitted
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> [ `Applied of success
+     | `No_compaction of Keeper_post_turn.no_compaction
      | `Compaction_failed of failure
      | `Busy of Keeper_turn_admission.autonomous_block
      ]

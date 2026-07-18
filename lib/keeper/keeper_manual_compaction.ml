@@ -4,6 +4,10 @@ type success =
   ; manifest : (unit, string) result
   }
 
+type operation_outcome =
+  | Compacted of success
+  | No_compaction of Keeper_post_turn.no_compaction
+
 type lifecycle_stage =
   | Operator_request
   | Compaction_started
@@ -105,6 +109,13 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
             ~meta
             ~trigger:Compaction_trigger.Manual
         with
+        | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+          let failure_dispatch =
+            dispatch_failed (Keeper_post_turn.compaction_recovery_error_to_tag error)
+          in
+          (match failure_dispatch with
+           | Ok () -> Ok (No_compaction no_compaction)
+           | Error _ -> Error (Recovery (error, failure_dispatch)))
         | Error error ->
           let failure_dispatch =
             dispatch_failed (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -129,7 +140,7 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
              Keeper_unified_metrics.broadcast_compaction
                ~name:meta.name
                recovery;
-             Ok { recovery; manifest })))
+             Ok (Compacted { recovery; manifest }))))
 ;;
 
 let lifecycle_stage_to_string = function
@@ -193,7 +204,8 @@ let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
   with
   | `Busy block -> `Busy block
   | `Ran (Error failure) -> `Compaction_failed failure
-  | `Ran (Ok success) ->
+  | `Ran (Ok (Compacted success)) ->
     observe_manifest ~keeper_name:meta.name success.manifest;
     `Applied success
+  | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction
 ;;

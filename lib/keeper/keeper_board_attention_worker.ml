@@ -24,6 +24,10 @@ type judge =
        , Candidate.retryable_failure )
        result
 
+type lane_signal =
+  | Candidate_recorded
+  | Startup_recovery
+
 type instance =
   { base_path : string
   ; worker_epoch : string
@@ -31,7 +35,7 @@ type instance =
   ; sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
   ; condition : Eio.Condition.t
-  ; mutable pending : Key_set.t
+  ; mutable pending : lane_signal Key_map.t
   ; mutable active : Key_set.t
   ; mutable lane_failures : string Key_map.t
   ; mutable closed : bool
@@ -81,32 +85,44 @@ let unregister_instance instance =
     | Some _ | None -> false)
 ;;
 
-let signal_instance instance keeper_name =
+let merge_signal current incoming =
+  match current, incoming with
+  | Startup_recovery, _ | _, Startup_recovery -> Startup_recovery
+  | Candidate_recorded, Candidate_recorded -> Candidate_recorded
+;;
+
+let signal_instance instance keeper_name signal =
   let result, notify =
     with_instance instance (fun () ->
       if instance.closed
       then Worker_not_registered, false
-      else if Key_set.mem keeper_name instance.pending
-      then Coalesced, false
-      else (
-        instance.pending <- Key_set.add keeper_name instance.pending;
-        Signaled, true))
+      else
+        match Key_map.find_opt keeper_name instance.pending with
+        | Some current ->
+          instance.pending <-
+            Key_map.add keeper_name (merge_signal current signal) instance.pending;
+          Coalesced, false
+        | None ->
+          instance.pending <- Key_map.add keeper_name signal instance.pending;
+          Signaled, true)
   in
   if notify then Eio.Condition.broadcast instance.condition;
   result
 ;;
 
-let notify ~base_path ~keeper_name =
+let notify ~base_path ~keeper_name signal =
   match with_instances (fun () -> Hashtbl.find_opt instances base_path) with
   | None -> Worker_not_registered
-  | Some instance -> signal_instance instance keeper_name
+  | Some instance -> signal_instance instance keeper_name signal
 ;;
 
 let record_and_notify ~base_path candidate =
   match Candidate.record ~base_path candidate with
   | Candidate.Record_error detail -> Error detail
   | Candidate.Recorded persisted ->
-    let signal = notify ~base_path ~keeper_name:persisted.keeper_name in
+    let signal =
+      notify ~base_path ~keeper_name:persisted.keeper_name Candidate_recorded
+    in
     Ok
       { candidate = persisted
       ; persistence = Candidate.Candidate_recorded
@@ -115,7 +131,8 @@ let record_and_notify ~base_path candidate =
   | Candidate.Duplicate persisted ->
     let signal =
       match persisted.status with
-      | Candidate.Pending _ -> notify ~base_path ~keeper_name:persisted.keeper_name
+      | Candidate.Pending _ ->
+        notify ~base_path ~keeper_name:persisted.keeper_name Candidate_recorded
       | Candidate.Judged _ | Candidate.Consumed _ -> No_signal_required
     in
     Ok
@@ -296,12 +313,14 @@ let rec drain_keeper instance keeper_name =
         partition
     in
     (match transition with
-     | Partition.Partition_completed _ -> wake_owner ~base_path keeper_name
-     | Partition.Partition_deferred _
+     | Partition.Partition_completed _ ->
+       wake_owner ~base_path keeper_name;
+       Eio.Fiber.yield ();
+       drain_keeper instance keeper_name
      | Partition.Partition_blocked _ ->
-       ());
-    Eio.Fiber.yield ();
-    drain_keeper instance keeper_name
+       Eio.Fiber.yield ();
+       drain_keeper instance keeper_name
+     | Partition.Partition_deferred _ -> Ok ())
 ;;
 
 let finish_lane instance keeper_name =
@@ -318,15 +337,26 @@ let record_lane_failure instance keeper_name detail =
     instance.lane_failures <- Key_map.add keeper_name detail instance.lane_failures)
 ;;
 
-let run_lane instance keeper_name =
+let run_lane instance keeper_name signal =
   try
     Eio.Switch.run (fun lane_sw ->
       Eio.Switch.on_release lane_sw (fun () -> finish_lane instance keeper_name);
-      match
-        Partition.recover_and_resume
-          ~base_path:instance.base_path
-          ~keeper_name
-      with
+      match signal with
+      | Candidate_recorded ->
+        (match drain_keeper instance keeper_name with
+         | Ok () -> ()
+         | Error detail ->
+           record_lane_failure instance keeper_name detail;
+           Log.Keeper.error
+             "Board attention partition lane failed keeper=%s: %s"
+             keeper_name
+             detail)
+      | Startup_recovery ->
+        (match
+           Partition.recover_for_process_start
+             ~base_path:instance.base_path
+             ~keeper_name
+         with
       | Error detail ->
         record_lane_failure instance keeper_name detail;
         Log.Keeper.error
@@ -347,7 +377,7 @@ let run_lane instance keeper_name =
            Log.Keeper.error
              "Board attention partition lane failed keeper=%s: %s"
              keeper_name
-             detail))
+             detail)))
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (match Eio.Switch.get_error instance.sw with
@@ -374,23 +404,26 @@ let take_startable instance =
     then Some `Closed
     else
       match
-        Key_set.find_first_opt
+        Key_map.find_first_opt
           (fun keeper_name -> not (Key_set.mem keeper_name instance.active))
           instance.pending
       with
       | None -> None
-      | Some keeper_name ->
-        instance.pending <- Key_set.remove keeper_name instance.pending;
+      | Some (keeper_name, signal) ->
+        instance.pending <- Key_map.remove keeper_name instance.pending;
         instance.active <- Key_set.add keeper_name instance.active;
         instance.lane_failures <- Key_map.remove keeper_name instance.lane_failures;
-        Some (`Keeper keeper_name))
+        Some (`Keeper (keeper_name, signal)))
 ;;
 
 let rec run_dispatcher instance =
   match Eio.Condition.loop_no_mutex instance.condition (fun () -> take_startable instance) with
   | `Closed -> ()
-  | `Keeper keeper_name ->
-    (match Eio.Fiber.fork_promise ~sw:instance.sw (fun () -> run_lane instance keeper_name) with
+  | `Keeper (keeper_name, signal) ->
+    (match
+       Eio.Fiber.fork_promise ~sw:instance.sw (fun () ->
+         run_lane instance keeper_name signal)
+     with
      | _lane_result -> ()
      | exception exn ->
        finish_lane instance keeper_name;
@@ -426,7 +459,7 @@ let start_instance ~sw ~base_path ~worker_epoch ~judge =
     ; sw
     ; mutex = Stdlib.Mutex.create ()
     ; condition = Eio.Condition.create ()
-    ; pending = Key_set.empty
+    ; pending = Key_map.empty
     ; active = Key_set.empty
     ; lane_failures = Key_map.empty
     ; closed = false
@@ -447,7 +480,8 @@ let start_instance ~sw ~base_path ~worker_epoch ~judge =
          error.detail)
     discovery.read_errors;
   List.iter
-    (fun keeper_name -> ignore (signal_instance instance keeper_name : wake_result))
+    (fun keeper_name ->
+       ignore (signal_instance instance keeper_name Startup_recovery : wake_result))
     discovery.keeper_names;
   run_dispatcher instance
 ;;

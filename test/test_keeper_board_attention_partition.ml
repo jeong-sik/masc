@@ -155,23 +155,25 @@ let claim ~base_path =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let test_unbounded_same_context_forms_one_root () =
+let test_pending_candidates_form_singleton_roots () =
   with_temp_base "board-partition-root" @@ fun base_path ->
   let candidates = List.init 17 (fun index -> candidate (index + 1)) in
   record_all ~base_path candidates;
   let partitions = ensure ~base_path candidates in
-  Alcotest.(check int) "one exact context root" 1 (List.length partitions);
-  let root = List.hd partitions in
-  Alcotest.(check int) "all candidates in root" 17 (List.length root.candidate_ids);
+  Alcotest.(check int) "one root per candidate" 17 (List.length partitions);
   Alcotest.(check (list string))
     "stable recorded order"
     (List.map (fun value -> value.A.candidate_id) candidates)
-    root.candidate_ids;
+    (List.concat_map (fun partition -> partition.P.candidate_ids) partitions);
+  Alcotest.(check bool)
+    "every root is an irreducible singleton"
+    true
+    (List.for_all (fun partition -> List.length partition.P.candidate_ids = 1) partitions);
   let second = ensure ~base_path candidates in
-  Alcotest.(check int) "idempotent ensure" 1 (List.length second)
+  Alcotest.(check int) "idempotent ensure" 17 (List.length second)
 ;;
 
-let test_contexts_form_separate_roots () =
+let test_singleton_roots_preserve_context_identity () =
   with_temp_base "board-partition-context" @@ fun base_path ->
   let left = List.init 3 (fun index -> candidate ~instructions:"left" (index + 1)) in
   let right =
@@ -180,13 +182,14 @@ let test_contexts_form_separate_roots () =
   let candidates = left @ right in
   record_all ~base_path candidates;
   let partitions = ensure ~base_path candidates in
-  Alcotest.(check int) "two context roots" 2 (List.length partitions);
-  Alcotest.(check (list int))
-    "context cardinalities"
-    [ 3; 4 ]
+  Alcotest.(check int) "all candidates remain independently executable" 7 (List.length partitions);
+  Alcotest.(check int)
+    "two exact context identities retained"
+    2
     (partitions
-     |> List.map (fun partition -> List.length partition.P.candidate_ids)
-     |> List.sort Int.compare)
+     |> List.map (fun partition -> partition.P.context_key)
+     |> List.sort_uniq String.compare
+     |> List.length)
 ;;
 
 let test_response_failure_defers_without_split () =
@@ -312,7 +315,7 @@ let test_provider_failure_defers_until_signal_recovery () =
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "deferred partition retried without a signal"
    | Error detail -> Alcotest.fail detail);
-  (match P.recover_and_resume ~base_path ~keeper_name:"partition-keeper" with
+  (match P.recover_for_process_start ~base_path ~keeper_name:"partition-keeper" with
    | Ok 1 -> ()
    | Ok count -> Alcotest.failf "expected one recovered partition, got %d" count
    | Error detail -> Alcotest.fail detail);
@@ -325,7 +328,7 @@ let test_running_claim_recovers_after_actor_end () =
   record_all ~base_path candidates;
   ignore (ensure ~base_path candidates : P.t list);
   ignore (claim ~base_path : P.t);
-  (match P.recover_and_resume ~base_path ~keeper_name:"partition-keeper" with
+  (match P.recover_for_process_start ~base_path ~keeper_name:"partition-keeper" with
    | Ok 1 -> ()
    | Ok count -> Alcotest.failf "expected one running recovery, got %d" count
    | Error detail -> Alcotest.fail detail);
@@ -397,13 +400,13 @@ let () =
     "keeper_board_attention_partition"
     [ ( "partition FSM"
       , [ Alcotest.test_case
-            "17 same-context candidates form one root"
+            "pending candidates form singleton roots"
             `Quick
-            test_unbounded_same_context_forms_one_root
+            test_pending_candidates_form_singleton_roots
         ; Alcotest.test_case
-            "different contexts form separate roots"
+            "singleton roots preserve context identity"
             `Quick
-            test_contexts_form_separate_roots
+            test_singleton_roots_preserve_context_identity
         ; Alcotest.test_case
             "response failure defers without split"
             `Quick

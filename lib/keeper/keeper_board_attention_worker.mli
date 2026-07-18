@@ -25,9 +25,6 @@ type record_acceptance =
   ; signal : wake_result
   }
 
-val notify : base_path:string -> keeper_name:string -> wake_result
-(** Non-blocking, domain-safe process hint. *)
-
 val record_and_notify :
   base_path:string -> Candidate.candidate -> (record_acceptance, string) result
 (** Commit the candidate before signaling the worker. Never invokes a model or

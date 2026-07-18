@@ -3,7 +3,6 @@
 module Candidate = Keeper_board_attention_candidate
 module Id_map = Map.Make (String)
 module Id_set = Set.Make (String)
-module Context_map = Map.Make (String)
 
 type completed_item =
   { candidate_id : string
@@ -449,22 +448,13 @@ let compare_candidate (left : Candidate.candidate) (right : Candidate.candidate)
 let ensure_roots ~now ~base_path ~keeper_name candidates =
   update ~base_path ~keeper_name (fun current ->
     let* owners = validate_live_membership current in
-    let* cohorts =
+    let unassigned =
       candidates
       |> List.filter (fun candidate ->
         match candidate.Candidate.status with
         | Candidate.Pending _ -> not (Id_map.mem candidate.candidate_id owners)
         | Candidate.Judged _ | Candidate.Consumed _ -> false)
       |> List.sort compare_candidate
-      |> List.fold_left
-           (fun result candidate ->
-              let* cohorts = result in
-              let* context_key = Candidate.keeper_context_key candidate in
-              let existing =
-                Option.value ~default:[] (Context_map.find_opt context_key cohorts)
-              in
-              Ok (Context_map.add context_key (candidate :: existing) cohorts))
-           (Ok Context_map.empty)
     in
     let existing_ids =
       List.fold_left
@@ -473,15 +463,11 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
         current
     in
     let* roots =
-      Context_map.bindings cohorts
-      |> List.fold_left
-           (fun result (context_key, reversed_candidates) ->
+      List.fold_left
+        (fun result candidate ->
               let* roots = result in
-              let candidate_ids =
-                reversed_candidates
-                |> List.rev
-                |> List.map (fun candidate -> candidate.Candidate.candidate_id)
-              in
+              let* context_key = Candidate.keeper_context_key candidate in
+              let candidate_ids = [ candidate.Candidate.candidate_id ] in
               let partition_id = root_id ~keeper_name ~context_key candidate_ids in
               if Id_set.mem partition_id existing_ids
               then
@@ -499,7 +485,8 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
                    ; state = Ready
                    }
                    :: roots))
-           (Ok [])
+        (Ok [])
+        unassigned
       |> Result.map List.rev
     in
     match roots with
@@ -509,7 +496,7 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
       Ok (true, updated, updated))
 ;;
 
-let recover_and_resume ~base_path ~keeper_name =
+let recover_for_process_start ~base_path ~keeper_name =
   update ~base_path ~keeper_name (fun current ->
     let recovered, changed, updated =
       List.fold_left

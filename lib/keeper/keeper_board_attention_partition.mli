@@ -14,11 +14,13 @@
       Ready -> Running -> Blocked
     v}
 
-    [Running] is a process claim, not a time lease. It is recovered to [Ready]
-    only at process-worker startup, after the prior process and all of its
-    storage operations are known to have ended. At that boundary, [Deferred]
-    is also recovered. An ordinary candidate signal may run new Ready work but
-    does not retry an unrelated Deferred partition. *)
+    [Running] is a process claim, not a time lease. Process-worker startup
+    recovers every [Running] and [Deferred] only after the prior process and all
+    of its storage operations are known to have ended. Independently, a live
+    lane abort releases only its exact same-[worker_epoch] [Running] claim via
+    cancellation-protected recovery; it never recovers [Deferred] or another
+    epoch. An ordinary candidate signal may run new Ready work but does not
+    retry unrelated deferred work. *)
 
 module Candidate = Keeper_board_attention_candidate
 

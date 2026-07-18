@@ -27,7 +27,6 @@ val rewrite_docker_host_paths_to_container :
 
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->
@@ -39,7 +38,6 @@ val handle_tool_execute :
 
 val handle_tool_execute_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->
@@ -55,7 +53,6 @@ end
 
 val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
@@ -63,7 +60,6 @@ val handle_tool_search_files :
 
 val handle_tool_search_files_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->

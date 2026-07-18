@@ -14,7 +14,6 @@ val execute_with_observers
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

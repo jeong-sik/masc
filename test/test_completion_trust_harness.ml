@@ -159,7 +159,6 @@ let attempt_done
     ~meta
     ~publication_recovery
     ~ctx_work
-    ~exec_cache:None
     ~name:"keeper_task_done"
     ~input:
       (`Assoc
@@ -193,7 +192,6 @@ let claim_via_dispatch
     ~meta
     ~publication_recovery
     ~ctx_work
-    ~exec_cache:None
     ~name:"keeper_task_claim"
     ~input:(`Assoc [ ("task_id", `String task_id) ])
     ()

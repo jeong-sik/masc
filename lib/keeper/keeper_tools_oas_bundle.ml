@@ -50,7 +50,6 @@ let make_tool_bundle
      [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
      each tool call site that already knows its [cwd]. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
-  let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
   in
@@ -92,7 +91,6 @@ let make_tool_bundle
                  ~publication_recovery
                  ~ctx_snapshot
                    ?turn_sandbox_factory
-                 ~exec_cache
                  ?search_fn
                  ?clock
                  ?continuation_channel

@@ -40,7 +40,6 @@
   (re_export masc.lockfree_atomic)
   (re_export masc.worker_execution_backend)
   (re_export masc.worker_execution_spec)
-  (re_export masc.worker_runtime_config)
   (re_export masc.otel_dispatch_hook)
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)

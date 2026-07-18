@@ -91,7 +91,7 @@ let assert_error_contains ~needle raw =
 
 let invoke ~config ~meta args =
   Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None
-    ~exec_cache:None ~config ~meta ~args
+    ~config ~meta ~args
 
 let test_rg_host_includes_via () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->

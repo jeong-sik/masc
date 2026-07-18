@@ -1,5 +1,5 @@
 (** Worker_runtime — local agent runtime with worker containers,
-    OAS/legacy backends, and heartbeat management.
+    an OAS backend, and heartbeat management.
 
     Facade re-exporting [Worker_container_runners], which itself
     transitively includes [Worker_container] and

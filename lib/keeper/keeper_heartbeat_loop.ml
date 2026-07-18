@@ -435,9 +435,12 @@ let drain_board_attention_candidates_on_owner_lane ~base_path ~keeper_name =
       ~base_path
       ~keeper_name
       (fun () ->
-         Keeper_board_attention_worker.drain_completed_on_owner_lane
-           ~base_path
-           ~keeper_name)
+         Eio_unix.run_in_systhread
+           ~label:"board-attention-owner-delivery"
+           (fun () ->
+              Keeper_board_attention_worker.drain_completed_on_owner_lane
+                ~base_path
+                ~keeper_name))
   with
   | `Ran (Ok report) -> Ok (Board_attention_drained report)
   | `Ran (Error detail) -> Error detail

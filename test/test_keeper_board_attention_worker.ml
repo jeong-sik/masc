@@ -168,7 +168,14 @@ let test_owner_drain_never_waits_for_provider () =
           await_completed ~base_path ~keeper_name:"keeper-a")
         : P.t list);
      let settled =
-       match W.drain_completed_on_owner_lane ~base_path ~keeper_name:"keeper-a" with
+       match
+         Eio_unix.run_in_systhread
+           ~label:"test-board-attention-owner-delivery"
+           (fun () ->
+              W.drain_completed_on_owner_lane
+                ~base_path
+                ~keeper_name:"keeper-a")
+       with
        | Ok report -> report
        | Error detail -> Alcotest.fail detail
      in
@@ -211,7 +218,11 @@ let test_blocked_keeper_does_not_block_sibling () =
         : W.record_acceptance);
      within clock (fun () -> Eio.Promise.await keeper_a_started);
      ignore
-       (record_candidate ~base_path (candidate ~keeper_name:"keeper-b" 1)
+       (Domain.join
+          (Domain.spawn (fun () ->
+             record_candidate
+               ~base_path
+               (candidate ~keeper_name:"keeper-b" 1)))
         : W.record_acceptance);
      within clock (fun () -> Eio.Promise.await keeper_b_judged);
      ignore

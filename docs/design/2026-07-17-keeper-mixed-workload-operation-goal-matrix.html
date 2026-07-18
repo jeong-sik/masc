@@ -256,7 +256,7 @@
                                                ▼
 Keeper owner admission: apply Completed → idempotent event enqueue → Consumed → Settled</pre>
     <p><strong>Crash matrix:</strong> candidate commit 전 crash는 작업 미접수로 끝나고, commit 후 wake 전 crash는 startup scan이 복구한다. Running 중 crash는 다음 worker epoch가 Ready로 회수한다. Completed 후 candidate apply 전 crash는 Completed replay, event enqueue 후 Consumed commit 전 crash는 candidate ID 기반 enqueue replay, Consumed 후 Settled 전 crash는 exact judgment replay 후 Settled로 수렴한다. 서로 다른 durable file을 하나의 atomic transaction으로 가장하지 않는다.</p>
-    <p><strong>현재 검증 경계:</strong> strict removed-state rejection, response failure no-split, exact settlement replay, owner nonblocking, sibling cancellation isolation, per-ledger startup recovery, cross-Keeper path collision, typed health projection을 focused target과 CI에서 검증한다. 이 구현 단위 증거는 8-hour fleet와 direct-latency SLO를 대신하지 않는다.</p>
+    <p><strong>현재 검증 경계:</strong> strict removed-state rejection, response failure no-split, exact settlement replay, owner nonblocking, sibling cancellation isolation, domain-safe wake stream, per-ledger startup recovery, cross-Keeper path collision, typed health projection을 focused target과 CI에서 검증한다. Candidate/partition JSONL parse·rewrite와 provider-free owner delivery는 systhread로 분리하되 OAS judge는 Eio lane fiber에 남긴다. 이 구현 단위 증거는 8-hour fleet와 direct-latency SLO를 대신하지 않는다.</p>
   </section>
 
   <section>

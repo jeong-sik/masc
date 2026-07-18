@@ -35,6 +35,7 @@ type instance =
   ; sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
   ; wakeup : unit Eio.Stream.t
+  ; mutable wake_queued : bool
   ; mutable pending : lane_signal Key_map.t
   ; mutable active : Key_set.t
   ; mutable lane_failures : string Key_map.t
@@ -91,20 +92,35 @@ let merge_signal current incoming =
   | Candidate_recorded, Candidate_recorded -> Candidate_recorded
 ;;
 
+(* The stream carries no work identity; durable [pending] is the SSOT. Exactly
+   one queued token is therefore sufficient to tell the dispatcher to rescan.
+   The caller holds [instance.mutex], making [wake_queued] and the stream's
+   single-slot capacity one invariant rather than a workload-size heuristic. *)
+let schedule_wakeup_locked instance =
+  if instance.wake_queued
+  then false
+  else (
+    instance.wake_queued <- true;
+    true)
+;;
+
 let signal_instance instance keeper_name signal =
   let result, notify =
     with_instance instance (fun () ->
       if instance.closed
       then Worker_not_registered, false
-      else
-        match Key_map.find_opt keeper_name instance.pending with
-        | Some current ->
-          instance.pending <-
-            Key_map.add keeper_name (merge_signal current signal) instance.pending;
-          Coalesced, false
-        | None ->
-          instance.pending <- Key_map.add keeper_name signal instance.pending;
-          Signaled, true)
+      else (
+        let result =
+          match Key_map.find_opt keeper_name instance.pending with
+          | Some current ->
+            instance.pending <-
+              Key_map.add keeper_name (merge_signal current signal) instance.pending;
+            Coalesced
+          | None ->
+            instance.pending <- Key_map.add keeper_name signal instance.pending;
+            Signaled
+        in
+        result, schedule_wakeup_locked instance))
   in
   if notify then Eio.Stream.add instance.wakeup ();
   result
@@ -261,46 +277,63 @@ let persist_failure ~base_path ~worker_epoch partition failure =
   | Error detail -> Error detail
 ;;
 
+(* Keep this boundary limited to the Candidate/Partition durable ledgers. Their
+   transactions are explicitly dual-context and use only Unix/Stdlib work in a
+   non-Eio caller. Provider judgment stays on the lane fiber: moving an OAS or
+   Promise operation into this closure would perform an unhandled Eio effect. *)
+let run_storage ~label operation =
+  Eio_unix.run_in_systhread ~label operation
+;;
+
 let process_claimed ~base_path ~worker_epoch ~judge partition =
-  match candidates_for_partition ~base_path partition with
+  match
+    run_storage ~label:"board-attention-load-partition-candidates" (fun () ->
+      candidates_for_partition ~base_path partition)
+  with
   | Error detail ->
-    persist_failure
-      ~base_path
-      ~worker_epoch
-      partition
-      (partition_failure Candidate.Partition_membership_conflict detail)
+    run_storage ~label:"board-attention-persist-membership-failure" (fun () ->
+      persist_failure
+        ~base_path
+        ~worker_epoch
+        partition
+        (partition_failure Candidate.Partition_membership_conflict detail))
   | Ok candidates ->
     (match judge candidates with
-     | Error failure -> persist_failure ~base_path ~worker_epoch partition failure
+     | Error failure ->
+       run_storage ~label:"board-attention-persist-judge-failure" (fun () ->
+         persist_failure ~base_path ~worker_epoch partition failure)
      | Ok judgments ->
        (match completed_items_exact partition judgments with
         | Error failure ->
-          persist_failure ~base_path ~worker_epoch partition failure
+          run_storage ~label:"board-attention-persist-response-failure" (fun () ->
+            persist_failure ~base_path ~worker_epoch partition failure)
         | Ok items ->
-          Partition.complete
-            ~now:(Time_compat.now ())
-            ~worker_epoch
-            ~base_path
-            ~partition
-            ~items))
+          run_storage ~label:"board-attention-persist-completion" (fun () ->
+            Partition.complete
+              ~now:(Time_compat.now ())
+              ~worker_epoch
+              ~base_path
+              ~partition
+              ~items)))
 ;;
 
 let rec drain_keeper instance keeper_name =
   let base_path = instance.base_path in
-  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
-  let* (_ : Partition.t list) =
-    Partition.ensure_roots
-      ~now:(Time_compat.now ())
-      ~base_path
-      ~keeper_name
-      candidates
-  in
   let* claimed =
-    Partition.claim_next
-      ~now:(Time_compat.now ())
-      ~worker_epoch:instance.worker_epoch
-      ~base_path
-      ~keeper_name
+    run_storage ~label:"board-attention-prepare-partition-claim" (fun () ->
+      let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+      let* (_ : Partition.t list) =
+        Partition.ensure_roots
+          ~now:(Time_compat.now ())
+          ~base_path
+          ~keeper_name
+          candidates
+      in
+      Partition.claim_next
+        ~now:(Time_compat.now ())
+        ~worker_epoch:instance.worker_epoch
+        ~base_path
+        ~keeper_name)
   in
   match claimed with
   | None -> Ok ()
@@ -327,7 +360,7 @@ let finish_lane instance keeper_name =
   let notify =
     with_instance instance (fun () ->
       instance.active <- Key_set.remove keeper_name instance.active;
-      not instance.closed)
+      not instance.closed && schedule_wakeup_locked instance)
   in
   if notify then Eio.Stream.add instance.wakeup ()
 ;;
@@ -353,9 +386,10 @@ let run_lane instance keeper_name signal =
              detail)
       | Startup_recovery ->
         (match
-           Partition.recover_for_process_start
-             ~base_path:instance.base_path
-             ~keeper_name
+           run_storage ~label:"board-attention-recover-process-start" (fun () ->
+             Partition.recover_for_process_start
+               ~base_path:instance.base_path
+               ~keeper_name)
          with
       | Error detail ->
         record_lane_failure instance keeper_name detail;
@@ -431,6 +465,7 @@ let rec run_dispatcher instance =
     run_dispatcher instance
   | None ->
     Eio.Stream.take instance.wakeup;
+    with_instance instance (fun () -> instance.wake_queued <- false);
     run_dispatcher instance
 ;;
 
@@ -441,7 +476,7 @@ let close_instance instance =
       then false
       else (
         instance.closed <- true;
-        true))
+        schedule_wakeup_locked instance))
   in
   ignore (unregister_instance instance : bool);
   if notify then Eio.Stream.add instance.wakeup ()
@@ -461,7 +496,8 @@ let start_instance ~sw ~base_path ~worker_epoch ~judge =
     ; judge
     ; sw
     ; mutex = Stdlib.Mutex.create ()
-    ; wakeup = Eio.Stream.create max_int
+    ; wakeup = Eio.Stream.create 1
+    ; wake_queued = false
     ; pending = Key_map.empty
     ; active = Key_set.empty
     ; lane_failures = Key_map.empty

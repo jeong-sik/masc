@@ -46,7 +46,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|
-| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | 63c38bf628 2026-07-17 | - |
+| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | b07a069c5c 2026-07-17 | - |
 | 0001 | Withdraw heuristic uncertainty governance | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | 7b62a87d44 2026-07-13 | - |
 | 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | - |
@@ -332,9 +332,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |
-| masc | Masc_oas_bridge as the total LLM dispatch boundary | Draft | (untracked) | - |
+| masc | Withdraw budget-and-slot authority from the MASC OAS bridge | Withdrawn | d5bd126498 2026-07-17 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 03d5feaf25 2026-07-08 | - |
-| shar | Shared typed admission primitive + knob-binding policy | Draft | (untracked) | - |
+| shar | Withdraw shared MASC admission and knob-binding policy | Withdrawn | d5bd126498 2026-07-17 | - |
 | type | Withdraw product-specific egress effect classification | Withdrawn | 7b62a87d44 2026-07-13 | - |
 
 ### 신규 RFC

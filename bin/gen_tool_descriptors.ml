@@ -172,6 +172,17 @@ let masc_resume_spec : tool_spec =
   }
 ;;
 
+let masc_pause_status_spec : tool_spec =
+  { name = "masc_pause_status"
+  ; description =
+      "Return the current pause status of the workspace and any paused keepers. \
+       Read-only; takes no arguments."
+  ; parameters = []
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
 (* === PR-2: plan group (8 tools) === *)
 
 let masc_plan_init_spec : tool_spec =
@@ -589,6 +600,7 @@ let () =
   emit_header buf;
   emit_named_tool_schema buf "masc_pause_schema" masc_pause_spec;
   emit_named_tool_schema buf "masc_resume_schema" masc_resume_spec;
+  emit_named_tool_schema buf "masc_pause_status_schema" masc_pause_status_spec;
   emit_schemas_list buf phase6_specs;
   print_string (Buffer.contents buf)
 ;;

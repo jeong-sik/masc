@@ -40,17 +40,20 @@ let config_category_enum_strings =
 type control_operation =
   | Pause
   | Resume
+  | Pause_status
 
-let control_operations = [ Pause; Resume ]
+let control_operations = [ Pause; Resume; Pause_status ]
 
 let control_operation_id = function
   | Pause -> "pause"
   | Resume -> "resume"
+  | Pause_status -> "pause_status"
 ;;
 
 let control_schema = function
   | Pause -> Tool_descriptors_gen.masc_pause_schema
   | Resume -> Tool_descriptors_gen.masc_resume_schema
+  | Pause_status -> Tool_descriptors_gen.masc_pause_status_schema
 ;;
 
 let control_schemas = List.map control_schema control_operations

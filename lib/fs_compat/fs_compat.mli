@@ -789,6 +789,10 @@ type private_jsonl_transaction_operation =
   | Set_stable_lock_permissions
   | Sync_stable_lock_parent
   | Acquire_stable_lock
+  | Inspect_stable_lock
+  | Read_stable_lock_state
+  | Write_stable_lock_state
+  | Sync_stable_lock
   | Open_transaction_data
   | Set_transaction_data_permissions
   | Inspect_transaction_data
@@ -811,6 +815,13 @@ type private_jsonl_operation_failure =
 
 type private_jsonl_transaction_error =
   | Stable_lock_contended of { lock_path : string }
+  | Unexpected_stable_lock_file_kind of Unix.file_kind
+  | Stable_lock_identity_mismatch of { lock_path : string }
+  | Unexpected_stable_lock_permissions of { actual : int }
+  | Invalid_stable_lock_state of
+      { lock_path : string
+      ; observed_length : int
+      }
   | Cursor_mismatch of
       { expected : Private_jsonl_cursor.t
       ; actual : Private_jsonl_cursor.t
@@ -829,8 +840,11 @@ val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
 
 (** Stable sibling lock owned by the private JSONL transaction protocol. It is
-    created with mode [0600] and must never be renamed or removed while the
-    store may be in use. *)
+    created with mode [0600]. Empty payload is the exact [Preparing] state. A
+    one-byte [Ready] commit marker is written only after the parent directory
+    is synced. Transactions acquire the advisory lock and require [Ready]
+    before touching data; every other payload fails closed. The lock must never
+    be renamed or removed while the store may be in use. *)
 val private_jsonl_lock_path : string -> string
 
 (** Read a private JSONL store under its stable sibling lock. [after = None]
@@ -868,6 +882,8 @@ val rewrite_private_jsonl_durable_locked_at_cursor_result :
 
 type private_jsonl_transaction_io_for_testing =
   { sync_parent : string -> unit }
+
+val private_jsonl_stable_lock_ready_marker_for_testing : string
 
 val read_private_jsonl_durable_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->

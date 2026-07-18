@@ -1806,6 +1806,10 @@ type private_jsonl_transaction_operation =
   | Set_stable_lock_permissions
   | Sync_stable_lock_parent
   | Acquire_stable_lock
+  | Inspect_stable_lock
+  | Read_stable_lock_state
+  | Write_stable_lock_state
+  | Sync_stable_lock
   | Open_transaction_data
   | Set_transaction_data_permissions
   | Inspect_transaction_data
@@ -1828,6 +1832,13 @@ type private_jsonl_operation_failure =
 
 type private_jsonl_transaction_error =
   | Stable_lock_contended of { lock_path : string }
+  | Unexpected_stable_lock_file_kind of Unix.file_kind
+  | Stable_lock_identity_mismatch of { lock_path : string }
+  | Unexpected_stable_lock_permissions of { actual : int }
+  | Invalid_stable_lock_state of
+      { lock_path : string
+      ; observed_length : int
+      }
   | Cursor_mismatch of
       { expected : Private_jsonl_cursor.t
       ; actual : Private_jsonl_cursor.t
@@ -1848,6 +1859,10 @@ let private_jsonl_operation_to_string = function
   | Set_stable_lock_permissions -> "set stable lock permissions"
   | Sync_stable_lock_parent -> "sync stable lock parent"
   | Acquire_stable_lock -> "acquire stable lock"
+  | Inspect_stable_lock -> "inspect stable lock"
+  | Read_stable_lock_state -> "read stable lock state"
+  | Write_stable_lock_state -> "write stable lock state"
+  | Sync_stable_lock -> "sync stable lock"
   | Open_transaction_data -> "open transaction data"
   | Set_transaction_data_permissions -> "set transaction data permissions"
   | Inspect_transaction_data -> "inspect transaction data"
@@ -1873,6 +1888,30 @@ let private_jsonl_operation_failure_to_string failure =
 let private_jsonl_transaction_error_to_string = function
   | Stable_lock_contended { lock_path } ->
     Printf.sprintf "private JSONL stable lock is contended: %s" lock_path
+  | Unexpected_stable_lock_file_kind kind ->
+    Printf.sprintf
+      "private JSONL stable lock has unexpected file kind: %s"
+      (match kind with
+       | Unix.S_REG -> "regular"
+       | Unix.S_DIR -> "directory"
+       | Unix.S_CHR -> "character-device"
+       | Unix.S_BLK -> "block-device"
+       | Unix.S_LNK -> "symbolic-link"
+       | Unix.S_FIFO -> "fifo"
+       | Unix.S_SOCK -> "socket")
+  | Stable_lock_identity_mismatch { lock_path } ->
+    Printf.sprintf
+      "private JSONL stable lock path changed identity after open: %s"
+      lock_path
+  | Unexpected_stable_lock_permissions { actual } ->
+    Printf.sprintf
+      "private JSONL stable lock permissions are %04o, expected 0600"
+      actual
+  | Invalid_stable_lock_state { lock_path; observed_length } ->
+    Printf.sprintf
+      "private JSONL stable lock has invalid durable state: %s (%d bytes)"
+      lock_path
+      observed_length
   | Cursor_mismatch { expected; actual } ->
     Printf.sprintf
       "private JSONL cursor mismatch: expected %s, observed %s"
@@ -1926,11 +1965,152 @@ let private_jsonl_capture operation f =
 
 let private_jsonl_lock_path path = path ^ ".lock"
 
+let private_jsonl_stable_lock_ready_marker = "\xA5"
+
+let private_jsonl_stable_lock_ready_marker_for_testing =
+  private_jsonl_stable_lock_ready_marker
+;;
+
+type private_jsonl_stable_lock_state =
+  | Stable_lock_initializing
+  | Stable_lock_ready
+
+type private_jsonl_stable_lock_creation =
+  | Stable_lock_created
+  | Stable_lock_existing
+
+type private_jsonl_stable_lock =
+  { fd : Unix.file_descr
+  ; creation : private_jsonl_stable_lock_creation
+  }
+
 let rec try_lock_whole_file fd =
   match Unix.lockf fd Unix.F_TLOCK 0 with
   | () -> true
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> try_lock_whole_file fd
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> false
+;;
+
+let private_jsonl_open_stable_lock lock_path =
+  match
+    private_jsonl_capture Open_stable_lock (fun () ->
+      Unix.openfile
+        lock_path
+        [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+        0o600)
+  with
+  | Ok fd -> Ok { fd; creation = Stable_lock_created }
+  | Error { exception_ = Unix.Unix_error (error, _, _); _ } when error = Unix.EEXIST ->
+    private_jsonl_capture Open_stable_lock (fun () ->
+      Unix.openfile lock_path [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0)
+    |> Result.map (fun fd -> { fd; creation = Stable_lock_existing })
+  | Error _ as error -> error
+;;
+
+let private_jsonl_inspect_stable_lock lock_path lock_fd =
+  match
+    private_jsonl_capture Inspect_stable_lock (fun () ->
+      Unix.fstat lock_fd, Unix.lstat lock_path)
+  with
+  | Error failure -> Error (Private_jsonl_operation_failed failure)
+  | Ok (descriptor_stats, path_stats) ->
+    if path_stats.Unix.st_kind <> Unix.S_REG
+    then Error (Unexpected_stable_lock_file_kind path_stats.Unix.st_kind)
+    else if descriptor_stats.Unix.st_kind <> Unix.S_REG
+    then Error (Unexpected_stable_lock_file_kind descriptor_stats.Unix.st_kind)
+    else if not
+              (Int.equal descriptor_stats.Unix.st_dev path_stats.Unix.st_dev
+               && Int.equal descriptor_stats.Unix.st_ino path_stats.Unix.st_ino)
+    then Error (Stable_lock_identity_mismatch { lock_path })
+    else Ok descriptor_stats
+;;
+
+let rec private_jsonl_write_substring_all fd value offset =
+  if offset < String.length value
+  then
+    match Unix.write_substring fd value offset (String.length value - offset) with
+    | 0 ->
+      raise
+        (Unix.Unix_error
+           (Unix.EIO, "write", "private JSONL stable lock accepted zero bytes"))
+    | count -> private_jsonl_write_substring_all fd value (offset + count)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      private_jsonl_write_substring_all fd value offset
+;;
+
+let private_jsonl_read_stable_lock_state lock_path lock_fd stats =
+  let observed_length = stats.Unix.st_size in
+  if observed_length = 0
+  then Ok Stable_lock_initializing
+  else if observed_length <> String.length private_jsonl_stable_lock_ready_marker
+  then Error (Invalid_stable_lock_state { lock_path; observed_length })
+  else
+    match private_jsonl_capture Read_stable_lock_state (fun () ->
+      let bytes = Bytes.create observed_length in
+      ignore (Unix.lseek lock_fd 0 Unix.SEEK_SET : int);
+      let rec read_all offset =
+        if offset < observed_length
+        then
+          match Unix.read lock_fd bytes offset (observed_length - offset) with
+          | 0 -> raise End_of_file
+          | count -> read_all (offset + count)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_all offset
+      in
+      read_all 0;
+      Bytes.unsafe_to_string bytes)
+    with
+    | Error failure -> Error (Private_jsonl_operation_failed failure)
+    | Ok state ->
+      if String.equal state private_jsonl_stable_lock_ready_marker
+      then Ok Stable_lock_ready
+      else Error (Invalid_stable_lock_state { lock_path; observed_length })
+;;
+
+let private_jsonl_write_stable_lock_ready_marker lock_fd =
+  private_jsonl_capture Write_stable_lock_state (fun () ->
+    ignore (Unix.lseek lock_fd 0 Unix.SEEK_SET : int);
+    private_jsonl_write_substring_all lock_fd private_jsonl_stable_lock_ready_marker 0)
+  |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+;;
+
+let private_jsonl_sync_stable_lock lock_fd =
+  private_jsonl_capture Sync_stable_lock (fun () -> Unix.fsync lock_fd)
+  |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+;;
+
+let private_jsonl_initialize_stable_lock ~io ~dir lock_fd =
+  let ( let* ) = Result.bind in
+  let* () = private_jsonl_sync_stable_lock lock_fd in
+  let* () =
+    private_jsonl_capture Sync_stable_lock_parent (fun () -> io.sync_parent dir)
+    |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+  in
+  let* () = private_jsonl_write_stable_lock_ready_marker lock_fd in
+  private_jsonl_sync_stable_lock lock_fd
+;;
+
+let private_jsonl_require_ready_stable_lock ~io ~dir lock_path stable_lock =
+  let ( let* ) = Result.bind in
+  let* () =
+    match stable_lock.creation with
+    | Stable_lock_created ->
+      private_jsonl_capture Set_stable_lock_permissions (fun () ->
+        Unix.fchmod stable_lock.fd 0o600)
+      |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+    | Stable_lock_existing -> Ok ()
+  in
+  let* stats = private_jsonl_inspect_stable_lock lock_path stable_lock.fd in
+  let actual = stats.Unix.st_perm land 0o7777 in
+  if actual <> 0o600
+  then Error (Unexpected_stable_lock_permissions { actual })
+  else
+    let* state =
+      private_jsonl_read_stable_lock_state lock_path stable_lock.fd stats
+    in
+    match state with
+    | Stable_lock_initializing ->
+      private_jsonl_initialize_stable_lock ~io ~dir stable_lock.fd
+    | Stable_lock_ready -> Ok ()
 ;;
 
 let with_private_jsonl_stable_lock ~io path f =
@@ -1948,34 +2128,28 @@ let with_private_jsonl_stable_lock ~io path f =
          with
          | Error failure -> Error (Private_jsonl_operation_failed failure)
          | Ok () ->
-           (match private_jsonl_capture Open_stable_lock (fun () ->
-              Unix.openfile
-                lock_path
-                [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ]
-                0o600)
+           (match private_jsonl_open_stable_lock lock_path
             with
             | Error failure -> Error (Private_jsonl_operation_failed failure)
-            | Ok lock_fd ->
+            | Ok stable_lock ->
               Fun.protect
-                ~finally:(fun () -> Unix.close lock_fd)
+                ~finally:(fun () -> Unix.close stable_lock.fd)
                 (fun () ->
-                   match private_jsonl_capture Set_stable_lock_permissions (fun () ->
-                     Unix.fchmod lock_fd 0o600)
+                   match private_jsonl_capture Acquire_stable_lock (fun () ->
+                     try_lock_whole_file stable_lock.fd)
                    with
                    | Error failure -> Error (Private_jsonl_operation_failed failure)
-                   | Ok () ->
-                     (match private_jsonl_capture Sync_stable_lock_parent (fun () ->
-                        io.sync_parent dir)
+                   | Ok false -> Error (Stable_lock_contended { lock_path })
+                   | Ok true ->
+                     (match
+                        private_jsonl_require_ready_stable_lock
+                          ~io
+                          ~dir
+                          lock_path
+                          stable_lock
                       with
-                      | Error failure -> Error (Private_jsonl_operation_failed failure)
-                      | Ok () ->
-                        (match private_jsonl_capture Acquire_stable_lock (fun () ->
-                           try_lock_whole_file lock_fd)
-                         with
-                         | Error failure ->
-                           Error (Private_jsonl_operation_failed failure)
-                         | Ok false -> Error (Stable_lock_contended { lock_path })
-                         | Ok true -> f ~dir))))))
+                      | Error _ as error -> error
+                      | Ok () -> f ~dir)))))
 ;;
 
 let private_jsonl_cursor_of_stats stats =

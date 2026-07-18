@@ -539,12 +539,112 @@ let test_private_jsonl_stable_lock_parent_sync_count () =
    with
    | Ok _ -> ()
    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
-  check int "parent syncs across five transactions" 5 !parent_sync_count
+  check int "parent syncs only during stable lock initialization" 1 !parent_sync_count
+;;
+
+let write_stable_lock_fixture path contents =
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let output = open_out_bin lock_path in
+  output_string output contents;
+  close_out output;
+  Unix.chmod lock_path 0o600
+;;
+
+let test_private_jsonl_stable_lock_interrupted_creation_recovers_once () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture path "";
+  let parent_sync_count = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { sync_parent = (fun _dir -> incr parent_sync_count) }
+  in
+  let read () =
+    match
+      Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+        ~io
+        path
+        ~after:None
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  in
+  read ();
+  check int "interrupted creation syncs parent once" 1 !parent_sync_count;
+  check string
+    "interrupted creation reaches Ready"
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing
+    (Fs_compat.load_file (Fs_compat.private_jsonl_lock_path path));
+  read ();
+  check int "recovered Ready state stays on hot path" 1 !parent_sync_count
+;;
+
+let test_private_jsonl_stable_lock_parent_sync_failure_stays_preparing () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { sync_parent =
+        (fun dir ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    }
+  in
+  (match
+     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+       ~io
+       path
+       ~after:None
+   with
+   | Error
+       (Fs_compat.Private_jsonl_operation_failed
+          { operation = Fs_compat.Sync_stable_lock_parent; _ }) ->
+     ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stable-lock initialization ignored parent sync failure");
+  check string
+    "failed parent sync does not publish Ready"
+    ""
+    (Fs_compat.load_file (Fs_compat.private_jsonl_lock_path path));
+  ignore (transaction_snapshot path ~after:None);
+  check string
+    "retry reaches Ready after parent sync succeeds"
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing
+    (Fs_compat.load_file (Fs_compat.private_jsonl_lock_path path))
+;;
+
+let test_private_jsonl_stable_lock_corruption_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture path "x";
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error (Fs_compat.Invalid_stable_lock_state _) -> ()
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "stable-lock bytes outside the creation grammar were accepted"
+;;
+
+let test_private_jsonl_existing_stable_lock_permission_drift_fails_closed () =
+  List.iter
+    (fun contents ->
+       with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+       write_stable_lock_fixture path contents;
+       Unix.chmod (Fs_compat.private_jsonl_lock_path path) 0o4600;
+       match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+       | Error (Fs_compat.Unexpected_stable_lock_permissions { actual }) ->
+         check int "observed stable-lock permissions" 0o4600 actual
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "existing stable lock with permission drift was accepted")
+    [ ""; Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing ]
+;;
+
+let test_private_jsonl_stable_lock_symlink_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  Unix.symlink path (Fs_compat.private_jsonl_lock_path path);
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error (Fs_compat.Unexpected_stable_lock_file_kind Unix.S_LNK) -> ()
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "symbolic-link stable lock was accepted"
 ;;
 
 let test_private_jsonl_transaction_lock_contention_is_typed () =
   with_transaction_jsonl None @@ fun path ->
-  ignore (transaction_snapshot path ~after:None);
+  write_stable_lock_fixture
+    path
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing;
   let ready_read, ready_write = Unix.pipe ~cloexec:true () in
   let release_read, release_write = Unix.pipe ~cloexec:true () in
   match Unix.fork () with
@@ -597,7 +697,11 @@ let () =
   run
     "fs_compat durable append"
     [ ( "durable_append"
-      , [ test_case "success fsyncs" `Quick test_success_fsyncs
+      , [ test_case
+            "private JSONL stable lock contention is typed"
+            `Quick
+            test_private_jsonl_transaction_lock_contention_is_typed
+        ; test_case "success fsyncs" `Quick test_success_fsyncs
         ; test_case
             "partial ENOSPC rolls back and fsyncs"
             `Quick
@@ -683,9 +787,25 @@ let () =
             `Quick
             test_private_jsonl_stable_lock_parent_sync_count
         ; test_case
-            "private JSONL stable lock contention is typed"
+            "private JSONL stable lock recovers interrupted creation"
             `Quick
-            test_private_jsonl_transaction_lock_contention_is_typed
+            test_private_jsonl_stable_lock_interrupted_creation_recovers_once
+        ; test_case
+            "private JSONL stable lock stays Preparing when parent sync fails"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_failure_stays_preparing
+        ; test_case
+            "private JSONL stable lock corruption fails closed"
+            `Quick
+            test_private_jsonl_stable_lock_corruption_fails_closed
+        ; test_case
+            "private JSONL existing stable lock rejects permission drift"
+            `Quick
+            test_private_jsonl_existing_stable_lock_permission_drift_fails_closed
+        ; test_case
+            "private JSONL stable lock rejects symbolic links"
+            `Quick
+            test_private_jsonl_stable_lock_symlink_fails_closed
         ] )
     ]
 ;;

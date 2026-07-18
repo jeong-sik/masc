@@ -337,9 +337,6 @@ let running_keeper_count (config : Workspace.config) : int =
 
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
-  let history_fragment_filter_enabled =
-    bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-  in
   let series_points = 120 in
   let names =
     keeper_names config @ Keeper_meta_store.configured_keeper_names config
@@ -538,13 +535,11 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 k2k_recent,
                 k2k_mentions,
                 conversation_raw_count,
-                conversation_fragment_count,
-                conversation_fragment_filtered_count ) =
+                conversation_decode_error_count ) =
             keeper_history_summary_json
               ~all_keeper_names:names
               ~keeper_name:m.name
               ~history_path
-              ~filter_fragments:history_fragment_filter_enabled
           in
           let conversation_tail_count =
             match conversation_tail with
@@ -980,9 +975,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
-              ("conversation_fragment_count", `Int conversation_fragment_count);
-              ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
-              ("conversation_fragment_filter_enabled", `Bool history_fragment_filter_enabled);
+              ( "conversation_decode_error_count",
+                `Int conversation_decode_error_count );
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);

@@ -70,8 +70,6 @@ let truncate_text ~(max_len : int) (s : string) : string =
   | String_util.Untouched _ -> s
   | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
-let contains_ci = String_util.contains_substring_ci
-
 type keeper_24h_bucket_stats = {
   mutable sample_points: int;
   mutable context_ratio_sum: float;
@@ -216,15 +214,14 @@ let keeper_history_summary_json
     ~(all_keeper_names : string list)
     ~(keeper_name : string)
     ~(history_path : string)
-    ~(filter_fragments : bool)
-  : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int =
+  : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int =
   let history_lines =
     Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_history_summary"
       history_path ~max_bytes:120000 ~max_lines:80
   in
   let mention_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
-  let (conversation_rev, k2k_rev, raw_count, fragment_count, filtered_count) =
-    List.fold_left (fun (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count) line ->
+  let conversation_rev, k2k_rev, raw_count, decode_error_count =
+    List.fold_left (fun (conv_acc, k2k_acc, raw_count, decode_error_count) line ->
       try
         let j = Yojson.Safe.from_string line in
         let role = Safe_ops.json_string ~default:"" "role" j |> String.trim in
@@ -243,62 +240,62 @@ let keeper_history_summary_json
         in
         if role = "" || content = ""
            || Keeper_types_support.is_internal_history_source source
-           || Keeper_context_core.has_world_state_signature content
         then
-          (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
+          conv_acc, k2k_acc, raw_count, decode_error_count
         else
-          let is_fragment =
-            role_lc = "assistant"
-            && Keeper_execution.looks_fragmentary_history_text content
-          in
-          let should_filter = filter_fragments && is_fragment in
           let mentions =
+            let mention_ids =
+              Keeper_lane_mentions.mention_ids_of_content content
+            in
             all_keeper_names
-            |> List.filter (fun candidate ->
-                 candidate <> keeper_name && contains_ci content candidate)
+            |> List.filter_map (fun candidate ->
+                 match Keeper_identity.Keeper_id.of_string candidate with
+                 | Some candidate_id
+                   when candidate <> keeper_name
+                        && List.exists
+                             (Keeper_identity.Keeper_id.equal candidate_id)
+                             mention_ids ->
+                     Some candidate
+                 | Some _ | None -> None)
           in
-          let (conv_acc, k2k_acc) =
-            if should_filter then
-              (conv_acc, k2k_acc)
-            else
-              let () = List.iter (count_table_incr mention_counts) mentions in
-              let preview = truncate_text ~max_len:280 content in
-              let is_k2k = role_lc = "user" && mentions <> [] in
-              let conversation_item =
-                `Assoc [
-                  ("role", `String role);
-                  ("ts_unix", `Float ts_unix);
-                  ("content", `String content);
-                  ("preview", `String preview);
-                  ("mentions", `List (List.map (fun s -> `String s) mentions));
-                  ("k2k", `Bool is_k2k);
-                  ("is_fragment", `Bool is_fragment);
-                ]
-              in
-              let k2k_acc =
-                match mentions with
-                | mentioned_keeper :: _ when is_k2k ->
-                    (`Assoc [
-                       ("keeper", `String keeper_name);
-                       ("mentioned", `String mentioned_keeper);
-                       ("role", `String role);
-                       ("ts_unix", `Float ts_unix);
-                       ("preview", `String preview);
-                     ]) :: k2k_acc
-                | _ -> k2k_acc
-              in
-              (conversation_item :: conv_acc, k2k_acc)
+          let () = List.iter (count_table_incr mention_counts) mentions in
+          let preview = truncate_text ~max_len:280 content in
+          let is_k2k = role_lc = "user" && mentions <> [] in
+          let conversation_item =
+            `Assoc [
+              ("role", `String role);
+              ("ts_unix", `Float ts_unix);
+              ("content", `String content);
+              ("preview", `String preview);
+              ("mentions", `List (List.map (fun s -> `String s) mentions));
+              ("k2k", `Bool is_k2k);
+            ]
           in
-          ( conv_acc,
+          let k2k_acc =
+            match mentions with
+            | mentioned_keeper :: _ when is_k2k ->
+                (`Assoc [
+                   ("keeper", `String keeper_name);
+                   ("mentioned", `String mentioned_keeper);
+                   ("role", `String role);
+                   ("ts_unix", `Float ts_unix);
+                   ("preview", `String preview);
+                 ]) :: k2k_acc
+            | _ -> k2k_acc
+          in
+          ( conversation_item :: conv_acc,
             k2k_acc,
             raw_count + 1,
-            fragment_count + (if is_fragment then 1 else 0),
-            filtered_count + (if should_filter then 1 else 0) )
+            decode_error_count )
       with
       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Not_found ->
-        (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
-    ) ([], [], 0, 0, 0) history_lines
+        conv_acc, k2k_acc, raw_count, decode_error_count + 1
+    ) ([], [], 0, 0) history_lines
   in
+  if decode_error_count > 0 then
+    Log.Dashboard.warn
+      "keeper history projection rejected %d row(s) for %s at %s"
+      decode_error_count keeper_name history_path;
   let conversation = `List (List.rev conversation_rev) in
   let k2k_recent = `List (List.rev k2k_rev) in
   let k2k_mentions =
@@ -313,7 +310,7 @@ let keeper_history_summary_json
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
   in
-  (conversation, k2k_recent, k2k_mentions, raw_count, fragment_count, filtered_count)
+  conversation, k2k_recent, k2k_mentions, raw_count, decode_error_count
 
 let top_counts_json
     ?(limit = 5)

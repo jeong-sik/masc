@@ -39,6 +39,17 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
 })
 
 describe('normalizeKeepers phase field', () => {
+  it('preserves observable conversation decode failures', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'history-decode-test',
+        status: 'active',
+        conversation_decode_error_count: 2,
+      },
+    ])
+    expect(keeper?.conversation_decode_error_count).toBe(2)
+  })
+
   it('normalizes lowercase backend phase to PascalCase KeeperPhase', () => {
     const [keeper] = normalizeKeepers([
       { name: 'phase-test', status: 'active', phase: 'running' },

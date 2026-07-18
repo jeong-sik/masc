@@ -525,24 +525,23 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              empty_memory_bank_summary, None
          in
 
-         let history_filter_fragments =
-           bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-         in
-         let (history_tail, history_raw_count, history_fragment_count, history_fragment_filtered_count) =
+         let history_tail, history_raw_count, history_decode_error_count =
            if not include_history_tail then
-             (`List [], 0, 0, 0)
+             `List [], 0, 0
            else
              let lines =
                read_tail_lines_or_empty ~site:"keeper_status_detail_history"
                  history_path ~max_bytes:tail_bytes ~max_lines:tail_messages
              in
-             let (items_rev, raw_count, fragment_count, filtered_count) =
+             let items_rev, raw_count, decode_error_count =
                List.fold_left
-                 (fun (acc, raw_count, fragment_count, filtered_count) line ->
+                 (fun (acc, raw_count, decode_error_count) line ->
                    try
                      let j = Yojson.Safe.from_string line in
                      let role = Safe_ops.json_string ~default:"unknown" "role" j in
-                     let content = Safe_ops.json_string ~default:"" "content" j in
+                     let content =
+                       Keeper_context_core.text_of_history_jsonl_json j
+                     in
                      let source = Safe_ops.json_string ~default:"unknown" "source" j in
                      let ts_unix =
                        let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
@@ -555,7 +554,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                      in
                      let role_lc = String.lowercase_ascii role in
                      let is_internal =
-                       ignore content;
                        Keeper_types_support.is_internal_history_source source
                      in
                      let entry_kind =
@@ -572,13 +570,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        | "system" -> "system"
                        | _ -> "other")
                      in
-                     let is_fragment =
-                       role_lc = "assistant"
-                       && looks_fragmentary_history_text content
-                     in
-                     let should_filter =
-                       is_internal || (history_filter_fragments && is_fragment)
-                     in
                      let preview =
                        if String.length content > 200 then
                          String_util.utf8_prefix ~max_bytes:200 content ^ "..."
@@ -589,27 +580,23 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                          ("role", `String role);
                          ("source", `String source);
                          ("kind", `String entry_kind);
-                         ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
                          ("age_s", Json_util.float_opt_to_json age_s);
                          ("content", `String preview);
-                       ]
+                     ]
                      in
-                     let acc = if should_filter then acc else item :: acc in
-                     let filtered_count =
-                       filtered_count + if should_filter then 1 else 0
-                     in
-                     ( acc,
-                       raw_count + 1,
-                       fragment_count + (if is_fragment then 1 else 0),
-                       filtered_count )
-                   with Yojson.Json_error _ -> (acc, raw_count, fragment_count, filtered_count))
-                 ([], 0, 0, 0) lines
+                     let acc = if is_internal then acc else item :: acc in
+                     acc, raw_count + 1, decode_error_count
+                   with
+                   | Yojson.Json_error _
+                   | Yojson.Safe.Util.Type_error _
+                   | Not_found ->
+                     acc, raw_count, decode_error_count + 1)
+                 ([], 0, 0) lines
              in
             ( `List (apply_tail_order tail_order (List.rev items_rev)),
               raw_count,
-              fragment_count,
-              filtered_count )
+              decode_error_count )
          in
          let compaction_history_tail =
            if not include_compaction_history then
@@ -913,9 +900,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              | `List xs -> `Int (List.length xs)
              | _ -> `Int 0);
            ("history_raw_count", `Int history_raw_count);
-           ("history_fragment_count", `Int history_fragment_count);
-           ("history_fragment_filtered_count", `Int history_fragment_filtered_count);
-           ("history_fragment_filter_enabled", `Bool history_filter_fragments);
+           ("history_decode_error_count", `Int history_decode_error_count);
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [

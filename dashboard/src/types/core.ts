@@ -1258,6 +1258,7 @@ export interface Keeper {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   conversation_tail_count?: number
+  conversation_decode_error_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
   handoff_count_total?: number

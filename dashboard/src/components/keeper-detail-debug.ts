@@ -35,6 +35,9 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   if (keeper.memory_recent_note) extras.push({ title: '메모리 노트', value: keeper.memory_recent_note })
   if (keeper.k2k_count != null) extras.push({ title: 'K2K 카운트', value: String(keeper.k2k_count) })
   if (keeper.conversation_tail_count != null) extras.push({ title: '대화 tail', value: String(keeper.conversation_tail_count) })
+  if ((keeper.conversation_decode_error_count ?? 0) > 0) {
+    extras.push({ title: '대화 디코드 오류', value: String(keeper.conversation_decode_error_count) })
+  }
   if (keeper.handoff_count_total != null) extras.push({ title: '핸드오프 총합', value: String(keeper.handoff_count_total) })
   if (keeper.compaction_count != null) extras.push({ title: '압축 횟수', value: String(keeper.compaction_count) })
   if (keeper.last_compaction_saved_tokens != null) extras.push({ title: '마지막 압축 절약', value: formatTokens(keeper.last_compaction_saved_tokens) })

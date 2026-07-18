@@ -26,24 +26,6 @@ let split_jsonl_lines (content : string) : string list =
   |> String.split_on_char '\n'
   |> List.filter (fun line -> String.trim line <> "")
 
-let normalize_system_context_prefix (text : string) : string =
-  let trimmed = String.trim text in
-  let prefix = "[system context]" in
-  if String.starts_with ~prefix trimmed
-  then (
-    let prefix_len = String.length prefix in
-    let rest_len = String.length trimmed - prefix_len in
-    if rest_len <= 0 then "" else String.trim (String.sub trimmed prefix_len rest_len))
-  else trimmed
-
-let has_world_state_signature (text : string) : bool =
-  let trimmed = normalize_system_context_prefix text in
-  String_util.contains_substring_ci trimmed "## Current World State"
-  &&
-  (String_util.contains_substring_ci trimmed "### Namespace State"
-   || String_util.contains_substring_ci trimmed "### Available Tools"
-   || String_util.contains_substring_ci trimmed "### Continuity")
-
 type history_line_action =
   | Keep_main
   | Move_internal

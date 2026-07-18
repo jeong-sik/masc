@@ -15,10 +15,6 @@ val empty_history_migration_stats : history_migration_stats
 
 val split_jsonl_lines : string -> string list
 
-val normalize_system_context_prefix : string -> string
-
-val has_world_state_signature : string -> bool
-
 type history_line_action =
   | Keep_main
   | Move_internal

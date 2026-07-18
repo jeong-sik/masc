@@ -1,94 +1,48 @@
-(** Property-based tests for Keeper_text_processing.
+(** Property-based tests for the remaining structural text operation.
 
-    Uses QCheck via qcheck-alcotest to verify structural properties
-    of text normalization, stripping, and quality checks. *)
+    Semantic reply classification was deliberately removed: punctuation,
+    language endings, and text length must not decide whether model output is
+    visible. *)
 
-module Tp = Masc.Keeper_text_processing
+module Text = Masc.Keeper_text_processing
 
-(* ── Generators ── *)
+let token_pool = [ "a"; "Z"; "0"; "é"; "한"; "글"; "🙂" ]
 
-let gen_word =
-  QCheck.Gen.(
-    let* len = int_range 1 12 in
-    let* chars = list_size (return len) (oneof [
-      char_range 'a' 'z';
-      char_range 'A' 'Z';
-      char_range '0' '9';
-    ]) in
-    return (String.init len (fun i -> List.nth chars i)))
+let gen_case =
+  let open QCheck.Gen in
+  let* tokens = list_size (int_range 0 64) (oneofl token_pool) in
+  let text = String.concat "" tokens in
+  let* max_bytes = int_range 0 (String.length text + 4) in
+  return (tokens, text, max_bytes)
 
-let gen_ascii_text =
-  QCheck.Gen.(
-    let* words = list_size (int_range 1 8) gen_word in
-    return (String.concat " " words))
+let print_case (_tokens, text, max_bytes) =
+  Printf.sprintf "(%S, max_bytes=%d)" text max_bytes
 
-let korean_endings = [| "합니다"; "입니다"; "습니다"; "중입니다"; "해요"; "다"; "요"; "함" |]
+let expected_prefix ~max_bytes tokens =
+  let rec loop bytes rev = function
+    | [] -> String.concat "" (List.rev rev)
+    | token :: rest ->
+      let next_bytes = bytes + String.length token in
+      if next_bytes > max_bytes
+      then String.concat "" (List.rev rev)
+      else loop next_bytes (token :: rev) rest
+  in
+  loop 0 [] tokens
 
-let gen_korean_text =
-  QCheck.Gen.(
-    let* prefix = gen_ascii_text in
-    let* idx = int_range 0 (Array.length korean_endings - 1) in
-    return (prefix ^ korean_endings.(idx)))
-
-let arb_ascii_text = QCheck.make gen_ascii_text ~print:Fun.id
-let arb_korean_text = QCheck.make gen_korean_text ~print:Fun.id
-
-(* ── Properties ── *)
-
-(* normalize_proactive_text is idempotent *)
-let prop_normalize_idempotent =
-  QCheck.Test.make ~count:1000 ~name:"normalize is idempotent"
-    arb_ascii_text
-    (fun text ->
-       let once = Tp.normalize_proactive_text text in
-       let twice = Tp.normalize_proactive_text once in
-       String.equal once twice)
-
-(* terminal punct detection: non-empty text + period *)
-let prop_terminal_punct =
-  QCheck.Test.make ~count:500 ~name:"word + period has terminal punct"
-    arb_ascii_text
-    (fun prefix ->
-       let trimmed = String.trim prefix in
-       QCheck.assume (trimmed <> "");
-       let text = trimmed ^ "." in
-       Tp.proactive_has_terminal_punct text)
-
-(* Korean endings detected *)
-let prop_terminal_korean =
-  QCheck.Test.make ~count:500 ~name:"Korean endings detected"
-    arb_korean_text
-    (fun text ->
-       let trimmed = String.trim text in
-       QCheck.assume (String.length trimmed > 2);
-       Tp.proactive_has_terminal_ending trimmed)
-
-(* fragmentary detection: trailing colon (safe char class member) *)
-let prop_fragmentary_trailing_colon =
-  QCheck.Test.make ~count:200 ~name:"trailing colon is fragmentary"
-    arb_ascii_text
-    (fun prefix ->
-       let trimmed = String.trim prefix in
-       QCheck.assume (trimmed <> "");
-       let text = trimmed ^ ":" in
-       Tp.proactive_looks_fragmentary text)
-
-(* normalize collapses whitespace *)
-let prop_normalize_no_consecutive_spaces =
-  QCheck.Test.make ~count:1000 ~name:"normalize has no consecutive spaces"
-    arb_ascii_text
-    (fun text ->
-       let normalized = Tp.normalize_proactive_text text in
-       not (try ignore (Re.Str.search_forward (Re.Str.regexp "  ") normalized 0); true
-            with Not_found -> false))
+let prop_truncate_preserves_complete_utf8_tokens =
+  QCheck.Test.make ~count:1000
+    ~name:"truncate returns the exact complete-token prefix"
+    (QCheck.make ~print:print_case gen_case)
+    (fun (tokens, text, max_bytes) ->
+       let actual, truncated = Text.truncate_utf8_prefix ~max_bytes text in
+       let expected = expected_prefix ~max_bytes tokens in
+       String.equal actual expected
+       && Bool.equal truncated (String.length text > max_bytes))
 
 let () =
-  let suite =
-    List.map QCheck_alcotest.to_alcotest
-      [ prop_normalize_idempotent;
-        prop_terminal_punct;
-        prop_terminal_korean;
-        prop_fragmentary_trailing_colon;
-        prop_normalize_no_consecutive_spaces ]
-  in
-  Alcotest.run "pbt_text_processing" [ ("properties", suite) ]
+  Alcotest.run "pbt_text_processing"
+    [ ( "structural_utf8",
+        [ QCheck_alcotest.to_alcotest
+            prop_truncate_preserves_complete_utf8_tokens
+        ] )
+    ]

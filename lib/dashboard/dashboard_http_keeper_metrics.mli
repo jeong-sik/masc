@@ -7,14 +7,8 @@
     runtime-visible entries available in the keeper-detail JSON
     builder.
 
-    Internal: 14 helpers stay private — token / similarity / text
-    helpers ([String_util.utf8_prefix], [truncate_text],
-    [contains_ci], 2 normalize regexes,
-    [normalize_similarity_text], [token_set_of_text],
-    [jaccard_similarity_text], [take_last]),
-    [type keeper_24h_bucket_stats] + builder, the 24h JSON
-    helpers ([keeper_metrics_24h_json],
-    [keeper_history_summary_json]). *)
+    Internal parsing and aggregation helpers stay private. The public
+    boundaries below expose typed summaries, not text-quality classifiers. *)
 
 (** {1 Model name normalization (runtime-visible)} *)
 
@@ -103,20 +97,8 @@ val keeper_history_summary_json :
   all_keeper_names:string list ->
   keeper_name:string ->
   history_path:string ->
-  filter_fragments:bool ->
-  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int
+  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int
 (** [keeper_history_summary_json ~all_keeper_names ~keeper_name
-      ~history_path ~filter_fragments] reads the keeper's history
-    file and returns
-    [(turns_json, models_json, tools_json, turn_count,
-       compaction_count, handoff_count)].  The 6-tuple shape is
-    operator-visible in the dashboard and pinned at the contract
-    seam. *)
-
-(** {1 Test-visible helpers}
-    Pinned for behaviour-tests under {!test/test_dashboard_keeper_metrics_10286}. *)
-
-val contains_ci : string -> string -> bool
-(** [contains_ci haystack needle] is a case-insensitive substring
-    check.  Returns [false] when [needle] is empty or longer than
-    [haystack]. *)
+      ~history_path] reads the keeper's typed history and returns
+    [(conversation_json, k2k_recent_json, k2k_mentions_json, raw_count,
+      decode_error_count)]. *)

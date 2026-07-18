@@ -616,7 +616,6 @@ let submit_keeper_invocation
       ctx
       ~request
   =
-  let name = Keeper_invocation_contract.target_name request in
   match
     let* background_sw =
       Keeper_msg_async.server_background_switch ()

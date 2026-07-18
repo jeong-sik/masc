@@ -156,6 +156,14 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
     "event-queue.json"
 ;;
 
+let reaction_ledger_dir ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+       keeper_name)
+    "reaction-ledger"
+;;
+
 let latest_row rows =
   match List.rev rows with
   | row :: _ -> row
@@ -1195,6 +1203,34 @@ let test_prior_schema_rows_are_segregated_but_consumed () =
     (summary |> member "prior_schema_row_count" |> to_int)
 ;;
 
+let test_evidence_result_preserves_first_malformed_failure () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-evidence-keeper" in
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  let malformed_month = Filename.concat ledger_dir "2026-01" in
+  let later_month = Filename.concat ledger_dir "2026-02" in
+  mkdir_p malformed_month;
+  mkdir_p later_month;
+  let malformed_path = Filename.concat malformed_month "01.jsonl" in
+  write_file malformed_path "not-json\n";
+  Unix.mkfifo (Filename.concat later_month "01.jsonl") 0o600;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+  with
+  | Ok _ -> fail "malformed ledger row was accepted as exact evidence"
+  | Error detail ->
+    let expected_prefix =
+      Printf.sprintf "failed to parse reaction ledger row %s:1:" malformed_path
+    in
+    check bool
+      "first malformed row short-circuits before later storage error"
+      true
+      (String.starts_with ~prefix:expected_prefix detail)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1211,6 +1247,10 @@ let () =
             "event queue reaction evidence matches exact stimulus id"
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
+        ; test_case
+            "evidence preserves first malformed failure"
+            `Quick
+            test_evidence_result_preserves_first_malformed_failure
         ; test_case
             "failure judgment external input is typed history"
             `Quick

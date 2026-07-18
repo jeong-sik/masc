@@ -620,7 +620,23 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   let store = store_for_base_path ~base_path ~keeper_name in
   let iteration, evidence =
     event_queue_reaction_evidence_with_iter ~keeper_name ~stimulus_id (fun note ->
-      Dated_jsonl.iter_all_result store note)
+      let exception Malformed_row of string * int option * string in
+      try
+        Dated_jsonl.iter_all_entries_result store (function
+          | Dated_jsonl.Parsed row -> note row
+          | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+            raise_notrace (Malformed_row (path, line_number, detail)))
+        |> Result.map_error Dated_jsonl.read_error_to_string
+      with
+      | Malformed_row (path, line_number, detail) ->
+        Error
+          (Printf.sprintf
+             "failed to parse reaction ledger row %s%s: %s"
+             path
+             (match line_number with
+              | Some value -> Printf.sprintf ":%d" value
+              | None -> "")
+             detail))
   in
   Result.map (fun () -> evidence) iteration
 ;;

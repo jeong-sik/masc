@@ -5,17 +5,21 @@ each sidecar without hand-editing files. This document enumerates what config
 each sidecar actually reads, where it reads it from, and how the dashboard
 should surface it in a form.
 
-All four current sidecars share the same resolution order (via Pydantic
-`BaseSettings` + `TomlConfigSettingsSource`):
+The remaining external sidecars share the following resolution order via
+Pydantic `BaseSettings` + `TomlConfigSettingsSource`:
 
 ```
 env  >  runtime TOML  >  field defaults
 ```
 
-- Runtime TOML path: `${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`
+- External-sidecar TOML path: `${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`
 - Env file: `sidecars/<name>-bot/.env` (cwd-relative at process start)
 - Dashboard should **write the TOML**, not the `.env` — TOML is the persistent
   surface, `.env` is developer scratch.
+
+Discord is no longer a sidecar. Its in-process OCaml gateway resolves the
+trigger-policy env override and the `[discord]` table in MASC `runtime.toml` as
+documented in the Discord section below.
 
 ## Common fields (all sidecars)
 
@@ -41,7 +45,11 @@ the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
 | Env var | Required | Notes |
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | **yes** | Developer Portal → Bot → Reset Token. Read at every `send_message` call, so token rotation does not require a server restart. If unset the gateway logs a warning and skips startup; the rest of the server boots normally. |
-| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_only`) | One of `mention_only`, `user_only:<discord_user_id>`, `all`. Closed sum; unknown values fall back to `mention_only`. |
+| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_or_thread`) | Closed sum: `mention_only`, `mention_or_thread`, `user_only:<discord_user_id>`, or `all`. Resolution is env > `[discord].trigger_policy` in resolved `runtime.toml` > default. A non-empty invalid env or TOML value is a typed configuration error and the Discord gateway does not start; it is never coerced to a fallback policy. |
+
+An absent or blank env value is unset and falls through to TOML. A missing
+`runtime.toml`, missing `[discord].trigger_policy`, or blank TOML value is also
+unset and yields the default only after both configured planes are absent.
 
 Channel→keeper bindings live where they always did:
 `Channel_gate_discord_state.bind` / `unbind` write to

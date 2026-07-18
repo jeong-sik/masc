@@ -4,8 +4,8 @@
    wrong field type, an invalid policy value, or an invalid
    MASC_DISCORD_TRIGGER_POLICY env value is an explicit load error — the
    gateway must not boot on a policy the operator did not write. Env wins
-   over TOML, matching every other env↔TOML pair in the codebase and the
-   precedence config/runtime.toml documents for this key. *)
+   over TOML, matching the precedence config/runtime.toml documents for this
+   key. *)
 
 open Alcotest
 open Masc
@@ -51,9 +51,7 @@ let ps p = Discord_gateway_state.trigger_policy_to_string p
 let default_str = ps G.default_trigger_policy
 
 let write_file path content =
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
 ;;
 
 (* -- load_trigger_policy_from_toml: the TOML plane in isolation -- *)
@@ -137,7 +135,9 @@ let test_toml_invalid_policy_is_load_error () =
    sandbox suites already use. *)
 let with_config_root dir f =
   with_env "MASC_CONFIG_DIR" dir @@ fun () ->
-  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "1" f
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "1" @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset f
 
 let test_env_valid_wins_over_toml () =
   with_temp_dir @@ fun dir ->

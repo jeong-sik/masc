@@ -94,10 +94,9 @@ let load_trigger_policy_from_toml ~path =
                   Error (Trigger_policy_invalid { path; detail })))))
 ;;
 
-(* Env > TOML > default — the precedence every other env↔TOML pair in this
-   codebase resolves with and the one config/runtime.toml documents for this
-   key. An invalid env value is a load error like an invalid TOML value; an
-   empty/unset env falls through to the TOML plane. *)
+(* Env > TOML > default — the precedence config/runtime.toml documents for
+   this key. An invalid env value is a load error like an invalid TOML value;
+   an empty/unset env falls through to the TOML plane. *)
 let resolved_trigger_policy () =
   match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
   | Some raw ->

@@ -503,6 +503,9 @@ let pp_binding_lookup_error formatter = function
   | Binding_store_read_failed detail ->
     Format.fprintf formatter "Discord binding store read failed: %s" detail
 
+let binding_lookup_error_to_string error =
+  Format.asprintf "%a" pp_binding_lookup_error error
+
 let binding_for_channel bindings ~channel_id =
   List.find_map
     (fun (b : binding) ->
@@ -516,31 +519,35 @@ let resolve_keeper_for_channel_result ~channel_id =
     match read_bindings_result () with
     | Error detail -> Error (Binding_store_read_failed detail)
     | Ok candidates ->
-      let binding, via_parent =
-        match binding_for_channel candidates ~channel_id:normalized with
-        | Some binding -> Some binding, false
-        | None ->
-          let parent_binding =
-            Option.bind
-              (parent_channel_of_thread ~channel_id:normalized)
-              (fun parent_channel_id ->
-                 if String.equal parent_channel_id normalized
-                 then None
-                 else
-                   binding_for_channel candidates
-                     ~channel_id:parent_channel_id)
-          in
-          parent_binding, true
-      in
-      Ok
-        (Option.map
-           (fun (binding : binding) ->
+      (match binding_for_channel candidates ~channel_id:normalized with
+       | Some binding ->
+         Ok
+           (Some
               { keeper_name = binding.keeper_name
               ; incoming_channel_id = normalized
               ; bound_channel_id = binding.channel_id
-              ; via_parent
+              ; via_parent = false
               })
-           binding)
+       | None ->
+         let parent_binding =
+           Option.bind
+             (parent_channel_of_thread ~channel_id:normalized)
+             (fun parent_channel_id ->
+                if String.equal parent_channel_id normalized
+                then None
+                else
+                  binding_for_channel candidates
+                    ~channel_id:parent_channel_id)
+         in
+         Ok
+           (Option.map
+              (fun (binding : binding) ->
+                 { keeper_name = binding.keeper_name
+                 ; incoming_channel_id = normalized
+                 ; bound_channel_id = binding.channel_id
+                 ; via_parent = true
+                 })
+              parent_binding))
 
 let keeper_for_channel_result ~channel_id =
   resolve_keeper_for_channel_result ~channel_id
@@ -555,6 +562,7 @@ let bound_channels_result ~keeper_name =
   if String.equal normalized "" then Ok []
   else
     read_bindings_result ()
+    |> Result.map_error (fun detail -> Binding_store_read_failed detail)
     |> Result.map (fun bindings ->
          bindings
          |> List.filter_map (fun (b : binding) ->
@@ -569,7 +577,7 @@ let bound_channels ~keeper_name =
     Log.Discord.error
       "Discord binding presence read failed (keeper=%s): %s"
       keeper_name
-      detail;
+      (binding_lookup_error_to_string detail);
     []
 
 let connected () =

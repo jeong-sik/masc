@@ -419,7 +419,7 @@ let handle_surface_post_with_outcome
       fail
         ~class_:Tool_result.Runtime_failure
         (Keeper_surface_post.error_json
-           ("Discord binding store read failed: " ^ detail))
+           (Channel_gate_discord_state.binding_lookup_error_to_string detail))
     | Ok bound_discord_channels ->
       let bound_slack_channels =
         Channel_gate_slack_state.bound_channels ~keeper_name:meta.name

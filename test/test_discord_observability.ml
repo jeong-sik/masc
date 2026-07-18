@@ -22,6 +22,8 @@ let test_label_contract () =
     (Obs.inbound_outcome_label Obs.Dispatch_unavailable);
   check string "ambient too_long" "dropped_too_long"
     (Obs.ambient_outcome_label Obs.Ambient_dropped_too_long);
+  check string "ambient binding store error" "binding_store_error"
+    (Obs.ambient_outcome_label Obs.Ambient_binding_store_error);
   check string "reply failed" "send_error"
     (Obs.reply_outcome_label Obs.Reply_send_failed)
 
@@ -49,9 +51,9 @@ let test_inbound_dispatch_counter () =
     Obs.record_inbound_dispatch Obs.Dispatch_unavailable)
 
 let test_ambient_counter () =
-  let labels = [ "outcome", "recorded" ] in
+  let labels = [ "outcome", "binding_store_error" ] in
   check_delta Names.metric_discord_ambient_record ~labels (fun () ->
-    Obs.record_ambient Obs.Ambient_recorded)
+    Obs.record_ambient Obs.Ambient_binding_store_error)
 
 let test_reply_counter () =
   let labels = [ "outcome", "sent" ] in

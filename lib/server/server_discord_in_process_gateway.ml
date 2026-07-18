@@ -422,7 +422,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
   | Error error ->
     log_binding_lookup_failure ~channel_id error;
     Discord_observability.record_ambient
-      Discord_observability.Ambient_dropped_unbound
+      Discord_observability.Ambient_binding_store_error
   | Ok None ->
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
@@ -568,7 +568,7 @@ let submit_ingress ingress ~lane ~event_id run =
       (Connector_ingress_lane.submit_error_to_string error)
 ;;
 
-let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
+  let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
     (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
@@ -613,7 +613,10 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
     (match State.keeper_for_channel_result ~channel_id with
-     | Error error -> log_binding_lookup_failure ~channel_id error
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_ambient
+         Discord_observability.Ambient_binding_store_error
      | Ok None -> on_ambient ~base_dir ev
      | Ok (Some keeper_name) ->
        submit_ingress

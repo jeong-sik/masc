@@ -55,6 +55,7 @@ let live_keeper_presence ~base_path =
             keeper_presence_of_registry_entry ~base_path entry
             |> Result.map (fun keeper -> keeper :: keepers))
        (Ok [])
+  |> Result.map List.rev
 ;;
 
 let update_presence ~workspace_config =
@@ -63,7 +64,7 @@ let update_presence ~workspace_config =
   | Error detail ->
     Log.Discord.error
       "discord_presence_bridge: binding read failed: %s"
-      detail
+      (Channel_gate_discord_state.binding_lookup_error_to_string detail)
   | Ok keepers ->
     (match
        presence_status_for_keepers

@@ -74,6 +74,7 @@ type binding_lookup_error =
   | Binding_store_read_failed of string
 
 val pp_binding_lookup_error : Format.formatter -> binding_lookup_error -> unit
+val binding_lookup_error_to_string : binding_lookup_error -> string
 
 val keeper_for_channel_result :
   channel_id:string -> (string option, binding_lookup_error) result
@@ -93,8 +94,10 @@ val bound_channels : keeper_name:string -> string list
     Callers that need control-flow authority must use
     {!bound_channels_result}. RFC-0223 P2 presence. *)
 
-val bound_channels_result : keeper_name:string -> (string list, string) result
-(** Typed bound-channel lookup. *)
+val bound_channels_result :
+  keeper_name:string -> (string list, binding_lookup_error) result
+(** Typed bound-channel lookup. Store failures use the same error contract as
+    single-channel lookup. *)
 
 val connected : unit -> bool
 (** Whether the in-process gateway's run loop currently reports

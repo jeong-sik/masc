@@ -213,6 +213,8 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
       ; metadata
       }
     in
+    (* DET-OK: rendering-only fallback to stable [user_id]; identity keys
+       use [user_id] directly. *)
     let user_name = Option.value user_name ~default:user_id in
     let delivery =
       slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id

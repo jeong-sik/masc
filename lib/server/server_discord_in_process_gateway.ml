@@ -593,6 +593,8 @@ let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
             ingress
             ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
             ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+            (* DET-OK: override-vs-admitted delivery, both from one typed
+               admission — deterministic, not an unknown-input default. *)
             (Option.value deliver ~default:accepted_delivery)))
   | Gw.Ready _
   | Gw.Reaction_add _

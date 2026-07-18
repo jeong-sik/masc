@@ -1371,17 +1371,13 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
-       let failing_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "remember-fails" ])
-       in
-       let successful_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "independent-success" ])
+       let first_id, second_id, successful_id =
+         List.init 3 (fun index ->
+           submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `Int index ]))
+         |> List.sort (fun left right -> String.compare right left)
+         |> function
+         | [ first; second; third ] -> first, second, third
+         | _ -> Alcotest.fail "three approvals expected"
        in
        let pending_entries =
          let open Yojson.Safe.Util in
@@ -1397,19 +1393,28 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
          | Some entry -> entry
          | None -> Alcotest.fail ("missing persisted entry " ^ id)
        in
+       let entry_at sequence id =
+         match entry_for id with
+         | `Assoc fields ->
+           `Assoc (("sequence", `Int sequence) :: List.remove_assoc "sequence" fields)
+         | _ -> Alcotest.fail "persisted entry object expected"
+       in
        write_pending_snapshot
          ~base_path
          (`Assoc
             [ "version", `Int 3
-            ; "next_sequence", `Int 3
+            ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ delivery_json
-                      ~entry:(entry_for failing_id)
+                      ~entry:(entry_at 1 first_id)
                       ~remember_rule:true
                   ; delivery_json
-                      ~entry:(entry_for successful_id)
+                      ~entry:(entry_at 2 second_id)
+                      ~remember_rule:true
+                  ; delivery_json
+                      ~entry:(entry_at 3 successful_id)
                       ~remember_rule:false
                   ] )
             ]);
@@ -1420,13 +1425,13 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        let report = install_exn ~base_path in
        Alcotest.(check int) "independent delivery replayed" 1 report.replayed_deliveries;
        Alcotest.(check int)
-         "one replay failure reported"
-         1
+         "two replay failures reported"
+         2
          (List.length report.delivery_replay_failures);
-       Alcotest.(check string)
-         "failing approval identified"
-         failing_id
-         (List.hd report.delivery_replay_failures).approval_id;
+       Alcotest.(check (list string))
+         "replay failures preserve durable sequence"
+         [ first_id; second_id ]
+         (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
        Alcotest.(check bool) "later delivery reached origin" true
          (Option.is_some
             (durable_resolution_opt
@@ -1438,7 +1443,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
             match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
             | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
             | None -> ())
-         [ failing_id; successful_id ])
+         [ first_id; second_id; successful_id ])
 ;;
 
 let test_submit_surfaces_storage_failure () =

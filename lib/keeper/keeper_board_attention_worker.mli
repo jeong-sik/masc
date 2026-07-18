@@ -44,6 +44,12 @@ val health_json : base_path:string -> Yojson.Safe.t
     Durable work without a registered worker is degraded and requires
     operator action. *)
 
+val placeholder_health_json :
+  status:Health_status.t -> component_timed_out:bool -> Yojson.Safe.t
+(** Typed non-live projection used while full health is warming, unavailable,
+    failed, or timed out. Field ownership remains here so server placeholders
+    cannot drift from {!health_json}. A caller must not pass [Health_status.Ok]. *)
+
 val start :
   sw:Eio.Switch.t ->
   base_path:string ->

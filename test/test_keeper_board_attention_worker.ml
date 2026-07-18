@@ -124,6 +124,34 @@ let within clock f =
   Eio.Time.with_timeout_exn clock 5.0 f
 ;;
 
+let json_field_names = function
+  | `Assoc fields -> List.map fst fields |> List.sort_uniq String.compare
+  | _ -> Alcotest.fail "health projection must be an object"
+;;
+
+let test_placeholder_health_shape_matches_live_projection () =
+  with_temp_base "board-worker-health-shape" @@ fun base_path ->
+  let live_fields = W.health_json ~base_path |> json_field_names in
+  let placeholder =
+    W.placeholder_health_json
+      ~status:Health_status.Timeout
+      ~component_timed_out:true
+  in
+  let placeholder_fields =
+    placeholder
+    |> json_field_names
+    |> List.filter (fun name -> not (String.equal name "component_timed_out"))
+  in
+  Alcotest.(check (list string))
+    "placeholder and live health share one field contract"
+    live_fields
+    placeholder_fields;
+  Alcotest.(check string)
+    "placeholder preserves typed timeout status"
+    "timeout"
+    U.(placeholder |> member "status" |> to_string)
+;;
+
 let test_owner_drain_never_waits_for_provider () =
   with_temp_base "board-worker-owner-independent" @@ fun base_path ->
   Eio_main.run @@ fun env ->
@@ -408,6 +436,10 @@ let () =
             "candidate signal does not retry deferred partition"
             `Quick
             test_candidate_signal_does_not_retry_deferred_partition
+        ; Alcotest.test_case
+            "placeholder health shape matches live projection"
+            `Quick
+            test_placeholder_health_shape_matches_live_projection
         ] )
     ]
 ;;

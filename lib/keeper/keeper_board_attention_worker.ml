@@ -582,6 +582,87 @@ let drain_completed_on_owner_lane ~base_path ~keeper_name =
       }
 ;;
 
+let ledger_error_json (error : Candidate.ledger_read_error) =
+  `Assoc
+    [ "ledger_path", `String error.ledger_path
+    ; "error", `String error.detail
+    ]
+;;
+
+let keeper_error_json (keeper_name, detail) =
+  `Assoc
+    [ "keeper_name", `String keeper_name
+    ; "error", `String detail
+    ]
+;;
+
+let health_projection_json
+      ~status
+      ~operator_action_required
+      ~status_reasons
+      ~worker_registered
+      ~active_keeper_count
+      ~lane_failures
+      ~candidate_keeper_names
+      ~candidate_discovery_errors
+      ~candidate_pending_count
+      ~candidate_judged_count
+      ~candidate_consumed_count
+      ~candidate_read_errors
+      ~durable_detail_fields
+      ~component_timed_out
+  =
+  let component_timeout_fields =
+    match component_timed_out with
+    | None -> []
+    | Some timed_out -> [ "component_timed_out", `Bool timed_out ]
+  in
+  `Assoc
+    ([ "schema", `String Partition.fleet_summary_schema
+     ; "status", `String (Health_status.to_string status)
+     ; "operator_action_required", `Bool operator_action_required
+     ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
+     ; "worker_registered", `Bool worker_registered
+     ; "active_keeper_count", `Int active_keeper_count
+     ; "lane_failure_count", `Int (List.length lane_failures)
+     ; "lane_failures", `List (List.map keeper_error_json lane_failures)
+     ; "candidate_ledger_keeper_count", `Int (List.length candidate_keeper_names)
+     ; ( "candidate_ledger_keeper_names"
+       , `List (List.map (fun name -> `String name) candidate_keeper_names) )
+     ; ( "candidate_ledger_discovery_error_count"
+       , `Int (List.length candidate_discovery_errors) )
+     ; ( "candidate_ledger_discovery_errors"
+       , `List (List.map ledger_error_json candidate_discovery_errors) )
+     ; "candidate_pending_count", `Int candidate_pending_count
+     ; "candidate_judged_count", `Int candidate_judged_count
+     ; "candidate_consumed_count", `Int candidate_consumed_count
+     ; "candidate_ledger_read_error_count", `Int (List.length candidate_read_errors)
+     ; "candidate_ledger_read_errors", `List (List.map keeper_error_json candidate_read_errors)
+     ]
+     @ durable_detail_fields
+     @ component_timeout_fields)
+;;
+
+let placeholder_health_json ~status ~component_timed_out =
+  if Health_status.equal status Health_status.Ok
+  then invalid_arg "Board attention placeholder health status must not be Ok";
+  health_projection_json
+    ~status
+    ~operator_action_required:false
+    ~status_reasons:[]
+    ~worker_registered:false
+    ~active_keeper_count:0
+    ~lane_failures:[]
+    ~candidate_keeper_names:[]
+    ~candidate_discovery_errors:[]
+    ~candidate_pending_count:0
+    ~candidate_judged_count:0
+    ~candidate_consumed_count:0
+    ~candidate_read_errors:[]
+    ~durable_detail_fields:Partition.empty_fleet_summary_detail_fields
+    ~component_timed_out:(Some component_timed_out)
+;;
+
 let health_json ~base_path =
   let durable = Partition.fleet_summary ~base_path in
   let worker_registered = registered ~base_path in
@@ -629,40 +710,22 @@ let health_json ~base_path =
     || discovery.read_errors <> []
     || candidate_read_errors <> []
   in
-  let ledger_error_json error =
-    `Assoc
-      [ "ledger_path", `String error.Candidate.ledger_path
-      ; "error", `String error.detail
-      ]
-  in
-  let keeper_error_json (keeper_name, detail) =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "error", `String detail
-      ]
-  in
-  `Assoc
-    ([ "schema", `String Partition.fleet_summary_schema
-     ; "status", `String (if operator_action_required then "degraded" else "ok")
-     ; "operator_action_required", `Bool operator_action_required
-     ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
-     ; "worker_registered", `Bool worker_registered
-     ; "active_keeper_count", `Int (active_keeper_count ~base_path)
-     ; "lane_failure_count", `Int lane_failure_count
-     ; "lane_failures", `List (List.map keeper_error_json lane_failures)
-     ; "candidate_ledger_keeper_count", `Int (List.length candidate_keeper_names)
-     ; ( "candidate_ledger_keeper_names"
-       , `List (List.map (fun name -> `String name) candidate_keeper_names) )
-     ; "candidate_ledger_discovery_error_count", `Int (List.length discovery.read_errors)
-     ; ( "candidate_ledger_discovery_errors"
-       , `List (List.map ledger_error_json discovery.read_errors) )
-     ; "candidate_pending_count", `Int candidate_pending_count
-     ; "candidate_judged_count", `Int candidate_judged_count
-     ; "candidate_consumed_count", `Int candidate_consumed_count
-     ; "candidate_ledger_read_error_count", `Int (List.length candidate_read_errors)
-     ; "candidate_ledger_read_errors", `List (List.map keeper_error_json candidate_read_errors)
-     ]
-     @ Partition.fleet_summary_detail_fields durable)
+  health_projection_json
+    ~status:
+      (if operator_action_required then Health_status.Degraded else Health_status.Ok)
+    ~operator_action_required
+    ~status_reasons
+    ~worker_registered
+    ~active_keeper_count:(active_keeper_count ~base_path)
+    ~lane_failures
+    ~candidate_keeper_names
+    ~candidate_discovery_errors:discovery.read_errors
+    ~candidate_pending_count
+    ~candidate_judged_count
+    ~candidate_consumed_count
+    ~candidate_read_errors
+    ~durable_detail_fields:(Partition.fleet_summary_detail_fields durable)
+    ~component_timed_out:None
 ;;
 
 module For_testing = struct

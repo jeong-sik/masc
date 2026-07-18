@@ -931,6 +931,11 @@ let fleet_summary_fields summary =
 
 let fleet_summary_to_yojson summary = `Assoc (fleet_summary_fields summary)
 
+let empty_fleet_summary_detail_fields =
+  fleet_summary_detail_fields
+    { ledger_count = 0; partitions = []; read_errors = [] }
+;;
+
 let fleet_summary_json ~base_path =
   fleet_summary ~base_path |> fleet_summary_to_yojson
 ;;

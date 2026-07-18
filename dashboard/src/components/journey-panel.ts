@@ -157,6 +157,8 @@ function statusTone(entry: JourneyWaterfallEntry): string {
       return 'ok'
     case 'failure':
       return 'bad'
+    case 'gap':
+      return 'warn'
     case 'unknown':
     default:
       return 'neutral'
@@ -165,18 +167,19 @@ function statusTone(entry: JourneyWaterfallEntry): string {
 
 function turnTone(turn: JourneyWaterfallTurn): string {
   if (turn.failureCount > 0) return 'bad'
+  if (turn.provenanceGapCount > 0) return 'warn'
   if (turn.toolCallCount > 0) return 'ok'
   return 'neutral'
 }
 
 function sourceLabel(entry: JourneyWaterfallEntry): string {
   switch (entry.source) {
-    case 'trajectory+tool_call_log':
-      return 'trajectory + provenance'
     case 'tool_call_log':
-      return 'tool log'
+      return 'tool provenance gap'
+    case 'agent_timeline':
+      return 'timeline provenance gap'
     case 'trajectory':
-      return 'trajectory'
+      return entry.hasToolCallLogProvenance ? 'trajectory + provenance' : 'trajectory'
     case 'unknown':
     default:
       return 'unknown'
@@ -263,6 +266,7 @@ function WaterfallEntryRow({
   maxDurationMs: number
 }) {
   const isTool = entry.kind === 'tool_call'
+  const isGap = entry.kind === 'provenance_gap'
   const style = toolCategory(entry.toolName ?? entry.summary)
   const widthPct = entry.durationMs && maxDurationMs > 0
     ? Math.max(8, Math.min(100, Math.round((entry.durationMs / maxDurationMs) * 100)))
@@ -274,10 +278,14 @@ function WaterfallEntryRow({
     <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
       <div class="flex flex-wrap items-center gap-2">
         <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs ${isTool ? style.color : 'text-[var(--color-info-fg)]'}">
-          ${isTool ? style.icon : 'TH'}
+          ${isTool ? style.icon : isGap ? 'GAP' : 'TH'}
         </span>
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg-secondary)]">
-          ${isTool ? normalizeToolName(entry.toolName ?? entry.summary) : 'thinking'}
+          ${isTool
+            ? normalizeToolName(entry.toolName ?? entry.summary)
+            : isGap
+              ? entry.toolName ?? entry.summary
+              : 'thinking'}
         </span>
         <${StatusChip} tone=${statusTone(entry)} uppercase=${false}>${status}<//>
         <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">
@@ -347,6 +355,7 @@ function WaterfallTurnRow({
             <span>tools ${turn.toolCallCount}</span>
             <span>thinking ${turn.thinkingCount}</span>
             <span>failures ${turn.failureCount}</span>
+            <span>provenance gaps ${turn.provenanceGapCount}</span>
           </div>
         </div>
         <div class="flex flex-wrap gap-1.5 text-3xs">
@@ -397,11 +406,12 @@ function WaterfallBody({
     <div class="flex flex-col gap-4">
       <${SourceWarning} errors=${result.sourceErrors} />
 
-      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <${MetricCell} label="turns" value=${summary.totalTurns} tone="info" />
         <${MetricCell} label="events" value=${summary.totalEntries} />
         <${MetricCell} label="tools" value=${summary.toolCallCount} tone="ok" />
         <${MetricCell} label="failures" value=${summary.failureCount} tone=${summary.failureCount > 0 ? 'bad' : 'ok'} />
+        <${MetricCell} label="provenance gaps" value=${summary.provenanceGapCount} tone=${summary.provenanceGapCount > 0 ? 'warn' : 'ok'} />
         <${MetricCell} label="tool time" value=${formatMaybeDuration(summary.totalDurationMs)} />
       </div>
 

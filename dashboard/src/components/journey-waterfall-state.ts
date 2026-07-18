@@ -4,7 +4,7 @@ import type {
   TrajectoryResponse,
 } from '../api/dashboard'
 import type { KeeperRuntimeTraceResponse } from '../api/keeper'
-import { asNullableString } from './common/normalize'
+import { asNullableString, asRecord } from './common/normalize'
 import type { Keeper } from '../types'
 import { keeperPriority as classifyKeeperPriority } from '../lib/keeper-classifiers'
 import {
@@ -12,9 +12,9 @@ import {
   type UnifiedTraceEvent,
 } from './session-trace/session-trace-state'
 
-type WaterfallEntryKind = 'thinking' | 'tool_call'
-type WaterfallEntryStatus = 'success' | 'failure' | 'unknown'
-type WaterfallEntrySource = 'trajectory' | 'trajectory+tool_call_log' | 'tool_call_log' | 'unknown'
+type WaterfallEntryKind = 'thinking' | 'tool_call' | 'provenance_gap'
+type WaterfallEntryStatus = 'success' | 'failure' | 'gap' | 'unknown'
+type WaterfallEntrySource = 'trajectory' | 'agent_timeline' | 'tool_call_log' | 'unknown'
 
 export interface JourneyWaterfallEntry {
   id: string
@@ -35,6 +35,7 @@ export interface JourneyWaterfallEntry {
   error: string | null
   sessionId: string | null
   traceId: string | null
+  hasToolCallLogProvenance: boolean
 }
 
 export interface JourneyWaterfallRuntimeEvidence {
@@ -64,6 +65,7 @@ export interface JourneyWaterfallTurn {
   thinkingCount: number
   toolCallCount: number
   failureCount: number
+  provenanceGapCount: number
   totalDurationMs: number
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
 }
@@ -74,6 +76,7 @@ export interface JourneyWaterfallSummary {
   thinkingCount: number
   toolCallCount: number
   failureCount: number
+  provenanceGapCount: number
   totalDurationMs: number
   timelineStartTs: number | null
   timelineEndTs: number | null
@@ -115,29 +118,37 @@ function numberValue(value: unknown): number | null {
 }
 
 function traceEventSource(event: UnifiedTraceEvent): WaterfallEntrySource {
+  if (event.detail.observation_kind === 'provenance_gap') {
+    const source = asNullableString(event.detail.source)
+    if (source === 'agent_timeline' || source === 'tool_call_log') return source
+    return 'unknown'
+  }
   const origin = asNullableString(event.detail.trace_origin)
-  if (origin === 'trajectory+tool_call_log') return 'trajectory+tool_call_log'
-  if (origin === 'tool_call_log') return 'tool_call_log'
   if (origin === 'trajectory') return 'trajectory'
   return 'unknown'
 }
 
 function traceEventTraceId(event: UnifiedTraceEvent): string | null {
-  return asNullableString(event.detail.trace_id)
+  const direct = asNullableString(event.detail.trace_id)
+  if (direct !== null) return direct
+  const toolCallLog = asRecord(event.detail.tool_call_log)
+  return asNullableString(toolCallLog?.trace_id)
 }
 
 function traceEventStatus(event: UnifiedTraceEvent): WaterfallEntryStatus {
+  if (event.detail.observation_kind === 'provenance_gap') return 'gap'
   if (event.error) return 'failure'
   if (event.kind === 'tool_call') return 'success'
   return 'unknown'
 }
 
 function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | null {
-  if (event.kind !== 'tool_call' && event.kind !== 'thinking') return null
+  const isProvenanceGap = event.detail.observation_kind === 'provenance_gap'
+  if (event.kind !== 'tool_call' && event.kind !== 'thinking' && !isProvenanceGap) return null
   const status = traceEventStatus(event)
   return {
     id: event.id,
-    kind: event.kind,
+    kind: isProvenanceGap ? 'provenance_gap' : event.kind as 'tool_call' | 'thinking',
     status,
     source: traceEventSource(event),
     ts: event.ts,
@@ -145,7 +156,7 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     turn: event.turn ?? null,
     round: event.round ?? null,
     summary: event.summary,
-    toolName: event.toolName ?? null,
+    toolName: event.toolName ?? asNullableString(event.detail.provenance_tool_name),
     toolArgs: event.toolArgs ?? null,
     toolResult: event.toolResult ?? null,
     thinkingContent: event.thinkingContent ?? null,
@@ -154,6 +165,7 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     error: event.error ?? null,
     sessionId: event.sessionId ?? null,
     traceId: traceEventTraceId(event),
+    hasToolCallLogProvenance: asRecord(event.detail.tool_call_log) !== null,
   }
 }
 
@@ -217,6 +229,7 @@ function buildTurn(
     thinkingCount: sortedEntries.filter(entry => entry.kind === 'thinking').length,
     toolCallCount: toolEntries.length,
     failureCount: sortedEntries.filter(entry => entry.status === 'failure').length,
+    provenanceGapCount: sortedEntries.filter(entry => entry.kind === 'provenance_gap').length,
     totalDurationMs: toolEntries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
     runtimeEvidence,
   }
@@ -273,6 +286,7 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
       thinkingCount: allTurnEntries.filter(entry => entry.kind === 'thinking').length,
       toolCallCount: allTurnEntries.filter(entry => entry.kind === 'tool_call').length,
       failureCount: allTurnEntries.filter(entry => entry.status === 'failure').length,
+      provenanceGapCount: allTurnEntries.filter(entry => entry.kind === 'provenance_gap').length,
       totalDurationMs: turns.reduce((sum, turn) => sum + turn.totalDurationMs, 0),
       timelineStartTs: allTurnEntries[0]?.ts ?? null,
       timelineEndTs: allTurnEntries.at(-1)?.ts ?? null,

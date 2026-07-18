@@ -427,7 +427,7 @@ describe('keeper tool telemetry fetchers', () => {
       total_entries: 1,
       total_entries_scope: 'tail',
       total_entries_exact: false,
-      tail_scan_lines: 500,
+      tail_scan_entries: 500,
       showing: 1,
       decode: {
         tool_call_count: 0,
@@ -480,7 +480,7 @@ describe('keeper tool telemetry fetchers', () => {
         total_entries: 1,
         total_entries_scope: 'tail',
         total_entries_exact: false,
-        tail_scan_lines: 500,
+        tail_scan_entries: 500,
         showing: 1,
         decode: {
           skipped_summary_count: 0,
@@ -549,7 +549,7 @@ describe('keeper tool telemetry fetchers', () => {
       total_entries: 1,
       total_entries_scope: 'tail',
       total_entries_exact: false,
-      tail_scan_lines: 1,
+      tail_scan_entries: 1,
       showing: 1,
       decode: {
         tool_call_count: 1,
@@ -661,7 +661,7 @@ describe('keeper tool telemetry fetchers', () => {
       total_entries: entries.length,
       total_entries_scope: 'tail',
       total_entries_exact: false,
-      tail_scan_lines: entries.length,
+      tail_scan_entries: entries.length,
       showing: entries.length,
       decode: {
         tool_call_count: 0,
@@ -709,7 +709,7 @@ describe('keeper tool telemetry fetchers', () => {
       total_entries: 0,
       total_entries_scope: 'tail',
       total_entries_exact: false,
-      tail_scan_lines: 0,
+      tail_scan_entries: 0,
       showing: 0,
       decode: {
         tool_call_count: 0,

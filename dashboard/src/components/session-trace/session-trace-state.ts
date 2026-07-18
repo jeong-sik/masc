@@ -520,10 +520,12 @@ function toolCallEntryToProvenanceGap(entry: ToolCallEntry, index: number): Unif
     detail: {
       observation_kind: 'provenance_gap',
       source: 'tool_call_log',
+      provenance_tool_name: entry.tool,
       tool_call_log: toolCallProvenanceDetail(entry),
     },
     agentName: entry.keeper,
     sessionId: entry.session_id ?? null,
+    turn: entry.turn ?? entry.keeper_turn_id,
     executionId: entry.execution_id,
     error: 'tool-call provenance has no canonical Trajectory execution row',
   }

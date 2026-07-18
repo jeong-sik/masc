@@ -62,7 +62,7 @@ export type TrajectoryResponse = {
   total_entries: number
   total_entries_scope: 'tail'
   total_entries_exact: false
-  tail_scan_lines: number
+  tail_scan_entries: number
   showing: number
   decode: TrajectoryLineDecode
   io_errors: TrajectoryReadError[]
@@ -150,7 +150,7 @@ const LINE_DECODE_KEYS = new Set([
 ])
 const TRAJECTORY_RESPONSE_KEYS = new Set([
   'keeper', 'trace_id', 'generation', 'total_entries', 'total_entries_scope',
-  'total_entries_exact', 'tail_scan_lines', 'showing', 'decode', 'io_errors',
+  'total_entries_exact', 'tail_scan_entries', 'showing', 'decode', 'io_errors',
   'entries',
 ])
 const SUCCEEDED_OUTCOME_KEYS = new Set(['status', 'output'])
@@ -303,7 +303,7 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
   const traceId = decodeTrajectoryNonBlankString(raw.trace_id)
   const generation = decodeTrajectoryCount(raw.generation)
   const totalEntries = decodeTrajectoryCount(raw.total_entries)
-  const tailScanLines = decodeTrajectoryCount(raw.tail_scan_lines)
+  const tailScanEntries = decodeTrajectoryCount(raw.tail_scan_entries)
   const showing = decodeTrajectoryCount(raw.showing)
   const decode = decodeLineDecode(raw.decode)
   const ioErrors = decodeTrajectoryReadErrors(raw.io_errors)
@@ -314,7 +314,7 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
     || totalEntries === null
     || raw.total_entries_scope !== 'tail'
     || raw.total_entries_exact !== false
-    || tailScanLines === null
+    || tailScanEntries === null
     || showing === null
     || showing > totalEntries
     || decode === null
@@ -340,7 +340,7 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
     total_entries: totalEntries,
     total_entries_scope: 'tail',
     total_entries_exact: false,
-    tail_scan_lines: tailScanLines,
+    tail_scan_entries: tailScanEntries,
     showing,
     decode,
     io_errors: ioErrors,

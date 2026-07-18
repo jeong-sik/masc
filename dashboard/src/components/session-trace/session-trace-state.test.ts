@@ -59,7 +59,7 @@ function emptyTimeline(agent = 'keeper-a') {
 const ONE_TOOL_TRAJECTORY_OBSERVATION = {
   total_entries_scope: 'tail' as const,
   total_entries_exact: false as const,
-  tail_scan_lines: 500,
+  tail_scan_entries: 500,
   decode: {
     tool_call_count: 1,
     thinking_count: 0,
@@ -247,7 +247,7 @@ describe('scheduleSessionTraceReload', () => {
       total_entries: 1,
       total_entries_scope: 'tail',
       total_entries_exact: false,
-      tail_scan_lines: 500,
+      tail_scan_entries: 500,
       showing: 1,
       decode: {
         tool_call_count: 0,
@@ -446,7 +446,7 @@ describe('buildTraceEvents', () => {
         total_entries: 3,
         total_entries_scope: 'tail',
         total_entries_exact: false,
-        tail_scan_lines: 3,
+        tail_scan_entries: 3,
         showing: 3,
         decode: {
           tool_call_count: 0,

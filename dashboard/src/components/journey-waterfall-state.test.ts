@@ -22,7 +22,7 @@ function trajectory(entries: TrajectoryEntry[]): TrajectoryResponse {
     total_entries: entries.length,
     total_entries_scope: 'tail',
     total_entries_exact: false,
-    tail_scan_lines: 500,
+    tail_scan_entries: 500,
     showing: entries.length,
     decode: {
       tool_call_count: toolEntries.length,
@@ -189,12 +189,13 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.toolCallCount).toBe(1)
     expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
-    expect(toolEntry?.source).toBe('trajectory+tool_call_log')
+    expect(toolEntry?.source).toBe('trajectory')
+    expect(toolEntry?.hasToolCallLogProvenance).toBe(true)
     expect(toolEntry?.toolArgs).toEqual({ path: '/tmp/old' })
     expect(toolEntry?.toolResult).toBe('old result')
   })
 
-  it('keeps tool-call-log rows when trajectory is missing', () => {
+  it('surfaces a provenance gap without fabricating a Tool row', () => {
     const model = buildJourneyWaterfall({
       keeper: 'keeper-a',
       trajectory: null,
@@ -217,6 +218,9 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns).toHaveLength(1)
     expect(model.turns[0]?.turn).toBe(5)
     expect(model.turns[0]?.entries[0]?.source).toBe('tool_call_log')
+    expect(model.turns[0]?.entries[0]?.kind).toBe('provenance_gap')
+    expect(model.turns[0]?.toolCallCount).toBe(0)
+    expect(model.turns[0]?.provenanceGapCount).toBe(1)
     expect(model.turns[0]?.runtimeEvidence).toBeNull()
   })
 

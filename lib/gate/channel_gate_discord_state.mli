@@ -87,12 +87,12 @@ val resolve_keeper_for_channel_result :
 (** Resolve the keeper for [channel_id]. Exact bindings win. The only
     parent fallback is an in-process thread-registry observation. *)
 
-val bound_channels : keeper_name:string -> string list
+val bound_channels :
+  keeper_name:string ->
+  (string list, Channel_gate_binding_store.binding_store_error) result
 (** Channel snowflakes bound to [keeper_name], freshly read from the
-    binding store on each call. The generic connector interface cannot carry
-    an error, so store failures are logged before returning an empty projection.
-    Callers that need control-flow authority must use
-    {!bound_channels_result}. RFC-0223 P2 presence. *)
+    binding store on each call. Store failure remains distinct from an empty
+    binding set. RFC-0223 P2 presence. *)
 
 val bound_channels_result :
   keeper_name:string -> (string list, binding_lookup_error) result

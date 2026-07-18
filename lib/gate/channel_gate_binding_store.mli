@@ -73,11 +73,10 @@ val binding_store_error_to_string : binding_store_error -> string
 val audit_append_error_to_string : audit_append_error -> string
 val mutation_error_to_string : mutation_error -> string
 val read_bindings_result : t -> (binding list, binding_store_error) result
-val read_bindings : t -> binding list
+val bound_channels_result :
+  t -> keeper_name:string -> (string list, binding_store_error) result
 val binding_json : binding -> Yojson.Safe.t
-val save_bindings : t -> binding list -> unit
 val audit_event_json : t -> audit_event -> Yojson.Safe.t
-val append_audit_event : t -> audit_event -> unit
 val mutate_bindings :
   t ->
   decide:(binding list -> (binding list * audit_event * 'a, string) result) ->

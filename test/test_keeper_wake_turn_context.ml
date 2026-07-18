@@ -69,6 +69,7 @@ let base_observation : WO.world_observation =
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
+    connected_surface_failures = [];
   }
 
 let meta_of_json json =

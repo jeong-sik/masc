@@ -331,7 +331,8 @@ let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
       Slack_observability.record_inbound_dispatch Slack_observability.Gate_error;
       Log.Server.error
         "Slack ingress binding unavailable channel=%s event=%s: %s"
-        channel_id event_id reason
+        channel_id event_id
+        (Channel_gate_binding_store.binding_store_error_to_string reason)
     | Ok resolved_binding -> (
       match accept_event ~resolved_binding ~dispatch_for_delivery ~team_id ev with
       | None -> ()

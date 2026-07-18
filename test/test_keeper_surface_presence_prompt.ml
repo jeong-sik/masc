@@ -62,6 +62,7 @@ let base_observation : WO.world_observation =
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
+    connected_surface_failures = [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =
@@ -202,6 +203,21 @@ let test_empty_presence_has_no_section () =
   check bool "no section when empty" false
     (contains ~needle:"### Connected Surfaces" user)
 
+let test_binding_presence_failure_is_visible () =
+  let failure : Gate_surface.presence_failure =
+    { connector_id = "telegram"
+    ; error = Channel_gate_binding_store.Binding_store_io_failed "read failed"
+    }
+  in
+  let user =
+    user_message
+      { base_observation with connected_surface_failures = [ failure ] }
+  in
+  check bool "failure section visible" true
+    (contains ~needle:"### Connected Surfaces" user);
+  check bool "connector failure visible" true
+    (contains ~needle:"telegram binding presence unavailable" user)
+
 let test_namespace_state_names_running_keeper_fibers () =
   let user =
     user_message { base_observation with running_keeper_fiber_count = 2 }
@@ -252,6 +268,8 @@ let () =
             test_dashboard_only_keeper_has_no_section;
           test_case "empty presence has no section" `Quick
             test_empty_presence_has_no_section;
+          test_case "binding presence failure is visible" `Quick
+            test_binding_presence_failure_is_visible;
           test_case "namespace state names running keeper fibers" `Quick
             test_namespace_state_names_running_keeper_fibers;
           test_case "profile defaults feed identity prompt" `Quick

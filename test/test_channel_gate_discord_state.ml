@@ -19,7 +19,7 @@ module Registry_test_connector_a = struct
     Ok (`Assoc [ "variant", `String "a" ])
   let unbind ~channel_id:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "a" ])
-  let bound_channels ~keeper_name:_ = []
+  let bound_channels ~keeper_name:_ = Ok []
   let connected () = false
 end
 module Registry_test_connector_b = struct

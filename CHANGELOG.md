@@ -4,6 +4,7 @@
 
 ### Fixed
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
+- Keeper context-metrics projection now reads its JSONL ledger through `Dated_jsonl.read_recent_result` and exposes typed storage or malformed-row unavailability instead of silently falling back to metadata. `Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files` now returns a `result`; there is no compatibility wrapper for the former `option` signature.
 
 ### Removed
 - Removed the public MASC JSON Schema classifiers `Tool_bridge.param_type_of_string` and `Sdk_tool_contract.param_type_of_schema_opt`, plus the zero-consumer `Sdk_tool_contract.tool_params_of_input_schema`. Consumers must use the OAS-owned `Agent_sdk.Mcp.json_schema_to_params`; missing, unsupported, or ambiguous property types now fail at that boundary instead of defaulting to `String`. No compatibility alias remains.

@@ -262,8 +262,10 @@ let reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
       ~base_path
       ~keeper_name
       ~stimulus_id
-    |> Result.map_error (fun detail ->
-      "failed to read keeper reaction ledger stimulus: " ^ detail)
+    |> Result.map_error (fun error ->
+      "failed to read keeper reaction ledger stimulus: "
+      ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+          error)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -281,12 +283,32 @@ let accept_keeper_wake_occurrence
   =
   match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id with
   | Error detail -> retryable_dispatch_failure detail
-  | Ok evidence when evidence.event_queue_ack_seen ->
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { first_reason; _ }) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "keeper reaction ledger evidence quarantined for occurrence %s: %s"
+         stimulus_id
+         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
+  | Ok
+      (Keeper_reaction_ledger.Evidence_incomplete
+        { evidence; _ }) ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "keeper reaction ledger evidence incomplete for occurrence %s: \
+          unattributed_syntax_error_count=%d \
+          unattributed_identity_quarantine_count=%d"
+         stimulus_id
+         evidence.unattributed_syntax_error_count
+         evidence.unattributed_identity_quarantine_count)
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
+    when evidence.event_queue_ack_seen ->
     (* The transition projector appends this exact-id ACK before retiring its
        outbox entry. It is therefore the durable terminal occurrence fence,
        independent of pending/lease/outbox retention. *)
     Ok Already_drained
-  | Ok evidence ->
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
          ~base_path

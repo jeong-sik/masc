@@ -13,39 +13,7 @@ let take = List.take
 
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
-  | None ->
-    `Assoc
-      [ "schema", `String "keeper.reaction_ledger.fleet_summary.v1"
-      ; "status", `String "unavailable"
-      ; "status_reasons", `List []
-      ; "operator_action_required", `Bool false
-      ; "keeper_count", `Int 0
-      ; "keeper_names", `List []
-      ; "scanned_row_limit_per_keeper", `Int 20
-      ; "row_count", `Int 0
-      ; "stimulus_count", `Int 0
-      ; "reaction_count", `Int 0
-      ; "pending_stimulus_count", `Int 0
-      ; "durable_event_queue_count", `Int 0
-      ; "durable_event_queue_pending_count", `Int 0
-      ; "durable_event_queue_inflight_count", `Int 0
-      ; "durable_event_queue_discovered_keeper_count", `Int 0
-      ; "durable_event_queue_discovered_keeper_names", `List []
-      ; "durable_event_queue_discovery_error", `Null
-      ; "durable_event_queue_discovery_error_count", `Int 0
-      ; ( "durable_event_queue_stale_after_sec"
-        , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
-      ; "durable_event_queue_stale_count", `Int 0
-      ; "durable_event_queue_stale_keeper_count", `Int 0
-      ; "durable_event_queue_read_error_count", `Int 0
-      ; "durable_event_queue_read_errors_by_keeper", `List []
-      ; "durable_event_queue_by_keeper", `List []
-      ; "durable_event_queue_stale_by_keeper", `List []
-      ; "durable_event_queue_payload_counts", `List []
-      ; "pending_by_keeper", `List []
-      ; "read_error_count", `Int 0
-      ; "keepers", `List []
-      ]
+  | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
     let keeper_names =

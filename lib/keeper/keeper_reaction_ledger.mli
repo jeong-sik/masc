@@ -1,9 +1,11 @@
 (** Durable keeper stimulus -> reaction ledger.
 
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
-    contract: queue-visible stimuli, turn reactions, execution receipts, and
-    board cursor acknowledgements are written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/YYYY-MM/DD.jsonl]. *)
+    contract: queue-visible stimuli, queue settlement reactions, and board
+    cursor acknowledgements are written to a replayable JSONL store under
+    [.masc/keepers/<keeper>/reaction-ledger/v3/YYYY-MM/DD.jsonl].  The
+    generation namespace is a hard boundary: older stores are neither read nor
+    written by this module. *)
 
 type cursor =
   { cursor_ts : float
@@ -30,15 +32,14 @@ type reaction_kind =
   | Event_queue_ack
   | Event_queue_requeued
   | Event_queue_escalated
-  | Execution_receipt
-  | Terminal_reason
   | Cursor_ack
-  | Operator_escalation
-  | Supervisor_recovery_requested
-  | Unknown_reaction of string
+
+type reaction_decode_error = Unknown_reaction_kind of string
+type row_quarantine_reason
 
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
+val row_quarantine_reason_to_string : row_quarantine_reason -> string
 
 val stimulus_kind_of_string : string -> stimulus_kind option
 (** Inverse of {!stimulus_kind_to_string}.  Strings outside the closed sum
@@ -46,9 +47,10 @@ val stimulus_kind_of_string : string -> stimulus_kind option
     through this and matches the variant exhaustively, so adding a stimulus
     variant forces the classifier to be updated (RFC-0266 regression guard). *)
 
-val reaction_kind_of_string : string -> reaction_kind
-(** Inverse of {!reaction_kind_to_string}.  Total: unknown strings map to
-    [Unknown_reaction], mirroring the open [Unknown_reaction of string] escape. *)
+val reaction_kind_of_string : string -> (reaction_kind, reaction_decode_error) result
+(** Closed inverse of {!reaction_kind_to_string}. Strings outside the current
+    reaction algebra return a typed decoder error and can never become a
+    current reaction. *)
 
 val board_stimulus_id : post_id:string -> string
 (** Stable id for board-originated stimuli. *)
@@ -61,18 +63,14 @@ val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
 (** Append a [record_kind="stimulus"] row for an enqueued stimulus. *)
 
-val record_event_queue_reaction :
-  base_path:string ->
-  keeper_name:string ->
-  reaction_kind:reaction_kind ->
-  Keeper_event_queue.stimulus ->
-  unit
-(** Append a [record_kind="reaction"] row tied to an event queue stimulus. *)
+val record_event_queue_turn_started :
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
+(** Append the sole non-settlement event-queue reaction. The writer fixes the
+    reaction kind so callers cannot manufacture settlement evidence. *)
 
 val record_event_queue_transition_reaction_result :
   base_path:string ->
   keeper_name:string ->
-  reaction_kind:reaction_kind ->
   source_index:int ->
   receipt:Keeper_event_queue_state.transition_receipt ->
   Keeper_event_queue.stimulus ->
@@ -92,21 +90,47 @@ type event_queue_reaction_evidence =
   ; event_queue_ack_recorded_at : float option
   ; latest_recorded_at : float option
   ; matched_record_count : int
+  ; quarantined_record_count : int
+  ; unattributed_syntax_error_count : int
+  ; unattributed_identity_quarantine_count : int
   }
 
-val event_queue_reaction_evidence :
-  base_path:string -> keeper_name:string -> stimulus_id:string -> event_queue_reaction_evidence
-(** Stream the durable reaction ledger for exact rows sharing [stimulus_id].
-    This intentionally does not use a "recent rows" limit, because dashboards
-    use it to prove a specific queue stimulus was observed by the keeper. *)
+type unattributed_syntax_error =
+  { path : string
+  ; line_number : int option
+  ; detail : string
+  }
+
+type event_queue_reaction_evidence_outcome =
+  | Evidence_complete of event_queue_reaction_evidence
+  | Evidence_quarantined of
+      { evidence : event_queue_reaction_evidence
+      ; first_reason : row_quarantine_reason
+      }
+  | Evidence_incomplete of
+      { evidence : event_queue_reaction_evidence
+      ; first_syntax_error : unattributed_syntax_error option
+      ; first_identity_quarantine_reason : row_quarantine_reason option
+      ; first_matching_quarantine_reason : row_quarantine_reason option
+      }
+
+type event_queue_reaction_evidence_error =
+  | Evidence_invalid_stimulus_id
+  | Evidence_read_error of Dated_jsonl.read_error
+
+val event_queue_reaction_evidence_error_to_string :
+  event_queue_reaction_evidence_error -> string
 
 val event_queue_reaction_evidence_result :
   base_path:string ->
   keeper_name:string ->
   stimulus_id:string ->
-  (event_queue_reaction_evidence, string) result
-(** Fail-loud exact-id scan for delivery invariants. Unlike the dashboard
-    projection above, malformed or unreadable ledger rows return [Error]. *)
+  (event_queue_reaction_evidence_outcome, event_queue_reaction_evidence_error) result
+(** Exact-id delivery scan over the complete keeper-local ledger. Matching
+    semantic-invalid rows produce {!Evidence_quarantined}. Syntax-invalid rows
+    and parseable rows without a usable stimulus identity cannot be attributed
+    and therefore produce {!Evidence_incomplete}; they never become negative
+    evidence. Empty query identities and storage failures remain typed errors. *)
 
 val record_board_cursor_ack :
   base_path:string ->
@@ -120,27 +144,6 @@ val record_board_cursor_ack :
     advancing the in-memory board cursor so every cursor advance has a replayable
     ack row. *)
 
-val record_execution_receipt_reaction :
-  Workspace.config ->
-  keeper_name:string ->
-  trace_id:string ->
-  ?turn_count:int ->
-  current_task_id:string option ->
-  goal_ids:string list ->
-  outcome:string ->
-  reaction_kind:reaction_kind ->
-  terminal_reason_code:string ->
-  receipt_json:Yojson.Safe.t ->
-  unit ->
-  unit
-(** Append a reaction row that links a turn execution receipt back into the
-    keeper reaction ledger. [reaction_kind] is a typed decision from the
-    receipt owner; this persistence boundary does not reclassify wire text. *)
-
-val read_recent_for_keeper :
-  base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t list
-(** Read the newest rows for tests and dashboards. *)
-
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
 (** Summarize the recent ledger rows for a keeper.  The summary is intentionally
@@ -153,3 +156,7 @@ val fleet_summary_json :
   limit_per_keeper:int ->
   Yojson.Safe.t
 (** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
+
+val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
+(** Canonical empty fleet projection used when server state is unavailable.
+    Kept here so schema and field ownership remain single-source. *)

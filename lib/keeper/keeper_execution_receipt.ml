@@ -453,14 +453,6 @@ let needs_operator_broadcast = function
   | Disp_skipped -> false
 ;;
 
-let reaction_kind_of_operator_disposition = function
-  | Disp_pass | Disp_skipped -> Keeper_reaction_ledger.Execution_receipt
-  | Disp_fail_open_next_runtime
-  | Disp_pass_next_model
-  | Disp_user_cancelled
-  | Disp_unknown -> Keeper_reaction_ledger.Terminal_reason
-;;
-
 module Broadcast_dedupe = struct
   (* Tracks only the last successfully emitted key. A->B->A re-emits by
      design so changed failure identities are not hidden; #22391 owns the
@@ -647,28 +639,6 @@ let append (config : Workspace.config) (receipt : t) =
       ~disposition_reason:reason
   in
   Dated_jsonl.append store receipt_json;
-  (try
-     Keeper_reaction_ledger.record_execution_receipt_reaction
-       config
-       ~keeper_name:receipt.keeper_name
-       ~trace_id:receipt.trace_id
-       ?turn_count:receipt.turn_count
-       ~current_task_id:receipt.current_task_id
-       ~goal_ids:receipt.goal_ids
-       ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
-       ~reaction_kind:(reaction_kind_of_operator_disposition disposition)
-       ~terminal_reason_code:receipt.terminal_reason_code
-       ~receipt_json
-       ()
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Keeper.warn
-       ~keeper_name:receipt.keeper_name
-       "%s: reaction ledger receipt append failed trace_id=%s: %s"
-       receipt.keeper_name
-       receipt.trace_id
-       (Printexc.to_string exn));
   if needs_operator_broadcast disposition
   then (
     let disposition_label = operator_disposition_kind_to_string disposition in

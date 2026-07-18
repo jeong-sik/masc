@@ -55,6 +55,18 @@ module Executor = struct
   ;;
 end
 
+(** {1 OAS Durable Execution Configuration} *)
+
+module Oas_execution = struct
+  (** Worker-domain count for the application-lifetime OAS execution codec.
+      OAS validates the parsed value when the runtime is created; MASC does
+      not silently coerce a non-positive numeric setting.
+      @category Concurrency
+      @ops_class operator *)
+  let domain_count =
+    get_int ~default:1 "MASC_OAS_EXECUTION_DOMAIN_COUNT"
+end
+
 (** {1 Orchestrator Configuration} *)
 
 module Orchestrator = struct

@@ -231,6 +231,13 @@ let test_worker_mcp_client_session_finish_clears_started_at () =
     completed.mcp_client_session_started_at;
   check bool "last_run_at recorded" true (Option.is_some completed.last_run_at)
 
+let test_worker_execution_recovery_key_fails_closed_on_empty_session () =
+  check (option string) "empty is explicit invalid key" (Some "")
+    (Worker_oas.For_testing.worker_execution_recovery_key "");
+  check (option string) "stable session is namespaced"
+    (Some "worker-oas:v1:stable-session")
+    (Worker_oas.For_testing.worker_execution_recovery_key "stable-session")
+
 let () =
   run "Worker_runtime"
     [
@@ -263,5 +270,8 @@ let () =
           test_case "worker MCP client session finish clears active start"
             `Quick
             test_worker_mcp_client_session_finish_clears_started_at;
+          test_case "worker recovery key fails closed on empty session"
+            `Quick
+            test_worker_execution_recovery_key_fails_closed_on_empty_session;
         ] );
     ]

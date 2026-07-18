@@ -42,6 +42,16 @@ module Executor : sig
       recommended count. *)
 end
 
+(** {1 OAS durable execution} *)
+
+module Oas_execution : sig
+  val domain_count : int
+  (** Worker-domain count for the application-lifetime OAS execution codec.
+      Reads [MASC_OAS_EXECUTION_DOMAIN_COUNT], default [1]. Non-positive
+      parsed values are rejected by OAS runtime initialization rather than
+      silently normalized. *)
+end
+
 (** {1 Orchestrator} *)
 
 module Orchestrator : sig

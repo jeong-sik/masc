@@ -124,6 +124,8 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Runtime_default_initialization_failed of Runtime.strict_init_error
+  | Oas_execution_runtime_initialization_failed of
+      Runtime_oas_execution.init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of

@@ -484,6 +484,26 @@ let run_keepalive_unified_turn
           ~keeper_name:meta_after_triage.name
           (Event_queue_settlement_failed message)
     in
+    let settle_completed_execution () =
+      match !cycle_outcome_ref with
+      | Some (Cycle.Completed { execution_settlement; _ }) ->
+        (match Runtime_agent.settle_execution execution_settlement with
+         | Ok () -> ()
+         | Error error ->
+           record_settlement_failure
+             ("OAS execution settlement failed: "
+              ^ Agent_sdk.Error.to_string error))
+      | Some
+          ( Cycle.Cancelled _
+          | Cycle.Skipped _
+          | Cycle.Failed _
+          | Cycle.Busy _
+          | Cycle.Judgment_settled _
+          | Cycle.Manual_compaction_failed _
+          | Cycle.Manual_compaction_not_applied _
+          | Cycle.Manual_compaction_applied _ )
+      | None -> ()
+    in
     let requeue_unsettled reason =
       match !claimed_lease with
       | None -> ()
@@ -839,6 +859,7 @@ let run_keepalive_unified_turn
                 | Keeper_runtime_failure_route.Retry_after_observed _
                 | Keeper_runtime_failure_route.Rotate_now _ ->
                   ()))
+          | Some (Cycle.Completed _) -> settle_completed_execution ()
           | Some (Cycle.Judgment_settled _) ->
             record_settlement_failure
               "failure judgment completed without an owning event queue lease"
@@ -852,8 +873,7 @@ let run_keepalive_unified_turn
             record_settlement_failure
               "manual compaction completed without an owning event queue lease"
           | Some
-              ( Cycle.Completed _
-              | Cycle.Cancelled _
+              ( Cycle.Cancelled _
               | Cycle.Skipped _
               | Cycle.Busy _ )
           | None ->
@@ -886,6 +906,7 @@ let run_keepalive_unified_turn
               ( Keeper_registry_event_queue.Settled _
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
+            settle_completed_execution ();
             (match
                project_transition_outbox
                  ~base_path:ctx.config.base_path
@@ -901,6 +922,7 @@ let run_keepalive_unified_turn
                 (connector_attention_event_ids_of_stimuli !consumed_stimuli)
           | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
             lease_settled := true;
+            settle_completed_execution ();
             Log.Keeper.error
               "registry: settlement committed with follow-up failure keeper=%s: %s"
               meta_after_triage.name

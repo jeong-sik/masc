@@ -89,6 +89,10 @@ type config =
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
         [Builder.with_checkpoint_sink]. Allows consumers to persist
         checkpoints at OAS turn boundaries. *)
+  ; terminal_checkpoint_sink :
+      (Agent_sdk.Checkpoint.t -> (unit, string) result) option
+    (** Caller-owned consumer-settlement sink for the checkpoint after the
+        durable OAS recovery record has been removed. *)
   }
 
 let default_config
@@ -129,6 +133,7 @@ let default_config
   ; min_p = provider_cfg.min_p
   ; on_run_complete = None
   ; checkpoint_sink = None
+  ; terminal_checkpoint_sink = None
   }
 ;;
 

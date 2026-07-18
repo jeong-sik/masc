@@ -771,6 +771,7 @@ let () =
     ; stop_reason
     ; inference_telemetry = None
     ; tool_surface
+    ; execution_settlement = None
     }
   in
   let stale_provider_failure =

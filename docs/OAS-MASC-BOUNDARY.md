@@ -1,8 +1,10 @@
 ---
 status: reference
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 code_refs:
   - lib/worker_oas.ml
+  - lib/runtime/runtime_oas_execution.ml
+  - lib/runtime/runtime_agent.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
   - lib/keeper/keeper_context_runtime.ml
@@ -32,6 +34,7 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 | 관심사 | OAS | MASC |
 |--------|-----|------|
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
+| 도구 effect 복구 | execution scope topology, settlement journal, locator codec, exact replay/fail-closed 판정 | stable product session key, private scope directory, locator slot, checkpoint association |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies, operator surfaces |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, tool dispatch, auth/join/policy semantics |
 | 컨텍스트 축약 | reducer/automatic truncation 없음; typed capacity/overflow 보고 | durable Keeper compaction, source CAS, reinjection |
@@ -83,6 +86,7 @@ OAS  ──does not know──→ MASC
 | Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
 | Checkpoint integration | OAS-owned transcript state | OAS checkpoint is used in shared worker/runtime paths. MASC does not derive checkpoint state from assistant prose or maintain a duplicate prose-derived sidecar. Feature adapters may use typed, owner-specific checkpoint metadata only where the OAS contract explicitly exposes it. |
+| Agent execution recovery | Wired for server-owned runtime and local workers | `runtime_oas_execution.ml` owns one application runtime and exact slot/context association. `Runtime_agent` uses only explicit stable `session_id`; callers without one remain compatibility-only and do not claim recovery. `Worker_oas` persists OAS mutation-boundary checkpoints. OAS `Internal` failures retain the slot fail-closed because they include unknown effect-settlement failures; no error-string matching is used. OAS remains the only owner of execution topology, settlement, and replay. |
 | Memory projection | Removed | MASC no longer creates or passes OAS memory objects; memory storage stays MASC-owned |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
 | Provider/model identity ownership | OAS-owned | MASC resolves logical `runtime_id` / runtime lane intent only; concrete provider/model selection and cost identity are OAS-owned. Legacy `allowed_providers` inputs are rejected |
@@ -92,6 +96,7 @@ OAS  ──does not know──→ MASC
 | Module / Surface | Classification | Why |
 |------------------|----------------|-----|
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, and product judgment usage |
+| `lib/runtime/runtime_oas_execution.ml` | Correct product adapter | MASC persists only stable product identity plus OAS's opaque locator. It neither parses nor reconstructs OAS execution events. Slot/context mismatch fails closed. |
 | `lib/keeper/keeper_compact_policy.ml`, `keeper_manual_compaction.ml` | MASC product owner | Configured LLM planning and checkpoint mutation stay in MASC; OAS supplies only generic model/runtime execution. |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Correct boundary | Keeper recovery reads canonical OAS checkpoints. MASC does not parse assistant replies into continuity state; owner-specific typed adapter metadata remains separate from the transcript. |
 

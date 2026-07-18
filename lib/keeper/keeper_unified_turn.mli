@@ -160,7 +160,10 @@ type turn_failure =
     possibly rotated runtime from Keeper meta. *)
 
 type turn_success =
-  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; execution_settlement : Runtime_agent.execution_settlement
+      }
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
 (** Typed non-error result of the unified turn boundary. Only

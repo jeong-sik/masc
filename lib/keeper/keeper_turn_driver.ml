@@ -284,6 +284,7 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?checkpoint_sink
+    ?terminal_checkpoint_sink
     ?context_injector
     ?context
     ?enable_thinking
@@ -565,6 +566,7 @@ let run_named
             ; cache_system_prompt
             ; yield_on_tool
             ; checkpoint_sink
+            ; terminal_checkpoint_sink
             ; checkpoint_stage_observed
             ; context_injector
             ; context

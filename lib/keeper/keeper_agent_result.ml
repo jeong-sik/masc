@@ -87,6 +87,7 @@ type run_result =
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
+  ; execution_settlement : Runtime_agent.execution_settlement option
   }
 
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls

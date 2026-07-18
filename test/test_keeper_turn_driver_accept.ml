@@ -60,6 +60,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     run_validation = None;
     runtime_observation = None;
     stop_reason = Runtime_agent.Completed;
+    execution_settlement = None;
   }
 
 let input_required_request () : Agent_sdk.Error.input_required =

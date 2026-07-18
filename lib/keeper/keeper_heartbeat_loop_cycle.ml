@@ -36,7 +36,10 @@ module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
-  | Completed of keeper_meta
+  | Completed of
+      { meta : keeper_meta
+      ; execution_settlement : Runtime_agent.execution_settlement
+      }
   | Cancelled of keeper_meta
   | Skipped of keeper_meta
   | Failed of
@@ -69,7 +72,7 @@ and failure_judgment_terminal =
       }
 
 let rec meta = function
-  | Completed meta
+  | Completed { meta; _ }
   | Cancelled meta
   | Skipped meta
   | Failed { meta; _ }
@@ -309,7 +312,11 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | `Turn (Ok (Keeper_unified_turn.Turn_completed updated)) -> Completed updated
+  | `Turn
+      (Ok
+        (Keeper_unified_turn.Turn_completed
+          { meta; execution_settlement })) ->
+    Completed { meta; execution_settlement }
   | `Turn (Ok (Keeper_unified_turn.Turn_cancelled meta)) -> Cancelled meta
   | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
 ;;

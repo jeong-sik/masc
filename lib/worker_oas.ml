@@ -82,6 +82,7 @@ let build_agent
       ~(hooks : Agent_sdk.Hooks.hooks)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ~(heartbeat_callbacks : Agent_sdk.Agent.periodic_callback list)
+      ?checkpoint_sink
       ?context_injector
       ?context
       ()
@@ -105,6 +106,11 @@ let build_agent
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
+  in
+  let builder =
+    match checkpoint_sink with
+    | Some sink -> Agent_sdk.Builder.with_checkpoint_sink sink builder
+    | None -> builder
   in
   let builder =
     match context_injector with
@@ -281,9 +287,25 @@ let finish_worker_mcp_client_session
   }
 ;;
 
+let worker_checkpoint_sink ~base_path ~worker_name ~session_id
+      (snapshot : Agent_sdk.Agent.checkpoint_snapshot)
+  =
+  let checkpoint =
+    { snapshot.checkpoint with Agent_sdk.Checkpoint.session_id }
+  in
+  Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
+;;
+
+let worker_execution_recovery_key session_id =
+  if String.equal session_id ""
+  then Some ""
+  else Some ("worker-oas:v1:" ^ session_id)
+;;
+
 module For_testing = struct
   let begin_worker_mcp_client_session = begin_worker_mcp_client_session
   let finish_worker_mcp_client_session = finish_worker_mcp_client_session
+  let worker_execution_recovery_key = worker_execution_recovery_key
 end
 
 (* ================================================================ *)
@@ -324,6 +346,9 @@ let rec run_worker_via_oas
   let tool_names_ref, hooks =
     make_tool_tracking_hooks ~context:shared_context ()
   in
+  let checkpoint_sink =
+    worker_checkpoint_sink ~base_path ~worker_name ~session_id
+  in
   let* agent =
     build_agent
       ~net
@@ -334,6 +359,7 @@ let rec run_worker_via_oas
       ~hooks
       ~raw_trace
       ~heartbeat_callbacks:heartbeat_cbs
+      ~checkpoint_sink
       ~context_injector
       ~context:shared_context
       ()
@@ -417,6 +443,9 @@ and resume_worker_via_oas
       Agent_sdk.Agent_types.context_injector = Some context_injector
     }
   in
+  let checkpoint_sink =
+    worker_checkpoint_sink ~base_path ~worker_name ~session_id
+  in
   let agent =
     Agent_sdk.Agent.resume
       ~net
@@ -426,6 +455,7 @@ and resume_worker_via_oas
       ~provider_config
       ~config
       ~context:shared_context
+      ~checkpoint_sink
       ()
   in
   let meta = begin_worker_mcp_client_session meta in
@@ -470,6 +500,37 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
+       let recovery_key = worker_execution_recovery_key session_id in
+       let* prepared_execution =
+         Runtime_oas_execution.prepare ~sw ~recovery_key agent
+         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
+       in
+       let execution_store =
+         Runtime_oas_execution.execution_store prepared_execution
+       in
+       let finish_execution checkpoint =
+         let* checkpoint =
+           Runtime_oas_execution.finish_checkpoint prepared_execution checkpoint
+           |> Result.map_error Runtime_oas_execution.finish_error_to_string
+         in
+         Worker_container.save_worker_checkpoint
+           ~base_path
+           ~worker_name
+           checkpoint
+       in
+       let retain_failure () =
+         Runtime_oas_execution.retain_failure prepared_execution
+       in
+       let execution_disposition_recorded = ref false in
+       Eio_guard.protect
+         ~finally:(fun () ->
+           if not !execution_disposition_recorded
+           then (
+             retain_failure ();
+             Log.LocalWorker.error
+               "worker %s: retained durable execution slot after an unexpected exception"
+               worker_name))
+       (fun () ->
        let clock =
          match Eio_context.get_clock_opt () with
          | Some c -> Some c
@@ -482,8 +543,21 @@ and run_existing_worker_agent
          Agent_sdk.Agent.run
            ~sw
            ?clock
+           ?execution_store
            agent
            prompt
+       in
+       let internal_failure =
+         match result with
+         | Error (Agent_sdk.Error.Internal detail) ->
+           retain_failure ();
+           execution_disposition_recorded := true;
+           Log.LocalWorker.error
+             "worker %s: retained durable execution slot after Internal failure: %s"
+             worker_name
+             detail;
+           true
+         | Ok _ | Error _ -> false
        in
        let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
        let evidence_session_id =
@@ -531,6 +605,8 @@ and run_existing_worker_agent
              ?evidence_session_id
              ()
          in
+         let* () = finish_execution checkpoint in
+         execution_disposition_recorded := true;
          Ok
            { Worker_container_types.output
            ; model_used =
@@ -562,7 +638,12 @@ and run_existing_worker_agent
              ?evidence_session_id
              ()
          in
-         Error detail)
+         if internal_failure
+         then Error detail
+         else (
+           let* () = finish_execution checkpoint in
+           execution_disposition_recorded := true;
+           Error detail)))
 ;;
 
 (* ================================================================ *)

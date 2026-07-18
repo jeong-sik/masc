@@ -39,6 +39,10 @@ OAS pin metadata is generated from `scripts/oas-agent-sdk-pin.sh`. Current depen
 
 #### 1.1.1 OAS 환경 변수 경계
 
+`MASC_OAS_EXECUTION_DOMAIN_COUNT`는 provider/model 설정이 아니라 MASC가
+소유한 application-lifetime OAS execution codec의 worker-domain 수다(기본
+`1`). 0 이하 값은 자동 보정하지 않고 서버 시작 단계에서 거부한다.
+
 OAS provider/model/transport 환경 변수는 OAS의 공용 계약이다. MASC keeper는 CLI transport별 env alias를 만들거나 기본값을 주입하지 않는다. deployment-wide OAS env는 keeper 프로세스 바깥의 service 환경에서 설정하고, per-keeper TOML은 현재 OAS가 읽는 env 키 또는 `MASC_KEEPER_OAS_*` 보조 키만 저장한다.
 
 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블은 process env를 `Unix.putenv`로 적용하는 장치가 아니다. 현재 MASC 내부 소비자는 `MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS`를 turn `max_tokens` fallback에 반영하고, 나머지 `OAS_*` 키는 allowlist 검증과 메타데이터 보존 용도다. 예시:

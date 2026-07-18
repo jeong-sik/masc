@@ -81,8 +81,10 @@ type config = {
           reject the field, so leave [None] unless explicitly needed. *)
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
+  terminal_checkpoint_sink :
+    (Agent_sdk.Checkpoint.t -> (unit, string) result) option;
 }
-(** Per-worker configuration.  60 fields — concrete record because
+(** Per-worker configuration.  61 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

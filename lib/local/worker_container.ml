@@ -228,10 +228,11 @@ let load_worker_checkpoint ~base_path ~worker_name =
 let save_worker_checkpoint ~base_path ~worker_name checkpoint =
   try
     ensure_worker_container_dirs ~base_path ~worker_name;
-    Fs_compat.save_file
+    Fs_compat.save_file_atomic
       (worker_checkpoint_path ~base_path ~worker_name)
-      (Agent_sdk.Checkpoint.to_string checkpoint);
-    Ok ()
+      (Agent_sdk.Checkpoint.to_string checkpoint)
+    |> Result.map_error (fun detail ->
+      sprintf "failed to save worker checkpoint for %s: %s" worker_name detail)
   with Sys_error msg ->
     Error
       (sprintf "failed to save worker checkpoint for %s: %s" worker_name msg)

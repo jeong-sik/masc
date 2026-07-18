@@ -32,7 +32,10 @@ type turn_failure =
   }
 
 type turn_success =
-  | Turn_completed of keeper_meta
+  | Turn_completed of
+      { meta : keeper_meta
+      ; execution_settlement : Runtime_agent.execution_settlement
+      }
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
@@ -406,6 +409,7 @@ let run_keeper_cycle
       }
   | Ok { entry; publication_recovery } ->
   let meta = entry.meta in
+  let completed_execution_settlement = ref None in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
      SubmitTask=external producers, AssignTask=channel decision below,
@@ -1152,6 +1156,7 @@ dominant source of the observed CAS race exhaustion after
                     ();
                   Error err, turn_state)
                 | Ok result ->
+                  completed_execution_settlement := result.execution_settlement;
                   (match
                      require_last_execution_for_finalize
                        ~keeper_name:meta.name
@@ -1231,7 +1236,14 @@ dominant source of the observed CAS race exhaustion after
     Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
     let result, _turn_state = main_path turn_state phase_opt in
-    result
-    |> Result.map (fun meta -> Turn_completed meta)
-    |> Result.map_error failure_of_error
+    (match result, !completed_execution_settlement with
+     | Error error, _ -> Error (failure_of_error error)
+     | Ok meta, Some execution_settlement ->
+       Ok (Turn_completed { meta; execution_settlement })
+     | Ok _, None ->
+       let error =
+         Agent_sdk.Error.Internal
+           "keeper turn completed without an OAS execution settlement handle"
+       in
+       Error (failure_of_error error))
 ;;

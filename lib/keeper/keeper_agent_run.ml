@@ -242,6 +242,7 @@ let run_turn
      observation phase. *)
   let turn_start_time = Unix.gettimeofday () in
   let turn_cancelled = ref None in
+  let pending_execution_settlement = ref None in
   let emit_observation_turn_end ~phase ~stop_reason () =
     let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
     let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
@@ -543,8 +544,9 @@ let run_turn
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
          in
-         let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
-                Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
+         let persist_execution_checkpoint
+               (checkpoint : Agent_sdk.Checkpoint.t)
+           =
                 (* OAS's per-turn pipeline builds checkpoints with an empty
                    session_id (the OAS agent carries no session field), so the
                    sink must stamp the keeper's own session identity before
@@ -552,13 +554,13 @@ let run_turn
                    non-empty [Trace_id.t]; without this restamp the checkpoint
                    transaction rejects an invalid persistence identity. *)
                 let checkpoint =
-                  { snapshot.checkpoint with
+                  { checkpoint with
                     session_id =
                       Keeper_id.Trace_id.to_string meta.runtime.trace_id
                   ; working_context =
                       (match checkpoint_sidecar with
                        | Some _ as sidecar -> sidecar
-                       | None -> snapshot.checkpoint.working_context)
+                       | None -> checkpoint.working_context)
                   }
                 in
                 match
@@ -568,6 +570,10 @@ let run_turn
                 with
                 | Ok _ -> Ok ()
                 | Error _ as error -> error
+         in
+         let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+                Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
+                persist_execution_checkpoint snapshot.checkpoint
          in
          let call_run_named ?raw_trace ~initial_messages () =
                 (* Keeper does not impose a cumulative turn, time, token, or cost
@@ -584,6 +590,7 @@ let run_turn
                     ~system_prompt:turn_system_prompt
                     ~tools
                     ~checkpoint_sink
+                    ~terminal_checkpoint_sink:persist_execution_checkpoint
                     ~initial_messages
                     ~model_input_projection
                     ~hooks
@@ -630,6 +637,7 @@ let run_turn
                with
                | Error e -> Error e
                | Ok result ->
+                 pending_execution_settlement := result.execution_settlement;
                  let post_turn_t0 = Time_compat.now () in
                  (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
@@ -886,13 +894,26 @@ let run_turn
                      (List.map Ids.Execution_id.to_string execution_ids)) )
             ]
           ());
+       (match receipt_result with
+        | Ok _ -> pending_execution_settlement := None
+        | Error _ ->
+          Option.iter Runtime_agent.retain_execution !pending_execution_settlement;
+          pending_execution_settlement := None);
        receipt_result)
 with
 | Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
+  Option.iter Runtime_agent.retain_execution !pending_execution_settlement;
+  pending_execution_settlement := None;
   turn_cancelled := Some ce;
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
   raise ce
 | Eio.Cancel.Cancelled _ as ce ->
+  Option.iter Runtime_agent.retain_execution !pending_execution_settlement;
+  pending_execution_settlement := None;
   turn_cancelled := Some ce;
   raise ce
+| exn ->
+  Option.iter Runtime_agent.retain_execution !pending_execution_settlement;
+  pending_execution_settlement := None;
+  raise exn

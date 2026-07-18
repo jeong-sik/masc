@@ -1027,7 +1027,17 @@ let run_keeper_invocation_turn_admitted
                     Ids.Turn_ref.to_yojson turn_ref );
                 ]
               in
-              tool_result_ok_data reply_json
+              (match result.execution_settlement with
+               | None ->
+                 tool_result_error
+                   "keeper turn completed without an OAS execution settlement handle"
+               | Some execution_settlement ->
+                 (match Runtime_agent.settle_execution execution_settlement with
+                  | Ok () -> tool_result_ok_data reply_json
+                  | Error error ->
+                 tool_result_error
+                   ("keeper turn OAS execution settlement failed: "
+                    ^ Agent_sdk.Error.to_string error)))
 
 ))))))))))
 

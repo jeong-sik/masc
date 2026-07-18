@@ -2461,3 +2461,5 @@
 (include stanzas/test_fs_compat_capability_write.inc)
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)
+
+(include stanzas/test_runtime_oas_execution.inc)

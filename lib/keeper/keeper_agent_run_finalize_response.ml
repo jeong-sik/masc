@@ -388,5 +388,6 @@ let finalize
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
       ; tool_surface = acc.tool_surface
+      ; execution_settlement = result.execution_settlement
       }
 ;;

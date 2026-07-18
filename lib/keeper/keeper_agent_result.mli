@@ -42,6 +42,7 @@ type run_result =
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
+  ; execution_settlement : Runtime_agent.execution_settlement option
   }
 
 val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t

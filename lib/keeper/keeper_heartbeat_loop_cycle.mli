@@ -1,7 +1,10 @@
 (** Keeper cycle execution with error-class handling. *)
 
 type cycle_outcome =
-  | Completed of Keeper_meta_contract.keeper_meta
+  | Completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; execution_settlement : Runtime_agent.execution_settlement
+      }
   | Cancelled of Keeper_meta_contract.keeper_meta
   | Skipped of Keeper_meta_contract.keeper_meta
   | Failed of

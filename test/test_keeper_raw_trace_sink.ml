@@ -391,6 +391,7 @@ let test_traced_turn_yields_result_level_fields () =
       run_validation;
       runtime_observation = None;
       stop_reason = Runtime_agent.Completed;
+      execution_settlement = None;
     }
   in
   (match result.trace_ref with

@@ -16,6 +16,7 @@ val build_agent :
   hooks:Agent_sdk.Hooks.hooks ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   heartbeat_callbacks:Agent_sdk.Agent.periodic_callback list ->
+  ?checkpoint_sink:Agent_sdk.Agent.checkpoint_sink ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   unit ->
@@ -76,4 +77,9 @@ module For_testing : sig
   val finish_worker_mcp_client_session :
     Worker_container_types.worker_container_meta ->
     Worker_container_types.worker_container_meta
+
+  val worker_execution_recovery_key : string -> string option
+  (** Empty persisted MCP session ids remain an explicit invalid recovery key
+      and fail closed at the durable execution boundary; they never silently
+      enter compatibility mode. *)
 end

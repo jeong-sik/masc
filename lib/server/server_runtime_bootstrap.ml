@@ -396,6 +396,8 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Runtime_default_initialization_failed of Runtime.strict_init_error
+  | Oas_execution_runtime_initialization_failed of
+      Runtime_oas_execution.init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
@@ -433,6 +435,8 @@ let owner_initialization_error_to_string = function
   | Runtime_default_initialization_failed error ->
     "Runtime.init_default_degraded failed: "
     ^ Runtime.strict_init_error_to_string error
+  | Oas_execution_runtime_initialization_failed error ->
+    Runtime_oas_execution.init_error_to_string error
   | Keeper_persistence_preparation_failed error ->
     "Keeper persistence preparation failed: "
     ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
@@ -585,6 +589,22 @@ let initialize_owner_state_blocking
   Agent_sdk_log_bridge.install ();
   Log.Server.info
     "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+  (match
+     Runtime_oas_execution.initialize
+       ~sw
+       ~domain_mgr
+       ~fs
+       ~base_path
+       ~domain_count:Env_config.Oas_execution.domain_count
+   with
+   | Ok () ->
+     Log.Server.info
+       "OAS durable execution runtime initialized (domain_count=%d)"
+       Env_config.Oas_execution.domain_count
+   | Error error ->
+     raise
+       (Owner_initialization_failed
+          (Oas_execution_runtime_initialization_failed error)));
   let state =
     create_server_state
       ~sw

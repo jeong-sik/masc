@@ -40,6 +40,15 @@
       "on_token_usage",
       "on_tool_calls",
       "provider"
+    ],
+    "agent_execution_symbols": [
+      "type:execution_locator",
+      "type:execution_runtime",
+      "type:execution_store",
+      "val:create_execution_runtime",
+      "val:execution_locator_of_yojson",
+      "val:execution_locator_to_yojson",
+      "val:execution_store"
     ]
   }
 }

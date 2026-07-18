@@ -45,6 +45,8 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; terminal_checkpoint_sink :
+      (Agent_sdk.Checkpoint.t -> (unit, string) result) option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
@@ -235,6 +237,7 @@ let run_try_provider
           ; session_id = ctx.session_id
           ; cache_system_prompt = ctx.cache_system_prompt
           ; checkpoint_sink = Some checkpoint_sink
+          ; terminal_checkpoint_sink = ctx.terminal_checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context
           ; enable_thinking =
@@ -300,10 +303,18 @@ let run_try_provider
     let result =
       match result with
       | Ok run_result ->
-        apply_accept
-          ~runtime_id:ctx.error_runtime_id
-          ~accept:ctx.accept
-          run_result
+        (match
+           apply_accept
+             ~runtime_id:ctx.error_runtime_id
+             ~accept:ctx.accept
+             run_result
+         with
+         | Ok _ as accepted -> accepted
+         | Error _ as rejected ->
+           Option.iter
+             Runtime_agent.retain_execution
+             run_result.execution_settlement;
+           rejected)
       | Error _ as err -> err
     in
     (match ctx.on_runtime_observation, result with

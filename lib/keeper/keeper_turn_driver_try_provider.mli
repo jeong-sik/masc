@@ -26,6 +26,8 @@ type try_provider_ctx =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; terminal_checkpoint_sink :
+      (Agent_sdk.Checkpoint.t -> (unit, string) result) option
   ; checkpoint_stage_observed : bool Atomic.t
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option

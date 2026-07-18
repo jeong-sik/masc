@@ -86,6 +86,8 @@ type config = Runtime_agent_context.config = {
   min_p : float option;
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
+  terminal_checkpoint_sink :
+    (Agent_sdk.Checkpoint.t -> (unit, string) result) option;
 }
 
 val default_config :
@@ -102,6 +104,18 @@ val default_config :
 
 (** {1 Run result} *)
 
+type execution_settlement
+
+val settle_execution
+  :  execution_settlement
+  -> (unit, Agent_sdk.Error.sdk_error) result
+(** Commit durable OAS execution cleanup only after the caller's consumer
+    settlement has committed. The configured terminal checkpoint sink then
+    persists the same checkpoint without the recovery locator. *)
+
+val retain_execution : execution_settlement -> unit
+(** Abandon consumer settlement without deleting durable recovery authority. *)
+
 type run_result = {
   response : Agent_sdk.Types.api_response;
   checkpoint : Agent_sdk.Checkpoint.t option;
@@ -111,6 +125,7 @@ type run_result = {
   run_validation : Agent_sdk.Raw_trace.run_validation option;
   runtime_observation : Runtime_observation.runtime_observation option;
   stop_reason : stop_reason;
+  execution_settlement : execution_settlement option;
 }
 
 type worker_lifecycle_classification =

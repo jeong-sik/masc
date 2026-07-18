@@ -288,6 +288,66 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
   })
 
+  it('preserves typed keeper context metrics storage failures', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'sojin',
+          context_metrics_unavailable: {
+            kind: 'storage_read_failed',
+            reason: 'io_error',
+            path: '/tmp/metrics.jsonl',
+            detail: 'permission denied',
+          },
+        },
+      ],
+    })
+
+    expect(result.keepers[0]!.context_metrics_unavailable).toEqual({
+      kind: 'storage_read_failed',
+      reason: 'io_error',
+      path: '/tmp/metrics.jsonl',
+      detail: 'permission denied',
+    })
+  })
+
+  it('preserves malformed metrics rows and makes invalid diagnostics explicit', () => {
+    const result = normalizeOperatorSnapshot({
+      persistent_agents: [
+        {
+          name: 'watcher',
+          context_metrics_unavailable: {
+            kind: 'malformed_json',
+            reason: 'malformed_metrics_row',
+            path: '/tmp/metrics.jsonl',
+            line_number: 7,
+            detail: 'unexpected end of input',
+          },
+        },
+        {
+          name: 'broken-wire-contract',
+          context_metrics_unavailable: {
+            kind: 'new_failure_kind',
+            reason: 'new_reason',
+          },
+        },
+      ],
+    })
+
+    expect(result.persistent_agents![0]!.context_metrics_unavailable).toEqual({
+      kind: 'malformed_json',
+      reason: 'malformed_metrics_row',
+      path: '/tmp/metrics.jsonl',
+      line_number: 7,
+      detail: 'unexpected end of input',
+    })
+    expect(result.persistent_agents![1]!.context_metrics_unavailable).toEqual({
+      kind: 'invalid_payload',
+      reported_kind: 'new_failure_kind',
+      reported_reason: 'new_reason',
+    })
+  })
+
   it('filters keepers without name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [

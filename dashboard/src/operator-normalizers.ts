@@ -19,6 +19,8 @@ import type {
   OperatorGuidanceSummary,
   OperatorJudgment,
   OperatorKeeperSnapshot,
+  OperatorContextMetricsStorageReadFailureReason,
+  OperatorContextMetricsUnavailable,
   OperatorReviewDecision,
   OperatorRecommendedAction,
   OperatorSessionSnapshot,
@@ -27,6 +29,7 @@ import type {
   PendingConfirmation,
 } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
+import { OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS } from './types/dashboard-mission'
 
 function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null
@@ -50,6 +53,50 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
     paused_by: asString(raw.paused_by) ?? null,
     paused_at: asString(raw.paused_at) ?? null,
   }
+}
+
+const contextMetricsStorageReadFailureReasons = new Set<OperatorContextMetricsStorageReadFailureReason>([
+  ...OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS,
+])
+
+function normalizeContextMetricsUnavailable(raw: unknown): OperatorContextMetricsUnavailable | undefined {
+  if (raw === null || raw === undefined) return undefined
+  if (!isRecord(raw)) {
+    return { kind: 'invalid_payload', reported_kind: null, reported_reason: null }
+  }
+
+  const kind = asString(raw.kind) ?? null
+  const reason = asString(raw.reason) ?? null
+  const path = raw.path === null ? null : asString(raw.path)
+  const detail = typeof raw.detail === 'string' ? raw.detail : undefined
+
+  if (
+    kind === 'storage_read_failed'
+    && reason !== null
+    && contextMetricsStorageReadFailureReasons.has(reason as OperatorContextMetricsStorageReadFailureReason)
+    && path !== undefined
+    && detail !== undefined
+  ) {
+    return {
+      kind,
+      reason: reason as OperatorContextMetricsStorageReadFailureReason,
+      path,
+      detail,
+    }
+  }
+
+  const lineNumber = raw.line_number === null ? null : asNumber(raw.line_number)
+  if (
+    kind === 'malformed_json'
+    && reason === 'malformed_metrics_row'
+    && typeof path === 'string'
+    && (lineNumber === null || (lineNumber !== undefined && Number.isSafeInteger(lineNumber)))
+    && detail !== undefined
+  ) {
+    return { kind, reason, path, line_number: lineNumber, detail }
+  }
+
+  return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
 }
 
 function normalizeStringRecord(raw: unknown): Record<string, string> | undefined {
@@ -237,6 +284,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_tokens: asNumber(raw.context_tokens) ?? asNumber(contextRaw?.context_tokens),
     context_max: asNumber(raw.context_max) ?? asNumber(contextRaw?.context_max),
     context_source: asString(raw.context_source) ?? asString(contextRaw?.source),
+    context_metrics_unavailable: normalizeContextMetricsUnavailable(raw.context_metrics_unavailable),
     generation: asNumber(raw.generation),
     active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,

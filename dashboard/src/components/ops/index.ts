@@ -17,7 +17,13 @@ import {
   workflowContextForRoute,
   workflowTargetLabel,
 } from '../../workflow-context'
-import type { OperatorActionLogEntry, OperatorReviewDecision } from '../../types'
+import type {
+  OperatorActionLogEntry,
+  OperatorContextMetricsUnavailable,
+  OperatorKeeperSnapshot,
+  OperatorReviewDecision,
+  OperatorSnapshot,
+} from '../../types'
 import { ComposerV2 } from '../board/composer-v2'
 import {
   actionTypeLabel,
@@ -42,6 +48,60 @@ interface OpsActivityTimelineEntry {
   target: string
   detail: string
   tone: ActivityTone
+}
+
+interface ContextMetricsDiagnostic {
+  keeper: OperatorKeeperSnapshot
+  source: 'keeper' | 'persistent_agent'
+  error: OperatorContextMetricsUnavailable
+}
+
+function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): ContextMetricsDiagnostic[] {
+  if (!snapshot) return []
+  const keepers = snapshot.keepers
+    .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
+      keeper.context_metrics_unavailable !== undefined)
+    .map(keeper => ({ keeper, source: 'keeper' as const, error: keeper.context_metrics_unavailable }))
+  const persistentAgents = (snapshot.persistent_agents ?? [])
+    .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
+      keeper.context_metrics_unavailable !== undefined)
+    .map(keeper => ({ keeper, source: 'persistent_agent' as const, error: keeper.context_metrics_unavailable }))
+  return [...keepers, ...persistentAgents]
+}
+
+function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
+  const { keeper, source, error } = diagnostic
+  const sourceLabel = source === 'keeper' ? 'Keeper' : 'Persistent agent'
+  if (error.kind === 'invalid_payload') {
+    return html`
+      <li
+        class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
+        data-testid="ops-context-metrics-diagnostic"
+        data-error-kind=${error.kind}
+      >
+        <strong>${sourceLabel} ${keeper.name}</strong>
+        <span>invalid context metrics diagnostic</span>
+        ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
+        ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
+      </li>
+    `
+  }
+
+  const location = error.kind === 'malformed_json' && error.line_number !== null
+    ? `${error.path}:${error.line_number}`
+    : error.path
+  return html`
+    <li
+      class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
+      data-testid="ops-context-metrics-diagnostic"
+      data-error-kind=${error.kind}
+    >
+      <strong>${sourceLabel} ${keeper.name}</strong>
+      <span>${error.reason}</span>
+      ${location ? html`<span>${location}</span>` : null}
+      <span>${error.detail}</span>
+    </li>
+  `
 }
 
 function parseTimestamp(value?: string | null): number {
@@ -182,6 +242,7 @@ function renderActivityTimeline() {
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
+  const metricsDiagnostics = contextMetricsDiagnostics(snapshot)
   const workflowContext = route.value.tab === 'command' ? workflowContextForRoute(route.value) : null
   const workflowReady = workflowTargetReady(workflowContext, snapshot?.keepers ?? [])
 
@@ -211,6 +272,16 @@ export function Ops() {
     <section class="v2-command-surface flex flex-col gap-4" aria-label="Operations panel">
       ${operatorError.value ? html`<section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
+      ${metricsDiagnostics.length > 0 ? html`
+        <section
+          class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error"
+          role="alert"
+          data-testid="ops-context-metrics-unavailable"
+        >
+          <strong>Context metrics unavailable</strong>
+          <ul class="mt-2 grid gap-2">${metricsDiagnostics.map(renderContextMetricsDiagnostic)}</ul>
+        </section>
+      ` : null}
 
       ${workflowContext ? html`
         <section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="Workflow context">

@@ -18,16 +18,14 @@ type session_context = Keeper_types.session_context
 (** {1 Working Context Operations} *)
 
 val text_of_message : Agent_sdk.Types.message -> string
-val max_tokens_of_context : working_context -> int
 val message_count : working_context -> int
 val serialized_bytes : working_context -> int
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
-val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list
-val create : eio:bool -> system_prompt:string -> max_tokens:int -> working_context
+val create : eio:bool -> system_prompt:string -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
@@ -43,8 +41,6 @@ val role_of_string_opt : string -> Agent_sdk.Types.role option
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
-val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
-val context_to_json : working_context -> Yojson.Safe.t
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
@@ -58,11 +54,9 @@ val total_tokens : Agent_sdk.Types.api_usage -> int
 (** {1 Keeper Context Lifecycle} *)
 
 val log_keeper_exn : label:string -> exn -> unit
-val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint
   :  Agent_sdk.Checkpoint.t
-  -> primary_model_max_tokens:int
   -> working_context
 
 val save_oas_checkpoint
@@ -72,7 +66,7 @@ val save_oas_checkpoint
   -> agent_name:string
   -> ctx:working_context
   -> generation:int
-  -> (Agent_sdk.Checkpoint.t, string) result
+  -> (Agent_sdk.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
@@ -113,7 +107,6 @@ type compaction_recovery =
 
 val load_context_from_checkpoint
   :  trace_id:string
-  -> primary_model_max_tokens:int
   -> base_dir:string
   -> session_context * working_context option
 
@@ -134,7 +127,6 @@ val apply_post_turn_lifecycle_with_resilience_handles
   :  resilience_audit_store:Shared_audit.Store.t option
   -> resilience_strategy_executor:Resilience.Recovery.strategy_executor option
   -> meta:keeper_meta
-  -> primary_model_max_tokens:int
   -> checkpoint:Agent_sdk.Checkpoint.t option
   -> post_turn_lifecycle
 
@@ -177,7 +169,6 @@ val recover_latest_checkpoint_for_compaction
   :  base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
-  -> primary_model_max_tokens:int
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)

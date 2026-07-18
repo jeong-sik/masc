@@ -309,7 +309,6 @@ let run_turn
       ~meta
       ~profile_defaults
       ~base_dir
-      ~max_context
       ~runtime_id
       ?temperature
       ?shared_context

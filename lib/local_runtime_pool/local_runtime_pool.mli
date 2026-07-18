@@ -15,8 +15,7 @@
     if leasing semantics are needed in the future, the design
     should land at the OAS runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
-    Selection ([select_runtime_from]) and the read-only
-    accessors below remain in active use by
+    The read-only accessors below remain in active use by
     [tool_local_runtime_status] / [tool_local_runtime_verify]
     / [tool_local_runtime_bench]. See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
@@ -140,7 +139,7 @@ val configured_capacity : unit -> int
 val healthy_runtime_count : unit -> int
 (** Number of runtimes whose [cooldown_until] is unset or
     in the past — the count of slots currently considered
-    eligible by {!select_runtime_from}. *)
+    eligible for new work. *)
 
 val allocated_slots : unit -> int
 (** Sum of [active_slots] across the pool.  Equals the
@@ -149,37 +148,14 @@ val allocated_slots : unit -> int
 val measured_ceiling : unit -> int option
 (** Operator-installed upper bound on
     {!allocated_slots}.  [None] when no measurement has
-    been recorded yet; consumed by the rate-limiter to
-    decide whether to admit additional acquires. *)
+    been recorded yet; recorded by
+    [tool_local_runtime_bench] and surfaced by
+    [tool_local_runtime_status]. *)
 
 val record_measured_ceiling : int -> unit
 (** Stores a new [measured_ceiling].  Replaces the previous
     value unconditionally (no monotonic guard — the
     operator endpoint validates the value before calling). *)
-
-(** {1 Selection + acquire / release} *)
-
-val select_runtime_from :
-  runtime list ->
-  ?preferred_pool:string ->
-  ?model_name:string ->
-  unit ->
-  (runtime, string) result
-(** Pure runtime selector — no side effects, takes the
-    candidate list as an argument so callers can run
-    deterministic tests without mutating the global pool.
-
-    Selection rules:
-    - filter by [preferred_pool] when given (fall back to
-      all runtimes when no match);
-    - require an exact [model] match when [model_name]
-      names a non-generic label, otherwise allow generic
-      runtimes;
-    - drop runtimes still in cooldown;
-    - sort by ([active_slots], [latency_ema_ms]) ascending
-      and pick the first.
-
-    Errors when no candidate satisfies the filters. *)
 
 (* [acquire] / [release] removed 2026-05-05 — see header §Status. *)
 

@@ -119,13 +119,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_message:env_message_gate
                   ~fallback_token:env_token_gate
               in
-              let primary_max_context =
-                match p.max_context_override_opt with
-                | Some v -> v
-                (* Boundary: Keeper consumes an opaque context budget, not a
-                   provider/model identity. *)
-                | None -> Runtime.default_max_context ()
-              in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
@@ -210,7 +203,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
-          ~max_tokens:primary_max_context
       in
       (* next_generation keys the per-(keeper, trace) counter by the trace_id
          string; episodes live under that same string dir (ensure_dir/of
@@ -318,23 +310,32 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~agent_name:meta.agent_name
             ~ctx:ctx0
             ~generation
+          |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn;
-            Error (Printexc.to_string exn)
+            Error (`Unexpected_exception (Printexc.to_string exn))
       in
       match init_save_result with
-      | Error e ->
+      | Error error ->
+        let detail =
+          match error with
+          | `Write_error error ->
+            Keeper_context_core.checkpoint_write_error_to_string
+              ~persistence_error_to_string:Fun.id
+              error
+          | `Unexpected_exception detail -> detail
+        in
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", p.name); ("site", Keeper_checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
         Log.Keeper.error
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
-          p.name e;
+          p.name detail;
         Progress.stop_tracking task_id;
-        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" e)
+        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
       | Ok _ ->
       let runtime_assignment_result =
         match p.runtime_id_opt with

@@ -99,26 +99,36 @@ let memory_bank_summary_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-(* Compaction plan (RFC-0313-adjacent W2). The LLM classifies each working-set
-   message by 0-based index into kept / summarized / dropped, and returns one
-   [summary] prose block that stands in for the summarized indices. Index-based
-   (not free-text rewrite) so the original messages are never fabricated — the
-   consumer reconstructs the context by index, matching the
-   [consolidation_plan] member_indices/drop_indices precedent. Field names are
-   exported as constants so the parser shares this SSOT. *)
+(* Compaction plan codec. Only eligible source units cross the provider
+   boundary. Each source-bound decision carries its own optional replacement
+   summary, so application preserves source order and never relocates facts
+   through one global prose block. Field names and action tokens are exported
+   so schema, prompt, and parser share one wire SSOT. *)
+let compaction_plan_field_decisions = "decisions"
+let compaction_plan_field_unit_index = "unit_index"
+let compaction_plan_field_action = "action"
 let compaction_plan_field_summary = "summary"
-let compaction_plan_field_kept_indices = "kept_indices"
-let compaction_plan_field_summarized_indices = "summarized_indices"
-let compaction_plan_field_dropped_indices = "dropped_indices"
+let compaction_plan_action_keep = "keep"
+let compaction_plan_action_drop = "drop"
+let compaction_plan_action_summarize = "summarize"
 
 let compaction_plan_output_schema =
-  let int_array = `Assoc [ "type", `String "array"; "items", integer_schema ] in
-  let fields =
-    [ compaction_plan_field_summary, string_schema
-    ; compaction_plan_field_kept_indices, int_array
-    ; compaction_plan_field_summarized_indices, int_array
-    ; compaction_plan_field_dropped_indices, int_array
+  let decision_fields =
+    [ compaction_plan_field_unit_index, integer_schema
+    ; ( compaction_plan_field_action
+      , enum_schema
+          [ compaction_plan_action_keep
+          ; compaction_plan_action_drop
+          ; compaction_plan_action_summarize
+          ] )
+    ; compaction_plan_field_summary, nullable_string_schema
     ]
+  in
+  let decision_schema =
+    object_schema ~required:(List.map fst decision_fields) decision_fields
+  in
+  let fields =
+    [ compaction_plan_field_decisions, array_schema decision_schema ]
   in
   object_schema ~required:(List.map fst fields) fields
 ;;

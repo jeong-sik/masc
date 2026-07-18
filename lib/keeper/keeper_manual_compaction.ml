@@ -25,10 +25,6 @@ type failure =
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
-let primary_max_context meta =
-  let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
-  resolution.effective_budget
-;;
 let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
   let trigger = recovery.Keeper_context_runtime.trigger in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -55,7 +51,7 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     Keeper_runtime_manifest.make_for_context
       context
       ~event:Keeper_runtime_manifest.Context_compacted
-      ?runtime_id:recovery.evidence.selected_runtime_id
+      ~runtime_id:recovery.evidence.selected_runtime_id
       ~status:"compacted"
       ~decision:
         (Keeper_runtime_manifest.with_clock_refs
@@ -108,7 +104,6 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
             ~base_dir
             ~meta
             ~trigger:Compaction_trigger.Manual
-            ~primary_model_max_tokens:(primary_max_context meta)
         with
         | Error error ->
           let failure_dispatch =

@@ -138,10 +138,6 @@ val validate_registry_entry :
   registry_entry ->
   (unit, registry_entry_validation_error) result
 
-(** Health verdict for a single entry.  Pure: does not read the registry. *)
-val health_of_entry :
-  base_path:string -> string -> registry_entry -> registry_entry_health
-
 (** Like [get] but returns the entry together with its health verdict.
     Returns [Some _] even when the entry is corrupted, so callers can decide
     whether to consume it. *)
@@ -408,14 +404,6 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool
 
-(** Check if a keeper is already live for boot idempotency.
-    Returns [true] when the keeper has a live fiber, is not
-    stop-requested, and its phase is [Running] or [Paused].
-    All other phases (including [Failing] and [Offline]) return [false]
-    so that [/boot] can restart the keeper instead of silently
-    doing nothing (Issue #17218). *)
-val is_boot_already_live : base_path:string -> string -> bool
-
 (** Check if a keeper has ANY registry entry (regardless of state).
     Used by reconcile to skip Crashed/Dead keepers. *)
 val is_registered : base_path:string -> string -> bool
@@ -489,9 +477,6 @@ val restore_supervisor_state :
 val board_wakeup_allowed :
   base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
 
-(** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
-val clear_board_wakeups : base_path:string -> string -> unit
-
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
@@ -500,12 +485,6 @@ val cleanup_tracking_exact : registry_entry -> exact_update_result
 
 (** Clear the registry. For testing only. *)
 val clear : unit -> unit
-
-(** Get board event cursor timestamp. Returns 0.0 if not found. *)
-val get_board_cursor_ts : base_path:string -> string -> float
-
-(** Update board event cursor timestamp. No-op if not found. *)
-val set_board_cursor_ts : base_path:string -> string -> float -> unit
 
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option
@@ -579,15 +558,6 @@ val dispatch_event_with_audit :
   string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
-(** Like [dispatch_event], but logs and emits a Otel_metric_store counter on
-    [Error] so silent-failure call sites do not lose the signal.
-    Same return type — callers that need the result can still match. *)
-val dispatch_event_and_log :
-  base_path:string ->
-  ?origin:lifecycle_event_origin ->
-  string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
-
 (** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
     on [Error] instead of returning the result. Replaces [ignore (...)] call sites
     that previously swallowed transition errors silently. *)
@@ -608,9 +578,6 @@ val dispatch_event_with_audit_and_log :
 
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
-
-(** Get the observable conditions of a keeper. *)
-val get_conditions : base_path:string -> string -> Keeper_state_machine.conditions option
 
 (* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
    drain_board_events) moved to Keeper_registry_event_queue. *)

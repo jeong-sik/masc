@@ -306,11 +306,7 @@ let () =
   let disposition = fst (R.operator_disposition no_visible_output) in
   check
     "runtime completion ignores missing visible-output observation"
-    (disposition = R.Disp_pass);
-  check
-    "completed turn with missing visible output records an execution receipt"
-    (R.reaction_kind_of_operator_disposition disposition
-     = Masc.Keeper_reaction_ledger.Execution_receipt)
+    (disposition = R.Disp_pass)
 ;;
 
 let () =
@@ -381,24 +377,6 @@ let operator_disposition_kinds =
   ; R.Disp_skipped
   ; R.Disp_unknown
   ]
-;;
-
-let () =
-  List.iter
-    (fun (disposition, expected) ->
-      let actual = R.reaction_kind_of_operator_disposition disposition in
-      check
-        (Printf.sprintf
-           "typed reaction kind for %s"
-           (R.operator_disposition_kind_to_string disposition))
-        (actual = expected))
-    [ R.Disp_pass, Masc.Keeper_reaction_ledger.Execution_receipt
-    ; R.Disp_skipped, Masc.Keeper_reaction_ledger.Execution_receipt
-    ; R.Disp_fail_open_next_runtime, Masc.Keeper_reaction_ledger.Terminal_reason
-    ; R.Disp_pass_next_model, Masc.Keeper_reaction_ledger.Terminal_reason
-    ; R.Disp_user_cancelled, Masc.Keeper_reaction_ledger.Terminal_reason
-    ; R.Disp_unknown, Masc.Keeper_reaction_ledger.Terminal_reason
-    ]
 ;;
 
 let () =

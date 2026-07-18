@@ -43,12 +43,6 @@ val dedupe_schemas :
 (** [dedupe_schemas schemas] removes duplicate-by-[name] entries
     while preserving first-occurrence order. *)
 
-val prefixed_tool_names : string list -> string list
-(** [prefixed_tool_names names] prepends [["mcp__masc__"]] to
-    every name.  Used by the spawned-agent surface (see
-    {!spawned_agent_prefixed_tools}) to match the MCP-prefixed
-    tool naming convention used by Anthropic's SDK. *)
-
 val lookup_schemas_by_name_exn :
   label:string ->
   Masc_domain.tool_schema list ->
@@ -68,10 +62,6 @@ val lookup_schemas_by_name_exn :
 val spawned_agent_public_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.spawned_agent_surface_tools}.  The small
     set of tools a spawned scripting agent can use. *)
-
-val spawned_agent_prefixed_tools : string list
-(** [spawned_agent_public_tool_names] with each name prefixed by
-    [["mcp__masc__"]]. *)
 
 (** {1 Local-worker surface} *)
 
@@ -119,46 +109,3 @@ val local_worker_tool_schemas :
 
     [Error] when [names] contains an unknown name (operator-
     visible message format from {!resolve_named_schemas}). *)
-
-(** {1 Role-catalogue} *)
-
-val workspace_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.workspace_role_tools}.
-    Candidates for workspace leads and fleet leaders. *)
-
-val execution_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.execution_role_tools}.
-    Candidates for worker agents. *)
-
-val filter_catalog_to_available :
-  available:string list -> string list -> string list
-(** [filter_catalog_to_available ~available names] returns
-    [names] filtered to those present in [available], deduped
-    while preserving order.  Used by {!build_tool_catalog} so
-    stale catalogue entries cannot escape into prompts. *)
-
-val build_tool_catalog : role:string -> unit -> string list
-(** [build_tool_catalog ~role ()] returns the role-filtered tool
-    name list (unprefixed).
-
-    | [role] | Result |
-    |---|---|
-    | [["worker"]] | {!execution_tool_names} ∩ available |
-    | [["workspace_lead"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
-    | other | all available spawned/local worker tools |
-
-    Available = ({!spawned_agent_public_tool_names} ∪
-    {!local_worker_public_tool_names}) ∩
-    {!local_worker_resolvable_tool_names}, deduped. *)
-
-val local_worker_resolvable_tool_names : unit -> string list
-(** [local_worker_resolvable_tool_names ()] returns only the tool
-    names that {!local_worker_tool_schemas} can actually resolve.
-    {!build_tool_catalog} applies this gate before returning an
-    autonomous catalogue, so prompts do not include names unknown to
-    the local worker schema registry.
-
-    On [Error] from {!local_worker_tool_schemas}, traces via
-    {!Eio.traceln}
-    [["[AgentToolSurfaces] local_worker_tool_schemas failed: <msg>"]]
-    and returns [\[\]] — best-effort, never raises. *)

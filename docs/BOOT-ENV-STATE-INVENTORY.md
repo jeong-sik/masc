@@ -156,16 +156,12 @@ durable_queue_stale_sec = 0.0 # default: any durable backlog degrades full healt
 stream_idle_timeout_sec = 120
 # Optional Agent.run no-progress guard. Tool timeouts live in the tool layer.
 # execution_idle_timeout_sec = 300
-tool_cost_max_usd = 1.25
 llm_rerank = true
 
 [watchdog]
 stale_sec = 600
 grace_sec = 900
 ```
-
-`tool_cost_max_usd = 0` leaves the advisory cost threshold unset. Cost
-thresholds are telemetry only and never gate keeper tool execution.
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values
@@ -319,7 +315,6 @@ Allowed path model:
 - `<runtime_root>/runtime_params.json`
 - `<runtime_root>/param_audit.jsonl`
 - `<runtime_root>/metrics/<agent>/YYYY-MM.jsonl`
-- `<runtime_root>/drift_guard.jsonl`
 - `<runtime_root>/costs.jsonl`
 - `<runtime_root>/autonomy_stats.jsonl`
 
@@ -477,7 +472,7 @@ MASC_WORKSPACE_ROOT
 
 ### A.2 `env_config_runtime`
 
-Used for timeouts, cleanup intervals, transports, local model runtimes, board backend, worker runtime, web search, dashboard thresholds, and local execution behavior.
+Used for timeouts, cleanup intervals, transports, local model runtimes, worker runtime, web search, dashboard thresholds, and local execution behavior.
 
 ```text
 LLAMA_DEFAULT_MODEL
@@ -486,7 +481,6 @@ LLAMA_SWARM_MODEL
 MASC_AGENT_RATE_BURST
 MASC_AGENT_RATE_LIMIT
 MASC_AGENT_TRANSPORT
-MASC_BOARD_BACKEND
 MASC_BOARD_FLUSH_INTERVAL_SEC
 MASC_BRIEFING_CACHE_TTL_SEC
 MASC_CACHE_MAX_ENTRIES
@@ -601,7 +595,6 @@ Important operator-facing families still outside the centralized inventory:
 - dashboard and operator HTTP surfaces: `MASC_DASHBOARD_*`, `MASC_OPERATOR_*`, `MASC_WARM_DELAY_*`
 - advanced keeper tuning: extra `MASC_KEEPER_*` reads from `keeper_config.ml`, `keeper_memory_bank.ml`, `keeper_tool_affinity.ml`, and related files
 - transport edge cases: `MASC_FORCE_JSON_RESPONSE`, `MASC_POST_SSE_KEEPALIVE_SEC`, `MASC_SSE_*`
-- worker runtime and Docker lanes: `MASC_WORKER_RUNTIME_*`
 - goal, swarm, economy, and notify lanes: `MASC_GOAL_*`, `MASC_SWARM_*`, `MASC_ECONOMY_*`, `MASC_NOTIFY_*`
 - connector overrides: `MASC_DISCORD_*`
 

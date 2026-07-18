@@ -1,14 +1,11 @@
-(* F941 — the server's resolved-config trigger-policy parser must
-   delegate to the single canonical grammar in [Discord_gateway_state]
-   so production config and the (separately test-covered) grammar can
-   never drift apart. Before this, a permissive duplicate parser lived
-   in [Server_discord_in_process_gateway]; adding a new policy variant
-   to the strict grammar would have left prod silently coercing it.
-
-   These assertions pin the wrapper's contract: an empty value is unset
-   (=> default), the four valid forms parse through to the same variant
-   the strict grammar yields, and an unparseable value falls back to the
-   default rather than producing a half-formed policy. *)
+(* F941 / masc#25123 — the server's trigger-policy loading is typed and
+   fail-closed, mirroring the Slack sibling: a missing runtime.toml or a
+   missing key is "unset" (default applies); unreadable/malformed TOML, a
+   wrong field type, an invalid policy value, or an invalid
+   MASC_DISCORD_TRIGGER_POLICY env value is an explicit load error — the
+   gateway must not boot on a policy the operator did not write. Env wins
+   over TOML, matching the precedence config/runtime.toml documents for this
+   key. *)
 
 open Alcotest
 open Masc
@@ -53,38 +50,135 @@ let with_temp_dir f =
 let ps p = Discord_gateway_state.trigger_policy_to_string p
 let default_str = ps G.default_trigger_policy
 
-let test_empty_is_default () =
-  check string "empty => default" default_str (ps (G.parse_trigger_policy ""))
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
 
-let test_whitespace_is_default () =
-  check string "whitespace => default" default_str
-    (ps (G.parse_trigger_policy "   "))
+(* -- load_trigger_policy_from_toml: the TOML plane in isolation -- *)
 
-let test_valid_values_parse_through () =
-  (* Each valid form yields exactly what the strict grammar yields,
-     proving the wrapper delegates rather than re-implementing. *)
-  List.iter
-    (fun raw ->
-      let expected =
-        match Discord_gateway_state.parse_trigger_policy raw with
-        | Ok p -> ps p
-        | Error msg -> failf "strict grammar rejected %S: %s" raw msg
-      in
-      check string (Printf.sprintf "%S parses through" raw) expected
-        (ps (G.parse_trigger_policy raw)))
-    [ "mention_only"; "mention_or_thread"; "all"; "user_only:VINCENT" ]
+let test_toml_missing_file_is_unset () =
+  with_temp_dir @@ fun dir ->
+  match
+    G.load_trigger_policy_from_toml
+      ~path:(Filename.concat dir "runtime.toml")
+  with
+  | Ok G.Runtime_toml_missing -> ()
+  | Ok _ -> fail "expected Runtime_toml_missing"
+  | Error e -> failf "expected missing, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
 
-let test_unknown_falls_back_to_default () =
-  (* A typo must not produce a policy the operator did not write. The
-     wrapper logs (via Log.Server) and returns the default. *)
-  check string "typo => default" default_str
-    (ps (G.parse_trigger_policy "mention_ony"))
+let test_toml_missing_key_is_unset () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\nother = \"x\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok G.Trigger_policy_missing -> ()
+  | Ok _ -> fail "expected Trigger_policy_missing"
+  | Error e -> failf "expected missing key, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
 
-let test_user_only_empty_id_falls_back () =
-  (* The strict grammar rejects an empty id; the wrapper falls back to
-     the default instead of constructing User_only "". *)
-  check string "user_only: empty id => default" default_str
-    (ps (G.parse_trigger_policy "user_only:"))
+let test_toml_empty_value_is_unset () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"  \"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok G.Trigger_policy_missing -> ()
+  | Ok _ -> fail "expected Trigger_policy_missing for blank value"
+  | Error e -> failf "expected unset, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_valid_value_loads () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"mention_only\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Ok (G.Trigger_policy_loaded p) ->
+    check string "loaded policy" "mention_only" (ps p)
+  | Ok _ -> fail "expected loaded policy"
+  | Error e -> failf "expected policy, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_toml_malformed_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord\ntrigger_policy = \"mention_only\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Runtime_toml_invalid _) -> ()
+  | Error e -> failf "expected Runtime_toml_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "malformed TOML must not load"
+
+let test_toml_wrong_type_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = 7\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Trigger_policy_invalid _) -> ()
+  | Error e -> failf "expected Trigger_policy_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "a non-string trigger_policy must not load"
+
+let test_toml_invalid_policy_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path "[discord]\ntrigger_policy = \"mention_ony\"\n";
+  match G.load_trigger_policy_from_toml ~path with
+  | Error (G.Trigger_policy_invalid _) -> ()
+  | Error e -> failf "expected Trigger_policy_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok _ -> fail "a typo policy must not load"
+
+(* -- resolved_trigger_policy: env > TOML > default -- *)
+
+(* Point the config resolver at a temp config root so the TOML plane is
+   under test control. MASC_CONFIG_DIR is the documented override the
+   sandbox suites already use. *)
+let with_config_root dir f =
+  with_env "MASC_CONFIG_DIR" dir @@ fun () ->
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "1" @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset f
+
+let test_env_valid_wins_over_toml () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  with_env "MASC_DISCORD_TRIGGER_POLICY" "mention_only" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "env wins over TOML" "mention_only" (ps p)
+  | Error e -> failf "expected env policy, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_env_invalid_is_load_error () =
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  with_env "MASC_DISCORD_TRIGGER_POLICY" "mention_ony" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Error (G.Trigger_policy_env_invalid _) -> ()
+  | Error e -> failf "expected env_invalid, got: %s"
+                 (G.trigger_policy_load_error_to_string e)
+  | Ok p -> failf "invalid env must not resolve, got %s" (ps p)
+
+let test_env_unset_falls_to_toml () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  with_env "MASC_DISCORD_TRIGGER_POLICY" "" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "TOML applies when env unset" "all" (ps p)
+  | Error e -> failf "expected TOML policy, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
+
+let test_all_unset_is_default () =
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  with_env "MASC_DISCORD_TRIGGER_POLICY" "" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "default when nothing configured" default_str (ps p)
+  | Error e -> failf "expected default, got error: %s"
+                 (G.trigger_policy_load_error_to_string e)
 
 let discord_message ~message_id =
   Discord_gateway_client.Message_create
@@ -190,15 +284,24 @@ let test_durable_accept_precedes_delivery_handoff () =
 
 let () =
   run "server_discord_trigger_policy"
-    [ ( "parse_trigger_policy"
-      , [ test_case "empty => default" `Quick test_empty_is_default
-        ; test_case "whitespace => default" `Quick test_whitespace_is_default
-        ; test_case "valid values parse through strict grammar" `Quick
-            test_valid_values_parse_through
-        ; test_case "unknown => default (no silent coercion)" `Quick
-            test_unknown_falls_back_to_default
-        ; test_case "user_only empty id => default" `Quick
-            test_user_only_empty_id_falls_back
+    [ ( "toml_loader"
+      , [ test_case "missing file => unset" `Quick test_toml_missing_file_is_unset
+        ; test_case "missing key => unset" `Quick test_toml_missing_key_is_unset
+        ; test_case "blank value => unset" `Quick test_toml_empty_value_is_unset
+        ; test_case "valid value loads" `Quick test_toml_valid_value_loads
+        ; test_case "malformed TOML => load error" `Quick
+            test_toml_malformed_is_load_error
+        ; test_case "wrong type => load error" `Quick
+            test_toml_wrong_type_is_load_error
+        ; test_case "invalid policy => load error" `Quick
+            test_toml_invalid_policy_is_load_error
+        ] )
+    ; ( "resolved_precedence"
+      , [ test_case "valid env wins over TOML" `Quick test_env_valid_wins_over_toml
+        ; test_case "invalid env => load error (no silent default)" `Quick
+            test_env_invalid_is_load_error
+        ; test_case "unset env falls to TOML" `Quick test_env_unset_falls_to_toml
+        ; test_case "all unset => default" `Quick test_all_unset_is_default
         ] )
     ; ( "ingress handoff"
       , [ test_case "durable accept precedes Discord delivery" `Quick

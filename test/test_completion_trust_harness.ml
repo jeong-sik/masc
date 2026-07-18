@@ -76,7 +76,6 @@ let make_meta ?(name = "keeper-completion-trust") () =
 
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-    ~max_tokens:4000
 
 let with_ws name fn =
   let dir = temp_dir name in
@@ -160,7 +159,6 @@ let attempt_done
     ~meta
     ~publication_recovery
     ~ctx_work
-    ~exec_cache:None
     ~name:"keeper_task_done"
     ~input:
       (`Assoc
@@ -194,7 +192,6 @@ let claim_via_dispatch
     ~meta
     ~publication_recovery
     ~ctx_work
-    ~exec_cache:None
     ~name:"keeper_task_claim"
     ~input:(`Assoc [ ("task_id", `String task_id) ])
     ()

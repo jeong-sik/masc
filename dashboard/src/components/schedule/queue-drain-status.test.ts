@@ -71,6 +71,11 @@ describe('queueDrainStatusOf', () => {
     expect(status?.tone).toBe('warn')
   })
 
+  it('surfaces reaction-ledger read and exact-occurrence quarantine explicitly', () => {
+    expect(queueDrainStatusOf(req('not_found', 'read_error'))?.state).toBe('read_error')
+    expect(queueDrainStatusOf(req('not_found', 'quarantined'))?.state).toBe('evidence_invalid')
+  })
+
   it('surfaces an unrecognized receipt as 확인 불가 (indeterminate)', () => {
     expect(queueDrainStatusOf(req('unrecognized_receipt'))?.state).toBe('indeterminate')
   })
@@ -86,6 +91,7 @@ describe('isCalendarVisible', () => {
     expect(visible('matched_inflight')).toBe(true)
     expect(visible('not_found', 'not_found')).toBe(true) // missed
     expect(visible('read_error')).toBe(true)
+    expect(visible('not_found', 'quarantined')).toBe(true)
     expect(visible('not_found', 'matched_consumed_ack')).toBe(false) // drained
     expect(visible('unrecognized_receipt')).toBe(false) // indeterminate
   })

@@ -602,7 +602,6 @@ describe('keeper tool telemetry fetchers', () => {
               before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
               before_message_count: 9, after_message_count: 3,
               summarized_message_count: 4, dropped_message_count: 1,
-              pair_repair_dropped_message_count: 2,
               before_tool_use_count: 2, after_tool_use_count: 1,
               before_tool_result_count: 2, after_tool_result_count: 1,
             },
@@ -632,11 +631,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[1]?.before_tokens).toBeNull()
     expect(result.items[1]?.runtime_id).toBeNull()
     expect(result.items[1]?.links.checkpoint_path).toBeNull()
-    // Rows persisted before #25037 lack pair_repair_dropped_message_count:
-    // the field decodes to null without voiding the rest of the evidence.
     expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
-    expect(result.items[0]?.exact_evidence?.pair_repair_dropped_message_count).toBeNull()
-    expect(result.items[2]?.exact_evidence?.pair_repair_dropped_message_count).toBe(2)
   })
 })
 
@@ -1946,16 +1941,13 @@ describe('fetchKeeperConfig', () => {
         last_reason: 'board quiet',
       },
       hooks: {
+        scope: 'keeper_runtime_composite',
         slots: {
           pre_tool_use: {
             active: 'true',
             source: 'keeper_hooks_oas',
-            gates: 'keeper_deny_list',
+            features: 'tool_start_timing',
           },
-        },
-        deny_list: 'Execute',
-        cost_budget: {
-          active: 'false',
         },
       },
       runtime: {
@@ -2029,9 +2021,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
-    expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
-    // deny_list count is derived from the array (deny_list_count field dropped).
-    expect(result.hooks?.deny_list).toEqual(['Execute'])
+    expect(result.hooks?.scope).toBe('keeper_runtime_composite')
+    expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')

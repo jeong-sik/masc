@@ -70,14 +70,6 @@ let test_masc_routes_response_text_projection_through_adapter () =
 
 let test_masc_delegates_oas_tool_call_projection () =
   check_calls
-    ~file:"lib/keeper/keeper_context_tool_message_pairs.ml"
-    ~callee:"Canonical_tool.tool_call_of_block"
-    ~expected:2;
-  check_calls
-    ~file:"lib/keeper/keeper_context_core_accessors.ml"
-    ~callee:"Canonical_tool.tool_call_of_block"
-    ~expected:1;
-  check_calls
     ~file:"lib/keeper/keeper_agent_prompt_metrics.ml"
     ~callee:"Canonical_tool.tool_call_of_block"
     ~expected:2;
@@ -94,10 +86,6 @@ let test_masc_delegates_oas_tool_call_projection () =
 let test_masc_delegates_oas_reasoning_details_projection () =
   check_calls
     ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
-    ~callee:"Agent_sdk.Types.reasoning_details_text"
-    ~expected:1;
-  check_calls
-    ~file:"lib/keeper/keeper_context_core.ml"
     ~callee:"Agent_sdk.Types.reasoning_details_text"
     ~expected:1;
   check_calls

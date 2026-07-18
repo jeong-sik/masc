@@ -52,10 +52,9 @@ requires making captured state explicit:
 let run_named config tools prompt =
   let provider = ... in
   let health_tracker = ... in
-  let budget = ... in
   (* 500 lines of setup *)
   let try_runtime candidates =
-    (* uses provider, health_tracker, budget directly *)
+    (* uses provider and health_tracker directly *)
     ...
   in
   try_runtime initial_candidates
@@ -64,7 +63,6 @@ let run_named config tools prompt =
 type runtime_context = {
   provider : Provider.t;
   health_tracker : Health.tracker;
-  budget : Budget.t;
   (* ... other captured fields *)
 }
 

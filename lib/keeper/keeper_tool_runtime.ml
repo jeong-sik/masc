@@ -17,7 +17,6 @@ type context =
       Keeper_publication_recovery_availability.turn_context
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; exec_cache : Masc_exec.Exec_cache.t option
   ; search_fn : unit -> Keeper_tool_execution.t
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
@@ -110,7 +109,6 @@ let handle_shell_ir ctx descriptor args =
       Some
         (Keeper_tool_command_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
-           ~exec_cache:ctx.exec_cache
          ~config:ctx.config
          ~meta:ctx.meta
          ?continuation_channel:ctx.continuation_channel
@@ -122,7 +120,6 @@ let handle_shell_ir ctx descriptor args =
     Some
       (Keeper_tool_command_runtime.handle_tool_search_files_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
-         ~exec_cache:ctx.exec_cache
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)

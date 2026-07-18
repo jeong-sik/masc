@@ -1497,11 +1497,8 @@ export interface KeeperHookSlot {
 }
 
 interface KeeperHookIntrospection {
+  scope: string | null
   slots: Record<string, KeeperHookSlot>
-  deny_list: string[]
-  // deny_list_count dropped: it is pure derived state (deny_list.length).
-  // Consumers compute the count from the array directly.
-  cost_budget: { max_cost_usd?: number | null; active: boolean }
 }
 
 export interface KeeperConfig {

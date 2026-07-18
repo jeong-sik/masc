@@ -41,12 +41,6 @@ val set_env :
     [server_runtime_bootstrap]; safe to re-call (last-writer-wins
     on the underlying [Atomic.t]). *)
 
-val set_base_path : string -> unit
-(** Capture the base path used by {!Discovery_history} to
-    persist probe snapshots. When unset, probe persistence is
-    skipped silently — the cache itself works without a base
-    path. *)
-
 (** {1 Cache state (test-visible)} *)
 
 val cached_endpoints : endpoint_info list ref

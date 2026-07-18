@@ -1,5 +1,4 @@
 open Printf
-open Result.Syntax
 
 type runtime = {
   id : string;
@@ -389,101 +388,6 @@ let record_measured_ceiling value =
       | None -> Some bounded
     in
     pool := { state with measured_ceiling = new_ceiling })
-
-let preference_matches (runtime : runtime) preferred_pool =
-  match trim_opt preferred_pool with
-  | None -> true
-  | Some preferred ->
-      String.equal preferred default_pool_label
-      || String.equal preferred "default"
-      || String.equal runtime.id preferred
-
-let runtime_matches_requested_model (runtime : runtime) requested_model =
-  match trim_opt requested_model with
-  | None -> `Any
-  | Some requested -> (
-      match runtime.model with
-      | Some configured when String.equal configured requested -> `Exact
-      | None -> `Generic
-      | Some _ -> `Mismatch)
-
-let runtime_sort_key (runtime : runtime) =
-  let overload = max 0 (runtime.active_slots - runtime.max_concurrency) in
-  let latency =
-    match runtime.latency_ema_ms with Some value -> int_of_float value | None -> 0
-  in
-  (overload, runtime.active_slots, latency, runtime.failure_streak, runtime.id)
-
-(* Pure selection — no side effects, no Eio calls. *)
-let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name () :
-    (runtime, string) result =
-  let matching =
-    List.filter (fun runtime -> preference_matches runtime preferred_pool) runtimes
-  in
-  let matching = if matching = [] then runtimes else matching in
-  match matching with
-  | [] -> Error "no local runtimes configured"
-  | runtimes ->
-      let requested_model = trim_opt model_name in
-      let exact_model_matches =
-        List.filter
-          (fun runtime ->
-            match runtime_matches_requested_model runtime requested_model with
-            | `Exact -> true
-            | _ -> false)
-          runtimes
-      in
-      let generic_model_matches =
-        List.filter
-          (fun runtime ->
-            match runtime_matches_requested_model runtime requested_model with
-            | `Generic -> true
-            | _ -> false)
-          runtimes
-      in
-      let candidate_runtimes_result =
-        match requested_model with
-        | None -> Ok runtimes
-        | Some requested -> (
-            match exact_model_matches with
-            | _ :: _ -> Ok exact_model_matches
-            | [] -> (
-                match generic_model_matches with
-                | _ :: _ -> Ok generic_model_matches
-                | [] ->
-                    let scope =
-                      match trim_opt preferred_pool with
-                      | Some pool -> sprintf " in runtime pool %s" pool
-                      | None -> ""
-                    in
-                    Error
-                      (sprintf
-                         "no local runtime configured for model %s%s"
-                         requested scope)))
-      in
-      let* runtimes = candidate_runtimes_result in
-      let now = Time_compat.now () in
-      let healthy =
-        List.filter
-          (fun (runtime : runtime) ->
-            match runtime.cooldown_until with
-            | Some until_ts when until_ts > now -> false
-            | _ -> true)
-          runtimes
-      in
-      let candidates = if healthy = [] then runtimes else healthy in
-      let sorted =
-        List.sort (fun a b -> compare (runtime_sort_key a) (runtime_sort_key b))
-          candidates
-      in
-      match sorted with
-      | runtime :: _ -> Ok runtime
-      | [] -> (
-          match requested_model with
-          | Some requested ->
-              Error
-                (sprintf "no local runtime configured for model %s" requested)
-          | None -> Error "no local runtimes configured")
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]

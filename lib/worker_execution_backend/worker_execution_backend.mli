@@ -3,9 +3,9 @@
     JSON / string codecs.
 
     Used by [Worker_container_types.runtime_backend] (the field
-    every worker spec carries) and dispatched on by
-    [Worker_container_runners] to pick between in-process
-    [Local_playground] execution and a real [Docker] container.
+    every worker spec carries) and recorded into worker metadata.
+    Execution is always in-process; nothing dispatches on the
+    backend to select a container runtime.
 
     The variant is intentionally closed: a future "k8s" or
     "podman" backend must extend the type, failing every

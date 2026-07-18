@@ -74,6 +74,22 @@ let make_checkpoint () =
     ; working_context = None
     }
 
+let block_message role content : Agent_sdk.Types.message =
+  { role; content; name = None; tool_call_id = None; metadata = [] }
+
+let tool_use id =
+  Agent_sdk.Types.ToolUse
+    { id; name = "test_tool"; input = `Assoc [ "id", `String id ] }
+
+let tool_result id =
+  Agent_sdk.Types.ToolResult
+    { tool_use_id = id
+    ; content = "result:" ^ id
+    ; outcome = Tool_succeeded
+    ; json = None
+    ; content_blocks = None
+    }
+
 let test_regular_post_turn_does_not_auto_compact () =
   Eio_main.run @@ fun _env ->
   let meta = make_meta () in
@@ -83,7 +99,6 @@ let test_regular_post_turn_does_not_auto_compact () =
       ~resilience_audit_store:None
       ~resilience_strategy_executor:None
       ~meta
-      ~primary_model_max_tokens:8192
       ~checkpoint:(Some checkpoint)
   in
   match result.checkpoint with
@@ -92,6 +107,29 @@ let test_regular_post_turn_does_not_auto_compact () =
     check int "checkpoint turn retained" checkpoint.turn_count retained.turn_count;
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
+
+let test_invalid_plan_is_distinct_from_provider_unavailable () =
+  let meta = make_meta () in
+  let context =
+    Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+  in
+  let decision failure =
+    Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+      (fun ~runtime_ids:_ ~keeper_name:_ () ->
+         Some (fun ~units:_ -> Error failure))
+      (fun () ->
+         Compact_policy.compact_for_request_typed
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           context)
+    |> fun preparation -> preparation.Compact_policy.decision
+  in
+  (match decision Masc.Keeper_compaction_llm_summarizer.Invalid_plan with
+   | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
+   | _ -> fail "invalid provider plan was not a typed source terminal");
+  match decision Masc.Keeper_compaction_llm_summarizer.Provider_unavailable with
+  | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
+  | _ -> fail "provider failure was collapsed into an invalid plan"
 
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -149,16 +187,44 @@ let test_manual_compaction_serializes_owner_lane () =
         ; agent_name = meta.agent_name
         }
       in
+      let closed_cycle =
+        [ block_message Assistant [ tool_use "closed-a"; tool_use "closed-b" ]
+        ; block_message User [ tool_result "closed-a" ]
+        ; block_message Tool [ tool_result "closed-b" ]
+        ]
+      in
+      let protected_suffix =
+        [ block_message Assistant [ tool_use "open" ]
+        ; Agent_sdk.Types.text_message Assistant "tool progress"
+        ]
+      in
       let session =
         Masc.Keeper_context_core.create_session
           ~session_id:checkpoint.session_id
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       in
-      Masc.Keeper_checkpoint_store.save_oas_classified
-        ~session_dir:session.session_dir
-        checkpoint
-      |> Result.get_ok
-      |> ignore;
+      let checkpoint =
+        let context =
+          Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+        in
+        match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:context
+            ~generation:meta.runtime.generation
+        with
+        | Ok (checkpoint, Masc.Keeper_checkpoint_store.Saved _) -> checkpoint
+        | Ok (_, Stale_noop _) -> fail "initial checkpoint save was stale"
+        | Error error ->
+          failf
+            "initial checkpoint save failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:Fun.id
+               error)
+      in
       let ctx : _ Masc.Keeper_tool_surface.context =
         { config
         ; agent_name = "operator"
@@ -183,7 +249,8 @@ let test_manual_compaction_serializes_owner_lane () =
                 turn_count = checkpoint.turn_count + 1
               ; messages =
                   checkpoint.messages
-                  @ [ Agent_sdk.Types.text_message Agent_sdk.Types.User "old turn tail" ]
+                  @ closed_cycle
+                  @ protected_suffix
               }
             in
             Masc.Keeper_checkpoint_store.save_oas_classified
@@ -265,22 +332,37 @@ let test_manual_compaction_serializes_owner_lane () =
       (match Eio.Promise.await finished with
        | `Ran () -> ()
        | `Rejected _ -> fail "simulated owner turn was rejected");
-      let plan =
-        Masc.Keeper_compaction_llm_summarizer.plan_of_json
-          ~message_count:4
-          (`Assoc
-            [ "summary", `String "owner-lane compacted context"
-            ; "kept_indices", `List [ `Int 0 ]
-            ; "summarized_indices", `List [ `Int 1; `Int 2; `Int 3 ]
-            ; "dropped_indices", `List []
-            ])
-        |> Result.get_ok
-      in
       Atomic.set owner_entry.fiber_stop true;
       let outcome =
         Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
           (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             Some (fun ~messages:_ -> Some plan))
+             Some (fun ~units ->
+               check int "only closed units reach LLM" 4 (List.length units);
+               check bool "parallel cycle is one decision unit" true
+                 (match List.nth units 3 with
+                  | Masc.Keeper_compaction_unit.Closed_tool_cycle messages ->
+                    messages = closed_cycle
+                  | Ordinary_message _ -> false);
+               Masc.Keeper_compaction_llm_summarizer.plan_of_json
+                 ~runtime_id:"test.compaction"
+                 ~units
+                 (`Assoc
+                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
+                     , `List
+                         [ `Assoc
+                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
+                               , `Int 1 )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
+                               , `String
+                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
+                               )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
+                               , `String "owner-lane compacted context" )
+                             ]
+                         ] )
+                   ])
+               |> Result.map_error (fun _ ->
+                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
           run_cycle
       in
       (match outcome with
@@ -292,26 +374,99 @@ let test_manual_compaction_serializes_owner_lane () =
              ~session_dir:session.session_dir
              ~session_id:checkpoint.session_id)
       in
-      check int "latest running-turn checkpoint compacted" 2
+      check int "compacted checkpoint retains all protected messages" 8
         (List.length compacted.messages);
+      check bool "open tool/progress suffix is exact" true
+        (List.filteri (fun index _ -> index >= 6) compacted.messages = protected_suffix);
       let _, reinjectable =
         Masc.Keeper_context_runtime.load_context_from_checkpoint
           ~trace_id:checkpoint.session_id
-          ~primary_model_max_tokens:8192
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       in
-      check int "compacted checkpoint available to same-lane injection" 2
+      check int "compacted checkpoint available to same-lane injection" 8
         (reinjectable
          |> Option.map Masc.Keeper_context_runtime.messages_of_context
          |> Option.value ~default:[]
          |> List.length);
       let manifest = only_compaction_manifest config meta in
-      check int "manifest records post-turn source size" 4
-        Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
-                          |> member "before_message_count" |> to_int);
-      check int "manifest records pair-repair drops" 0
-        Yojson.Safe.Util.(manifest.decision |> member "exact_evidence"
-                          |> member "pair_repair_dropped_message_count" |> to_int);
+      let evidence =
+        Yojson.Safe.Util.(manifest.decision |> member "exact_evidence")
+      in
+      check int "manifest records post-turn source size" 8
+        Yojson.Safe.Util.(evidence |> member "before_message_count" |> to_int);
+      check int "manifest records protected compacted size" 8
+        Yojson.Safe.Util.(evidence |> member "after_message_count" |> to_int);
+      check int "manifest counts only eligible summarized messages" 1
+        Yojson.Safe.Util.(evidence |> member "summarized_message_count" |> to_int);
+      check int "manifest retains closed and open ToolUse blocks" 3
+        Yojson.Safe.Util.(evidence |> member "after_tool_use_count" |> to_int);
+      let concurrent_checkpoint =
+        { compacted with
+          messages =
+            [ Agent_sdk.Types.text_message
+                Agent_sdk.Types.User
+                "concurrent checkpoint source"
+            ]
+        }
+      in
+      let stale_plan_result =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_ids:_ ~keeper_name:_ () ->
+             Some (fun ~units ->
+               (match
+                  Masc.Keeper_checkpoint_store.save_oas_classified
+                    ~session_dir:session.session_dir
+                    concurrent_checkpoint
+                with
+                | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+                | Ok (Stale_noop _) ->
+                  fail "concurrent equal-turn checkpoint save was stale"
+                | Error detail ->
+                  failf "concurrent checkpoint save failed: %s" detail);
+               Masc.Keeper_compaction_llm_summarizer.plan_of_json
+                 ~runtime_id:"test.compaction"
+                 ~units
+                 (`Assoc
+                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
+                     , `List
+                         [ `Assoc
+                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
+                               , `Int 1 )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
+                               , `String
+                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
+                               )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
+                               , `String "stale plan must not commit" )
+                             ]
+                         ] )
+                   ])
+               |> Result.map_error (fun _ ->
+                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
+          (fun () ->
+             Post_turn.recover_latest_checkpoint_for_compaction
+               ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+               ~meta
+               ~trigger:Compaction_trigger.Manual)
+      in
+      (match stale_plan_result with
+       | Error
+           (Post_turn.Checkpoint_cas_failed
+              (Masc.Keeper_checkpoint_store.Source_changed _)) ->
+         ()
+       | Error error ->
+         failf
+           "stale plan returned wrong error: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok _ -> fail "stale compaction plan replaced a concurrent checkpoint");
+      let retained_concurrent_checkpoint =
+        Masc.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id:checkpoint.session_id
+        |> Result.get_ok
+      in
+      check bool "CAS preserves concurrent checkpoint exactly" true
+        (retained_concurrent_checkpoint.messages = concurrent_checkpoint.messages);
       Registry_queue.settle_result
         ~base_path
         meta.name
@@ -322,6 +477,38 @@ let test_manual_compaction_serializes_owner_lane () =
       |> ignore)
 ;;
 
+let test_malformed_structure_preserves_checkpoint () =
+  Eio_main.run @@ fun _env ->
+  let meta = make_meta ~name:"malformed-compaction" () in
+  let orphan = block_message User [ tool_result "orphan" ] in
+  let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
+  let context =
+    Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+  let make_called = Atomic.make false in
+  let preparation =
+    Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+      (fun ~runtime_ids:_ ~keeper_name:_ () ->
+         Atomic.set make_called true;
+         None)
+      (fun () ->
+         Compact_policy.compact_for_request_typed
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           context)
+  in
+  check bool "malformed input never reaches LLM" false (Atomic.get make_called);
+  check bool "original message remains exact" true
+    (Masc.Keeper_context_core.messages_of_context preparation.context = [ orphan ]);
+  match preparation.decision with
+  | Compact_policy.Rejected
+      ( Manual
+      , Invalid_structure
+          (Masc.Keeper_compaction_unit.Orphan_tool_result
+            { message_index = 0; tool_use_id = "orphan" }) ) ->
+    ()
+  | _ -> fail "malformed compaction was not rejected with typed structure"
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -329,7 +516,11 @@ let () =
         `Quick test_compaction_rejection_tag_is_stable;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
+      test_case "invalid plan is distinct from provider unavailability"
+        `Quick test_invalid_plan_is_distinct_from_provider_unavailable;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
+      test_case "malformed structure preserves checkpoint"
+        `Quick test_malformed_structure_preserves_checkpoint;
     ];
   ]

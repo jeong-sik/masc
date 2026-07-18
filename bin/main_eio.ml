@@ -794,6 +794,22 @@ let run_cmd host port cli_base_path =
         Log.Server.info "MASC MCP: Background fibers finished, shutdown complete."
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
+    | exn
+      when Masc.Shutdown.is_benign_termination
+             ~benign:(function
+               | Graceful_shutdown | Eio.Cancel.Cancelled _ -> true
+               | _ -> false)
+             exn ->
+        (* Failing the switch to end shutdown cancels in-flight fibers; a
+           cancellable finalizer then raises [Cancelled] wrapped as
+           [Fun.Finally_raised], which Eio combines with [Graceful_shutdown]
+           into one [Eio.Exn.Multiple].  [is_benign_termination] unwraps that
+           wrapper structure and classifies the leaves, so the combined value
+           is recognised as a clean shutdown rather than falling through to the
+           [FATAL] handler below and exiting 1 on every restart (#25118). The
+           caller-side [benign] classifies only leaf exceptions. *)
+        Log.Server.info
+          "MASC MCP: Background fibers finished, shutdown complete (with benign in-flight cancellations)."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
         let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
         Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"

@@ -1,25 +1,56 @@
-(** Unit tests for [Keeper_compaction_llm_summarizer] (RFC-0313-adjacent W2).
-
-    Covers the pure surface: structured-plan parsing/validation
-    ([plan_of_json]) and plan application ([apply]). The provider call in
-    [make] needs an Eio context + live provider and is exercised by
-    integration, not here. *)
+(** Unit tests for the source-bound Keeper compaction planner. *)
 
 open Masc
 module C = Keeper_compaction_llm_summarizer
 module Compact_policy = Keeper_compact_policy
+module S = Keeper_structured_output_schema
+module T = Agent_sdk.Types
+module U = Keeper_compaction_unit
 
-let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
-  let ints xs = `List (List.map (fun i -> `Int i) xs) in
+let test_runtime_id = "test.compaction"
+let plan_of_json ~units json = C.plan_of_json ~runtime_id:test_runtime_id ~units json
+
+let decision ?summary unit_index action : Yojson.Safe.t =
   `Assoc
-    [ "summary", `String summary
-    ; "kept_indices", ints kept
-    ; "summarized_indices", ints summarized
-    ; "dropped_indices", ints dropped
+    [ S.compaction_plan_field_unit_index, `Int unit_index
+    ; S.compaction_plan_field_action, `String action
+    ; S.compaction_plan_field_summary, Option.fold ~none:`Null ~some:(fun value -> `String value) summary
     ]
+
+let plan_json decisions : Yojson.Safe.t =
+  `Assoc [ S.compaction_plan_field_decisions, `List decisions ]
+
+let keep unit_index = decision unit_index S.compaction_plan_action_keep
+let drop unit_index = decision unit_index S.compaction_plan_action_drop
+let summarize unit_index summary =
+  decision ~summary unit_index S.compaction_plan_action_summarize
 
 let is_ok = function Ok _ -> true | Error _ -> false
 let is_error = function Ok _ -> false | Error _ -> true
+
+let message ?name ?tool_call_id ?(metadata = []) role content : T.message =
+  { role; content; name; tool_call_id; metadata }
+
+let text role value = message role [ T.Text value ]
+let ordinary message = U.Ordinary_message message
+
+let tool_use id =
+  T.ToolUse { id; name = "test_tool"; input = `Assoc [ "secret", `String id ] }
+
+let tool_result id =
+  T.ToolResult
+    { tool_use_id = id
+    ; content = "result:" ^ id
+    ; outcome = T.Tool_succeeded
+    ; json = None
+    ; content_blocks = None
+    }
+
+let closed_cycle id =
+  U.Closed_tool_cycle
+    [ message T.Assistant [ tool_use id ]
+    ; message T.Tool [ tool_result id ]
+    ]
 
 let temperature_runtime_id = "local.kimi_like"
 
@@ -75,9 +106,7 @@ let with_temperature_runtime f =
 
 let test_provider_for_plan_preserves_runtime_temperature () =
   with_temperature_runtime (fun provider_cfg ->
-    let cfg =
-      C.For_testing.provider_for_plan provider_cfg
-    in
+    let cfg = C.For_testing.provider_for_plan provider_cfg in
     Alcotest.(check (option (float 0.0001)))
       "runtime.toml temperature is preserved"
       (Some 1.0)
@@ -239,126 +268,230 @@ let test_compact_policy_prefers_structured_judge_over_chat_runtime () =
     [ eligible_judge_runtime_id; ineligible_chat_runtime_id ]
     (Compact_policy.For_testing.compaction_runtime_ids meta)
 
-(* -- plan_of_json: valid partition accepted -- *)
 
-let test_valid_partition_accepted () =
-  let json = plan_json ~summary:"folded" ~kept:[ 3; 4 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
-  Alcotest.(check bool)
-    "a full disjoint partition of [0,5) parses"
-    true
-    (is_ok (C.plan_of_json ~message_count:5 json))
 
-let test_all_kept_rejected () =
-  let json = plan_json ~summary:"n/a" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[] in
-  Alcotest.(check bool)
-    "keeping everything is not semantic compaction"
-    true
-    (is_error (C.plan_of_json ~message_count:3 json))
-
-let test_drop_only_with_kept_accepted () =
-  let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
-  Alcotest.(check bool)
-    "drop-only plans are valid when at least one message remains"
-    true
-    (is_ok (C.plan_of_json ~message_count:2 json))
-
-(* -- plan_of_json: structural violations rejected (no silent repair) -- *)
-
-let test_out_of_range_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0; 1 ] ~summarized:[ 5 ] ~dropped:[] in
-  Alcotest.(check bool)
-    "an index >= message_count is rejected"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_negative_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ -1; 0 ] ~summarized:[ 1 ] ~dropped:[] in
-  Alcotest.(check bool)
-    "a negative index is rejected"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_duplicate_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0; 1 ] ~summarized:[ 1 ] ~dropped:[] in
-  Alcotest.(check bool)
-    "an index appearing in two lists is rejected"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_missing_index_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0 ] ~summarized:[] ~dropped:[] in
-  Alcotest.(check bool)
-    "a partition that omits an in-range index is rejected"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_all_dropped_rejected () =
-  let json = plan_json ~summary:"S" ~kept:[] ~summarized:[] ~dropped:[ 0; 1 ] in
-  Alcotest.(check bool)
-    "a non-empty working set must not compact to empty output"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_empty_summary_rejected_when_summarizing () =
-  let json = plan_json ~summary:"   " ~kept:[ 1 ] ~summarized:[ 0 ] ~dropped:[] in
-  Alcotest.(check bool)
-    "a blank summary is rejected when there are summarized indices to fold"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_missing_field_rejected () =
-  let json = `Assoc [ "summary", `String "x"; "kept_indices", `List [] ] in
-  Alcotest.(check bool)
-    "a plan missing summarized_indices/dropped_indices is rejected"
-    true
-    (is_error (C.plan_of_json ~message_count:0 json))
-
-(* -- apply: reconstruction honours the plan -- *)
-
-let msg role text = Agent_sdk.Types.text_message role text
-let texts (ms : Agent_sdk.Types.message list) =
-  List.map (fun m -> Agent_sdk.Types.text_of_message m) ms
-
-let sample =
-  [ msg Agent_sdk.Types.User "u0"
-  ; msg Agent_sdk.Types.Assistant "a1"
-  ; msg Agent_sdk.Types.Tool "t2"
-  ; msg Agent_sdk.Types.User "u3"
+let eligibility_units =
+  [ ordinary (text T.System "system")
+  ; ordinary (text T.User "user")
+  ; ordinary (text T.Tool "tool")
+  ; ordinary (text T.Assistant "eligible")
+  ; ordinary (text T.Assistant "   ")
+  ; ordinary (message T.Assistant [ T.Text "text"; T.RedactedThinking "opaque" ])
+  ; ordinary (message ~name:"named" T.Assistant [ T.Text "named" ])
+  ; ordinary (message ~tool_call_id:"call" T.Assistant [ T.Text "linked" ])
+  ; ordinary (message ~metadata:[ "source", `String "producer" ] T.Assistant [ T.Text "meta" ])
+  ; closed_cycle "closed"
   ]
 
-let test_apply_keeps_summarizes_drops () =
-  (* kept: 3 ; summarized: 0,1 ; dropped: 2 *)
-  let json = plan_json ~summary:"S" ~kept:[ 3 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
-  match C.plan_of_json ~message_count:4 json with
-  | Error e -> Alcotest.failf "expected valid plan, got %s" e
-  | Ok plan ->
-    let out = C.apply plan ~messages:sample in
-    let out_texts = texts out in
-    (* summary replaces indices 0,1 at position of first summarized (0);
-       index 2 dropped; index 3 kept. Result: [summary; u3]. *)
-    Alcotest.(check int) "two messages remain" 2 (List.length out);
-    Alcotest.(check bool)
-      "first is the compaction summary"
-      true
-      (match out_texts with
-       | s :: _ -> Astring.String.is_infix ~affix:"S" s
-                   && Astring.String.is_prefix ~affix:"[COMPACTION_SUMMARY]" s
-       | [] -> false);
-    Alcotest.(check (list string))
-      "kept message survives verbatim after the summary"
-      [ "u3" ]
-      (List.tl out_texts)
+let test_only_plain_assistant_text_is_eligible () =
+  Alcotest.(check bool) "mixed source has eligible text" true
+    (C.has_eligible_units eligibility_units);
+  List.iteri
+    (fun index unit_ ->
+      Alcotest.(check bool)
+        (Printf.sprintf "unit %d eligibility" index)
+        (index = 3)
+        (C.has_eligible_units [ unit_ ]))
+    eligibility_units
 
-let test_apply_drop_only_preserves_kept () =
-  let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[ 3 ] in
-  match C.plan_of_json ~message_count:4 json with
-  | Error e -> Alcotest.failf "expected valid plan, got %s" e
+let validation_units =
+  [ ordinary (text T.System "protected-system")
+  ; ordinary (text T.Assistant "first")
+  ; closed_cycle "protected-cycle"
+  ; ordinary (text T.User "protected-user")
+  ; ordinary (text T.Assistant "second")
+  ]
+
+let test_valid_source_decisions_accepted () =
+  let result =
+    plan_of_json
+      ~units:validation_units
+      (plan_json [ summarize 1 "first summary"; keep 4 ])
+  in
+  match result with
+  | Error detail -> Alcotest.failf "valid source-bound plan rejected: %s" detail
   | Ok plan ->
-    let out = C.apply plan ~messages:sample in
-    Alcotest.(check (list string))
-      "drop-only removes only the selected message"
-      [ "u0"; "a1"; "t2" ]
-      (texts out)
+    Alcotest.(check string) "runtime source is bound" test_runtime_id
+      (C.selected_runtime_id plan);
+    Alcotest.(check (list int)) "summarized source index" [ 1 ]
+      (C.summarized_indices plan);
+    Alcotest.(check (list int)) "nothing dropped" [] (C.dropped_indices plan)
+
+let test_runtime_identity_is_not_normalized () =
+  let exact_runtime_id = "  exact.runtime  " in
+  match
+    C.plan_of_json
+      ~runtime_id:exact_runtime_id
+      ~units:validation_units
+      (plan_json [ summarize 1 "first summary"; keep 4 ])
+  with
+  | Error detail -> Alcotest.failf "exact runtime identity rejected: %s" detail
+  | Ok plan ->
+    Alcotest.(check string) "runtime identity remains exact" exact_runtime_id
+      (C.selected_runtime_id plan)
+
+let test_all_kept_rejected () =
+  Alcotest.(check bool) "all-kept is not compaction" true
+    (is_error
+       (plan_of_json ~units:validation_units (plan_json [ keep 1; keep 4 ])))
+
+let test_drop_with_kept_accepted () =
+  Alcotest.(check bool) "drop plus keep is a valid change" true
+    (is_ok
+       (plan_of_json ~units:validation_units (plan_json [ drop 1; keep 4 ])))
+
+let test_protected_index_rejected () =
+  Alcotest.(check bool) "provider cannot target protected source index" true
+    (is_error
+       (plan_of_json ~units:validation_units (plan_json [ summarize 0 "x"; keep 4 ])))
+
+let test_missing_eligible_index_rejected () =
+  Alcotest.(check bool) "every eligible source needs a decision" true
+    (is_error
+       (plan_of_json ~units:validation_units (plan_json [ summarize 1 "x" ])))
+
+let test_duplicate_index_rejected () =
+  Alcotest.(check bool) "duplicate source decision rejected" true
+    (is_error
+       (plan_of_json
+          ~units:validation_units
+          (plan_json [ summarize 1 "x"; drop 1; keep 4 ])))
+
+let test_all_dropped_rejected () =
+  Alcotest.(check bool) "planner cannot remove every eligible unit" true
+    (is_error
+       (plan_of_json ~units:validation_units (plan_json [ drop 1; drop 4 ])))
+
+let test_action_summary_contract_rejected () =
+  let invalid =
+    [ decision ~summary:"unexpected" 1 S.compaction_plan_action_keep
+    ; decision ~summary:"unexpected" 1 S.compaction_plan_action_drop
+    ; decision 1 S.compaction_plan_action_summarize
+    ; summarize 1 "   "
+    ; decision 1 "unknown-action"
+    ]
+  in
+  List.iter
+    (fun invalid_decision ->
+      Alcotest.(check bool) "invalid action/summary pair" true
+        (is_error
+           (plan_of_json
+              ~units:validation_units
+              (plan_json [ invalid_decision; keep 4 ]))))
+    invalid
+
+let test_unknown_and_duplicate_fields_rejected () =
+  let unknown_top =
+    `Assoc
+      [ S.compaction_plan_field_decisions, `List [ summarize 1 "x"; keep 4 ]
+      ; "unexpected", `Null
+      ]
+  in
+  let duplicate_top =
+    `Assoc
+      [ S.compaction_plan_field_decisions, `List [ summarize 1 "x"; keep 4 ]
+      ; S.compaction_plan_field_decisions, `List []
+      ]
+  in
+  let unknown_decision =
+    `Assoc
+      [ S.compaction_plan_field_unit_index, `Int 1
+      ; S.compaction_plan_field_action, `String S.compaction_plan_action_summarize
+      ; S.compaction_plan_field_summary, `String "x"
+      ; "unexpected", `Null
+      ]
+  in
+  let duplicate_decision =
+    `Assoc
+      [ S.compaction_plan_field_unit_index, `Int 1
+      ; S.compaction_plan_field_unit_index, `Int 1
+      ; S.compaction_plan_field_action, `String S.compaction_plan_action_summarize
+      ; S.compaction_plan_field_summary, `String "x"
+      ]
+  in
+  List.iter
+    (fun json ->
+      Alcotest.(check bool) "non-canonical object rejected" true
+        (is_error (plan_of_json ~units:validation_units json)))
+    [ `Assoc []
+    ; unknown_top
+    ; duplicate_top
+    ; plan_json [ unknown_decision; keep 4 ]
+    ; plan_json [ duplicate_decision; keep 4 ]
+    ]
+
+let test_request_excludes_protected_content () =
+  let units =
+    [ ordinary (text T.System "SECRET_SYSTEM")
+    ; ordinary (text T.User "SECRET_USER")
+    ; closed_cycle "SECRET_TOOL"
+    ; ordinary
+        (message T.Assistant
+           [ T.Text "SECRET_MIXED"; T.Thinking { content = "SECRET_THINKING"; signature = None } ])
+    ; ordinary
+        (message ~metadata:[ "secret", `Bool true ] T.Assistant [ T.Text "SECRET_METADATA" ])
+    ; ordinary (text T.Assistant "VISIBLE_ASSISTANT")
+    ]
+  in
+  let request = C.For_testing.messages_for_plan ~units in
+  let wire = request |> List.map T.text_of_message |> String.concat "\n" in
+  Alcotest.(check bool) "eligible assistant text crosses boundary" true
+    (Astring.String.is_infix ~affix:"VISIBLE_ASSISTANT" wire);
+  List.iter
+    (fun secret ->
+      Alcotest.(check bool) (secret ^ " remains private") false
+        (Astring.String.is_infix ~affix:secret wire))
+    [ "SECRET_SYSTEM"
+    ; "SECRET_USER"
+    ; "SECRET_TOOL"
+    ; "SECRET_MIXED"
+    ; "SECRET_THINKING"
+    ; "SECRET_METADATA"
+    ]
+
+let test_apply_preserves_protected_units_and_source_order () =
+  let system = text T.System "system" in
+  let first = text T.Assistant "first" in
+  let cycle = closed_cycle "cycle" in
+  let user = text T.User "user" in
+  let metadata_assistant =
+    message ~metadata:[ "producer", `String "exact" ] T.Assistant [ T.Text "metadata" ]
+  in
+  let second = text T.Assistant "second" in
+  let thinking =
+    message T.Assistant
+      [ T.Thinking { content = "private"; signature = Some "signed" } ]
+  in
+  let units =
+    [ ordinary system
+    ; ordinary first
+    ; cycle
+    ; ordinary user
+    ; ordinary metadata_assistant
+    ; ordinary second
+    ; ordinary thinking
+    ]
+  in
+  match
+    plan_of_json
+      ~units
+      (plan_json [ summarize 1 "first summary"; summarize 5 "second summary" ])
+  with
+  | Error detail -> Alcotest.failf "expected valid plan: %s" detail
+  | Ok plan ->
+    let summary =
+      { first with content = [ T.Text "first summary" ] }
+    in
+    let second_summary =
+      { second with content = [ T.Text "second summary" ] }
+    in
+    let expected =
+      [ system; summary ]
+      @ (match cycle with U.Closed_tool_cycle messages -> messages | Ordinary_message _ -> [])
+      @ [ user; metadata_assistant; second_summary; thinking ]
+    in
+    Alcotest.(check bool) "protected source constructors and order are exact" true
+      (C.apply plan = expected)
 
 let () =
   Alcotest.run "compaction_llm_summarizer"
@@ -382,23 +515,34 @@ let () =
         ; Alcotest.test_case "compact policy prefers structured judge over chat runtime" `Quick
             test_compact_policy_prefers_structured_judge_over_chat_runtime
         ] )
+    ; ( "eligibility"
+      , [ Alcotest.test_case "plain Assistant text only" `Quick
+            test_only_plain_assistant_text_is_eligible
+        ; Alcotest.test_case "protected content never reaches provider" `Quick
+            test_request_excludes_protected_content
+        ] )
     ; ( "plan_of_json"
-      , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
+      , [ Alcotest.test_case "valid source decisions accepted" `Quick
+            test_valid_source_decisions_accepted
+        ; Alcotest.test_case "runtime identity is not normalized" `Quick
+            test_runtime_identity_is_not_normalized
         ; Alcotest.test_case "all kept rejected" `Quick test_all_kept_rejected
-        ; Alcotest.test_case "drop-only with kept accepted" `Quick
-            test_drop_only_with_kept_accepted
-        ; Alcotest.test_case "out of range rejected" `Quick test_out_of_range_rejected
-        ; Alcotest.test_case "negative rejected" `Quick test_negative_rejected
-        ; Alcotest.test_case "duplicate rejected" `Quick test_duplicate_rejected
-        ; Alcotest.test_case "missing index rejected" `Quick test_missing_index_rejected
+        ; Alcotest.test_case "drop with kept accepted" `Quick
+            test_drop_with_kept_accepted
+        ; Alcotest.test_case "protected index rejected" `Quick
+            test_protected_index_rejected
+        ; Alcotest.test_case "missing eligible index rejected" `Quick
+            test_missing_eligible_index_rejected
+        ; Alcotest.test_case "duplicate index rejected" `Quick
+            test_duplicate_index_rejected
         ; Alcotest.test_case "all dropped rejected" `Quick test_all_dropped_rejected
-        ; Alcotest.test_case "empty summary rejected when summarizing" `Quick
-            test_empty_summary_rejected_when_summarizing
-        ; Alcotest.test_case "missing field rejected" `Quick test_missing_field_rejected
+        ; Alcotest.test_case "action summary contract rejected" `Quick
+            test_action_summary_contract_rejected
+        ; Alcotest.test_case "unknown and duplicate fields rejected" `Quick
+            test_unknown_and_duplicate_fields_rejected
         ] )
     ; ( "apply"
-      , [ Alcotest.test_case "keeps/summarizes/drops" `Quick test_apply_keeps_summarizes_drops
-        ; Alcotest.test_case "drop-only preserves kept" `Quick
-            test_apply_drop_only_preserves_kept
+      , [ Alcotest.test_case "protected units and source order stay exact" `Quick
+            test_apply_preserves_protected_units_and_source_order
         ] )
     ]

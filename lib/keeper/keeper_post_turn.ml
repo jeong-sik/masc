@@ -61,26 +61,40 @@ type compaction_recovery = {
 }
 
 type compaction_recovery_error =
-  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
+  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
+  | Checkpoint_structure_invalid of Keeper_compaction_unit.structural_error
+  | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
-  | Checkpoint_superseded of {
-      incoming_turn_count : int;
-      known_turn_count : int;
-    }
-  | Checkpoint_save_failed of string
 
 let compaction_recovery_error_to_tag = function
-  | Checkpoint_load_failed Keeper_checkpoint_store.Not_found ->
+  | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
     "checkpoint_not_found"
-  | Checkpoint_load_failed _ -> "checkpoint_load_failed"
+  | Checkpoint_ref_load_failed _ -> "checkpoint_load_failed"
+  | Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed _) ->
+    "checkpoint_source_changed"
+  | Checkpoint_cas_failed (Source_unavailable _) ->
+    "checkpoint_source_unavailable"
+  | Checkpoint_cas_failed
+      (Candidate_identity_invalid _
+      | Candidate_session_mismatch _
+      | Candidate_generation_mismatch _
+      | Candidate_turn_regressed _) ->
+    "checkpoint_candidate_invalid"
+  | Checkpoint_cas_failed (Commit_not_installed _) ->
+    "checkpoint_commit_not_installed"
+  | Checkpoint_cas_failed (Commit_durability_unknown _) ->
+    "checkpoint_commit_durability_unknown"
+  | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
+    "checkpoint_transaction_outcome_unknown"
+  | Checkpoint_structure_invalid _ -> "checkpoint_structure_invalid"
+  | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
   | Compaction_evidence_missing -> "compaction_evidence_missing"
   | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
-  | Checkpoint_superseded _ -> "checkpoint_superseded"
-  | Checkpoint_save_failed _ -> "checkpoint_save_failed"
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
@@ -89,8 +103,81 @@ let checkpoint_load_error_detail = function
   | Io_error detail
   | Sdk_other_error detail -> detail
 
+let checkpoint_identity_error_detail = function
+  | Keeper_checkpoint_store.Session_id_invalid detail ->
+    "invalid session id: " ^ detail
+  | Generation_missing -> "checkpoint generation is missing"
+  | Generation_not_integer -> "checkpoint generation is not an integer"
+  | Ref_create_failed (Keeper_checkpoint_ref.Negative_generation generation) ->
+    Printf.sprintf "negative checkpoint generation: %d" generation
+  | Ref_create_failed (Negative_turn_count turn_count) ->
+    Printf.sprintf "negative checkpoint turn count: %d" turn_count
+  | Ref_create_failed (Invalid_sha256 digest) ->
+    Printf.sprintf "invalid checkpoint SHA-256: %s" digest
+
+let checkpoint_ref_detail (reference : Keeper_checkpoint_ref.t) =
+  Printf.sprintf
+    "trace_id=%s generation=%d turn_count=%d sha256=%s"
+    (Keeper_id.Trace_id.to_string reference.trace_id)
+    reference.generation
+    reference.turn_count
+    reference.sha256
+
+let checkpoint_ref_load_error_detail = function
+  | Keeper_checkpoint_store.Ref_not_found -> "checkpoint not found"
+  | Ref_read_failed error -> checkpoint_load_error_detail error
+  | Ref_identity_invalid error -> checkpoint_identity_error_detail error
+  | Ref_session_mismatch { expected; actual } ->
+    Printf.sprintf
+      "checkpoint session mismatch: expected=%s actual=%s"
+      (Keeper_id.Trace_id.to_string expected)
+      (Keeper_id.Trace_id.to_string actual)
+  | Ref_lock_failed detail -> "checkpoint source lock failed: " ^ detail
+
+let checkpoint_cas_error_detail = function
+  | Keeper_checkpoint_store.Source_unavailable error ->
+    "checkpoint source unavailable: " ^ checkpoint_ref_load_error_detail error
+  | Source_changed actual ->
+    "checkpoint source changed: " ^ checkpoint_ref_detail actual
+  | Candidate_identity_invalid error ->
+    "checkpoint candidate identity invalid: "
+    ^ checkpoint_identity_error_detail error
+  | Candidate_session_mismatch { expected; candidate } ->
+    Printf.sprintf
+      "checkpoint candidate session mismatch: expected=%s candidate=%s"
+      (Keeper_id.Trace_id.to_string expected)
+      (Keeper_id.Trace_id.to_string candidate)
+  | Candidate_generation_mismatch { expected; candidate } ->
+    Printf.sprintf
+      "checkpoint candidate generation mismatch: expected=%d candidate=%d"
+      expected
+      candidate
+  | Candidate_turn_regressed { source_turn; candidate_turn } ->
+    Printf.sprintf
+      "checkpoint candidate turn regressed: source=%d candidate=%d"
+      source_turn
+      candidate_turn
+  | Commit_not_installed error ->
+    "checkpoint commit not installed: "
+    ^ Keeper_fs.durable_write_error_to_string error
+  | Commit_durability_unknown { installed_ref; error } ->
+    Printf.sprintf
+      "checkpoint commit durability unknown: %s error=%s"
+      (checkpoint_ref_detail installed_ref)
+      (Keeper_fs.durable_write_error_to_string error)
+  | Transaction_outcome_unknown { possible_installed_ref; error } ->
+    Printf.sprintf
+      "checkpoint transaction outcome unknown: %s error=%s"
+      (checkpoint_ref_detail possible_installed_ref)
+      (File_lock_eio.durable_lock_error_to_string error)
+
 let compaction_recovery_error_to_string = function
-  | Checkpoint_load_failed error -> checkpoint_load_error_detail error
+  | Checkpoint_ref_load_failed error -> checkpoint_ref_load_error_detail error
+  | Checkpoint_cas_failed error -> checkpoint_cas_error_detail error
+  | Checkpoint_structure_invalid error ->
+    "checkpoint structure invalid: "
+    ^ Keeper_compaction_unit.show_structural_error error
+  | Checkpoint_candidate_failed detail -> detail
   | Compaction_rejected reason ->
     "compaction rejected: "
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
@@ -99,48 +186,6 @@ let compaction_recovery_error_to_string = function
   | Unexpected_compaction_decision decision ->
     "unexpected compaction decision: "
     ^ Keeper_compact_policy.compaction_decision_to_string decision
-  | Checkpoint_superseded { incoming_turn_count; known_turn_count } ->
-    Printf.sprintf
-      "checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
-      incoming_turn_count
-      known_turn_count
-  | Checkpoint_save_failed detail -> detail
-
-let log_tool_pair_repair
-    ~keeper_name
-    ~site
-    (stats : Keeper_context_core.tool_pair_repair_stats) =
-  if Keeper_context_core.tool_pair_repair_stats_changed stats then
-    Log.Harness.emit
-      Log.Warn
-      ~details:
-        (`Assoc
-            [ "keeper_name", `String keeper_name
-            ; "site", `String site
-            ; "dropped_tool_uses", `Int stats.dropped_tool_uses
-            ; "dropped_tool_results", `Int stats.dropped_tool_results
-            ; ( "dropped_tool_use_samples"
-              , `List
-                  (List.map
-                     (fun (tool_use_id, tool_name) ->
-                        `Assoc
-                          [ "tool_use_id", `String tool_use_id
-                          ; "tool_name", `String tool_name
-                          ])
-                     stats.dropped_tool_use_samples) )
-            ; ( "dropped_tool_result_ids"
-              , `List
-                  (List.map
-                     (fun tool_use_id -> `String tool_use_id)
-                     stats.dropped_tool_result_ids) )
-            ])
-      (Printf.sprintf
-         "tool_pair_repair keeper=%s site=%s dropped_tool_uses=%d \
-          dropped_tool_results=%d"
-         keeper_name
-         site
-         stats.dropped_tool_uses
-         stats.dropped_tool_results)
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and
@@ -334,7 +379,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
     ~(meta : keeper_meta)
-    ~(primary_model_max_tokens : int)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
@@ -382,11 +426,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
         message_count = 0;
       }
   | Some cp ->
-      let ctx =
-        context_of_oas_checkpoint
-          cp
-          ~primary_model_max_tokens
-      in
+      let ctx = context_of_oas_checkpoint cp in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in
@@ -446,36 +486,24 @@ let commit_prepared_after_save ~trigger ~save =
   | Ok checkpoint -> Ok (checkpoint, trigger)
 ;;
 
-let checkpoint_of_save_outcome = function
-  | Ok (checkpoint, Keeper_checkpoint_store.Saved _) -> Ok checkpoint
-  | Ok
-      ( _,
-        Keeper_checkpoint_store.Stale_noop
-          { incoming_turn_count; known_turn_count } ) ->
-    Error (Checkpoint_superseded { incoming_turn_count; known_turn_count })
-  | Error detail -> Error (Checkpoint_save_failed detail)
-;;
-
 let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
-    ~(primary_model_max_tokens : int)
   : (compaction_recovery, compaction_recovery_error) result
   =
   let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
   match
-    Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
+    Keeper_checkpoint_store.load_oas_with_ref ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   with
-  | Error Keeper_checkpoint_store.Not_found ->
+  | Error Keeper_checkpoint_store.Ref_not_found ->
     Log.Keeper.debug
       "keeper:%s compaction OAS checkpoint not found"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-    Error (Checkpoint_load_failed Keeper_checkpoint_store.Not_found)
-  | Error
-      ((Parse_error detail | Store_error detail | Io_error detail
-       | Sdk_other_error detail) as error) ->
+    Error (Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found)
+  | Error error ->
+    let detail = checkpoint_ref_load_error_detail error in
     Log.Keeper.error
       "keeper:%s compaction OAS load error: %s"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -488,12 +516,12 @@ let recover_latest_checkpoint_for_compaction
           , Keeper_oas_execution_error_phase.(to_label Compaction_checkpoint_load) )
         ]
       ();
-    Error (Checkpoint_load_failed error)
-  | Ok checkpoint ->
+    Error (Checkpoint_ref_load_failed error)
+  | Ok (checkpoint, source_ref) ->
     let turn_generation =
       checkpoint_generation checkpoint ~fallback:meta.runtime.generation
     in
-    let ctx = context_of_oas_checkpoint checkpoint ~primary_model_max_tokens in
+    let ctx = context_of_oas_checkpoint checkpoint in
     let retry_meta =
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
@@ -513,14 +541,19 @@ let recover_latest_checkpoint_for_compaction
             commit_prepared_after_save
               ~trigger:prepared_trigger
               ~save:(fun () ->
-                save_oas_checkpoint_classified
+                save_oas_checkpoint_if_source
                   ~multimodal_policy:meta.multimodal_policy
                   ~keeper_name:meta.name
                   ~session
                   ~agent_name:retry_meta.agent_name
                   ~ctx:preparation.context
                   ~generation:turn_generation
-                |> checkpoint_of_save_outcome)
+                  ~expected_source_ref:source_ref
+                |> Result.map fst
+                |> Result.map_error (function
+                  | Tool_history_invalid error ->
+                    Checkpoint_structure_invalid error
+                  | Persistence_error error -> Checkpoint_cas_failed error))
           with
           | Ok (saved_checkpoint, trigger) ->
             Otel_metric_store.inc_counter
@@ -534,14 +567,14 @@ let recover_latest_checkpoint_for_compaction
               ; turn_generation
               }
           | Error
-              (Checkpoint_superseded
-                 { incoming_turn_count; known_turn_count } as error) ->
+              (Checkpoint_cas_failed
+                 (Keeper_checkpoint_store.Source_changed actual) as error) ->
             Log.Keeper.warn
-              "compaction checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
-              incoming_turn_count
-              known_turn_count;
+              "compaction checkpoint source changed: %s"
+              (checkpoint_ref_detail actual);
             Error error
-          | Error (Checkpoint_save_failed detail as error) ->
+          | Error (Checkpoint_cas_failed cas_error as error) ->
+            let detail = checkpoint_cas_error_detail cas_error in
             Log.Keeper.error
               "compaction checkpoint save failed: %s"
               detail;
@@ -562,7 +595,7 @@ let recover_latest_checkpoint_for_compaction
           log_keeper_exn
             ~label:"compaction checkpoint save exception"
             exn;
-          Error (Checkpoint_save_failed detail))
+          Error (Checkpoint_candidate_failed detail))
      | Keeper_compact_policy.Rejected (_, reason), _ ->
        Error (Compaction_rejected reason)
      | (Keeper_compact_policy.Applied _

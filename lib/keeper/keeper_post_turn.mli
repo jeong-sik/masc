@@ -36,15 +36,13 @@ type compaction_recovery =
   } [@@warning "-69"]
 
 type compaction_recovery_error =
-  | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
+  | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
+  | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
+  | Checkpoint_structure_invalid of Keeper_compaction_unit.structural_error
+  | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | Compaction_evidence_missing
   | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
-  | Checkpoint_superseded of
-      { incoming_turn_count : int
-      ; known_turn_count : int
-      }
-  | Checkpoint_save_failed of string
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
 val compaction_recovery_error_to_string : compaction_recovery_error -> string
@@ -56,7 +54,6 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
   meta:Keeper_meta_contract.keeper_meta ->
-  primary_model_max_tokens:int ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
@@ -92,5 +89,4 @@ val recover_latest_checkpoint_for_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
-  primary_model_max_tokens:int ->
   (compaction_recovery, compaction_recovery_error) result

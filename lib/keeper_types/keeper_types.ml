@@ -52,9 +52,7 @@ type tool_call_entry =
 (* ================================================================ *)
 
 type working_context =
-  { checkpoint : Agent_sdk.Checkpoint.t
-  ; max_tokens : int
-  }
+  { checkpoint : Agent_sdk.Checkpoint.t }
 
 type session_context =
   { session_id : string

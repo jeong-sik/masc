@@ -75,18 +75,6 @@ let record_error ?(error_type = "unknown") () =
   inc_counter metric_errors ~labels:[ "type", error_type ] ()
 ;;
 
-let set_active_agents count =
-  set_gauge metric_active_agents (Float.of_int count)
-;;
-
-let set_pending_tasks count =
-  set_gauge metric_pending_tasks (Float.of_int count)
-;;
-
-let reconcile_active_agents_gauge (_masc_dir : string) = ()
-
-let update_uptime () = ()
-
 let init () =
   (* Register histogram bucket upper bounds for histograms that use
      [observe_histogram] without manual [_bucket] counter management.
@@ -120,8 +108,6 @@ let init () =
     [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0 ];
   reg "masc_keeper_turn_phase_duration_seconds"
     [ 0.1; 0.5; 1.0; 5.0; 10.0; 30.0; 60.0; 120.0; 300.0; 600.0 ];
-  reg "masc_keeper_gated_gh_block_time_seconds"
-    [ 0.0; 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0 ];
   reg "masc_workspace_broadcast_duration_seconds"
     [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ];
   reg "masc_file_lock_acquire_seconds"

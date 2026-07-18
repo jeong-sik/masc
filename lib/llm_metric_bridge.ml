@@ -418,6 +418,4 @@ let make_sink () : Metrics.t =
   }
 ;;
 
-let init ~base_path:_ = ()
-
 let install () = Metrics.set_global (make_sink ())

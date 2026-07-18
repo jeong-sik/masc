@@ -224,13 +224,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     hooks: hooks
       ? {
+          scope: asNullableString(hooks.scope),
           slots: normalizeKeeperHookSlots(hooks.slots),
-          deny_list: normalizeStringList(hooks.deny_list),
-          // deny_list_count is derived (deny_list.length); not stored.
-          cost_budget: {
-            max_cost_usd: asLooseNullableNumber(isRecord(hooks.cost_budget) ? hooks.cost_budget.max_cost_usd : undefined),
-            active: asLooseBoolean(isRecord(hooks.cost_budget) ? hooks.cost_budget.active : undefined),
-          },
         }
       : undefined,
     runtime: {

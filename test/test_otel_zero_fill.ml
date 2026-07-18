@@ -42,6 +42,27 @@ let test_name_module_constant_zero_filled () =
   | Some m ->
     check bool "kind is Counter" true (m.metric_type = Otel_metric_store_core.Counter)
 
+let test_runtime_observation_emitters_are_typed_and_wired () =
+  let eviction_metric = Otel_runtime_metric_names.metric_runtime_metrics_eviction in
+  let eviction_before =
+    Otel_metric_store.metric_value_or_zero eviction_metric ()
+  in
+  Runtime_metrics.on_runtime_metrics_eviction ();
+  check (float 0.0) "eviction increments its declared counter"
+    (eviction_before +. 1.0)
+    (Otel_metric_store.metric_value_or_zero eviction_metric ());
+  let audit_metric = Otel_runtime_metric_names.metric_runtime_audit_failure in
+  let check_stage label stage =
+    let labels = [ "stage", label ] in
+    let before = Otel_metric_store.metric_value_or_zero audit_metric ~labels () in
+    Runtime_metrics.on_runtime_audit_failure ~stage;
+    check (float 0.0) (label ^ " increments its typed counter")
+      (before +. 1.0)
+      (Otel_metric_store.metric_value_or_zero audit_metric ~labels ())
+  in
+  check_stage "store_creation" Runtime_metrics.Store_creation;
+  check_stage "append" Runtime_metrics.Append
+
 let test_keeper_metrics_zero_filled () =
   match find_unlabeled Keeper_metrics.(to_string WriteMetaFailures) with
   | None -> fail "masc_keeper_write_meta_failures_total must be registered at module init"
@@ -109,6 +130,8 @@ let () =
         ] )
     ; ( "module-init"
       , [ test_case "name module constant" `Quick test_name_module_constant_zero_filled
+        ; test_case "runtime observation emitters" `Quick
+            test_runtime_observation_emitters_are_typed_and_wired
         ; test_case "keeper metrics" `Quick test_keeper_metrics_zero_filled
         ; test_case "chat transport metric" `Quick
             test_chat_transport_metric_zero_filled

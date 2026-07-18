@@ -78,13 +78,6 @@ let test_parse_llm_endpoints_env () =
    2026-05-05 — covered the acquire/release surface that was archived.
    See docs/audit-responses/2026-05-05-dashboard-heuristic.md §7.1. *)
 
-let test_select_runtime_from_empty_returns_error () =
-  match Local_runtime_pool.select_runtime_from [] () with
-  | Ok _ -> Alcotest.fail "empty runtime list should be rejected"
-  | Error message ->
-      Alcotest.(check string) "empty runtime error"
-        "no local runtimes configured" message
-
 (* [test_acquire_requires_explicit_or_runtime_model] removed 2026-05-05 —
    covered the acquire surface that was archived. *)
 
@@ -106,8 +99,6 @@ let () =
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "parse LLM_ENDPOINTS env" `Quick
             test_parse_llm_endpoints_env;
-          Alcotest.test_case "empty runtime set returns error" `Quick
-            test_select_runtime_from_empty_returns_error;
           Alcotest.test_case "record measured ceiling" `Quick
             test_record_measured_ceiling;
         ] );

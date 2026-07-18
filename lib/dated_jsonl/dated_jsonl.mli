@@ -7,6 +7,53 @@
 type t
 (** Opaque handle.  Holds [base_dir] and the append mutex. *)
 
+type read_operation =
+  | Inspect
+  | List_directory
+  | Open_file
+  | Read_file
+
+type layout_entry_kind =
+  | Month_directory
+  | Day_file
+
+type non_regular_file_kind =
+  | Directory
+  | Symbolic_link
+  | Character_device
+  | Block_device
+  | Fifo
+  | Socket
+
+type read_error =
+  | Invalid_offset of { offset : int }
+  | Not_a_directory of { path : string }
+  | Invalid_layout_entry of
+      { parent : string
+      ; entry : string
+      ; expected : layout_entry_kind
+      }
+  | Non_regular_file of
+      { path : string
+      ; kind : non_regular_file_kind
+      }
+  | Io_error of
+      { operation : read_operation
+      ; path : string
+      ; detail : string
+      }
+
+type recent_entry =
+  | Parsed of Yojson.Safe.t
+  | Malformed_json of
+      { path : string
+      ; line_number : int option
+      ; detail : string
+      }
+
+val read_error_to_string : read_error -> string
+(** Render a typed storage read failure for operator-facing diagnostics. *)
+
 val create :
   base_dir:string ->
   ?mutex:Eio.Mutex.t ->
@@ -48,6 +95,14 @@ val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
     order (oldest first), skipping the first [offset] newest entries.
     Scans day-files from newest to oldest, stops early. *)
 
+val read_recent_result :
+  ?offset:int -> t -> int -> (recent_entry list, read_error) result
+(** Strict bounded recent-row read. The limit and offset count physical,
+    non-empty JSONL rows, including {!Malformed_json} rows. Missing stores are
+    [Ok []]. The reader accepts only [YYYY-MM/DD.jsonl] layout entries and
+    regular day files; symbolic links, other file kinds, and I/O failures are
+    returned explicitly. Results are chronological (oldest first). *)
+
 val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
@@ -77,9 +132,13 @@ val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
     order without loading a whole day-file into memory. Malformed rows are
     skipped, matching {!read_recent} and {!read_range}. *)
 
-val iter_all_result : t -> (Yojson.Safe.t -> unit) -> (unit, string) result
-(** Fail-loud variant of {!iter_all}. Missing stores are empty; directory,
-    file-read, and JSON parse failures are returned with their exact path. *)
+val iter_all_entries_result :
+  t -> (recent_entry -> unit) -> (unit, read_error) result
+(** Stream every physical, non-empty JSONL row in chronological order. JSON
+    syntax failures are delivered as {!Malformed_json} entries and do not stop
+    iteration. The same closed layout and regular-file boundary as
+    {!read_recent_result} applies; storage failures are returned explicitly.
+    Missing stores are empty. *)
 
 val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
 (** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)
@@ -116,7 +175,8 @@ val reset_count_cache_for_testing : unit -> unit
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]
     from a large file without loading the whole file into memory.
-    Reads backwards in chunks. Returns chronologically (oldest first). *)
+    Reads backwards in chunks. Returns chronologically (oldest first). A
+    missing file is an empty tail; other open and read errors are exceptions. *)
 
 module For_testing : sig
   val mutex : t -> Eio.Mutex.t

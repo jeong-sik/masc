@@ -35,7 +35,6 @@ val prepare_run_context :
   -> meta:keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> base_dir:string
-  -> max_context:int
   -> runtime_id:string
   -> ?temperature:float
   -> ?shared_context:Agent_sdk.Context.t

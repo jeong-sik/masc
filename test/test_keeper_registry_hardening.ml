@@ -410,7 +410,6 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
          Out_channel.output_string channel evidence);
        let ctx_work =
          Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-           ~max_tokens:4000
        in
        let _original_entry =
          KR.register ~base_path:config.base_path meta.name meta
@@ -461,7 +460,6 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
                 ~meta:exact_resources.entry.meta
                 ~publication_recovery:exact_resources.publication_recovery
                 ~ctx_work
-                ~exec_cache:None
                 ~name:"Read"
                 ~input:(`Assoc [ ("file_path", `String evidence_path) ])
                 ()

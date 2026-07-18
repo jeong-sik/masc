@@ -27,14 +27,34 @@ val default_trigger_policy : Discord_gateway_client.trigger_policy
 (** Policy used when none is configured (empty/unset): the quiet,
     mention-triggered baseline ([Mention_or_thread]). *)
 
-val parse_trigger_policy : string -> Discord_gateway_client.trigger_policy
-(** Resolve a configured trigger-policy string. Empty/whitespace is
-    treated as unset and returns {!default_trigger_policy}. A non-empty
-    value is parsed by the single canonical grammar
-    ({!Discord_gateway_state.parse_trigger_policy}); a value that fails
-    to parse is logged via [Log.Server] and falls back to the default,
-    rather than being silently coerced. Exposed for unit testing the
-    config boundary. *)
+(** Typed trigger-policy loading, mirroring the Slack sibling. A missing
+    runtime.toml or missing key is "unset"; unreadable/malformed
+    TOML, a wrong field type, or a value the strict grammar rejects is an
+    explicit load error — the gateway does not start on one (fail-closed,
+    masc#25123). *)
+type trigger_policy_toml_load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Discord_gateway_client.trigger_policy
+
+type trigger_policy_load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+  | Trigger_policy_env_invalid of { detail : string }
+
+val trigger_policy_load_error_to_string : trigger_policy_load_error -> string
+
+val load_trigger_policy_from_toml :
+  path:string -> (trigger_policy_toml_load, trigger_policy_load_error) result
+(** Exposed for unit testing the config boundary. *)
+
+val resolved_trigger_policy :
+  unit -> (Discord_gateway_client.trigger_policy, trigger_policy_load_error) result
+(** Env > TOML > default. [MASC_DISCORD_TRIGGER_POLICY] wins when set and
+    valid; an invalid env value is a load error (never a silent default);
+    otherwise the [discord.trigger_policy] runtime.toml key applies, and a
+    missing file/key yields {!default_trigger_policy}. *)
 
 module For_testing : sig
   val submit_triggered_event :

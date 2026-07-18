@@ -154,17 +154,6 @@ let autonomy_entries =
       "Vote decay factor";
   ]
 
-let level2_entries =
-  [
-    entry ~default:"0.85" "MASC_DRIFT_THRESHOLD" "Drift detection threshold";
-    entry ~default:"0.4" "MASC_DRIFT_JACCARD_WEIGHT" "Drift Jaccard weight";
-    entry ~default:"0.6" "MASC_DRIFT_COSINE_WEIGHT" "Drift cosine weight";
-    entry ~default:"0.075" "MASC_HEBBIAN_RATE" "Hebbian learning rate";
-    entry ~default:"0.01" "MASC_HEBBIAN_DECAY" "Hebbian decay rate";
-    entry ~default:"100" "MASC_LOCK_WARN_MS"
-      "Lock contention warning threshold (ms)";
-  ]
-
 let dashboard_entries =
   [
     entry ~default:"(none)" "MASC_BENCHMARK_RESULTS_DIR"
@@ -223,8 +212,6 @@ let dashboard_entries =
 
 let board_entries =
   [
-    entry ~default:"(none)" "MASC_BOARD_BACKEND"
-      "Board backend type (e.g. jsonl, pg); None when unset";
     entry ~default:"30.0" "MASC_BOARD_FLUSH_INTERVAL_SEC"
       "Flush interval for board persistence (seconds)";
   ]
@@ -599,16 +586,6 @@ let worker_entries =
       "Local worker heartbeat interval (seconds, clamped >=1)";
   ]
 
-let worker_runtime_entries =
-  [
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_BACKEND"
-      "Worker execution backend (e.g. docker, local); None when unset";
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_DOCKER_IMAGE"
-      "Docker image for worker runtime; None when unset";
-    entry ~default:"(none)" "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL"
-      "Host MCP base URL for worker runtime; None when unset";
-  ]
-
 let all_categories () =
   [
     category "server"
@@ -636,7 +613,6 @@ let all_categories () =
        @ keeper_tool_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
-    category "level2" level2_entries;
     category "dashboard" dashboard_entries;
     category "economy" economy_entries;
     category "operations"
@@ -644,7 +620,7 @@ let all_categories () =
     category "channel" channel_gate_entries;
     category "process"
       shutdown_entries;
-    category "worker" (worker_entries @ worker_runtime_entries);
+    category "worker" worker_entries;
     category "web_search" web_search_entries;
     category "session" (session_entries @ tempo_entries);
   ]

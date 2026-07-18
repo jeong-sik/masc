@@ -190,8 +190,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "masc_timeout_policy_overshoot_total"
-
 (* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
 
 (* #9943: per-keeper counter of "compaction triggered but
@@ -264,11 +262,3 @@ let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "
 let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"
-let metric_discovery_history_failures = Otel_metric_store_core.declare_counter "masc_discovery_history_failures_total"
-
-(* #18855: per-tool correction_pipeline fix counter.
-   Incremented when the OAS agent_tools module reports that
-   correction_pipeline fixed input fields for a tool.
-   Labels: [tool_name]. *)
-let metric_oas_correction_pipeline_fixes_total =
-  Otel_metric_store_core.declare_counter "masc_oas_correction_pipeline_fixes_total"

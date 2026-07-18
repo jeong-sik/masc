@@ -164,10 +164,6 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-(** #9662: cooperative-cancel timeout overshoot counter emitted by
-    [Timeout_policy].  Labels: [layer, origin]. *)
-val metric_timeout_policy_overshoot : string
-
 (** #9943: per-keeper noop compaction counter.  Increments when
     a snapshot records [compaction_before_tokens =
     compaction_after_tokens > 0] — the trigger fired but the
@@ -265,11 +261,3 @@ val metric_persistence_read_drops : string
 
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)
 val metric_persistence_utf8_repair : string
-
-val metric_discovery_history_failures : string
-
-(** #18855: per-tool correction_pipeline fix counter.
-    Incremented when the OAS agent_tools module reports that
-    correction_pipeline fixed input fields for a tool.
-    Labels: [tool_name]. *)
-val metric_oas_correction_pipeline_fixes_total : string

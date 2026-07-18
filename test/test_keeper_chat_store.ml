@@ -261,6 +261,28 @@ let test_to_json_array_exposes_id () =
             (List.mem_assoc "id" fields)
       | _ -> Alcotest.fail "expected a non-empty json array of assoc rows")
 
+(* The dashboard /chat/history cache keys freshness off [chat_path]'s
+   (mtime, size): the store is append-only, so every persisted message
+   must grow the file. Size is the load-bearing component (mtime
+   granularity can collapse two appends into one clock tick). *)
+let test_chat_path_size_grows_on_append () =
+  let base_dir = temp_base_path "keeper-chat-store-path-freshness" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-path-freshness" in
+      let path = K.chat_path ~base_dir ~keeper_name in
+      Alcotest.(check bool) "path names the keeper's jsonl" true
+        (Filename.basename path = keeper_name ^ ".jsonl");
+      K.append_user_message ~base_dir ~keeper_name ~content:"first" ();
+      Alcotest.(check bool) "append creates the file at chat_path" true
+        (Sys.file_exists path);
+      let size_after_first = (Unix.stat path).Unix.st_size in
+      K.append_user_message ~base_dir ~keeper_name ~content:"second" ();
+      let size_after_second = (Unix.stat path).Unix.st_size in
+      Alcotest.(check bool) "second append strictly grows the file" true
+        (size_after_second > size_after_first))
+
 let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
   let base_dir = temp_base_path "keeper-chat-recent-context" in
   Fun.protect
@@ -1924,6 +1946,8 @@ let () =
             test_message_id_minted_unique_and_stable;
           Alcotest.test_case "legacy row gets deterministic id (R3)" `Quick
             test_legacy_row_gets_deterministic_id;
+          Alcotest.test_case "chat_path size grows on append (cache key)" `Quick
+            test_chat_path_size_grows_on_append;
           Alcotest.test_case "to_json_array exposes id (R3)" `Quick
             test_to_json_array_exposes_id;
           Alcotest.test_case "recent context renders reply and tool evidence" `Quick

@@ -86,7 +86,6 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
       let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -138,7 +137,6 @@ let test_fusion_default_descriptor_is_bundle_visible () =
       let meta = make_meta ~name:"test-fusion-default-descriptor" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -175,7 +173,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
       let config = Workspace.default_config dir in
       let meta = make_meta ~name:"test-complete-tool-bundle" () in
       let ctx_snapshot =
-        Keeper_context_runtime.create ~eio:false ~system_prompt:"test" ~max_tokens:4000
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -234,7 +232,6 @@ let test_missing_current_task_reconciled_before_transition_hint () =
       in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -281,7 +278,6 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
       let meta = make_meta ~name:"test-assignment-bundle" () in
       let ctx_snapshot =
         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-          ~max_tokens:4000
       in
       with_publication_recovery_registry ~registry_root:dir
       @@ fun publication_recovery_registry ->
@@ -400,28 +396,6 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})
 
-let test_oas_mainline_warns_are_promoted_in_bridge () =
-  check bool "bridge promotes MCP server failure" true
-    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_config", "MCP server failed" -> true|});
-  check bool "bridge promotes context injector failure" true
-    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_turn", "context_injector raised" -> true|})
-
-let test_correction_pipeline_log_preserves_detail_fields () =
-  List.iter
-    (fun (key, pattern) ->
-      check bool ("bridge renders correction detail " ^ key) true
-        (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-           pattern))
-    [ "fields", {|[ "fields"|}
-    ; "stages", {|; "stages"|}
-    ; "input_keys", {|; "input_keys"|}
-    ; "corrected_keys", {|; "corrected_keys"|}
-    ; "added_fields", {|; "added_fields"|}
-    ; "changed_fields", {|; "changed_fields"|}
-    ]
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -453,9 +427,5 @@ let () =
         [
           test_case "keeper mainline failures log at error" `Quick
             test_keeper_mainline_failures_log_at_error;
-          test_case "oas mainline warns are promoted in bridge" `Quick
-            test_oas_mainline_warns_are_promoted_in_bridge;
-          test_case "correction pipeline log preserves detail fields" `Quick
-            test_correction_pipeline_log_preserves_detail_fields;
         ] );
     ]

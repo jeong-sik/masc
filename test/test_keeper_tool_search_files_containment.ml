@@ -175,7 +175,7 @@ let test_docker_keeper_blocks_rg_outside () =
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
+      ~config ~meta
       ~args:
         (`Assoc
           [
@@ -197,7 +197,6 @@ let test_local_keeper_rg_file_path_uses_parent_workdir () =
     let raw =
       Keeper_tool_command_runtime.handle_tool_search_files
         ~turn_sandbox_factory:None
-        ~exec_cache:None
         ~config
         ~meta
         ~args:
@@ -235,7 +234,6 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
     let raw =
       Keeper_tool_command_runtime.handle_tool_search_files
         ~turn_sandbox_factory:None
-        ~exec_cache:None
         ~config
         ~meta
         ~args:
@@ -272,7 +270,6 @@ let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None
-      ~exec_cache:None
       ~config
       ~meta
       ~args:
@@ -312,7 +309,7 @@ let test_docker_keeper_blocks_second_rg_outside () =
   let raw =
     Keeper_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
-      ~exec_cache:None ~config ~meta
+      ~config ~meta
       ~args:
         (`Assoc
           [
@@ -330,7 +327,7 @@ let test_docker_keeper_allows_inside_playground () =
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
-    Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on

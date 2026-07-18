@@ -10,6 +10,16 @@ open Keeper_types_profile
 
 include Keeper_context_core_accessors
 
+type 'persistence_error checkpoint_write_error =
+  | Tool_history_invalid of Keeper_compaction_unit.structural_error
+  | Persistence_error of 'persistence_error
+
+let checkpoint_write_error_to_string ~persistence_error_to_string = function
+  | Tool_history_invalid error ->
+    "tool history invalid: " ^ Keeper_compaction_unit.show_structural_error error
+  | Persistence_error error -> persistence_error_to_string error
+;;
+
 let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.t =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   {
@@ -20,38 +30,23 @@ let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.
     context = checkpoint_context;
   }
 
-(* OAS no longer persists a cumulative-token cap on the checkpoint
-   (budget enforcement removed). The per-response output max_tokens is
-   resolved from the model default at restore time. *)
-let checkpoint_max_tokens (_cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  fallback
-
-let context_of_oas_checkpoint
-    (cp : Agent_sdk.Checkpoint.t)
-    ~(primary_model_max_tokens : int) : working_context =
+let context_of_oas_checkpoint (cp : Agent_sdk.Checkpoint.t) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
-  let max_tokens =
-    checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
-  in
   let messages = cp.messages in
   let context = Agent_sdk.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
-  sync_oas_context
-    { checkpoint; max_tokens }
+  sync_oas_context { checkpoint }
 
-let save_oas_checkpoint_classified
+let checkpoint_for_persistence
     ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
     ~(keeper_name : string)
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_store.save_oas_outcome
-    , string )
-    result
-  =
+  : (Agent_sdk.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
@@ -73,26 +68,81 @@ let save_oas_checkpoint_classified
          ~keeper_name)
       checkpoint_messages
   in
-  let checkpoint =
-    {
-      ctx.checkpoint with
-      version = Agent_sdk.Checkpoint.checkpoint_version;
-      session_id = session.session_id;
-      agent_name;
-      model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
-      system_prompt = Some (system_prompt_of_context ctx);
-      messages = checkpoint_messages;
-      created_at = Time_compat.now ();
-      context = checkpoint_context;
-    }
-  in
+  match Keeper_compaction_unit.validate checkpoint_messages with
+  | Error _ as error -> error
+  | Ok () ->
+    Ok
+      {
+        ctx.checkpoint with
+        version = Agent_sdk.Checkpoint.checkpoint_version;
+        session_id = session.session_id;
+        agent_name;
+        model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
+        system_prompt = Some (system_prompt_of_context ctx);
+        messages = checkpoint_messages;
+        created_at = Time_compat.now ();
+        context = checkpoint_context;
+      }
+
+let save_oas_checkpoint_classified
+    ~multimodal_policy
+    ~keeper_name
+    ~session
+    ~agent_name
+    ~ctx
+    ~generation
+  =
   match
-    Keeper_checkpoint_store.save_oas_classified
-      ~session_dir:session.session_dir
-      checkpoint
+    checkpoint_for_persistence
+      ~multimodal_policy
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx
+      ~generation
   with
-  | Ok outcome -> Ok (checkpoint, outcome)
-  | Error e -> Error e
+  | Error error -> Error (Tool_history_invalid error)
+  | Ok checkpoint ->
+    (match
+       Keeper_checkpoint_store.save_oas_classified
+         ~session_dir:session.session_dir
+         checkpoint
+     with
+     | Ok outcome -> Ok (checkpoint, outcome)
+     | Error error -> Error (Persistence_error error))
+
+let save_oas_checkpoint_if_source
+    ~multimodal_policy
+    ~keeper_name
+    ~session
+    ~agent_name
+    ~ctx
+    ~generation
+    ~expected_source_ref
+  =
+  match
+    checkpoint_for_persistence
+      ~multimodal_policy
+      ~keeper_name
+      ~session
+      ~agent_name
+      ~ctx
+      ~generation
+  with
+  | Error error -> Error (Tool_history_invalid error)
+  | Ok checkpoint ->
+    (match
+       Keeper_checkpoint_store.save_oas_if_source
+         ~session_dir:session.session_dir
+         ~expected_source_ref
+         checkpoint
+     with
+     | Error error -> Error (Persistence_error error)
+     | Ok installed_ref ->
+       Keeper_checkpoint_store.save_oas_history
+         ~session_dir:session.session_dir
+         checkpoint;
+       Ok (checkpoint, installed_ref))
 
 let save_oas_checkpoint
     ~multimodal_policy
@@ -128,7 +178,7 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
 
-let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
+let load_context_from_checkpoint ~trace_id ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
@@ -174,13 +224,7 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   in
   match oas_checkpoint with
   | Some checkpoint ->
-      let ctx =
-        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
-      in
-      let ctx =
-        if primary_model_max_tokens <= 0 then ctx
-        else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
-      in
+      let ctx = context_of_oas_checkpoint checkpoint in
       (session, Some ctx)
   | None ->
       (* No canonical OAS checkpoint is available. Non-trivial OAS errors

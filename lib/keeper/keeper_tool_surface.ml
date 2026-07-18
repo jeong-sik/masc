@@ -89,25 +89,63 @@ let compaction_dispatch_error_data ~stage ~checkpoint_applied error =
     ; "dispatch_error", `String detail
     ]
 
+type compaction_checkpoint_commit_state =
+  | Not_installed
+  | Installed_durability_unknown
+  | Outcome_unknown
+
+let compaction_checkpoint_commit_state_to_string = function
+  | Not_installed -> "not_installed"
+  | Installed_durability_unknown -> "installed_durability_unknown"
+  | Outcome_unknown -> "transaction_outcome_unknown"
+
 let compaction_recovery_error_data ?dispatch_error error =
   let tag = Keeper_post_turn.compaction_recovery_error_to_tag error in
   let detail = Keeper_post_turn.compaction_recovery_error_to_string error in
+  let checkpoint_commit_state, checkpoint_applied =
+    match error with
+    | Keeper_post_turn.Checkpoint_cas_failed
+        (Keeper_checkpoint_store.Commit_durability_unknown _) ->
+      Installed_durability_unknown, `Bool true
+    | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
+      Outcome_unknown, `Null
+    | Checkpoint_ref_load_failed _
+    | Checkpoint_cas_failed _
+    | Checkpoint_structure_invalid _
+    | Checkpoint_candidate_failed _
+    | Compaction_rejected _
+    | Compaction_evidence_missing
+    | Unexpected_compaction_decision _ ->
+      Not_installed, `Bool false
+  in
   let recovery_code =
     match error with
-    | Keeper_post_turn.Checkpoint_load_failed
-        Keeper_checkpoint_store.Not_found -> Not_found
+    | Keeper_post_turn.Checkpoint_ref_load_failed
+        Keeper_checkpoint_store.Ref_not_found -> Not_found
     | Compaction_rejected Runtime_identity_unavailable
+    | Compaction_rejected (Invalid_structure _)
+    | Compaction_rejected No_eligible_history
     | Compaction_rejected Structurally_unchanged
     | Compaction_rejected Checkpoint_not_reduced ->
       Precondition_failed
     | Compaction_rejected Summarizer_unavailable
-    | Compaction_rejected Plan_unavailable_or_invalid
+    | Compaction_rejected Plan_provider_unavailable
+    | Compaction_rejected Invalid_compaction_plan
     | Compaction_rejected (Invalid_structural_evidence _)
     | Compaction_evidence_missing
-    | Unexpected_compaction_decision _ -> Internal_error
-    | Checkpoint_superseded _ -> Conflict
-    | Checkpoint_load_failed _
-    | Checkpoint_save_failed _ -> Internal_error
+    | Unexpected_compaction_decision _
+    | Checkpoint_ref_load_failed _
+    | Checkpoint_cas_failed (Source_unavailable _)
+    | Checkpoint_cas_failed (Candidate_identity_invalid _)
+    | Checkpoint_cas_failed (Candidate_session_mismatch _)
+    | Checkpoint_cas_failed (Candidate_generation_mismatch _)
+    | Checkpoint_cas_failed (Candidate_turn_regressed _)
+    | Checkpoint_cas_failed (Commit_not_installed _)
+    | Checkpoint_structure_invalid _
+    | Checkpoint_candidate_failed _ -> Internal_error
+    | Checkpoint_cas_failed (Source_changed _)
+    | Checkpoint_cas_failed (Commit_durability_unknown _)
+    | Checkpoint_cas_failed (Transaction_outcome_unknown _) -> Conflict
   in
   let code =
     match dispatch_error with
@@ -118,7 +156,10 @@ let compaction_recovery_error_data ?dispatch_error error =
     ([ "error_code", `String (error_code_to_string code)
      ; "message", `String detail
      ; "compaction_error", `String tag
-     ; "checkpoint_applied", `Bool false
+     ; ( "checkpoint_commit_state"
+       , `String
+           (compaction_checkpoint_commit_state_to_string checkpoint_commit_state) )
+     ; "checkpoint_applied", checkpoint_applied
      ]
      @
      match dispatch_error with
@@ -450,20 +491,6 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
-(** Resolve the primary model max context for a keeper.
-
-    Returns the resolved primary provider/runtime context window, separate from
-    any requested [max_context_override].
-    Returns the configured default Runtime capacity when meta is unavailable. *)
-let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
-  match meta with
-  | None -> Runtime.default_max_context ()
-  | Some meta ->
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-    in
-    resolution.effective_budget
-
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match
     Keeper_registry.wakeup_running
@@ -608,11 +635,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
         | None -> Keeper_context_runtime.generate_trace_id ()
       in
-      let max_tokens = resolve_primary_max_context meta_for_trace in
       let session, ctx_opt =
         Keeper_context_runtime.load_context_from_checkpoint
           ~trace_id
-          ~primary_model_max_tokens:max_tokens
           ~base_dir
       in
       let checkpoint_found = Option.is_some ctx_opt in
@@ -632,16 +657,12 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             else
               []
           in
-          let cleared_ctx =
-            {
-              wctx with
-              checkpoint =
-                {
-                  (Keeper_context_runtime.checkpoint_of_context wctx) with
-                  messages = cleared_messages;
-                };
+          let checkpoint =
+            { (Keeper_context_runtime.checkpoint_of_context wctx) with
+              messages = cleared_messages
             }
           in
+          let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
              — the keeper_unified_turn retry loop uses meta.runtime.generation
@@ -664,9 +685,14 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 with
                 | Ok _ -> ()
                 | Error err ->
+                    let detail =
+                      Keeper_context_core.checkpoint_write_error_to_string
+                        ~persistence_error_to_string:Fun.id
+                        err
+                    in
                     Log.Keeper.warn
                       "%s: failed to save cleared OAS checkpoint: %s"
-                      name err)
+                      name detail)
            | None -> ());
           msg_count - List.length cleared_messages
       in

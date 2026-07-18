@@ -369,7 +369,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let max_context_resolution =
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
-      let primary_max_context = max_context_resolution.effective_budget in
       let context_budget =
         Keeper_context_runtime.context_budget_json_of_resolution
           ~runtime_id:(runtime_id_of_meta m)
@@ -381,7 +380,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              let (_session, ctx_opt) =
                load_context_from_checkpoint
                  ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
-                 ~primary_model_max_tokens:primary_max_context
                  ~base_dir
              in
              ctx_opt

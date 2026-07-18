@@ -174,7 +174,6 @@ let make_fixture
   let ctx =
     Masc.Keeper_context_runtime.create ~eio:false
       ~system_prompt:"keeper tool matrix"
-      ~max_tokens:4000
     |> fun ctx ->
     Masc.Keeper_context_runtime.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")

@@ -259,21 +259,10 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
-  type backend =
-    | Jsonl
-    | Pg
-    | Unknown_backend of string
-
-  let backend_of_string raw =
-    match raw |> String.trim |> String.lowercase_ascii with
-    | "jsonl" -> Jsonl
-    | "pg" -> Pg
-    | other -> Unknown_backend other
-
-  let backend_to_string = function
-    | Jsonl -> "jsonl"
-    | Pg -> "pg"
-    | Unknown_backend value -> value
+  (* MASC_BOARD_BACKEND and the [backend] type were deleted together with
+     the test-only [Board_dispatch.jsonl_forced] pin: JSONL is the only
+     board lane, so a backend selector had nothing to select. The knob row
+     was removed from docs/runtime-tunables.md in the same change. *)
 
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
@@ -287,12 +276,6 @@ module Board = struct
       @ops_class operator *)
   let flusher_inbox_capacity =
     get_int ~default:1000 "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
-
-  (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
-  let backend_opt () =
-    Sys.getenv_opt "MASC_BOARD_BACKEND"
-    |> trim_opt
-    |> Option.map backend_of_string
 end
 
 (** {1 Tool Surface Configuration} *)

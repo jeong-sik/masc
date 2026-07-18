@@ -1,17 +1,16 @@
 let evidence : Keeper_compaction_evidence.t =
   Keeper_compaction_evidence.create
-    ~selected_runtime_id:(Some "compact-runtime")
+    ~selected_runtime_id:"compact-runtime"
     ~before_checkpoint_bytes:4096
     ~after_checkpoint_bytes:1024
     ~before_message_count:12
-    ~after_message_count:6
+    ~after_message_count:11
     ~summarized_message_count:6
     ~dropped_message_count:1
-    ~pair_repair_dropped_message_count:0
     ~before_tool_use_count:3
-    ~after_tool_use_count:1
+    ~after_tool_use_count:3
     ~before_tool_result_count:3
-    ~after_tool_result_count:1
+    ~after_tool_result_count:3
   |> Result.get_ok
 ;;
 
@@ -50,14 +49,13 @@ let test_projection_and_roundtrip () =
       [ "before_checkpoint_bytes", `Int 4096
       ; "after_checkpoint_bytes", `Int 1024
       ; "before_message_count", `Int 12
-      ; "after_message_count", `Int 6
+      ; "after_message_count", `Int 11
       ; "summarized_message_count", `Int 6
       ; "dropped_message_count", `Int 1
-      ; "pair_repair_dropped_message_count", `Int 0
       ; "before_tool_use_count", `Int 3
-      ; "after_tool_use_count", `Int 1
+      ; "after_tool_use_count", `Int 3
       ; "before_tool_result_count", `Int 3
-      ; "after_tool_result_count", `Int 1
+      ; "after_tool_result_count", `Int 3
       ]
   in
   Alcotest.check
@@ -74,6 +72,31 @@ let test_projection_and_roundtrip () =
   | Error _ -> Alcotest.fail "canonical evidence must decode"
 ;;
 
+let test_runtime_identity_is_not_normalized () =
+  let exact_runtime_id = "  exact.runtime  " in
+  match
+    Keeper_compaction_evidence.create
+      ~selected_runtime_id:exact_runtime_id
+      ~before_checkpoint_bytes:8
+      ~after_checkpoint_bytes:4
+      ~before_message_count:2
+      ~after_message_count:1
+      ~summarized_message_count:0
+      ~dropped_message_count:1
+      ~before_tool_use_count:0
+      ~after_tool_use_count:0
+      ~before_tool_result_count:0
+      ~after_tool_result_count:0
+  with
+  | Error error ->
+    Alcotest.failf
+      "exact runtime identity rejected: %s"
+      (Keeper_compaction_evidence.decode_error_to_string error)
+  | Ok evidence ->
+    Alcotest.(check string) "runtime identity remains exact" exact_runtime_id
+      evidence.selected_runtime_id
+;;
+
 let test_rejections () =
   let open Keeper_compaction_evidence in
   let check label runtime_id expected json =
@@ -87,17 +110,12 @@ let test_rejections () =
     |> replace "dropped_message_count" (`Int 0)
   in
   let duplicate =
-    `Assoc (("after_message_count", `Int 6) :: fields canonical)
+    `Assoc (("after_message_count", `Int 11) :: fields canonical)
   in
   let impossible_accounting =
     replace "summarized_message_count" (`Int 999) canonical
   in
-  let inexact_after = replace "after_message_count" (`Int 7) canonical in
-  let excessive_pair_repair =
-    canonical
-    |> replace "after_message_count" (`Int 0)
-    |> replace "pair_repair_dropped_message_count" (`Int 7)
-  in
+  let inexact_after = replace "after_message_count" (`Int 10) canonical in
   List.iter
     (fun (label, runtime_id, expected, json) ->
        check label runtime_id expected json)
@@ -110,7 +128,7 @@ let test_rejections () =
       , Invalid_transition (Checkpoint_bytes, 4096, 4096)
       , replace "after_checkpoint_bytes" (`Int 4096) canonical )
     ; "no messages", evidence.selected_runtime_id, No_messages_compacted, no_messages
-    ; "blank runtime", Some "   ", Empty_selected_runtime_id, canonical
+    ; "blank runtime", "   ", Empty_selected_runtime_id, canonical
     ; ( "duplicate"
       , evidence.selected_runtime_id
       , Invalid_field (After_message_count, Duplicate)
@@ -135,119 +153,56 @@ let test_rejections () =
       , evidence.selected_runtime_id
       , Invalid_transition (Tool_uses, 3, 4)
       , replace "after_tool_use_count" (`Int 4) canonical )
+    ; ( "tool use count decrease"
+      , evidence.selected_runtime_id
+      , Invalid_transition (Tool_uses, 3, 2)
+      , replace "after_tool_use_count" (`Int 2) canonical )
     ; ( "tool result count increase"
       , evidence.selected_runtime_id
       , Invalid_transition (Tool_results, 3, 4)
       , replace "after_tool_result_count" (`Int 4) canonical )
+    ; ( "tool result count decrease"
+      , evidence.selected_runtime_id
+      , Invalid_transition (Tool_results, 3, 2)
+      , replace "after_tool_result_count" (`Int 2) canonical )
     ; ( "impossible message accounting"
       , evidence.selected_runtime_id
       , Invalid_message_accounting
           { before_message_count = 12
-          ; after_message_count = 6
+          ; after_message_count = 11
           ; summarized_message_count = 999
           ; dropped_message_count = 1
-          ; pair_repair_dropped_message_count = 0
           }
       , impossible_accounting )
     ; ( "inexact after count"
       , evidence.selected_runtime_id
       , Invalid_message_accounting
           { before_message_count = 12
-          ; after_message_count = 7
+          ; after_message_count = 10
           ; summarized_message_count = 6
           ; dropped_message_count = 1
-          ; pair_repair_dropped_message_count = 0
           }
       , inexact_after )
-    ; ( "excessive pair repair count"
-      , evidence.selected_runtime_id
-      , Invalid_message_accounting
-          { before_message_count = 12
-          ; after_message_count = 0
-          ; summarized_message_count = 6
-          ; dropped_message_count = 1
-          ; pair_repair_dropped_message_count = 7
-          }
-      , excessive_pair_repair )
     ]
 ;;
 
-let test_exact_pair_repair_accounting () =
-  match
-    Keeper_compaction_evidence.create
-      ~selected_runtime_id:evidence.selected_runtime_id
-      ~before_checkpoint_bytes:4096
-      ~after_checkpoint_bytes:1024
-      ~before_message_count:12
-      ~after_message_count:4
-      ~summarized_message_count:6
-      ~dropped_message_count:1
-      ~pair_repair_dropped_message_count:2
-      ~before_tool_use_count:3
-      ~after_tool_use_count:1
-      ~before_tool_result_count:3
-      ~after_tool_result_count:1
-  with
-  | Ok exact ->
-    Alcotest.(check int)
-      "pair-repair message drops preserved"
-      2
-      exact.pair_repair_dropped_message_count
-  | Error error ->
-    Alcotest.failf
-      "exact pair-repair accounting rejected: %s"
-      (Keeper_compaction_evidence.decode_error_to_string error)
-;;
-
-let test_legacy_pair_repair_migration () =
+let test_legacy_pair_repair_field_is_rejected () =
   let open Keeper_compaction_evidence in
-  let restore json =
-    of_json ~selected_runtime_id:evidence.selected_runtime_id json
+  let legacy =
+    `Assoc
+      (("pair_repair_dropped_message_count", `Int 0) :: fields canonical)
   in
-  (match restore (remove "pair_repair_dropped_message_count" canonical) with
-   | Ok restored ->
-     Alcotest.(check int)
-       "zero pair-repair count derived"
-       0
-       restored.pair_repair_dropped_message_count
-   | Error error ->
-     Alcotest.failf
-       "legacy zero pair-repair evidence rejected: %s"
-       (decode_error_to_string error));
-  let with_pair_repair =
-    canonical
-    |> replace "after_message_count" (`Int 4)
-    |> remove "pair_repair_dropped_message_count"
-  in
-  (match restore with_pair_repair with
-   | Ok restored ->
-     Alcotest.(check int)
-       "non-zero pair-repair count derived"
-       2
-       restored.pair_repair_dropped_message_count
-   | Error error ->
-     Alcotest.failf
-       "legacy non-zero pair-repair evidence rejected: %s"
-       (decode_error_to_string error));
-  let impossible =
-    canonical
-    |> replace "after_message_count" (`Int 7)
-    |> remove "pair_repair_dropped_message_count"
-  in
-  match restore impossible with
-  | Error
-      (Legacy_message_accounting_not_derivable
-        { before_message_count = 12
-        ; after_message_count = 7
-        ; summarized_message_count = 6
-        ; dropped_message_count = 1
-        }) ->
-    ()
+  match
+    of_json
+      ~selected_runtime_id:evidence.selected_runtime_id
+      legacy
+  with
+  | Error (Unknown_field "pair_repair_dropped_message_count") -> ()
   | Error error ->
     Alcotest.failf
-      "unexpected legacy migration rejection: %s"
+      "unexpected legacy-field rejection: %s"
       (decode_error_to_string error)
-  | Ok _ -> Alcotest.fail "impossible legacy evidence decoded"
+  | Ok _ -> Alcotest.fail "legacy pair-repair field decoded"
 ;;
 
 let () =
@@ -263,13 +218,11 @@ let () =
             `Quick
             test_projection_and_roundtrip
         ; Alcotest.test_case "closed rejections" `Quick test_rejections
+        ; Alcotest.test_case "runtime identity is not normalized" `Quick
+            test_runtime_identity_is_not_normalized
         ; Alcotest.test_case
-            "exact pair-repair accounting"
+            "legacy pair-repair field rejected"
             `Quick
-            test_exact_pair_repair_accounting
-        ; Alcotest.test_case
-            "legacy pair-repair migration"
-            `Quick
-            test_legacy_pair_repair_migration
+            test_legacy_pair_repair_field_is_rejected
         ] )
     ]

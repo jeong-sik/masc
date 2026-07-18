@@ -12,24 +12,6 @@ let resolve_net ?net () =
       | Some net -> Ok net
       | None -> Error "Eio net not initialized")
 
-let build_execution_spec ~base_path ~worker_name ~model_label
-    ~runtime_backend ?working_dir
-    ?thinking_enabled ?worker_run_id ~role ~selection_note
-    ~(prompt : string) ~(timeout_sec : int) () =
-  {
-    Worker_execution_spec.base_path;
-    worker_name;
-    model_label;
-    working_dir;
-    runtime_backend;
-    thinking_enabled;
-    worker_run_id;
-    role;
-    selection_note;
-    prompt;
-    timeout_sec;
-  }
-
 let workspace_path_of_spec (spec : Worker_execution_spec.t) =
   match spec.working_dir with
   | Some dir when String.trim dir <> "" -> dir
@@ -61,7 +43,7 @@ let create_raw_trace ~base_path ~worker_name =
       (Printf.sprintf "failed to create worker raw trace for %s: %s"
          worker_name msg)
 
-let run_worker_oas ~sw ?net ~workspace_config:_
+let run_worker_oas ~sw ?net
     (spec : Worker_execution_spec.t) : unit -> (run_result, string) result =
   fun () ->
     let* net = resolve_net ?net () in

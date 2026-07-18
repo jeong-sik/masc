@@ -25,7 +25,6 @@ let config_category_enum_strings =
   ; "rate_limiting"
   ; "inference"
   ; "autonomy"
-  ; "level2"
   ; "dashboard"
   ; "economy"
   ; "operations"

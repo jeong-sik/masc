@@ -275,16 +275,6 @@ let is_running ~base_path name =
   | None -> false
 ;;
 
-let is_boot_already_live ~base_path name =
-  match get ~base_path name with
-  | Some entry
-    when entry.conditions.fiber_alive
-         && not entry.conditions.stop_requested
-         && (entry.phase = Running || entry.phase = Paused) ->
-    true
-  | Some _ | None -> false
-;;
-
 (** True if the keeper has ANY registry entry (regardless of state).
     Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
 let is_registered ~base_path name = Option.is_some (get ~base_path name)
@@ -520,16 +510,6 @@ let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
        true)
 ;;
 
-let clear_board_wakeups ~base_path name =
-  match update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty }) with
-  | Ok () -> ()
-  | Error err ->
-    Log.Keeper.warn
-      "%s: failed to clear board wakeups: %s"
-      name
-      (registry_entry_validation_error_to_string err)
-;;
-
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key (Atomic.get registry) with
@@ -570,28 +550,6 @@ let clear () =
 ;;
 
 (* -- Board cursor -------------------------------------------------- *)
-
-let get_board_cursor_ts ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> entry.board_cursor_ts
-  | None -> 0.0
-;;
-
-let set_board_cursor_ts ~base_path name ts =
-  match
-    update_entry ~base_path name (fun e ->
-      let board_cursor_post_id =
-        if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
-      in
-      { e with board_cursor_ts = ts; board_cursor_post_id })
-  with
-  | Ok () -> ()
-  | Error err ->
-    Log.Keeper.warn
-      "%s: failed to set board cursor timestamp: %s"
-      name
-      (registry_entry_validation_error_to_string err)
-;;
 
 let get_board_cursor ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
@@ -1235,12 +1193,6 @@ let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
 let get_phase ~base_path name =
   match get ~base_path name with
   | Some entry -> Some entry.phase
-  | None -> None
-;;
-
-let get_conditions ~base_path name =
-  match get ~base_path name with
-  | Some entry -> Some entry.conditions
   | None -> None
 ;;
 

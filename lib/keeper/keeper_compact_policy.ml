@@ -68,7 +68,10 @@ let register_record_pre_compact
 type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
-  | Plan_unavailable_or_invalid
+  | Plan_provider_unavailable
+  | Invalid_compaction_plan
+  | Invalid_structure of Keeper_compaction_unit.structural_error
+  | No_eligible_history
   | Structurally_unchanged
   | Checkpoint_not_reduced
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
@@ -76,7 +79,11 @@ type compaction_rejection =
 let compaction_rejection_to_tag = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
-  | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
+  | Plan_provider_unavailable -> "plan_provider_unavailable"
+  | Invalid_compaction_plan -> "invalid_compaction_plan"
+  | Invalid_structure error ->
+    "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
+  | No_eligible_history -> "no_eligible_history"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
   | Invalid_structural_evidence _ -> "invalid_structural_evidence"
@@ -179,23 +186,39 @@ let record_pre_compact
 
 type requested_compaction =
   { messages : Agent_sdk.Types.message list
-  ; selected_runtime_id : string option
+  ; selected_runtime_id : string
   ; summarized_message_count : int
   ; dropped_message_count : int
   }
 
-(* Non-empty, trimmed runtime id from a lazily-invoked source, or [None] on a
-   blank result or an unresolvable identity ([Failure], e.g.
-   [default_runtime_id_or_fail] when the runtime state is uninitialized). [f]
-   must be a thunk, not an already-evaluated value: OCaml forces arguments
-   before a function call, so catching [Failure] here only works if the
-   raising call happens inside this match. *)
-let trimmed_runtime_id_opt (f : unit -> string) =
+type compaction_runtime_source =
+  | Structured_judge
+  | Keeper_chat
+
+let compaction_runtime_source_to_label = function
+  | Structured_judge -> "structured_judge"
+  | Keeper_chat -> "keeper_chat"
+
+(* Exact non-blank runtime id from a lazily-invoked source. Whitespace is used
+   only to reject a blank value; the configured identity is never normalized.
+   Legacy [Failure] results remain unavailable, but are never silent. [f] must
+   be a thunk because OCaml evaluates ordinary arguments before the call. *)
+let runtime_id_opt ~keeper_name ~source (f : unit -> string) =
   match f () with
   | runtime_id ->
-    let trimmed = String.trim runtime_id in
-    if trimmed = "" then None else Some trimmed
-  | exception Failure _ -> None
+    if String.trim runtime_id = ""
+    then (
+      Log.Keeper.warn ~keeper_name
+        "compaction runtime source is blank source=%s"
+        (compaction_runtime_source_to_label source);
+      None)
+    else Some runtime_id
+  | exception Failure detail ->
+    Log.Keeper.warn ~keeper_name
+      "compaction runtime source unavailable source=%s: %s"
+      (compaction_runtime_source_to_label source)
+      detail;
+    None
 ;;
 
 (* The structured-judge lane is schema-capable by construction (RFC-0307):
@@ -221,35 +244,72 @@ let trimmed_runtime_id_opt (f : unit -> string) =
 let compaction_runtime_ids (meta : keeper_meta) =
   List.filter_map
     Fun.id
-    [ trimmed_runtime_id_opt Runtime.runtime_id_for_structured_judge
-    ; trimmed_runtime_id_opt (fun () -> Keeper_meta_contract.runtime_id_of_meta meta)
+    [ runtime_id_opt
+        ~keeper_name:meta.name
+        ~source:Structured_judge
+        Runtime.runtime_id_for_structured_judge
+    ; runtime_id_opt
+        ~keeper_name:meta.name
+        ~source:Keeper_chat
+        (fun () -> Keeper_meta_contract.runtime_id_of_meta meta)
     ]
 ;;
 
+let unit_message_count = function
+  | Keeper_compaction_unit.Ordinary_message _ -> 1
+  | Keeper_compaction_unit.Closed_tool_cycle messages -> List.length messages
+;;
+
+let selected_message_count units selected =
+  let units = Array.of_list units in
+  List.fold_left
+    (fun count index -> count + unit_message_count units.(index))
+    0
+    selected
+;;
 let requested_messages (meta : keeper_meta) messages =
-  match compaction_runtime_ids meta with
-  | [] -> Error Runtime_identity_unavailable
-  | runtime_ids ->
-    (match
-       Keeper_compaction_llm_summarizer.make
-         ~runtime_ids
-         ~keeper_name:meta.name
-         ()
-     with
-     | None -> Error Summarizer_unavailable
-     | Some summarize ->
-       (match summarize ~messages with
-        | None -> Error Plan_unavailable_or_invalid
-        | Some plan ->
-          if plan.summarized = [] && plan.dropped = []
-          then Error Structurally_unchanged
-          else
-            Ok
-              { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
-              ; selected_runtime_id = plan.selected_runtime_id
-              ; summarized_message_count = List.length plan.summarized
-              ; dropped_message_count = List.length plan.dropped
-              }))
+  match Keeper_compaction_unit.partition messages with
+  | Error error -> Error (Invalid_structure error)
+  | Ok { closed_prefix = []; _ } -> Error No_eligible_history
+  | Ok { closed_prefix = units; protected_suffix } ->
+    if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
+    then Error No_eligible_history
+    else
+      (match compaction_runtime_ids meta with
+       | [] -> Error Runtime_identity_unavailable
+       | runtime_ids ->
+         (match
+            Keeper_compaction_llm_summarizer.make
+              ~runtime_ids
+              ~keeper_name:meta.name
+              ()
+          with
+          | None -> Error Summarizer_unavailable
+          | Some summarize ->
+            (match summarize ~units with
+             | Error Keeper_compaction_llm_summarizer.Provider_unavailable ->
+               Error Plan_provider_unavailable
+             | Error Keeper_compaction_llm_summarizer.Invalid_plan ->
+               Error Invalid_compaction_plan
+             | Ok plan ->
+               if not (Keeper_compaction_llm_summarizer.has_changes plan)
+               then Error Structurally_unchanged
+               else
+                 Ok
+                   { messages =
+                       Keeper_compaction_llm_summarizer.apply plan
+                       @ protected_suffix
+                   ; selected_runtime_id =
+                       Keeper_compaction_llm_summarizer.selected_runtime_id plan
+                   ; summarized_message_count =
+                       selected_message_count
+                         units
+                         (Keeper_compaction_llm_summarizer.summarized_indices plan)
+                   ; dropped_message_count =
+                       selected_message_count
+                         units
+                         (Keeper_compaction_llm_summarizer.dropped_indices plan)
+                   })))
 ;;
 
 let tool_block_counts messages =
@@ -322,16 +382,11 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
-    let planned_message_count = List.length requested.messages in
-    let messages, pair_repair_stats =
-      Keeper_context_core.repair_broken_tool_call_pairs_with_stats requested.messages
-    in
-    let pair_repair_dropped_message_count =
-      planned_message_count - List.length messages
+    let checkpoint =
+      { (checkpoint_of_context ctx) with messages = requested.messages }
     in
     let compacted_ctx =
-      sync_oas_context
-        { ctx with checkpoint = { (checkpoint_of_context ctx) with messages } }
+      sync_oas_context { checkpoint }
     in
     let after_bytes = serialized_bytes compacted_ctx in
     let reject reason =
@@ -364,7 +419,6 @@ let compact_for_request_typed
           ~after_message_count:after_messages
           ~summarized_message_count:requested.summarized_message_count
           ~dropped_message_count:requested.dropped_message_count
-          ~pair_repair_dropped_message_count
           ~before_tool_use_count
           ~after_tool_use_count
           ~before_tool_result_count
@@ -372,20 +426,7 @@ let compact_for_request_typed
       with
       | Error error -> reject (Invalid_structural_evidence error)
       | Ok evidence ->
-        let tool_use_sample_json =
-          List.map
-            (fun (tool_use_id, tool_name) ->
-               `Assoc
-                 [ "tool_use_id", `String tool_use_id
-                 ; "tool_name", `String tool_name
-                 ])
-            pair_repair_stats.dropped_tool_use_samples
-        in
-        let tool_result_id_json =
-          List.map
-            (fun tool_use_id -> `String tool_use_id)
-            pair_repair_stats.dropped_tool_result_ids
-        in
+        let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit
           Log.Info
           ~details:
@@ -398,17 +439,6 @@ let compact_for_request_typed
                 ; "saved_checkpoint_bytes", `Int (before_bytes - after_bytes)
                 ; "before_messages", `Int before_messages
                 ; "after_messages", `Int after_messages
-                ; ( "tool_pair_repair"
-                  , `Assoc
-                      [ ( "dropped_tool_uses"
-                        , `Int pair_repair_stats.dropped_tool_uses )
-                      ; ( "dropped_tool_results"
-                        , `Int pair_repair_stats.dropped_tool_results )
-                      ; ( "dropped_messages"
-                        , `Int pair_repair_dropped_message_count )
-                      ; "dropped_tool_use_samples", `List tool_use_sample_json
-                      ; "dropped_tool_result_ids", `List tool_result_id_json
-                      ] )
                 ])
           (Printf.sprintf
              "context compaction prepared keeper=%s saved_checkpoint_bytes=%d"

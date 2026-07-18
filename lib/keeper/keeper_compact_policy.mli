@@ -6,7 +6,10 @@
 type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
-  | Plan_unavailable_or_invalid
+  | Plan_provider_unavailable
+  | Invalid_compaction_plan
+  | Invalid_structure of Keeper_compaction_unit.structural_error
+  | No_eligible_history
   | Structurally_unchanged
   | Checkpoint_not_reduced
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error

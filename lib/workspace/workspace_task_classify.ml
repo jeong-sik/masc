@@ -129,7 +129,6 @@ let empty_task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
-  ; evidence_claims = []
   ; links = { operation_id = None; session_id = None }
   }
 ;;

@@ -271,6 +271,18 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
        Log.Server.error "runtime.toml load failed: %s" msg;
        raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();
+  (* Boot-time observability: emit the resolved runtime knobs once, right after
+     they freeze. The opt-in timeouts (stream_idle_timeout_sec and the
+     body-timeout override) are None when unset; without this line a knob that
+     is CONFIGURED in runtime.toml but did not reach Keeper_runtime_resolved is
+     indistinguishable at runtime from an unset one — the exact ambiguity that
+     blocked diagnosing #25128 (idle timeout configured at 120s yet never
+     observed to fire). No existing surface exposes the resolved value. *)
+  Log.Runtime.info
+    ~category:Log.Boundary
+    "resolved runtime config: %s"
+    (Yojson.Safe.to_string
+       (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
   Keeper_task_owner_backend.install_hooks ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock

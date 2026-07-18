@@ -439,7 +439,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("MASC_HOST", host);
         ("MASC_CONFIG_DIR", config_dir);
         ("MASC_PERSONAS_DIR", personas_dir);
-        ("MASC_BOARD_BACKEND", "jsonl");
       ]
   in
   let argv =

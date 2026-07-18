@@ -472,7 +472,7 @@ MASC_WORKSPACE_ROOT
 
 ### A.2 `env_config_runtime`
 
-Used for timeouts, cleanup intervals, transports, local model runtimes, board backend, worker runtime, web search, dashboard thresholds, and local execution behavior.
+Used for timeouts, cleanup intervals, transports, local model runtimes, worker runtime, web search, dashboard thresholds, and local execution behavior.
 
 ```text
 LLAMA_DEFAULT_MODEL

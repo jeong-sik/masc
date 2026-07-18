@@ -259,6 +259,11 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
+  (* MASC_BOARD_BACKEND and the [backend] type were deleted together with
+     the test-only [Board_dispatch.jsonl_forced] pin: JSONL is the only
+     board lane, so a backend selector had nothing to select. The knob row
+     was removed from docs/runtime-tunables.md in the same change. *)
+
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"

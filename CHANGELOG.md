@@ -6,6 +6,7 @@
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
 
 ### Removed
+- Removed the dead board-backend env chain (`MASC_BOARD_BACKEND`, `Board.backend`, test-only `Board_dispatch.jsonl_forced`), the reader-less `Discovery_history` store and its `masc_discovery_history_failures` metric, the caller-less bench-canary reader (`MASC_KEEPER_BENCH_CANARY_*`), and `Local_runtime_pool.select_runtime_from`. No replacement: none of these had a production consumer.
 - Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
 - Removed the per-turn prefix/string heuristic that rewrote unknown-looking
   prompt tokens. Keeper prompt prose now describes behaviour, while the active

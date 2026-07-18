@@ -403,7 +403,7 @@ let record_board_attention_candidate
       (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
   | Keeper_world_observation_board_signal.Available candidate ->
     (match
-       Keeper_board_attention_candidate.record_and_wake
+       Keeper_board_attention_worker.record_and_notify
          ~base_path:config.base_path
          candidate
      with

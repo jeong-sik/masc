@@ -11,6 +11,7 @@ type retryable_failure_kind =
   | Prompt_contract_unavailable
   | Provider_unavailable
   | Response_contract_unavailable
+  | Partition_membership_conflict
   | Durable_delivery_unavailable
 
 type retryable_failure =
@@ -65,29 +66,26 @@ type persistence =
   | Candidate_recorded
   | Candidate_already_present
 
-type wake_decision =
-  | Wake_requested of Keeper_registry.wakeup_outcome
-  | Wake_not_required
-
-type record_acceptance =
-  { candidate : candidate
-  ; persistence : persistence
-  ; wake : wake_decision
-  }
-
 type drain_report =
   { attempted : int
   ; consumed : int
   ; remaining : int
   }
 
+module Candidate_map : Map.S with type key = string
+
 exception Candidate_unavailable of string
 
 val retryable_failure_kind_to_string : retryable_failure_kind -> string
 val retryable_failure_kind_of_string : string -> retryable_failure_kind option
+val retryable_failure_to_yojson : retryable_failure -> Yojson.Safe.t
+val retryable_failure_of_yojson : Yojson.Safe.t -> (retryable_failure, string) result
+val judgment_to_yojson : judgment -> Yojson.Safe.t
+val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val delivery_to_string : delivery -> string
 val delivery_of_string : string -> delivery option
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
+val candidate_id_of_signal : keeper_name:string -> Board_dispatch.board_signal -> string
 
 val of_board_evidence :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -111,7 +109,17 @@ val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
+val discover_keeper_names : base_path:string -> (string list, string) result
+(** Discover exact durable Keeper identities by parsing candidate rows, not by
+    reversing sanitized filenames. A malformed ledger or a filename collision
+    containing multiple identities is an error. *)
+
 val record : base_path:string -> candidate -> record_result
+
+val keeper_context_key : candidate -> (string, string) result
+(** Canonical persisted Keeper-context identity used to form immutable
+    judgment cohorts. Equality is structural JSON equality after key sorting;
+    no prompt-size or provider-capacity estimate participates. *)
 
 val record_retryable_failure :
   base_path:string ->
@@ -127,45 +135,31 @@ val process_with_judge :
   judge:(candidate -> (judgment, retryable_failure) result) ->
   candidate ->
   (candidate, string) result
-(** Testable state-machine boundary. Production drains the configured
-    structured judge through {!drain_pending_on_owner_lane}. *)
+(** Test-only state-machine boundary for focused single-candidate tests.
+    Production judging is owned by {!Keeper_board_attention_worker}. *)
 
-val record_and_wake :
-  base_path:string -> candidate -> (record_acceptance, string) result
-(** Persist the exact candidate, then request a live wake from the registered
-    running Keeper. The durable row is authoritative: a deferred wake remains
-    a successful acceptance and is returned as a typed
-    {!Keeper_registry.wakeup_outcome}. A consumed duplicate needs no wake.
-    This function never invokes the model judge. *)
+val judge_batch_exact :
+  base_path:string ->
+  candidate list ->
+  (judgment Candidate_map.t, retryable_failure) result
+(** Execute one prepared same-context partition and accept the response only
+    when its candidate-id set is exactly the requested set. *)
 
-val drain_pending_on_owner_lane :
+val apply_completed_judgments :
+  base_path:string ->
+  keeper_name:string ->
+  (string * judgment) list ->
+  (drain_report, string) result
+(** Idempotently apply already-completed partition results on the owner lane.
+    Pending rows become [Judged] in one ledger rewrite, relevant events are
+    enqueued by candidate identity, and all rows become [Consumed] in one
+    further rewrite. Replays require an exactly equal persisted judgment;
+    conflicting results fail without overwriting either value. *)
+
+val consume_judged_on_owner_lane :
   base_path:string -> keeper_name:string -> (drain_report, string) result
-(** Synchronously process at most one fresh-pending batch plus all already
-    judged durable candidates. Production
-    calls this only while holding the Keeper's turn admission slot; no
-    dashboard/producer domain may call it.
-
-    Semantics:
-    - Already-judged verdicts deliver without new model calls.
-    - One provider call receives only candidates whose persisted
-      [keeper_context] values are structurally equal. Other contexts remain
-      pending for a later admission.
-    - At most one provider call runs per admission. Remaining candidates are
-      reported durably rather than drained behind the first call.
-    - The response must cover the exact requested candidate-id set. Unknown,
-      duplicate, or missing identities fail the whole attempted batch and
-      persist retryable response-contract evidence for every attempted row.
-    - A successful fresh batch commits every [Judged] row in one candidate
-      ledger rewrite, performs idempotent relevant-event delivery, then commits
-      every [Consumed] row in one candidate ledger rewrite. The rewrite count
-      is therefore two regardless of batch cardinality.
-    - Pending rows never expire from wall-clock age. Supersession or operator
-      discard requires a separate typed lifecycle operation. *)
-
-val batch_max_candidates : int
-(** Maximum candidates judged per model call. *)
-
-module Candidate_map : Map.S with type key = string
+(** Deliver and consume legacy or crash-recovered [Judged] rows without any
+    provider call. *)
 
 module For_testing : sig
   val set_ledger_rewrite_observer : (unit -> unit) -> unit
@@ -185,4 +179,6 @@ module For_testing : sig
     keeper_name:string ->
     judge_batch:(candidate list -> (judgment Candidate_map.t, retryable_failure) result) ->
     (drain_report, string) result
+  (** Execute one exact-context cohort without a fixed cardinality cap. This
+      test adapter does not represent the production partition worker. *)
 end

@@ -20,6 +20,8 @@ val runtime_base_path_opt : unit -> string option
 
 val keeper_event_queue_health_json : unit -> Yojson.Safe.t
 
+val keeper_board_attention_partition_health_json : unit -> Yojson.Safe.t
+
 val keeper_fleet_runtime_resolution_base_fields :
   ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->
   ?include_reaction_ledger:bool ->

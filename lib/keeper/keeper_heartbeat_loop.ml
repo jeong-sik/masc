@@ -460,7 +460,7 @@ let drain_board_attention_candidates_on_owner_lane ~base_path ~keeper_name =
       ~base_path
       ~keeper_name
       (fun () ->
-         Keeper_board_attention_candidate.drain_pending_on_owner_lane
+         Keeper_board_attention_worker.drain_completed_on_owner_lane
            ~base_path
            ~keeper_name)
   with

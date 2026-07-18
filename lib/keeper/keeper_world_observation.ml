@@ -881,7 +881,7 @@ let collect_board_events_with_cursor_policy
                   | Board_signal.Transient -> List.rev acc, last_cursor)
                | Board_signal.Available candidate ->
                  (match
-                    Keeper_board_attention_candidate.record_and_wake
+                    Keeper_board_attention_worker.record_and_notify
                       ~base_path
                       candidate
                   with

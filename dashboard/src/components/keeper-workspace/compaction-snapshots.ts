@@ -34,6 +34,7 @@ export interface CompactionSnapshot {
   readonly detailSource?: string | null
   readonly summarizedCount?: number | null
   readonly droppedCount?: number | null
+  readonly pairRepairDroppedCount?: number | null
   readonly reinjection?: KeeperCompactionReinjectionObservation
   readonly kept: readonly string[]
   readonly summarized: readonly string[]
@@ -118,6 +119,7 @@ function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): Compaction
     detailSource: snapshot.source,
     summarizedCount: evidence?.summarized_message_count ?? null,
     droppedCount: evidence?.dropped_message_count ?? null,
+    pairRepairDroppedCount: evidence?.pair_repair_dropped_message_count ?? null,
     reinjection: snapshot.reinjection_observation,
     kept: [],
     summarized: [],

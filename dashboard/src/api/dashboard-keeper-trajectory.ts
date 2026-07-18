@@ -14,18 +14,21 @@ export type TrajectoryInvalidReasons = {
 
 export type TrajectoryReadError = { path: string; message: string }
 
+export type TrajectoryToolOutcome =
+  | { status: 'succeeded'; output: string }
+  | { status: 'failed'; error: string }
+
 export type TrajectoryToolEntry = {
   type?: undefined
   ts: number
   ts_iso: string
   turn: number
-  execution_id?: string
+  execution_id: string
   round: number
   tool_name: string
   args: Record<string, unknown>
-  result: string | null
+  outcome: TrajectoryToolOutcome
   duration_ms: number
-  error: string | null
 }
 
 export type TrajectoryThinkingEntry = {
@@ -33,10 +36,14 @@ export type TrajectoryThinkingEntry = {
   ts: number
   ts_iso: string
   turn: number
-  content: string
-  content_length: number
-  redacted: boolean
+  block_index: number
+  block: TrajectoryThinkingBlock
 }
+
+export type TrajectoryThinkingBlock =
+  | { type: 'thinking'; thinking: string; signature?: string }
+  | { type: 'reasoning_details'; reasoning_content?: string; details: unknown[] }
+  | { type: 'redacted_thinking'; data: string }
 
 export type TrajectoryEntry = TrajectoryToolEntry | TrajectoryThinkingEntry
 
@@ -78,7 +85,7 @@ export function decodeTrajectoryCount(value: unknown): number | null {
 }
 
 export function decodeTrajectoryInvalidReasons(raw: unknown): TrajectoryInvalidReasons | null {
-  if (!isRecord(raw)) return null
+  if (!isRecord(raw) || !hasOnlyKeys(raw, INVALID_REASON_KEYS)) return null
   const missingRequiredField = decodeTrajectoryCount(raw.missing_required_field)
   const invalidField = decodeTrajectoryCount(raw.invalid_field)
   const unexpectedField = decodeTrajectoryCount(raw.unexpected_field)
@@ -111,7 +118,7 @@ export function decodeTrajectoryReadErrors(raw: unknown): TrajectoryReadError[] 
   if (!Array.isArray(raw)) return null
   const errors: TrajectoryReadError[] = []
   for (const item of raw) {
-    if (!isRecord(item)) return null
+    if (!isRecord(item) || !hasOnlyKeys(item, READ_ERROR_KEYS)) return null
     const path = decodeTrajectoryNonBlankString(item.path)
     const message = decodeTrajectoryNonBlankString(item.message)
     if (path === null || message === null) return null
@@ -125,22 +132,77 @@ function decodeFiniteNumber(value: unknown): number | null {
   return decoded !== undefined && Number.isFinite(decoded) ? decoded : null
 }
 
-function decodeNullableString(value: unknown): string | null | undefined {
-  if (value === null) return null
-  const decoded = decodeTrajectoryExactString(value)
-  return decoded === null ? undefined : decoded
-}
-
 const TOOL_ENTRY_KEYS = new Set([
-  'ts', 'ts_iso', 'turn', 'round', 'tool_name', 'args', 'result',
-  'duration_ms', 'error', 'execution_id',
+  'ts', 'ts_iso', 'turn', 'round', 'tool_name', 'args', 'outcome',
+  'duration_ms', 'execution_id',
 ])
 const THINKING_ENTRY_KEYS = new Set([
-  'type', 'ts', 'ts_iso', 'turn', 'content', 'content_length', 'redacted',
+  'type', 'ts', 'ts_iso', 'turn', 'block_index', 'block',
 ])
+const INVALID_REASON_KEYS = new Set([
+  'missing_required_field', 'invalid_field', 'unexpected_field',
+  'duplicate_field', 'unsupported_row_type', 'malformed_json',
+])
+const READ_ERROR_KEYS = new Set(['path', 'message'])
+const LINE_DECODE_KEYS = new Set([
+  'tool_call_count', 'thinking_count', 'skipped_summary_count',
+  'invalid_line_count', 'invalid_reasons',
+])
+const TRAJECTORY_RESPONSE_KEYS = new Set([
+  'keeper', 'trace_id', 'generation', 'total_entries', 'total_entries_scope',
+  'total_entries_exact', 'tail_scan_lines', 'showing', 'decode', 'io_errors',
+  'entries',
+])
+const SUCCEEDED_OUTCOME_KEYS = new Set(['status', 'output'])
+const FAILED_OUTCOME_KEYS = new Set(['status', 'error'])
+const THINKING_BLOCK_KEYS = new Set(['type', 'thinking', 'signature'])
+const REASONING_DETAILS_BLOCK_KEYS = new Set(['type', 'reasoning_content', 'details'])
+const REDACTED_THINKING_BLOCK_KEYS = new Set(['type', 'data'])
 
 function hasOnlyKeys(raw: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(raw).every(key => allowed.has(key))
+}
+
+function decodeToolOutcome(raw: unknown): TrajectoryToolOutcome | null {
+  if (!isRecord(raw)) return null
+  if (raw.status === 'succeeded' && hasOnlyKeys(raw, SUCCEEDED_OUTCOME_KEYS)) {
+    const output = decodeTrajectoryExactString(raw.output)
+    return output === null ? null : { status: 'succeeded', output }
+  }
+  if (raw.status === 'failed' && hasOnlyKeys(raw, FAILED_OUTCOME_KEYS)) {
+    const error = decodeTrajectoryNonBlankString(raw.error)
+    return error === null ? null : { status: 'failed', error }
+  }
+  return null
+}
+
+function decodeThinkingBlock(raw: unknown): TrajectoryThinkingBlock | null {
+  if (!isRecord(raw)) return null
+  if (raw.type === 'thinking' && hasOnlyKeys(raw, THINKING_BLOCK_KEYS)) {
+    const thinking = decodeTrajectoryExactString(raw.thinking)
+    if (thinking === null) return null
+    if (raw.signature === undefined) return { type: 'thinking', thinking }
+    const signature = decodeTrajectoryExactString(raw.signature)
+    return signature === null ? null : { type: 'thinking', thinking, signature }
+  }
+  if (
+    raw.type === 'reasoning_details'
+    && hasOnlyKeys(raw, REASONING_DETAILS_BLOCK_KEYS)
+    && Array.isArray(raw.details)
+  ) {
+    if (raw.reasoning_content === undefined) {
+      return { type: 'reasoning_details', details: raw.details }
+    }
+    const reasoningContent = decodeTrajectoryExactString(raw.reasoning_content)
+    return reasoningContent === null
+      ? null
+      : { type: 'reasoning_details', reasoning_content: reasoningContent, details: raw.details }
+  }
+  if (raw.type === 'redacted_thinking' && hasOnlyKeys(raw, REDACTED_THINKING_BLOCK_KEYS)) {
+    const data = decodeTrajectoryExactString(raw.data)
+    return data === null ? null : { type: 'redacted_thinking', data }
+  }
+  return null
 }
 
 function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | null {
@@ -151,12 +213,9 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
   const round = decodeTrajectoryCount(raw.round)
   const toolName = decodeTrajectoryNonBlankString(raw.tool_name)
   const args = isRecord(raw.args) ? raw.args : null
-  const result = decodeNullableString(raw.result)
+  const outcome = decodeToolOutcome(raw.outcome)
   const durationMs = decodeTrajectoryCount(raw.duration_ms)
-  const error = decodeNullableString(raw.error)
-  const executionId = raw.execution_id === undefined
-    ? undefined
-    : decodeTrajectoryNonBlankString(raw.execution_id)
+  const executionId = decodeTrajectoryNonBlankString(raw.execution_id)
   if (
     ts === null
     || tsIso === null
@@ -164,10 +223,9 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
     || round === null
     || toolName === null
     || args === null
-    || result === undefined
+    || outcome === null
     || durationMs === null
-    || error === undefined
-    || (raw.execution_id !== undefined && executionId === null)
+    || executionId === null
   ) return null
   return {
     ts,
@@ -176,10 +234,9 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
     round,
     tool_name: toolName,
     args,
-    result,
+    outcome,
     duration_ms: durationMs,
-    error,
-    ...(typeof executionId === 'string' ? { execution_id: executionId } : {}),
+    execution_id: executionId,
   }
 }
 
@@ -188,24 +245,22 @@ function decodeThinkingEntry(raw: Record<string, unknown>): TrajectoryThinkingEn
   const ts = decodeFiniteNumber(raw.ts)
   const tsIso = decodeTrajectoryNonBlankString(raw.ts_iso)
   const turn = decodeTrajectoryCount(raw.turn)
-  const content = decodeTrajectoryExactString(raw.content)
-  const contentLength = decodeTrajectoryCount(raw.content_length)
+  const blockIndex = decodeTrajectoryCount(raw.block_index)
+  const block = decodeThinkingBlock(raw.block)
   if (
     ts === null
     || tsIso === null
     || turn === null
-    || content === null
-    || contentLength === null
-    || typeof raw.redacted !== 'boolean'
+    || blockIndex === null
+    || block === null
   ) return null
   return {
     type: 'thinking',
     ts,
     ts_iso: tsIso,
     turn,
-    content,
-    content_length: contentLength,
-    redacted: raw.redacted,
+    block_index: blockIndex,
+    block,
   }
 }
 
@@ -215,7 +270,7 @@ function decodeTrajectoryEntry(raw: unknown): TrajectoryEntry | null {
 }
 
 function decodeLineDecode(raw: unknown): TrajectoryLineDecode | null {
-  if (!isRecord(raw)) return null
+  if (!isRecord(raw) || !hasOnlyKeys(raw, LINE_DECODE_KEYS)) return null
   const toolCallCount = decodeTrajectoryCount(raw.tool_call_count)
   const thinkingCount = decodeTrajectoryCount(raw.thinking_count)
   const skippedSummaryCount = decodeTrajectoryCount(raw.skipped_summary_count)
@@ -239,7 +294,11 @@ function decodeLineDecode(raw: unknown): TrajectoryLineDecode | null {
 }
 
 function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
-  if (!isRecord(raw) || !Array.isArray(raw.entries)) return null
+  if (
+    !isRecord(raw)
+    || !hasOnlyKeys(raw, TRAJECTORY_RESPONSE_KEYS)
+    || !Array.isArray(raw.entries)
+  ) return null
   const keeper = decodeTrajectoryNonBlankString(raw.keeper)
   const traceId = decodeTrajectoryNonBlankString(raw.trace_id)
   const generation = decodeTrajectoryCount(raw.generation)
@@ -267,7 +326,13 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
     if (entry === null) return null
     entries.push(entry)
   }
-  if (entries.length !== showing) return null
+  const decodedToolCallCount = entries.filter(entry => entry.type !== 'thinking').length
+  const decodedThinkingCount = entries.length - decodedToolCallCount
+  if (
+    entries.length !== showing
+    || decode.tool_call_count !== decodedToolCallCount
+    || decode.thinking_count !== decodedThinkingCount
+  ) return null
   return {
     keeper,
     trace_id: traceId,
@@ -292,7 +357,6 @@ export function fetchKeeperTrajectory(
   if (limit != null) params.set('limit', String(limit))
   if (fullOutput) {
     params.set('result_max_len', '0')
-    params.set('content_max_len', '0')
   }
   const qs = params.toString()
   return get<unknown>(

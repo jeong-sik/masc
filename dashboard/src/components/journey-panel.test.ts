@@ -45,9 +45,9 @@ function trajectory(): TrajectoryResponse {
         round: 1,
         tool_name: 'fs_read',
         args: { path: '/tmp/old' },
-        result: 'old result',
+        outcome: { status: 'succeeded', output: 'old result' },
         duration_ms: 120,
-        error: null,
+        execution_id: 'exec-journey-1',
       },
     ],
   }
@@ -68,6 +68,7 @@ function toolCalls(): ToolCallsResponse {
         duration_ms: 120,
         trace_id: 'trace-1',
         turn: 1,
+        execution_id: 'exec-journey-1',
       },
     ],
   }
@@ -217,7 +218,7 @@ describe('JourneyPanel', () => {
       expect(screen.getByText('Turn 1')).toBeInTheDocument()
       expect(screen.getByText('fs_read')).toBeInTheDocument()
       expect(screen.getByText('agent turns 2')).toBeInTheDocument()
-      expect(screen.getByText('trajectory + I/O')).toBeInTheDocument()
+      expect(screen.getByText('trajectory + provenance')).toBeInTheDocument()
     })
 
     expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true)

@@ -410,10 +410,7 @@ function isLongContent(text: string): boolean {
 // ── Diff renderer ─────────────────────────────────────
 
 function DiffBlock({ text }: { text: string }) {
-  const allLines = text.split('\n')
-  const MAX_LINES = 500
-  const lines = allLines.length > MAX_LINES ? allLines.slice(0, MAX_LINES) : allLines
-  const truncatedCount = allLines.length - lines.length
+  const lines = text.split('\n')
 
   return html`
     <div class="font-mono text-2xs leading-loose overflow-x-auto">
@@ -425,11 +422,6 @@ function DiffBlock({ text }: { text: string }) {
           : 'text-[var(--color-fg-primary)]'
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
-      ${truncatedCount > 0 ? html`
-        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--color-border-default)]">
-          ... ${truncatedCount} lines truncated for performance ...
-        </div>
-      ` : null}
     </div>
   `
 }
@@ -446,10 +438,6 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--color-border-default)]'
   const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--color-bg-surface)]'
 
-  const MAX_TEXT_LEN = 100000
-  const isTruncatedPlain = hint === 'plain' && text.length > MAX_TEXT_LEN
-  const displayText = isTruncatedPlain ? text.slice(0, MAX_TEXT_LEN) + '\n\n... (Output truncated for performance) ...' : text
-
   return html`
     <div>
       <div class="flex items-center justify-between mb-1">
@@ -463,7 +451,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
+            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${text}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--color-bg-surface)]'} to-transparent pointer-events-none"></div>
           ` : null}

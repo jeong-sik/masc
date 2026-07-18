@@ -151,9 +151,8 @@ describe('buildJourneyWaterfall', () => {
           ts: 1,
           ts_iso: '2026-05-14T00:00:01.000Z',
           turn: 2,
-          content: 'Need to inspect the file.',
-          content_length: 25,
-          redacted: false,
+          block_index: 0,
+          block: { type: 'thinking', thinking: 'Need to inspect the file.' },
         },
         {
           ts: 2,
@@ -162,9 +161,9 @@ describe('buildJourneyWaterfall', () => {
           round: 1,
           tool_name: 'fs_read',
           args: { path: '/tmp/old' },
-          result: 'old result',
+          outcome: { status: 'succeeded', output: 'old result' },
           duration_ms: 250,
-          error: null,
+          execution_id: 'exec-journey-1',
         },
       ]),
       toolCalls: toolCalls([
@@ -178,6 +177,7 @@ describe('buildJourneyWaterfall', () => {
           duration_ms: 250,
           trace_id: 'trace-1',
           turn: 2,
+          execution_id: 'exec-journey-1',
         },
       ]),
       runtimeTrace: runtimeTrace(),
@@ -190,8 +190,8 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
-    expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })
-    expect(toolEntry?.toolResult).toBe('current result')
+    expect(toolEntry?.toolArgs).toEqual({ path: '/tmp/old' })
+    expect(toolEntry?.toolResult).toBe('old result')
   })
 
   it('keeps tool-call-log rows when trajectory is missing', () => {
@@ -231,9 +231,9 @@ describe('buildJourneyWaterfall', () => {
           round: 1,
           tool_name: 'fs_read',
           args: {},
-          result: null,
+          outcome: { status: 'failed', error: 'rejected' },
           duration_ms: 0,
-          error: 'rejected',
+          execution_id: 'exec-journey-failed-1',
         },
       ]),
       toolCalls: null,

@@ -172,7 +172,7 @@ function turnTone(turn: JourneyWaterfallTurn): string {
 function sourceLabel(entry: JourneyWaterfallEntry): string {
   switch (entry.source) {
     case 'trajectory+tool_call_log':
-      return 'trajectory + I/O'
+      return 'trajectory + provenance'
     case 'tool_call_log':
       return 'tool log'
     case 'trajectory':

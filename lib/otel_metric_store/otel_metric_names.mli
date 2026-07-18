@@ -164,8 +164,9 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-(** #9662: cooperative-cancel timeout overshoot counter emitted by
-    [Timeout_policy].  Labels: [layer, origin]. *)
+(** #9662: cooperative-cancel timeout overshoot counter.
+    Labels: [layer, origin].  Has no emitter since the timeout_policy
+    module was removed; kept as a declared counter name. *)
 val metric_timeout_policy_overshoot : string
 
 (** #9943: per-keeper noop compaction counter.  Increments when

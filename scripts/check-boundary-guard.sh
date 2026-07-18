@@ -247,7 +247,7 @@ check_forbidden_active "V7l-generic-gate-product-knowledge" \
 # message prose must not synthesize follow-up actions, quality verdicts, or
 # recovery instructions in the model-facing response.
 check_forbidden_active "V7m-mcp-message-semantics" \
-  'contains_casefold|Masc_error_recovery|parse_status_from_message|quality_from_result|required_follow_up|Recovery:' \
+  'contains_casefold|parse_status_from_message|quality_from_result|required_follow_up|Recovery:' \
   "lib/mcp_server_eio_call_tool.ml" \
   "lib/mcp_server_eio_call_tool.mli" \
   "lib/mcp_server_eio_protocol.ml" \

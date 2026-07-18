@@ -32,7 +32,7 @@ module Event_id_set = Set.Make (String)
 (* The storage namespace and row schema advance together.  A generation hard
    cut never scans or writes an older namespace, so retired data cannot remain
    on the exact-evidence hot path or become a second authority. *)
-let storage_generation = "v3"
+let storage_generation = "v4"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function

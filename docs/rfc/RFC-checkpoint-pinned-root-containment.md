@@ -130,9 +130,9 @@ proof-by-construction theater.
 
 ### 3.2 Reject any symlink anywhere in the chain
 
-Breaks the legitimate symlinked deployment root (`~/.masc` → mounted
-volume), which is precisely why `canonical_session_location` canonicalizes
-the parent at all. The pin handles this case: the deployment link is
+Breaks the legitimate symlinked deployment root (`<base-path>/.masc` →
+mounted volume), which is precisely why `canonical_session_location`
+canonicalizes the parent at all. The pin handles this case: the deployment link is
 resolved once at boot and the *physical* tree becomes the invariant.
 
 ### 3.3 `openat2`/`RESOLVE_BENEATH`

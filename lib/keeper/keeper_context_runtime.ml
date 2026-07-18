@@ -61,8 +61,6 @@ let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpo
 (* Re-export from Keeper_compact_policy                              *)
 (* ================================================================ *)
 
-let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_keeper
-
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t

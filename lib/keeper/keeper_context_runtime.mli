@@ -125,8 +125,6 @@ val load_context_from_checkpoint
 
 (** {1 Compaction} *)
 
-val compaction_policy_of_keeper : keeper_meta -> float * int * int
-
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
   | Prepared of Compaction_trigger.t

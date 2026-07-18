@@ -58,9 +58,6 @@ let handle_keeper_list ctx args : tool_result =
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
-          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-            compaction_policy_of_keeper m
-          in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
           let metrics_window_lines = Dated_jsonl.read_recent_lines metrics_store 120 in
           let last_metrics =
@@ -174,9 +171,6 @@ let handle_keeper_list ctx args : tool_result =
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
-              ("compaction_ratio_gate", `Float compact_ratio_gate);
-              ("compaction_message_gate", `Int compact_message_gate);
-              ("compaction_token_gate", `Int compact_token_gate);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

@@ -35,11 +35,6 @@ type compaction_preparation =
   ; evidence : Keeper_compaction_evidence.t option
   }
 
-(** Legacy configuration projection retained until the unused ratio/message/
-    token gates are removed from [keeper_meta]. It is not consulted by
-    {!compact_for_request_typed}. *)
-val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
-
 (** Apply a caller-owned request. Only a valid configured-LLM plan that
     strictly reduces the exact serialized checkpoint byte length is prepared.
     Every refusal preserves the original context and returns a typed reason.

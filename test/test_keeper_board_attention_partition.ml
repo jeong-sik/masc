@@ -296,7 +296,7 @@ let test_partition_ledger_rejects_cross_keeper_identity () =
     U.(health |> member "read_error_count" |> to_int)
 ;;
 
-let test_provider_failure_defers_until_signal_recovery () =
+let test_provider_failure_defers_until_process_start_recovery () =
   with_temp_base "board-partition-defer" @@ fun base_path ->
   let candidates = [ candidate 1; candidate 2 ] in
   record_all ~base_path candidates;
@@ -322,6 +322,33 @@ let test_provider_failure_defers_until_signal_recovery () =
    | Ok count -> Alcotest.failf "expected one recovered partition, got %d" count
    | Error detail -> Alcotest.fail detail);
   ignore (claim ~base_path : P.t)
+;;
+
+let test_untyped_worker_epoch_is_rejected () =
+  with_temp_base "board-partition-untyped-worker-epoch" @@ fun base_path ->
+  let candidates = [ candidate 1 ] in
+  record_all ~base_path candidates;
+  ignore (ensure ~base_path candidates : P.t list);
+  let claimed = claim ~base_path in
+  let untyped_state =
+    match P.to_yojson claimed with
+    | `Assoc fields ->
+      (match List.assoc_opt "state" fields with
+       | Some (`Assoc state_fields) ->
+         `Assoc
+           (("worker_epoch", `String "legacy-worker-epoch")
+            :: List.remove_assoc "worker_epoch" state_fields)
+       | Some _ | None -> Alcotest.fail "running state fixture is malformed")
+    | _ -> Alcotest.fail "partition fixture did not encode as an object"
+  in
+  let untyped_row =
+    match P.to_yojson claimed with
+    | `Assoc fields -> `Assoc (("state", untyped_state) :: List.remove_assoc "state" fields)
+    | _ -> Alcotest.fail "partition fixture did not encode as an object"
+  in
+  match P.of_yojson untyped_row with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "untyped legacy worker epoch was accepted"
 ;;
 
 let test_running_claim_recovers_at_process_start () =
@@ -418,9 +445,13 @@ let () =
             `Quick
             test_removed_split_state_is_rejected
         ; Alcotest.test_case
-            "provider failure waits for signal recovery"
+            "provider failure waits for process-start recovery"
             `Quick
-            test_provider_failure_defers_until_signal_recovery
+            test_provider_failure_defers_until_process_start_recovery
+        ; Alcotest.test_case
+            "untyped worker epoch is rejected"
+            `Quick
+            test_untyped_worker_epoch_is_rejected
         ; Alcotest.test_case
             "running claim recovers at process start"
             `Quick

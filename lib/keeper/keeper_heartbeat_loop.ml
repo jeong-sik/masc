@@ -536,6 +536,12 @@ let run_keepalive_unified_turn
              ( Keeper_registry_event_queue.Settled _
              | Keeper_registry_event_queue.Already_settled _ ) ->
            lease_settled := true
+         | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+           lease_settled := true;
+           Log.Keeper.error
+             "registry: requeue committed with follow-up failure keeper=%s: %s"
+             meta_after_triage.name
+             detail
          | Error message ->
            Log.Keeper.error
              "registry: failed to requeue unsettled lease keeper=%s: %s"
@@ -924,7 +930,14 @@ let run_keepalive_unified_turn
               mark_connector_attention_ignored_after_turn
                 ~base_path:ctx.config.base_path
                 ~keeper_name:meta_after_triage.name
-                (connector_attention_event_ids_of_stimuli !consumed_stimuli)));
+                (connector_attention_event_ids_of_stimuli !consumed_stimuli)
+          | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+            lease_settled := true;
+            Log.Keeper.error
+              "registry: settlement committed with follow-up failure keeper=%s: %s"
+              meta_after_triage.name
+              detail;
+            record_settlement_failure detail));
       { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
     with
     | Eio.Cancel.Cancelled _ as e ->

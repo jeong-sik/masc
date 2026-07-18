@@ -580,6 +580,37 @@ describe('keeper tool telemetry fetchers', () => {
               checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
             },
           },
+          {
+            id: 'manifest:trace-c:context_compacted:2026-06-26T04:04:00Z',
+            keeper: 'keeper-alpha',
+            ts_iso: '2026-06-26T04:04:00Z',
+            ts_unix: null,
+            trace_id: 'trace-c',
+            keeper_turn_id: 14,
+            source: 'runtime_manifest',
+            trigger: 'proactive(90%)',
+            runtime_id: 'oas-seoul-1',
+            display_runtime: 'oas-seoul-1',
+            before_tokens: 180000,
+            after_tokens: 90000,
+            saved_tokens: 90000,
+            compaction_id: 'cmp-43',
+            compaction_source: 'event_bus',
+            status: 'observed',
+            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+            exact_evidence: {
+              before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
+              before_message_count: 9, after_message_count: 3,
+              summarized_message_count: 4, dropped_message_count: 1,
+              pair_repair_dropped_message_count: 2,
+              before_tool_use_count: 2, after_tool_use_count: 1,
+              before_tool_result_count: 2, after_tool_result_count: 1,
+            },
+            reinjection_observation: {
+              state: 'not_linked', keeper_turn_id: null,
+              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+            },
+          },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -601,6 +632,11 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.items[1]?.before_tokens).toBeNull()
     expect(result.items[1]?.runtime_id).toBeNull()
     expect(result.items[1]?.links.checkpoint_path).toBeNull()
+    // Rows persisted before #25037 lack pair_repair_dropped_message_count:
+    // the field decodes to null without voiding the rest of the evidence.
+    expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
+    expect(result.items[0]?.exact_evidence?.pair_repair_dropped_message_count).toBeNull()
+    expect(result.items[2]?.exact_evidence?.pair_repair_dropped_message_count).toBe(2)
   })
 })
 
@@ -1902,7 +1938,6 @@ describe('fetchKeeperConfig', () => {
         ratio_gate: '0.85',
         message_gate: '16',
         token_gate: '24000',
-        cooldown_sec: '120',
       },
       proactive: {
         enabled: 'true',

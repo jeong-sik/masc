@@ -23,7 +23,6 @@ type parsed_args = {
   compaction_ratio_gate_opt : float option;
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
-  compaction_cooldown_sec_opt : int option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
   instructions_arg : string option;
@@ -152,9 +151,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
     let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
-    let compaction_cooldown_sec_opt =
-      Safe_ops.json_int_opt "compaction_cooldown_sec" args
-    in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
@@ -207,7 +203,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       compaction_ratio_gate_opt;
       compaction_message_gate_opt;
       compaction_token_gate_opt;
-      compaction_cooldown_sec_opt;
       sandbox_profile_opt;
       network_mode_opt;
       instructions_arg;

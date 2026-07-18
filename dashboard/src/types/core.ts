@@ -1398,7 +1398,6 @@ interface KeeperConfigCompaction {
   ratio_gate: number
   message_gate: number
   token_gate: number
-  cooldown_sec: number
 }
 
 interface KeeperConfigProactive {

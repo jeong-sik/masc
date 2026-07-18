@@ -115,19 +115,6 @@ let keeper_memory_os_recall_max_bytes_rp =
     ~description:"Rendered recall block byte threshold to log/count as over-budget (0 = disabled)" ()
 let keeper_memory_os_recall_max_bytes () : int =
   Runtime_params.get keeper_memory_os_recall_max_bytes_rp
-
-(** Cooldown between compaction attempts.  Previous default (90s) exceeded
-    the proactive heartbeat interval (30s), permanently blocking compaction
-    for proactive keepers.  15s allows compaction to fire every other cycle. *)
-let keeper_compaction_cooldown_sec_rp =
-  _rp_int ~key:"keeper.compaction.cooldown_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACTION_COOLDOWN_SEC"
-                          ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
-    ~min_v:0 ~max_v:two_days_seconds_int
-    ~description:"Compaction cooldown (seconds)" ()
-let keeper_compaction_cooldown_sec () : int =
-  Runtime_params.get keeper_compaction_cooldown_sec_rp
-
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
@@ -168,9 +155,6 @@ let normalize_compaction_message_gate (v : int) : int =
 
 let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
-
-let normalize_compaction_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 let default_compaction_profile = "custom"
 
@@ -290,29 +274,11 @@ let hitl_summary_temperature_rp =
 let hitl_summary_temperature () : float =
   Runtime_params.get hitl_summary_temperature_rp
 
-(** Maximum number of request-local Auto Judge calls that may be in flight.
-    A bounded queue prevents an operator recovery of a large durable backlog
-    from turning into an unbounded provider burst. *)
-let hitl_summary_max_concurrency_rp =
-  _rp_int ~key:"keeper.hitl_summary.max_concurrency"
-    ~default:(fun () ->
-      int_of_env_default
-        "MASC_KEEPER_HITL_SUMMARY_MAX_CONCURRENCY"
-        ~default:4
-        ~min_v:1
-        ~max_v:32)
-    ~min_v:1
-    ~max_v:32
-    ~description:"Maximum concurrent HITL Auto Judge calls" ()
-let hitl_summary_max_concurrency () : int =
-  Runtime_params.get hitl_summary_max_concurrency_rp
-
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
   let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
-  let (_ : int) = Runtime_params.get hitl_summary_max_concurrency_rp in
   ()
 
 let keeper_enable_thinking_rp =

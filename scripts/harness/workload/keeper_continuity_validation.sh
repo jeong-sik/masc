@@ -33,7 +33,6 @@ PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
 KEEPER_COMPACTION_RATIO_GATE="${KEEPER_COMPACTION_RATIO_GATE:-0.10}"
 KEEPER_COMPACTION_MESSAGE_GATE="${KEEPER_COMPACTION_MESSAGE_GATE:-2}"
-KEEPER_COMPACTION_COOLDOWN_SEC="${KEEPER_COMPACTION_COOLDOWN_SEC:-0}"
 
 SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
@@ -533,7 +532,6 @@ create_keeper() {
     --arg runtime_id "$KEEPER_RUNTIME_NAME" \
     --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
     --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
-    --argjson compaction_cooldown_sec "$KEEPER_COMPACTION_COOLDOWN_SEC" \
     '{
       name:$name,
       goal:$goal,
@@ -543,7 +541,6 @@ create_keeper() {
       compaction_ratio_gate:$compaction_ratio_gate,
       compaction_message_gate:$compaction_message_gate,
       compaction_token_gate:0,
-      compaction_cooldown_sec:$compaction_cooldown_sec,
       drift_enabled:false
     } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60

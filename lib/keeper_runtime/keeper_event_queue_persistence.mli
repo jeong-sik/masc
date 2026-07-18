@@ -1,6 +1,6 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] uses one v3 envelope containing pending stimuli, active
+    [event-queue.json] keeps the v3 envelope containing pending stimuli, active
     typed leases, the monotonic lease sequence and the transition outbox.
     Older schemas are unsupported. [event-queue-inflight.json] is rejected
     explicitly rather than migrated or treated as a second authority. *)
@@ -42,9 +42,14 @@ type lease = Keeper_event_queue_state.lease
 type transition_receipt = Keeper_event_queue_state.transition_receipt
 type outbox_entry = Keeper_event_queue_state.outbox_entry
 
-type settle_result = Keeper_event_queue_state.settle_result =
+type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> lease_kind
@@ -111,7 +116,9 @@ val load_snapshot_pair_with_errors :
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Strict state read used by tests and operator projection. A malformed v3
-    envelope or v3-plus-legacy residue is an [Error], never an empty queue. *)
+    envelope or v3-plus-legacy residue is an [Error], never an empty queue.
+    Committed WAL rows are replayed idempotently, checkpointed, and then
+    compacted to the exact empty suffix before the state is returned. *)
 
 val claim_when_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -139,6 +146,11 @@ val settle_result :
   settlement:settlement ->
   unit ->
   (settle_result, string) result
+(** Append and fsync the owner-bound canonical receipt before checkpointing the
+    state snapshot. Once checkpointed, the exact WAL prefix is durably compacted
+    rather than retained by an arbitrary size policy. A post-commit checkpoint,
+    WAL-compaction or pending-projection failure is returned as a committed
+    outcome, never relabelled as an uncommitted error. *)
 
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -150,7 +162,8 @@ val prepare_registration_result :
 (** Registration boundary for a newly-owned lane. Requeues an abandoned lease,
     records its stable [Registration_recovery] transition, and returns the
     resulting pending projection from the same durable transaction. A malformed
-    state is an [Error]; registration must not substitute an empty queue. *)
+    state is an [Error]; registration must not substitute an empty queue.
+    Post-commit [Error] names that fact; retry replays the exact WAL cursor. *)
 
 val mark_transition_projected_result :
   base_path:string ->

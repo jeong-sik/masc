@@ -84,8 +84,6 @@ type drain_report =
 
 exception Candidate_unavailable of string
 
-let prompt_name = Keeper_prompt_names.board_attention_judgment
-
 let retryable_failure_kind_to_string = function
   | Runtime_configuration_unavailable -> "runtime_configuration_unavailable"
   | Prompt_contract_unavailable -> "prompt_contract_unavailable"

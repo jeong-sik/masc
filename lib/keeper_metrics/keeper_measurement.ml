@@ -6,7 +6,6 @@ type threshold_params = {
   compaction_ratio_gate : float;
   compaction_message_gate : int;
   compaction_token_gate : int;
-  compaction_cooldown_sec : int;
   model_ratio_multiplier : float;
 }
 
@@ -45,7 +44,6 @@ let threshold_params_to_json (t : threshold_params) : Yojson.Safe.t =
     "compaction_ratio_gate", `Float t.compaction_ratio_gate;
     "compaction_message_gate", `Int t.compaction_message_gate;
     "compaction_token_gate", `Int t.compaction_token_gate;
-    "compaction_cooldown_sec", `Int t.compaction_cooldown_sec;
     "model_ratio_multiplier", `Float t.model_ratio_multiplier;
   ]
 

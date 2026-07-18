@@ -42,6 +42,11 @@ type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind

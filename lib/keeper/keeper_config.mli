@@ -127,7 +127,6 @@ val resolve_compaction_policy :
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
-val normalize_compaction_cooldown_sec : int -> int
 
 (** {1 Runtime Parameters}
 
@@ -138,7 +137,6 @@ val normalize_compaction_cooldown_sec : int -> int
 val keeper_compact_ratio : unit -> float
 val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
-val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 
 (** Memory OS recall selection budget (masc#25052 P1). See the .ml for the
@@ -160,7 +158,6 @@ val keeper_unified_max_tokens : unit -> int
 (** {2 HITL Context-Summary Worker Policy} *)
 
 val hitl_summary_temperature : unit -> float
-val hitl_summary_max_concurrency : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 

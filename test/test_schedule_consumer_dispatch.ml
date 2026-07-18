@@ -484,6 +484,7 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
        with
        | Ok (Keeper_registry_event_queue.Settled _)
        | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
+       | Ok _ -> fail "scheduled occurrence settlement follow-up failed"
        | Error detail -> fail detail);
       (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
        | Ok () -> ()
@@ -754,6 +755,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         | Error error -> fail ("scheduled wake settlement failed: " ^ error)
         | Ok (Keeper_registry_event_queue.Settled receipt)
         | Ok (Keeper_registry_event_queue.Already_settled receipt) -> receipt
+        | Ok _ -> fail "scheduled wake settlement follow-up failed"
       in
       (match
          Keeper_registry_event_queue.mark_transition_projected_result

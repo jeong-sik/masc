@@ -3,4 +3,4 @@
 (test
  (name test_server_slack_trigger_policy)
  (modules test_server_slack_trigger_policy)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc masc_test_deps))

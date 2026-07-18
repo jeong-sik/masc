@@ -15,6 +15,14 @@ let test_format_line_prefixes_ctx () =
     "[oas:http_client] boom"
     (Sink.format_line ~ctx:"http_client" "boom")
 
+let test_format_line_preserves_oas_secret_redaction () =
+  Alcotest.(check string)
+    "custom sink redacts before durable logging"
+    "[oas:http_client] Authorization: Bearer [REDACTED]"
+    (Sink.format_line
+       ~ctx:"http_client"
+       "Authorization: Bearer provider-secret")
+
 let capture () =
   let seen = ref [] in
   let record tag message = seen := (tag, message) :: !seen in
@@ -54,6 +62,8 @@ let () =
     [ ( "routing"
       , [ Alcotest.test_case "format_line prefixes ctx" `Quick
             test_format_line_prefixes_ctx
+        ; Alcotest.test_case "format_line redacts provider secrets" `Quick
+            test_format_line_preserves_oas_secret_redaction
         ; Alcotest.test_case "dispatches each level" `Quick
             test_route_dispatches_each_level
         ; Alcotest.test_case "only matching emitter fires" `Quick

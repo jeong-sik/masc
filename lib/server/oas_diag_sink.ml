@@ -14,7 +14,10 @@
 
 (* Prefix the OAS subsystem [ctx] onto the message so provider diagnostics stay
    attributable once merged into the shared runtime log. *)
-let format_line ~ctx message = Printf.sprintf "[oas:%s] %s" ctx message
+let format_line ~ctx message =
+  Printf.sprintf "[oas:%s] %s" ctx message
+  |> Llm_provider.Secret_redactor.redact_string
+;;
 
 (* Exhaustive over [Llm_provider.Diag.level] — a new OAS level forces a compile
    update rather than silently dropping to a default emitter. *)
@@ -31,9 +34,10 @@ let route ~debug ~info ~warn ~error (level : Llm_provider.Diag.level) ~ctx messa
 ;;
 
 (* Install the global sink at boot, before any provider call. MASC's own
-   [Log.Runtime] level gate then applies (Debug/Info suppressed by default;
-   Warn/Error surface); the event is tagged [Boundary] so it stays filterable
-   without colliding with keeper events. *)
+   [Log.Runtime] level gate then applies; the event is tagged [Boundary] so it
+   stays filterable without colliding with keeper events. [format_line]
+   preserves the OAS default sink's redaction boundary before the message
+   reaches MASC's durable log. *)
 let install () =
   Llm_provider.Diag.set_sink
     (route

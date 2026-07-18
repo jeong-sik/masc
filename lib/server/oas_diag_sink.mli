@@ -4,7 +4,10 @@
     sink and never reach [system_log_*.jsonl]. See #25148 / #25031. *)
 
 (** [format_line ~ctx message] prefixes the OAS subsystem [ctx] onto [message]
-    ([\[oas:http_client\] ...]) for attribution in the shared runtime log. *)
+    ([\[oas:http_client\] ...]) for attribution in the shared runtime log, then
+    applies OAS's canonical diagnostic secret redaction. Custom sinks receive
+    raw diagnostic messages, so this preserves the default sink's security
+    boundary before durable persistence. *)
 val format_line : ctx:string -> string -> string
 
 (** [route ~debug ~info ~warn ~error level ~ctx message] dispatches to the

@@ -106,8 +106,7 @@
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →
   ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the
-  ; generated _j module.  Promoted from sse_event_poc :with-test
-  ; gating once the typed lib became production-required (PR-1).
+  ; generated _j module.  The typed SSE library is production-required.
   (atdgen (and :build (>= 4.2.0)))
   (atdgen-runtime (>= 4.2.0))
   ; RFC-0004 Phase A0.2 PR-2: atdts generates TypeScript decoders

@@ -234,10 +234,8 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
       scope_hint
 ;;
 
-let no_eligible_exclusion_summary ~scope_excluded_count =
-  Printf.sprintf
-    "Diagnostics: goal_scope_or_filter=%d."
-    scope_excluded_count
+let no_eligible_exclusion_summary =
+  Masc_task_handlers.Tool_task_no_eligible.no_eligible_exclusion_summary
 ;;
 
 

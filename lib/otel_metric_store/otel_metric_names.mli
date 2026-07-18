@@ -267,9 +267,3 @@ val metric_persistence_read_drops : string
 val metric_persistence_utf8_repair : string
 
 val metric_discovery_history_failures : string
-
-(** #18855: per-tool correction_pipeline fix counter.
-    Incremented when the OAS agent_tools module reports that
-    correction_pipeline fixed input fields for a tool.
-    Labels: [tool_name]. *)
-val metric_oas_correction_pipeline_fixes_total : string

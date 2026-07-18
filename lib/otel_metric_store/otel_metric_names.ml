@@ -265,10 +265,3 @@ let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_c
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"
 let metric_discovery_history_failures = Otel_metric_store_core.declare_counter "masc_discovery_history_failures_total"
-
-(* #18855: per-tool correction_pipeline fix counter.
-   Incremented when the OAS agent_tools module reports that
-   correction_pipeline fixed input fields for a tool.
-   Labels: [tool_name]. *)
-let metric_oas_correction_pipeline_fixes_total =
-  Otel_metric_store_core.declare_counter "masc_oas_correction_pipeline_fixes_total"

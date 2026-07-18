@@ -71,13 +71,9 @@ include Otel_transport_metric_names
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 include Otel_core_metric_names
 
-(* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
-let metric_pool_idle_total = "masc_pool_idle_total"
-let metric_pool_inflight_total = "masc_pool_inflight_total"
-let metric_pool_reuse_total = Otel_metric_store_core.declare_counter "masc_pool_reuse_total"
-let metric_pool_evict_total = Otel_metric_store_core.declare_counter "masc_pool_evict_total"
-let metric_pool_evict_failure_total = Otel_metric_store_core.declare_counter "masc_pool_evict_failure_total"
-let metric_pool_create_total = Otel_metric_store_core.declare_counter "masc_pool_create_total"
+(* masc_pool_* series are emitted solely by [Otel_runtime_observables]
+   (computed at exporter tick from [Pool_metrics.current_snapshot]); no
+   store cells are declared here, so there is no 0-cell duplicate. *)
 
 include Otel_policy_metric_names
 
@@ -102,17 +98,9 @@ let metric_oas_bridge_unmigrated_payload_kind =
   Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;
 
-let metric_keeper_context_tool_result_compacted =
-  Otel_metric_store_core.declare_counter "masc_keeper_context_tool_result_compacted_total"
-;;
-
 let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed = Otel_metric_store_core.declare_counter "masc_distributed_lock_acquire_failed_total"
-
-let metric_ide_orphan_reads =
-  Otel_metric_store_core.declare_counter "masc_ide_orphan_reads_total"
-;;
 
 (* #10130: boot-time sweep of [save_file_atomic] orphan temp
    files.  Labels: [size_class = empty | with_data].  The

@@ -1041,26 +1041,27 @@ let cached_keeper_config_json config name =
    ~1-2 s per keeper (chat tail parse + per-trace trajectory and
    internal-history tail reads + redaction), so a 16-keeper hydration
    serialized 15 s+ of main-domain work and pushed unrelated HTTP/WS
-   responses past the dashboard's 35 s client timeout. The cache key
-   embeds the chat file's (mtime, size): the store is append-only, so a
-   newly persisted message changes the key and is served fresh on the
-   next request without an invalidation hook. Enrichment-only drift
-   (trajectory/meta appends with no chat append) is bounded by the TTL,
-   the same staleness contract as the cached trajectory handler above. *)
-let keeper_chat_history_cache_key config name =
+   responses past the dashboard's 35 s client timeout.
+
+   Freshness lives in the cached VALUE, not the key: the key space is
+   exactly one entry per (validated) keeper name, so append bursts can
+   never grow cache cardinality. Each entry stamps the chat file's
+   (mtime, size) observed by its compute; a request whose current stat
+   differs invalidates the entry and recomputes, so a newly persisted
+   message is served fresh on the next request without an invalidation
+   hook at every append site. Enrichment-only drift (trajectory/meta
+   appends with no chat append) is bounded by the TTL, the same
+   staleness contract as the cached trajectory handler above. *)
+let keeper_chat_history_freshness config name =
   let base_dir = (config : Workspace.config).base_path in
   let path = Keeper_chat_store.chat_path ~base_dir ~keeper_name:name in
-  (* Sound-partial freshness component: a missing chat file is its own
-     cache state ("absent"), never conflated with a real (mtime, size)
-     pair. A half-readable stat (racing writer) also maps to "absent",
-     which only costs a recompute on the next request. *)
-  let freshness =
-    match Fs_compat.file_mtime path, Fs_compat.file_size path with
-    | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
-    | Some _, None | None, Some _ | None, None -> "absent"
-  in
-  Printf.sprintf "keeper:chat-history:%s:%s:%s"
-    (Workspace.masc_root_dir config) name freshness
+  (* Sound-partial: a missing chat file is its own state ("absent"),
+     never conflated with a real (mtime, size) pair. A half-readable
+     stat (racing writer) also maps to "absent", which only costs a
+     recompute on the next request. *)
+  match Fs_compat.file_mtime path, Fs_compat.file_size path with
+  | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
+  | Some _, None | None, Some _ | None, None -> "absent"
 ;;
 
 let keeper_chat_history_json config name =
@@ -1088,12 +1089,38 @@ let keeper_chat_history_json config name =
 ;;
 
 let cached_keeper_chat_history_json config name =
-  Dashboard_cache.get_or_compute
-    (keeper_chat_history_cache_key config name)
-    ~ttl:keeper_hot_path_cache_ttl_s
-    (fun () ->
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        keeper_chat_history_json config name))
+  let cache_key =
+    Printf.sprintf "keeper:chat-history:%s:%s"
+      (Workspace.masc_root_dir config) name
+  in
+  let current = keeper_chat_history_freshness config name in
+  (match Dashboard_cache.peek cache_key with
+   | Some (`Assoc fields) ->
+     (match List.assoc_opt "freshness" fields with
+      | Some (`String stamped) when String.equal stamped current -> ()
+      | Some _ | None -> Dashboard_cache.invalidate cache_key)
+   | Some _ -> Dashboard_cache.invalidate cache_key
+   | None -> ());
+  let cached =
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s
+      (fun () ->
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          (* Stamp the stat observed by THIS compute (stat before load):
+             an append racing the load makes the data newer than the
+             stamp, which the next request's stat comparison detects and
+             recomputes — never silently stale. *)
+          let stamped = keeper_chat_history_freshness config name in
+          `Assoc
+            [ ("freshness", `String stamped)
+            ; ("body", keeper_chat_history_json config name)
+            ]))
+  in
+  match cached with
+  | `Assoc fields ->
+    (match List.assoc_opt "body" fields with
+     | Some body -> body
+     | None -> cached)
+  | other -> other
 ;;
 
 let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
@@ -1527,13 +1554,15 @@ let handle_keeper_get_subroutes state req request reqd =
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
         | `Assoc _ -> []
       in
-      let cache_key =
-        Printf.sprintf "keeper:tool-calls:%s:%s:%d" masc_root name limit
-      in
+      (* No per-keeper cache entry: the expensive part (the fleet parse)
+         is behind the single fleet-rows key above, and the per-request
+         remainder — filtering an in-memory window plus a bounded
+         coverage-gap tail read — is milliseconds off the main domain.
+         Skipping the per-(name, limit) entry keeps this route's cache
+         cardinality at exactly one key and never pins a per-keeper
+         response shape. *)
       let json =
-        Dashboard_cache.get_or_compute cache_key
-          ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
-            Domain_pool_ref.submit_io_or_inline (fun () ->
+        Domain_pool_ref.submit_io_or_inline (fun () ->
               let entries =
                 Keeper_tool_call_log.filter_rows_for_keeper
                   ~keeper_name:name ~n:limit fleet_rows
@@ -1602,7 +1631,7 @@ let handle_keeper_get_subroutes state req request reqd =
                   if stale_reason = "" then `Null else `String stale_reason );
                 ("coverage_gaps", `List coverage_gaps);
                 ("entries", `List entries);
-              ]))
+              ])
       in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/feedback" then

@@ -61,9 +61,10 @@
       <tr><td>빌드 실패</td><td><code>build_dune_target_with_lock</code>가 typed 75를 1로 소실</td><td>원래 status를 보존</td><td><code>dune-local.sh</code> exit taxonomy</td></tr>
       <tr><td>실행 후보</td><td>선택된 path만 stderr에 출력</td><td>exec 직전 schema v1 descriptor를 atomic publish</td><td><code>start-masc.sh</code></td></tr>
       <tr><td>정상성</td><td>child가 떠 있거나 포트가 열리면 암묵적 성공</td><td>listener PID = supervised child PID AND <code>/health</code> success</td><td>process supervisor</td></tr>
+      <tr><td>proof 권한</td><td>명시 계약 없음</td><td>proof path는 child 환경에 전달하지 않고 supervisor만 atomic write</td><td>process supervisor</td></tr>
       <tr><td>LKG 승격</td><td>없음</td><td>candidate bytes를 다시 hash하고 descriptor를 atomic promote</td><td>process supervisor</td></tr>
       <tr><td>fallback</td><td>환경변수로 알려지지 않은 stale executable 허용 가능</td><td>schema와 SHA가 일치하는 health-promoted artifact만 선택</td><td>artifact contract SSOT</td></tr>
-      <tr><td>retry</td><td>모든 child exit를 동일하게 무한 반복</td><td>PID-bound health proof 없는 exit는 terminal; proof가 있는 runtime exit만 restart 대상</td><td>process supervisor FSM</td></tr>
+      <tr><td>retry</td><td>모든 child exit를 동일하게 무한 반복</td><td>exact <code>masc.runtime_health_proof.v1</code>의 PID/hash가 candidate와 일치하지 않으면 terminal; 검증된 runtime exit만 restart 대상</td><td>process supervisor FSM</td></tr>
     </tbody>
   </table>
 
@@ -101,6 +102,7 @@
       <tr><td>다른 프로세스가 같은 포트 health 응답</td><td>listener PID ≠ child PID</td><td>승격하지 않음</td><td>HTTP 200만으로 LKG 인정</td></tr>
       <tr><td>health 직전 executable 교체</td><td>candidate hash ≠ 현재 bytes</td><td>승격 거부 및 ERROR</td><td>path identity를 byte identity로 간주</td></tr>
       <tr><td>candidate가 exec 전에 실패</td><td>descriptor 있음, health proof 없음</td><td>terminal state</td><td>candidate 존재만으로 무한 restart</td></tr>
+      <tr><td>health proof write 중 monitor 종료/파일 위조</td><td>proof schema/PID/hash/EOF 중 하나라도 불일치</td><td>atomic proof가 아니면 terminal state</td><td>파일 존재만으로 restart 권한 부여</td></tr>
       <tr><td>health-promoted runtime이 이후 crash</td><td>candidate 발행됨</td><td>기존 continuous restart 책임 유지</td><td>startup failure로 오분류</td></tr>
     </tbody>
   </table>

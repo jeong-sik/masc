@@ -1398,11 +1398,14 @@ fi
                {|
 #!/bin/bash
 set -eu
+if [ "${MASC_RUNTIME_HEALTH_PROOF_FILE+x}" = x ]; then
+  exit 70
+fi
 printf '%%s\n' "$$" > %s
 hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
 "$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
   "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
-while [ ! -f "${MASC_RUNTIME_HEALTH_PROOF_FILE:?}" ]; do
+while ! grep -q "pid=$$" "${MASC_SUPERVISOR_LOG:?}" 2>/dev/null; do
   sleep 0.02
 done
 kill -TERM "$PPID"
@@ -1431,6 +1434,59 @@ while true; do sleep 1; done
           check bool "promotion is operator-visible" true
             (contains_substring stderr
                "health-verified runtime artifact promoted")))
+
+let test_supervisor_rejects_malformed_health_proof () =
+  with_temp_dir "start-masc-supervisor-malformed-proof" (fun repo_root ->
+      with_temp_dir "start-masc-supervisor-malformed-proof-bin" (fun fake_bin ->
+          let scripts_dir = Filename.concat repo_root "scripts" in
+          let lib_dir = Filename.concat scripts_dir "lib" in
+          let supervisor_script =
+            Filename.concat scripts_dir "start-masc-supervised.sh"
+          in
+          let child_script = Filename.concat repo_root "start-masc.sh" in
+          let invocation_count = Filename.concat repo_root "invocation-count" in
+          let lkg_file = Filename.concat repo_root "last-known-good.v1" in
+          let log_file = Filename.concat repo_root "supervisor.log" in
+          mkdir_p lib_dir;
+          mkdir_p fake_bin;
+          copy_script (supervised_script_path ()) supervisor_script;
+          copy_script (runtime_artifact_contract_path ())
+            (Filename.concat lib_dir "runtime-artifact-contract.sh");
+          write_executable (Filename.concat fake_bin "lsof")
+            "#!/bin/sh\nexit 0\n";
+          write_executable (Filename.concat fake_bin "curl")
+            "#!/bin/sh\nexit 1\n";
+          write_executable child_script
+            (Printf.sprintf
+               {|
+#!/bin/bash
+set -eu
+printf '1\n' > %s
+hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
+"$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
+: > "$(dirname "${MASC_RUNTIME_LKG_FILE:?}")/masc-runtime-health-proof.${PPID}.v1"
+exit 23
+|}
+               (quote invocation_count));
+          let code, stdout, stderr =
+            run_script ~cwd:repo_root supervisor_script
+              ~env:
+                [
+                  ("MASC_RUNTIME_LKG_FILE", lkg_file);
+                  ("MASC_SUPERVISOR_LOG", log_file);
+                  ("MASC_RESTART_COOLDOWN_SEC", "0");
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              []
+          in
+          check int "malformed proof preserves child failure" 23 code;
+          check string "malformed proof cannot authorize a restart" "1\n"
+            (read_file invocation_count);
+          check string "supervisor writes no stdout" "" stdout;
+          check bool "invalid proof is operator-visible" true
+            (contains_substring stderr
+               "lacks an exact PID-bound health proof")))
 
 let test_supervisor_restarts_without_exit_limit_and_preserves_status () =
   with_temp_dir "start-masc-supervised-script" (fun repo_root ->
@@ -1474,7 +1530,7 @@ printf '%%s\n' "$$" > %s
 hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
 "$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
   "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
-while [ ! -f "${MASC_RUNTIME_HEALTH_PROOF_FILE:?}" ]; do
+while ! grep -q "pid=$$" "${MASC_SUPERVISOR_LOG:?}" 2>/dev/null; do
   sleep 0.02
 done
 if [ "$count" -ge 6 ]; then
@@ -1594,6 +1650,8 @@ let () =
             test_supervisor_stops_on_startup_without_candidate;
           test_case "supervisor promotes PID-bound healthy candidate" `Quick
             test_supervisor_promotes_pid_bound_healthy_candidate;
+          test_case "supervisor rejects malformed health proof" `Quick
+            test_supervisor_rejects_malformed_health_proof;
           test_case
             "supervisor restarts without exit limit and preserves status"
             `Quick

@@ -48,10 +48,12 @@ ARTIFACT_CONTRACT="${MASC_RUNTIME_ARTIFACT_CONTRACT:-$REPO_ROOT/scripts/lib/runt
 LKG_FILE="${MASC_RUNTIME_LKG_FILE:-$REPO_ROOT/logs/masc-runtime-lkg.v1}"
 ATTEMPT_DIR="$(dirname "$LKG_FILE")"
 CANDIDATE_FILE="$ATTEMPT_DIR/masc-runtime-candidate.$$.v1"
-PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.sha256"
+PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.v1"
+HEALTH_PROOF_SCHEMA="masc.runtime_health_proof.v1"
 active_pid=""
 active_kind=""
 monitor_pid=""
+completed_pid=""
 stop_signal=""
 stop_exit_code=0
 stop_forwarded_pid=""
@@ -85,6 +87,51 @@ done
 source "$ARTIFACT_CONTRACT"
 mkdir -p "$ATTEMPT_DIR"
 
+write_health_proof() {
+  local child_pid="$1"
+  local artifact_hash="$2"
+  local temp="$PROOF_FILE.tmp.$$"
+
+  case "$child_pid" in
+    ''|*[!0-9]*) return 2 ;;
+  esac
+  masc_runtime_artifact_valid_hash "$artifact_hash" || return 2
+
+  umask 077
+  if ! printf '%s\n%s\n%s\n' \
+      "$HEALTH_PROOF_SCHEMA" "$child_pid" "$artifact_hash" >"$temp"
+  then
+    rm -f "$temp"
+    return 1
+  fi
+  chmod 600 "$temp" || {
+    rm -f "$temp"
+    return 1
+  }
+  mv -f "$temp" "$PROOF_FILE"
+}
+
+verify_health_proof() {
+  local expected_pid="$1"
+  local schema proof_pid proof_hash
+
+  [ -f "$PROOF_FILE" ] || return 1
+  {
+    IFS= read -r schema || return 1
+    IFS= read -r proof_pid || return 1
+    IFS= read -r proof_hash || return 1
+    if IFS= read -r _; then
+      return 1
+    fi
+  } <"$PROOF_FILE"
+
+  [ "$schema" = "$HEALTH_PROOF_SCHEMA" ] || return 1
+  [ "$proof_pid" = "$expected_pid" ] || return 1
+  masc_runtime_artifact_valid_hash "$proof_hash" || return 1
+  masc_runtime_artifact_descriptor_read "$CANDIDATE_FILE" || return 1
+  [ "$proof_hash" = "$MASC_ARTIFACT_SHA256" ]
+}
+
 monitor_runtime_candidate() {
   local child_pid="$1"
   local listener_pid=""
@@ -103,8 +150,11 @@ monitor_runtime_candidate() {
           return
         fi
         if masc_runtime_artifact_promote "$CANDIDATE_FILE" "$LKG_FILE" "$REPO_ROOT"; then
-          printf '%s\n' "$actual_hash" >"$PROOF_FILE"
-          log "health-verified runtime artifact promoted sha256=$actual_hash pid=$child_pid"
+          if write_health_proof "$child_pid" "$actual_hash"; then
+            log "health-verified runtime artifact promoted sha256=$actual_hash pid=$child_pid"
+          else
+            log "ERROR: healthy runtime artifact promotion lacked an exact health proof"
+          fi
         else
           log "ERROR: healthy runtime artifact failed exact LKG promotion"
         fi
@@ -176,6 +226,7 @@ run_active() {
     fi
   fi
 
+  completed_pid="$active_pid"
   active_pid=""
   active_kind=""
   stop_forwarded_pid=""
@@ -214,7 +265,6 @@ while true; do
     MASC_RUNTIME_ARTIFACT_CONTRACT="$ARTIFACT_CONTRACT" \
     MASC_RUNTIME_LKG_FILE="$LKG_FILE" \
     MASC_RUNTIME_CANDIDATE_FILE="$CANDIDATE_FILE" \
-    MASC_RUNTIME_HEALTH_PROOF_FILE="$PROOF_FILE" \
     MASC_ENABLE_VERIFIED_LKG_FALLBACK=1 \
     "$REPO_ROOT/start-masc.sh" "$@"
   exit_code=$?
@@ -236,8 +286,8 @@ while true; do
     log "terminal startup state: no runtime candidate was published; refusing restart amplification"
     exit "$exit_code"
   fi
-  if [ ! -f "$PROOF_FILE" ]; then
-    log "terminal startup state: runtime candidate never reached PID-bound health; refusing restart amplification"
+  if ! verify_health_proof "$completed_pid"; then
+    log "terminal startup state: runtime candidate lacks an exact PID-bound health proof; refusing restart amplification"
     exit "$exit_code"
   fi
 

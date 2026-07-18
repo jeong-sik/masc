@@ -123,7 +123,9 @@ let build_turn_context
      merely looks like a world-state block is untouched (as are legacy
      pre-tag copies, which compaction owns). *)
   let is_world_state_prompt_turn =
-    Keeper_types_support.is_prompt_history_source history_user_source
+    String.equal
+      history_user_source
+      Keeper_types_support.world_state_prompt_history_source
   in
   let user_msg =
     let plain = Agent_sdk.Types.user_msg user_message in

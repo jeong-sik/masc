@@ -260,7 +260,8 @@ let message_is_world_state_prompt (message : Agent_sdk.Types.message) : bool =
        List.assoc_opt history_source_metadata_key
          message.Agent_sdk.Types.metadata
      with
-     | Some (`String source) -> is_prompt_history_source source
+     | Some (`String source) ->
+       String.equal source world_state_prompt_history_source
      | Some
          (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _
          | `Assoc _ | `Tuple _ | `Variant _)

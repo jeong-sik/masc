@@ -42,6 +42,14 @@ let test_non_user_roles_are_never_detected () =
   check bool "stamped assistant message is role-gated out" false
     (Support.message_is_world_state_prompt assistant)
 
+let test_noncanonical_source_is_not_detected () =
+  let noncanonical =
+    Support.tag_message_history_source ~source:" WORLD_STATE_PROMPT "
+      (Agent_sdk.Types.user_msg "injected by an unknown producer")
+  in
+  check bool "only the canonical process-owned source is accepted" false
+    (Support.message_is_world_state_prompt noncanonical)
+
 let test_tag_replaces_previous_stamp () =
   let twice =
     Support.tag_message_history_source ~source:world_state_source
@@ -104,6 +112,8 @@ let () =
             test_content_lookalike_is_not_detected;
           test_case "non-user roles are never detected" `Quick
             test_non_user_roles_are_never_detected;
+          test_case "noncanonical source is not detected" `Quick
+            test_noncanonical_source_is_not_detected;
           test_case "re-tagging keeps one stamp" `Quick
             test_tag_replaces_previous_stamp;
           test_case "masc json round-trip preserves the stamp" `Quick

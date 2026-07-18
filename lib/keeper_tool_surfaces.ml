@@ -39,9 +39,6 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
-let prefixed_tool_names names =
-  names |> List.map (fun name -> "mcp__masc__" ^ name)
-
 (* Hashtbl materialisation helper for membership-only checks.  Used
    below where we'd otherwise scan a name list per element of a
    filter loop — replaces O(N x M) with O(N + M). *)
@@ -76,9 +73,6 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
 
 let spawned_agent_public_tool_names : string list =
   Tool_catalog_surfaces.spawned_agent_surface_tools
-
-let spawned_agent_prefixed_tools : string list =
-  prefixed_tool_names spawned_agent_public_tool_names
 
 let local_worker_public_tool_names : string list =
   Tool_catalog_surfaces.local_worker_surface_tools
@@ -157,58 +151,3 @@ let local_worker_tool_schemas ?names () :
   match names with
   | None -> Ok all_schemas
   | Some values -> resolve_named_schemas all_schemas values
-
-(** Role-catalog candidates for workspace leads and fleet leaders.
-    SSOT: Tool_catalog_surfaces.workspace_role_tools.
-    [build_tool_catalog] filters against resolvable surfaced tool names so
-    stale entries cannot escape into prompts. *)
-let workspace_tool_names : string list =
-  Tool_catalog_surfaces.workspace_role_tools
-
-(** Role-catalog candidates for worker agents.
-    SSOT: Tool_catalog_surfaces.execution_role_tools. *)
-let execution_tool_names : string list =
-  Tool_catalog_surfaces.execution_role_tools
-
-let filter_catalog_to_available ~available names =
-  let available = SS.of_list available in
-  names
-  |> List.filter (fun name -> SS.mem name available)
-  |> Json_util.dedupe_keep_order
-
-(** [local_worker_resolvable_tool_names ()] returns only the tool names
-    that [local_worker_tool_schemas] can actually resolve. *)
-let local_worker_resolvable_tool_names () : string list =
-  match local_worker_tool_schemas () with
-  | Ok schemas ->
-      List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas
-  | Error msg ->
-      Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
-      []
-
-let role_catalog_available_tool_names () =
-  let surfaced =
-    spawned_agent_public_tool_names @ local_worker_public_tool_names
-    |> Json_util.dedupe_keep_order
-  in
-  filter_catalog_to_available
-    ~available:(local_worker_resolvable_tool_names ())
-    surfaced
-
-(** Build a role-based tool catalog from the full registered tool set.
-    [role] determines which subset of tools the agent sees:
-    - ["worker"]: execution-focused tools
-    - ["workspace_lead"]: workspace and orchestration tools
-    - [_]: all available spawned/local worker tools
-    Returns tool names (unprefixed). *)
-let build_tool_catalog ~(role : string) () : string list =
-  let available_names = role_catalog_available_tool_names () in
-  let filtered =
-    match role with
-    | "worker" ->
-        filter_catalog_to_available ~available:available_names execution_tool_names
-    | "workspace_lead" | "fleet_leader" ->
-        filter_catalog_to_available ~available:available_names workspace_tool_names
-    | _ -> available_names
-  in
-  Json_util.dedupe_keep_order filtered

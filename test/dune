@@ -60,7 +60,6 @@
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution
-  test_attribution_tagged
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -227,7 +226,6 @@
   test_metrics_rotation
   test_tool_error
   test_tool_token
-  test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_surface_post
@@ -375,7 +373,6 @@
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution
-  test_attribution_tagged
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
@@ -544,7 +541,6 @@
   test_metrics_rotation
   test_tool_error
   test_tool_token
-  test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
   test_keeper_surface_post
@@ -1014,7 +1010,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_state_product
   test_tool_result
   test_tool_hooks
   test_sse_external_sub
@@ -1182,7 +1177,6 @@
   test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
-  test_state_product
   test_tool_result
   test_tool_hooks
   test_sse_external_sub
@@ -2023,10 +2017,6 @@
 (include stanzas/test_system_log_atomicity.inc)
 
 (include stanzas/test_telemetry_task_transition_10358.inc)
-
-(include stanzas/test_timeout_policy.inc)
-
-(include stanzas/test_timeout_policy_overshoot_counter.inc)
 
 (include stanzas/test_event_bus_subscription_contract.inc)
 

@@ -190,8 +190,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "masc_timeout_policy_overshoot_total"
-
 (* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
 
 (* #9943: per-keeper counter of "compaction triggered but

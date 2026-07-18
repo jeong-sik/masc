@@ -39,6 +39,24 @@ let max_oas_history_retained = 12
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
 
+(* Checkpoint payloads serialize to 0.7-1.4MB (see the [~pretty:false] note on
+   [Keeper_fs.save_json_durable_atomic]). Encoding or decoding one on the
+   calling fiber stalls every other fiber on the single-domain scheduler for
+   the whole conversion (issue #25077; same class as the board_attention
+   ledger re-parse hangs). Route the pure conversions through the executor
+   pool: [submit_or_inline] runs them on a worker domain when the pool is
+   installed and inline otherwise (tests, pre-init), and re-raises
+   [Eio.Cancel.Cancelled]. *)
+let decode_checkpoint_off_scheduler (content : string) :
+    (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    Agent_sdk.Checkpoint.of_string content)
+
+let encode_checkpoint_string_off_scheduler (ckpt : Agent_sdk.Checkpoint.t) :
+    string =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    Agent_sdk.Checkpoint.to_string ckpt)
+
 let keeper_generation_context_key = "keeper_generation"
 
 let keeper_generation_of_context (context : Agent_sdk.Context.t) : int =
@@ -95,7 +113,7 @@ let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : u
   let save_snapshot_file () =
     Keeper_fs.save_atomic
       (oas_history_path ~session_dir ~snapshot_id)
-      (Agent_sdk.Checkpoint.to_string ckpt)
+      (encode_checkpoint_string_off_scheduler ckpt)
   in
   let save_result =
     match
@@ -196,7 +214,7 @@ let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
   let path = oas_history_path ~session_dir ~snapshot_id in
   if Fs_compat.file_exists path then
     try
-      match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+      match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
       | Ok ckpt -> Ok ckpt
       | Error e -> Error (classify_sdk_error e)
     with
@@ -210,7 +228,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
     let path = oas_checkpoint_path ~session_dir ~session_id in
     if Fs_compat.file_exists path then
       try
-        match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+        match decode_checkpoint_off_scheduler (Fs_compat.load_file path) with
         | Ok ckpt -> Ok ckpt
         | Error e -> Error (classify_sdk_error e)
       with
@@ -265,6 +283,10 @@ type unix_failure =
 type directory_failure =
   | Directory_unix_failure of unix_failure
   | Directory_other_failure of string
+  | Directory_leaf_invalid of
+      { session_dir : string
+      ; leaf : string
+      }
 
 type save_oas_error =
   | Invalid_session_id of string
@@ -287,6 +309,11 @@ let save_oas_error_to_string = function
       failure.operation failure.argument (Unix.error_message failure.error)
   | Session_directory_unavailable (Directory_other_failure detail) ->
     "checkpoint session directory unavailable: " ^ detail
+  | Session_directory_unavailable (Directory_leaf_invalid { session_dir; leaf }) ->
+    Printf.sprintf
+      "checkpoint session directory rejected: leaf %S of %S is not a real \
+       path segment"
+      leaf session_dir
   | Existing_checkpoint_unreadable error ->
     "existing checkpoint unreadable: " ^ checkpoint_load_error_to_string error
   | Canonical_write_failed error ->
@@ -296,31 +323,71 @@ let save_oas_error_to_string = function
     "checkpoint transaction lock failed: "
     ^ File_lock_eio.durable_lock_error_to_string error
 
+(* [leaf] must denote exactly one directory entry under the canonical parent.
+   An empty, ".", ".." or root leaf makes [Filename.concat parent leaf] (and
+   the [^ ".checkpoint.lock"] sibling derived from it) resolve outside the
+   session root, so every downstream consumer of the canonical location would
+   inherit the escape. *)
+let leaf_is_real_segment leaf =
+  not (String.equal leaf "")
+  && not (String.equal leaf Filename.current_dir_name)
+  && not (String.equal leaf Filename.parent_dir_name)
+  && not (String.exists (fun c -> Char.equal c '/') leaf)
+
 let canonical_session_location session_dir =
-  let parent = Filename.dirname session_dir in
-  try
-    Fs_compat.mkdir_p parent;
-    let parent =
-      Eio_guard.run_in_systhread (fun () ->
-        let parent = Unix.realpath parent in
-        if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
-        then
-          raise
-            (Unix.Unix_error
-               (Unix.ENOTDIR, "checkpoint_session_parent", parent));
-        parent)
-    in
-    Ok (Filename.concat parent (Filename.basename session_dir))
-  with
-  | Unix.Unix_error (error, operation, argument) ->
+  (* Containment boundary for every checkpoint path (issue #25077).
+     [Keeper_fs.save_json_durable_atomic ~ownership_root] already rejects
+     escapes on the durable-write directory chain, but the lock file, history
+     archive, and read paths consume this location without that guard, so the
+     leaf is validated here once, before any filesystem side effect. The
+     canonical parent is [Unix.realpath] of the *configured* session root:
+     resolving a symlinked deployment root to its physical location is the
+     purpose of this function, so the parent resolution itself is trusted.
+     The leaf, however, must not be a symlink: a link there would redirect
+     every checkpoint and lock write through whatever target it names
+     ([Keeper_fs] applies the same symlink rejection to its own write
+     chains). The lstat check shares the TOCTOU
+     caveat documented on [Keeper_fs]: OCaml 5.4 has no portable
+     dirfd-relative API, so the caller keeps the subtree process-owned. *)
+  let leaf = Filename.basename session_dir in
+  if not (leaf_is_real_segment leaf)
+  then
     Error
       (Session_directory_unavailable
-         (Directory_unix_failure { error; operation; argument }))
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Error
-      (Session_directory_unavailable
-         (Directory_other_failure (Printexc.to_string exn)))
+         (Directory_leaf_invalid { session_dir; leaf }))
+  else (
+    let parent = Filename.dirname session_dir in
+    try
+      Fs_compat.mkdir_p parent;
+      let location =
+        Eio_guard.run_in_systhread (fun () ->
+          let parent = Unix.realpath parent in
+          if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR
+          then
+            raise
+              (Unix.Unix_error
+                 (Unix.ENOTDIR, "checkpoint_session_parent", parent));
+          let location = Filename.concat parent leaf in
+          (match Unix.lstat location with
+           | { Unix.st_kind = Unix.S_LNK; _ } ->
+             raise
+               (Unix.Unix_error
+                  (Unix.ELOOP, "checkpoint_session_leaf", location))
+           | _ -> ()
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+          location)
+      in
+      Ok location
+    with
+    | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Session_directory_unavailable
+           (Directory_unix_failure { error; operation; argument }))
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Session_directory_unavailable
+           (Directory_other_failure (Printexc.to_string exn))))
 
 let with_session_lock_typed ~session_dir f =
   match canonical_session_location session_dir with
@@ -394,7 +461,7 @@ let load_canonical_bytes_and_checkpoint_strict path =
   | Error _ as error -> error
   | Ok None -> Ok None
   | Ok (Some content) ->
-    (match Agent_sdk.Checkpoint.of_string content with
+    (match decode_checkpoint_off_scheduler content with
      | Ok checkpoint -> Ok (Some (content, checkpoint))
      | Error error -> Error (classify_sdk_error error))
 
@@ -505,7 +572,7 @@ let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoin
 ;;
 
 let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
-  match Agent_sdk.Checkpoint.of_string canonical_bytes with
+  match decode_checkpoint_off_scheduler canonical_bytes with
   | Error error -> Error (Ref_read_failed (classify_sdk_error error))
   | Ok checkpoint ->
     exact_snapshot_of_checkpoint
@@ -573,8 +640,10 @@ let save_oas_if_source
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_sdk.Checkpoint.t) =
-  let candidate_json = Agent_sdk.Checkpoint.to_json candidate in
-  let candidate_bytes = Yojson.Safe.to_string candidate_json in
+  let candidate_bytes =
+    Executor_pool_ref.submit_or_inline (fun () ->
+      Yojson.Safe.to_string (Agent_sdk.Checkpoint.to_json candidate))
+  in
   match checkpoint_ref_of_canonical_bytes candidate_bytes candidate with
   | Error error -> Error (Candidate_identity_invalid error)
   | Ok candidate_ref
@@ -619,11 +688,10 @@ let save_oas_if_source
            in
            let ownership_root = Filename.dirname session_dir in
            (match
-              Keeper_fs.save_json_durable_atomic
+              Keeper_fs.save_bytes_durable_atomic
                 ~ownership_root
-                ~pretty:false
                 canonical_path
-                candidate_json
+                candidate_bytes
             with
             | Error error when error.Keeper_fs.renamed ->
               Error
@@ -631,12 +699,13 @@ let save_oas_if_source
                    { installed_ref = candidate_ref; error })
             | Error error -> Error (Commit_not_installed error)
             | Ok () ->
-              (* [candidate_bytes] and
-                 [save_json_durable_atomic ~pretty:false] use the same
-                 [Yojson.Safe.to_string candidate_json] contract. Once the
-                 writer returns [Ok], rename and both durability fsyncs have
-                 completed; a post-commit read cannot downgrade that committed
-                 outcome to a retryable failure. *)
+              (* The durable writer installs [candidate_bytes] verbatim — the
+                 exact bytes [candidate_ref] was derived from — so the
+                 published file and the returned ref agree by construction,
+                 not by an encoding contract. Once the writer returns [Ok],
+                 rename and both durability fsyncs have completed; a
+                 post-commit read cannot downgrade that committed outcome to
+                 a retryable failure. *)
               Ok candidate_ref))
 
 let save_oas_classified_typed
@@ -675,11 +744,11 @@ let save_oas_classified_typed
         let known = Option.map (fun (w : watermark) -> w.turn_count) existing in
         let ownership_root = Filename.dirname session_dir in
         (match
-           Keeper_fs.save_json_durable_atomic
+           Keeper_fs.save_json_durable_atomic_from
              ~ownership_root
              ~pretty:false
              canonical_path
-             (Agent_sdk.Checkpoint.to_json ckpt)
+             (fun () -> Agent_sdk.Checkpoint.to_json ckpt)
          with
          | Error error -> Error (Canonical_write_failed error)
          | Ok () ->

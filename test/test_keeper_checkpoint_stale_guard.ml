@@ -80,7 +80,7 @@ let make_checkpoint ~session_id ~turn_count ~marker =
 let with_generation generation (checkpoint : Agent_sdk.Checkpoint.t) =
   let context = Agent_sdk.Context.copy ~eio:false checkpoint.context in
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "keeper_generation" (`Int generation);
+    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   { checkpoint with context }
 
 let save_ok ~session_dir ckpt label =
@@ -202,6 +202,63 @@ let test_empty_session_id_rejected () =
       check string "round-trips the stamped session_id" "trace-1-0000a"
         on_disk.Agent_sdk.Checkpoint.session_id
     | Error _ -> fail "load after stamped save failed")
+
+(* Issue #25077 item 1: [canonical_session_location] is the containment
+   boundary shared by the lock file, the history archive, and every
+   checkpoint path. A leaf that is not one real path segment (".." / ".")
+   must be refused before any filesystem side effect, and a symlink leaf
+   must be refused before the lock is derived: either would relocate
+   lock/checkpoint writes outside the session root that the
+   [Keeper_fs] ownership containment protects on the write chain. *)
+let test_session_leaf_containment () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  let base = Filename.dirname session_dir in
+  let target = Filename.concat base "elsewhere" in
+  let link = Filename.concat base "session-link" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link with Unix.Unix_error _ -> ());
+      cleanup_dir target;
+      cleanup_dir session_dir)
+    (fun () ->
+      let reject label dir =
+        match
+          Keeper_checkpoint_store.with_session_lock ~session_dir:dir
+            (fun _ -> ())
+        with
+        | Ok () -> fail (label ^ ": escaping session_dir was accepted")
+        | Error _ -> ()
+      in
+      (* Exact typed rejection for the ".." leaf pins the boundary error. *)
+      (match
+         Keeper_checkpoint_store.with_session_lock
+           ~session_dir:(Filename.concat base Filename.parent_dir_name)
+           (fun _ -> ())
+       with
+       | Ok () -> fail "'..' leaf: escaping session_dir was accepted"
+       | Error msg ->
+         check string "'..' leaf is the typed leaf rejection"
+           (Printf.sprintf
+              "checkpoint session directory rejected: leaf %S of %S is not \
+               a real path segment"
+              Filename.parent_dir_name
+              (Filename.concat base Filename.parent_dir_name))
+           msg);
+      reject "'.' leaf" (Filename.concat base Filename.current_dir_name);
+      (* A symlink leaf would redirect every checkpoint and lock write
+         through its target. *)
+      Unix.mkdir target 0o755;
+      Unix.symlink target link;
+      reject "symlink leaf" link;
+      (* The genuine session directory still passes the same boundary. *)
+      match
+        Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ -> ())
+      with
+      | Ok () -> ()
+      | Error e -> fail ("real session leaf rejected: " ^ e))
 
 let test_invalid_existing_checkpoint_fails_closed () =
   let session_dir = temp_dir () in
@@ -496,6 +553,8 @@ let () =
             test_externally_replaced_canonical_is_the_watermark;
           test_case "empty session_id is refused, not silently dropped" `Quick
             test_empty_session_id_rejected;
+          test_case "session leaf escapes and symlink leaves are refused" `Quick
+            test_session_leaf_containment;
           test_case "invalid canonical checkpoint fails closed" `Quick
             test_invalid_existing_checkpoint_fails_closed;
           test_case "multi-domain writers leave max turn on disk" `Quick

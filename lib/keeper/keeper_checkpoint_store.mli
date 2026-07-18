@@ -26,6 +26,12 @@ val max_oas_history_retained : int
 val oas_history_path :
   session_dir:string -> snapshot_id:string -> string
 
+(** Session-scoped context key carrying the keeper generation on a
+    checkpoint. Single definition of the wire literal; every writer and
+    reader (context core, tests) must reference this value so the key
+    cannot drift between sites. *)
+val keeper_generation_context_key : string
+
 (** Compose an OAS history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)
 val oas_history_snapshot_id_of_checkpoint :

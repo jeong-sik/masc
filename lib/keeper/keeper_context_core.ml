@@ -54,7 +54,7 @@ let save_oas_checkpoint_classified
   =
   let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
-    checkpoint_generation_key (`Int generation);
+    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
      Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
@@ -118,7 +118,7 @@ let save_oas_checkpoint
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   match
     Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
-      checkpoint_generation_key
+      Keeper_checkpoint_store.keeper_generation_context_key
   with
   | Some (`Int value) -> value
   | Some (`Intlit raw) -> Option.value ~default:fallback (int_of_string_opt raw)

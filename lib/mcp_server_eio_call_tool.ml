@@ -327,10 +327,9 @@ let record_runtime_mcp_keeper_trajectory
   let masc_root = runtime_mcp_masc_root ~base_path in
   let safe_input = Observability_redact.redact_json_value arguments in
   let safe_output =
-    Observability_redact.redact_preview ~max_len:4000 message
+    Observability_redact.redact_text message
   in
   let turn = Option.value ~default:0 ctx.turn in
-  let error = if success then None else Some safe_output in
   match safe_input with
   | `Assoc arguments ->
     let round =
@@ -341,35 +340,38 @@ let record_runtime_mcp_keeper_trajectory
         ~turn
     in
     let now = Time_compat.now () in
-    let entry : Trajectory.tool_call_entry =
-      {
-        ts = now;
-        ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-        turn;
-        round;
-        tool_name;
-        arguments;
-        result = Some safe_output;
-        duration_ms;
-        error;
-        execution_id = Some (Ids.Execution_id.to_string execution_id);
-      }
+    let outcome =
+      if success
+      then Trajectory.Tool_succeeded safe_output
+      else Trajectory.Tool_failed safe_output
     in
-    (try
-       Trajectory.append_entry
-         ~masc_root
-         ~keeper_name:ctx.keeper_name
-         ~trace_id
-         entry
+    (match
+       Trajectory.make_tool_call_entry ~ts:now
+         ~ts_iso:(Masc_domain.iso8601_of_unix_seconds now) ~turn ~round
+         ~tool_name ~arguments ~outcome ~duration_ms
+         ~execution_id:(Ids.Execution_id.to_string execution_id)
      with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
+     | Error error ->
        record_runtime_mcp_trajectory_coverage_gap
-         ~masc_root
-         ~keeper_name:ctx.keeper_name
-         ~trace_id
-         ~stale_reason:"runtime_mcp_trajectory_append_failed"
-         exn)
+         ~masc_root ~keeper_name:ctx.keeper_name ~trace_id
+         ~stale_reason:"runtime_mcp_trajectory_entry_invalid"
+         (Invalid_argument (Trajectory.entry_decode_error_to_string error))
+     | Ok entry ->
+       (try
+          Trajectory.record_tool_call
+            ~masc_root
+            ~keeper_name:ctx.keeper_name
+            ~trace_id
+            entry
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          record_runtime_mcp_trajectory_coverage_gap
+            ~masc_root
+            ~keeper_name:ctx.keeper_name
+            ~trace_id
+            ~stale_reason:"runtime_mcp_trajectory_append_failed"
+            exn))
   | _ ->
       let exn =
         Invalid_argument "trajectory Tool arguments must be a JSON object"

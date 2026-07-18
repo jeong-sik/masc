@@ -76,6 +76,43 @@ let dispatch_keeper_phase_event_checked
          (Keeper_state_machine.transition_error_to_string err))
 ;;
 
+let create_trajectory_accumulator
+      ~(config : Workspace.config)
+      ~(keeper_name : string)
+      ~(trace_id : string)
+      ~(generation : int)
+  : Trajectory.accumulator
+  =
+  let masc_root = Workspace.masc_root_dir config in
+  let observe_flush_failure exn =
+    try
+      Telemetry_coverage_gap.record
+        ~masc_root
+        ~source:"trajectory"
+        ~producer:"keeper_turn_helpers.accumulator"
+        ~durable_store:(Trajectory.trajectory_path masc_root keeper_name trace_id)
+        ~dashboard_surface:"/api/v1/keepers/:name/trajectory"
+        ~stale_reason:"trajectory_flush_failed"
+        ~keeper_name
+        ~trace_id
+        ~exn
+        ()
+    with
+    | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+    | gap_exn ->
+      Log.Keeper.error ~keeper_name
+        "trajectory coverage-gap write failed after flush error: %s"
+        (Printexc.to_string gap_exn)
+  in
+  Trajectory.create_accumulator
+    ~on_flush_error:observe_flush_failure
+    ~masc_root
+    ~keeper_name
+    ~trace_id
+    ~generation
+    ()
+;;
+
 let finalize_trajectory_acc
       ~(config : Workspace.config)
       ~(keeper_name : string)
@@ -212,9 +249,9 @@ let record_pre_dispatch_terminal_observation
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
-  let masc_root = Workspace.masc_root_dir config in
   let trajectory_acc =
-    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
+    create_trajectory_accumulator ~config ~keeper_name:meta.name ~trace_id
+      ~generation
   in
   finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in

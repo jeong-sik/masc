@@ -525,13 +525,12 @@ let run_keeper_invocation_turn_admitted
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Workspace.masc_root_dir ctx.config in
       let trajectory_acc =
-        Trajectory.create_accumulator
-          ~masc_root
+        Keeper_turn_helpers.create_trajectory_accumulator
+          ~config:ctx.config
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.generation ()
+          ~generation:meta.runtime.generation
       in
       let effective_models =
         if direct_reply then

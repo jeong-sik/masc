@@ -1852,27 +1852,13 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:trajectory_default_limit
            |> max 1 |> min trajectory_max_limit
          in
-         (* Zero requests the complete persisted result. Positive values are
-            display truncation only; they never change the stored trace. *)
-         let result_max_len =
-           Server_utils.int_query_param req "result_max_len"
-             ~default:2000
-           |> max 0
-         in
-         let content_max_len =
-           Server_utils.int_query_param req "content_max_len"
-             ~default:Trajectory.default_thinking_truncation
-           |> max 0 |> min 50000
-         in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d"
+             "keeper:trajectory:%s:%s:%s:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
-             result_max_len
-             content_max_len
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
@@ -1900,8 +1886,8 @@ let handle_keeper_get_subroutes state req request reqd =
                  ( "io_errors",
                    Trajectory.trajectory_read_errors_to_json
                      trajectory_read.Trajectory.io_errors );
-                 ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) lines));
+                 ( "entries"
+                 , `List (List.map Trajectory.trajectory_line_to_json lines) );
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

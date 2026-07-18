@@ -862,7 +862,14 @@ let oas_interleaving_event_label = function
   | _ -> None
 
 let trajectory_interleaving_label = function
-  | Trajectory.Thinking entry -> "thinking:" ^ entry.Trajectory.content
+  | Trajectory.Thinking entry ->
+      (match entry.Trajectory.block with
+       | Agent_sdk.Types.Thinking { content; _ } -> "thinking:" ^ content
+       | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+           "thinking:"
+           ^ Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+       | Agent_sdk.Types.RedactedThinking _ -> "thinking:[redacted]"
+       | _ -> Alcotest.fail "trajectory Thinking carried a non-reasoning block")
   | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
 
 let receipt_detail_of_provider_call
@@ -888,20 +895,22 @@ let receipt_detail_of_provider_call
 let trajectory_entry_of_provider_call ~ts ~turn ~round
     (call : Agent_sdk.Canonical_tool.provider_tool_call)
   : Trajectory.tool_call_entry =
-  { ts
-  ; ts_iso = Types_core.iso8601_of_unix_seconds ts
-  ; turn
-  ; round
-  ; tool_name = call.name
-  ; arguments =
-      (match call.input with
-       | `Assoc fields -> fields
-       | _ -> Alcotest.fail "canonical provider Tool input must be an object")
-  ; result = Some {|{"ok":true}|}
-  ; duration_ms = 1
-  ; error = None
-  ; execution_id = Some ("exec-" ^ call.call_id)
-  }
+  let arguments =
+    match call.input with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "canonical provider Tool input must be an object"
+  in
+  match
+    Trajectory.make_tool_call_entry ~ts
+      ~ts_iso:(Types_core.iso8601_of_unix_seconds ts) ~turn ~round
+      ~tool_name:call.name ~arguments
+      ~outcome:(Trajectory.Tool_succeeded {|{"ok":true}|}) ~duration_ms:1
+      ~execution_id:("exec-" ^ call.call_id)
+  with
+  | Ok entry -> entry
+  | Error error ->
+      Alcotest.failf "invalid trajectory fixture: %s"
+        (Trajectory.entry_decode_error_to_string error)
 
 let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
   let open Agent_sdk.Types in
@@ -1122,7 +1131,8 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
              (Trajectory.read_all_lines_result ~masc_root:base_dir ~keeper_name
                 ~trace_id
               |> fun read -> read.Trajectory.lines
-              |> List.map trajectory_interleaving_label))
+              |> List.map trajectory_interleaving_label);
+           Trajectory.finalize acc Trajectory.Completed |> ignore)
   | _ -> failf "expected two projected tool calls, got %d" (List.length calls)
 
 let test_keeper_stream_bridge_ignores_replayed_tool_start () =

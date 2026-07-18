@@ -2,28 +2,37 @@
 
 let trajectory_line_to_chat_trace_step = function
   | Trajectory.Thinking entry ->
+    let text =
+      match entry.block with
+      | Agent_sdk.Types.Thinking { content; _ } -> content
+      | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+          Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+      | Agent_sdk.Types.RedactedThinking _ -> "[redacted]"
+      | _ ->
+          invalid_arg
+            "Trajectory.Thinking contained a non-reasoning OAS content block"
+    in
     Some
       (Keeper_chat_blocks.Trace_think
-         { text = entry.content
+         { text
          ; ts = Some entry.ts_iso
-         ; oas_block_index = None
+         ; oas_block_index = Some entry.block_index
          })
   | Trajectory.Tool_call entry ->
-    let result =
-      Option.map
-        (fun text ->
-          try Yojson.Safe.from_string text with
-          | Yojson.Json_error _ -> `String text)
-        entry.result
+    let result, status =
+      match entry.outcome with
+      | Trajectory.Tool_succeeded text ->
+          ( Some
+              (try Yojson.Safe.from_string text with
+               | Yojson.Json_error _ -> `String text)
+          , Keeper_chat_blocks.Trace_tool_ok )
+      | Trajectory.Tool_failed _ -> None, Keeper_chat_blocks.Trace_tool_err
     in
     Some
       (Keeper_chat_blocks.Trace_tool
          { name = entry.tool_name
-         ; tool_call_id = entry.execution_id
-         ; status =
-             (match entry.error with
-              | Some _ -> Some Keeper_chat_blocks.Trace_tool_err
-              | None -> Some Keeper_chat_blocks.Trace_tool_ok)
+         ; tool_call_id = Some entry.execution_id
+         ; status = Some status
          ; dur = Some (Printf.sprintf "%dms" entry.duration_ms)
          ; args = Some (`Assoc entry.arguments)
          ; result

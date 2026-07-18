@@ -221,7 +221,7 @@ describe('JourneyPanel', () => {
       expect(screen.getByText('trajectory + provenance')).toBeInTheDocument()
     })
 
-    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true)
+    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200)
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('keeper-a', 200, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))

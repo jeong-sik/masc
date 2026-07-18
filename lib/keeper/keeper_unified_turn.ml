@@ -660,13 +660,12 @@ let run_keeper_cycle
                       base_dir
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                in
-               let masc_root = Workspace.masc_root_dir config in
                let trajectory_acc =
-                 Trajectory.create_accumulator
-                   ~masc_root
+                 create_trajectory_accumulator
+                   ~config
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.generation ()
+                   ~generation:meta.runtime.generation
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records

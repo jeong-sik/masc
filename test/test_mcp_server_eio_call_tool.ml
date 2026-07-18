@@ -723,7 +723,31 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
         (sse_payload |> U.member "tool_args_preview" |> U.to_string);
       check string "sse output preview includes result" "command exited 1"
-        (sse_payload |> U.member "tool_output_preview" |> U.to_string))
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string);
+      let full_output = String.make 12000 'r' in
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~mcp_session_id:"mcp-session-9"
+        entry
+        ~tool_name:"tool_execute"
+        ~arguments:(`Assoc [ ("cmd", `String "printf large") ])
+        ~message:full_output
+        ~disposition:(Tool_result.Completed ())
+        ~duration_ms:88;
+      let trajectory_entries =
+        Trajectory.read_entries_result ~masc_root ~keeper_name ~trace_id
+        |> fun read -> read.Trajectory.entries
+      in
+      let persisted_full_output =
+        List.find_map
+          (fun (trajectory_entry : Trajectory.tool_call_entry) ->
+             match trajectory_entry.outcome with
+             | Trajectory.Tool_succeeded output
+               when String.equal output full_output -> Some output
+             | Trajectory.Tool_succeeded _ | Trajectory.Tool_failed _ -> None)
+          trajectory_entries
+      in
+      check (option string) "runtime MCP producer persists complete output"
+        (Some full_output) persisted_full_output)
 
 let () =
   run "mcp_server_eio_call_tool"

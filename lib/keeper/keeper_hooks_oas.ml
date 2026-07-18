@@ -515,24 +515,24 @@ let make_hooks
          | None -> ()
          | Some acc ->
            let keeper_name = (!meta_ref).name in
-           let trace_id = acc.Trajectory.trace_id in
+           let trace_id = Trajectory.accumulator_trace_id acc in
+           let masc_root = Trajectory.accumulator_masc_root acc in
+           let trajectory_keeper = Trajectory.accumulator_keeper_name acc in
+           let turn = Trajectory.accumulator_turn acc in
            let safe_input =
              Observability_redact.redact_json_value input
            in
            let safe_output =
-             Observability_redact.redact_preview
-               ~max_len:4000
-               output_text
+             Observability_redact.redact_text output_text
            in
            let report_trajectory_gap ~stale_reason exn =
              try
                Telemetry_coverage_gap.record
-                 ~masc_root:acc.Trajectory.masc_root
+                 ~masc_root
                  ~source:"trajectory_tool_call"
                  ~producer:"keeper_hooks_oas.post_tool_use"
                  ~durable_store:
-                   (Trajectory.trajectory_path acc.Trajectory.masc_root
-                      acc.Trajectory.keeper_name trace_id)
+                   (Trajectory.trajectory_path masc_root trajectory_keeper trace_id)
                  ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
                  ~stale_reason
                  ~keeper_name
@@ -549,30 +549,29 @@ let make_hooks
            (match safe_input with
             | `Assoc arguments ->
                 let now = Time_compat.now () in
-                let entry : Trajectory.tool_call_entry =
-                  {
-                    ts = now;
-                    ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-                    turn = acc.Trajectory.turn;
-                    round = Trajectory.calls_in_current_turn acc + 1;
-                    tool_name;
-                    arguments;
-                    result = Some safe_output;
-                    duration_ms = trajectory_duration_ms duration_ms;
-                    error =
-                      (if outcome = Tool_result.Ok
-                       then None
-                       else Some safe_output);
-                    execution_id =
-                      Some (Ids.Execution_id.to_string execution_id);
-                  }
+                let round =
+                  Trajectory.next_round ~masc_root
+                    ~keeper_name:trajectory_keeper ~trace_id ~turn
                 in
-                Trajectory.record_entry
-                  ~on_persist_error:
-                    (report_trajectory_gap
-                       ~stale_reason:"trajectory_append_failed")
-                  acc
-                  entry
+                let trajectory_outcome =
+                  if outcome = Tool_result.Ok
+                  then Trajectory.Tool_succeeded safe_output
+                  else Trajectory.Tool_failed safe_output
+                in
+                (match
+                   Trajectory.make_tool_call_entry ~ts:now
+                     ~ts_iso:(Masc_domain.iso8601_of_unix_seconds now) ~turn
+                     ~round ~tool_name ~arguments ~outcome:trajectory_outcome
+                     ~duration_ms:(trajectory_duration_ms duration_ms)
+                     ~execution_id:(Ids.Execution_id.to_string execution_id)
+                 with
+                 | Error error ->
+                     report_trajectory_gap
+                       ~stale_reason:"trajectory_entry_invalid"
+                       (Invalid_argument
+                          (Trajectory.entry_decode_error_to_string error))
+                 | Ok entry ->
+                     Trajectory.record_entry acc entry)
             | _ ->
                 let exn =
                   Invalid_argument

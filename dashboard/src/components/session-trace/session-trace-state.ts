@@ -727,7 +727,7 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
     const trajectoryPromise = isKeeper
-      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true)
+      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT)
       : Promise.resolve(null)
     const toolCallsPromise = isKeeper
       ? fetchKeeperToolCalls(agentName, TOOL_CALL_LIMIT)

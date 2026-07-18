@@ -4,7 +4,6 @@ val persist_response_content
   -> turn:int
   -> Agent_sdk.Types.content_block list
   -> unit
-(** Append every [Thinking]/[RedactedThinking] block in [content] to the
-    keeper's trajectory JSONL, stamped with [turn]. Call once per turn from the
-    [after_turn] hook so no turn's reasoning is dropped. Text is persisted
-    untruncated (see {!Trajectory.append_thinking}). *)
+(** Append every [Thinking]/[ReasoningDetails]/[RedactedThinking] block in
+    provider order, stamped with [turn] and its original block index. The OAS
+    canonical block is persisted without flattening or truncation. *)

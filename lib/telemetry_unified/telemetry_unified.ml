@@ -37,14 +37,16 @@ let all_sources = Telemetry_unified_source.all_sources
    [Telemetry_unified_source_meta] (godfile decomp). *)
 include Telemetry_unified_source_meta
 
-let trajectory_tool_call_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "type" fields with
-      | Some (`String ("trajectory_summary" | "thinking")) -> false
-      | _ ->
-          List.mem_assoc "tool_name" fields
-          && List.mem_assoc "ts" fields)
-  | _ -> false
+type trajectory_row_class =
+  | Trajectory_tool_row
+  | Trajectory_non_tool_row
+  | Trajectory_invalid_row
+
+let classify_trajectory_json json =
+  match Trajectory.tool_call_entry_of_json json with
+  | Trajectory.Decoded_entry _ -> Trajectory_tool_row
+  | Trajectory.Non_entry_row -> Trajectory_non_tool_row
+  | Trajectory.Invalid_entry _ -> Trajectory_invalid_row
 
 (* ── Timestamp extraction ───────────────────────────── *)
 
@@ -558,7 +560,7 @@ let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   else
     protect_source_read Trajectory_tool_call ~site:"read_trajectory_file"
       ~default:[] (fun () ->
-      let parse_error_count = ref 0 in
+      let invalid_row_count = ref 0 in
       let entries =
         (* Tail-bounded read: trajectory trace files grow append-only (one
            measured at 12MB); [load_file] parsed the whole file on the keeper
@@ -575,20 +577,24 @@ let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
              else
                try
                  let json = Yojson.Safe.from_string line in
-                 if trajectory_tool_call_json json
-                    && within_requested_window ?since_ts ?until_ts json
-                 then Some json
-                 else None
+                 (match classify_trajectory_json json with
+                  | Trajectory_tool_row
+                    when within_requested_window ?since_ts ?until_ts json ->
+                      Some json
+                  | Trajectory_tool_row | Trajectory_non_tool_row -> None
+                  | Trajectory_invalid_row ->
+                      incr invalid_row_count;
+                      None)
                with Yojson.Json_error _ ->
-                 incr parse_error_count;
+                 incr invalid_row_count;
                  None)
       in
-      if !parse_error_count > 0 then
+      if !invalid_row_count > 0 then
         observe_source_read_failure Trajectory_tool_call
           ~site:"read_trajectory_file_parse"
           ~error:
-            (Printf.sprintf "%s has %d malformed JSONL line(s)" path
-               !parse_error_count);
+            (Printf.sprintf "%s has %d invalid trajectory row(s)" path
+               !invalid_row_count);
       entries)
 
 (* A trace file whose last write predates [since_ts] cannot hold entries in the
@@ -809,6 +815,7 @@ type trajectory_file_summary =
   { tfs_boundary : int
   ; tfs_tool_calls : int
   ; tfs_latest_ts : float option
+  ; tfs_invalid_rows : int
   }
 
 let trajectory_summary_cache : (string, trajectory_file_summary) Hashtbl.t =
@@ -832,43 +839,54 @@ let trajectory_file_summary path : trajectory_file_summary option =
     (match cached with
      | Some e when e.tfs_boundary = size -> Some e
      | cached ->
-       let from, count0, latest0 =
+       let from, count0, latest0, invalid0 =
          match cached with
          | Some e when e.tfs_boundary < size ->
-           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts
+           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts, e.tfs_invalid_rows
          | Some _ ->
            (* boundary past the file size: shrink/rotation — full re-parse *)
            Otel_metric_store_core.inc_counter
              Otel_builtin_metric_names.metric_telemetry_cache_rescans
              ~labels:[ ("store", "trajectories") ]
              ();
-           0, 0, None
-         | None -> 0, 0, None
+           0, 0, None, 0
+         | None -> 0, 0, None, 0
        in
-       let (count, latest), boundary =
-         Fs_compat.fold_appended_lines ~path ~from ~init:(count0, latest0)
-           ~f:(fun (count, latest) line ->
+       let (count, latest, invalid), boundary =
+         Fs_compat.fold_appended_lines ~path ~from
+           ~init:(count0, latest0, invalid0)
+           ~f:(fun (count, latest, invalid) line ->
              match Yojson.Safe.from_string line with
-             | exception Yojson.Json_error _ -> count, latest
+             | exception Yojson.Json_error _ -> count, latest, invalid + 1
              | json ->
-               if trajectory_tool_call_json json
-               then begin
-                 let latest =
-                   match extract_ts json with
-                   | ts when ts > 0.0 -> max_ts_opt latest ts
-                   | _ -> latest
-                 in
-                 count + 1, latest
-               end
-               else count, latest)
+               (match classify_trajectory_json json with
+                | Trajectory_tool_row ->
+                    let latest =
+                      match extract_ts json with
+                      | ts when ts > 0.0 -> max_ts_opt latest ts
+                      | _ -> latest
+                    in
+                    count + 1, latest, invalid
+                | Trajectory_non_tool_row -> count, latest, invalid
+                | Trajectory_invalid_row -> count, latest, invalid + 1))
        in
+       if invalid > invalid0 then
+         observe_source_read_failure Trajectory_tool_call
+           ~site:"trajectory_summary_invalid_rows"
+           ~error:
+             (Printf.sprintf "%s appended %d invalid trajectory row(s)" path
+                (invalid - invalid0));
        Otel_metric_store_core.inc_counter
          Otel_builtin_metric_names.metric_telemetry_scanned_bytes
          ~labels:[ ("store", "trajectories") ]
          ~delta:(Float.of_int (max 0 (boundary - from)))
          ();
        let entry =
-         { tfs_boundary = boundary; tfs_tool_calls = count; tfs_latest_ts = latest }
+         { tfs_boundary = boundary
+         ; tfs_tool_calls = count
+         ; tfs_latest_ts = latest
+         ; tfs_invalid_rows = invalid
+         }
        in
        Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
          Hashtbl.replace trajectory_summary_cache path entry);

@@ -6,7 +6,11 @@
 
 (** {1 Types} *)
 
-type tool_call_entry = {
+type tool_call_outcome =
+  | Tool_succeeded of string
+  | Tool_failed of string
+
+type tool_call_entry = private {
   ts : float;
   ts_iso : string;
   turn : int;
@@ -15,13 +19,12 @@ type tool_call_entry = {
   arguments : (string * Yojson.Safe.t) list;
       (** Structured Tool arguments. The association-list type makes the JSON
           object invariant explicit and prevents a parallel string form. *)
-  result : string option;
+  outcome : tool_call_outcome;
   duration_ms : int;
-  error : string option;
-  execution_id : string option;
+  execution_id : string;
       (** RFC-0233 canonical join key shared with the tool_calls JSONL row
-          for the same execution. [None] is an explicit source value, never a
-          fabricated identifier. *)
+          for the same execution. Rows without this identity are rejected by
+          the closed codec rather than matched heuristically. *)
 }
 
 type invalid_entry_counts = {
@@ -57,13 +60,11 @@ type entry_field =
   | Round
   | Tool_name
   | Arguments
-  | Result
+  | Tool_outcome
   | Duration_ms
-  | Error_message
   | Execution_id
-  | Content
-  | Content_length
-  | Redacted
+  | Block_index
+  | Thinking_block
 
 type entry_decode_error =
   | Missing_required_field of entry_field
@@ -77,6 +78,23 @@ type tool_call_entry_decode =
   | Decoded_entry of tool_call_entry
   | Non_entry_row
   | Invalid_entry of entry_decode_error
+
+val entry_decode_error_to_string : entry_decode_error -> string
+
+val make_tool_call_entry :
+  ts:float ->
+  ts_iso:string ->
+  turn:int ->
+  round:int ->
+  tool_name:string ->
+  arguments:(string * Yojson.Safe.t) list ->
+  outcome:tool_call_outcome ->
+  duration_ms:int ->
+  execution_id:string ->
+  (tool_call_entry, entry_decode_error) result
+(** Construct a canonical Tool observation. Invalid timestamps, empty
+    identities/names, non-positive rounds, negative durations, duplicate
+    argument keys, and empty failure payloads are rejected before persistence. *)
 
 type trajectory_outcome =
   | Completed
@@ -98,17 +116,27 @@ type trajectory = {
 
 (** {1 Thinking entries}
 
-    Thinking blocks from LLM responses, persisted alongside tool call entries
-    in the same JSONL file with [type = "thinking"]. *)
+    OAS Thinking/ReasoningDetails/RedactedThinking blocks, persisted in
+    provider order with their canonical structured payload alongside Tool
+    entries in the same JSONL file. *)
 
-type thinking_entry = {
+type thinking_entry = private {
   ts : float;
   ts_iso : string;
   turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
+  block_index : int;
+  block : Agent_sdk.Types.content_block;
 }
+
+val make_thinking_entry :
+  ts:float ->
+  ts_iso:string ->
+  turn:int ->
+  block_index:int ->
+  block:Agent_sdk.Types.content_block ->
+  (thinking_entry, entry_decode_error) result
+(** Construct one canonical provider-reasoning row. Non-reasoning OAS blocks
+    and invalid ordering metadata are rejected before persistence. *)
 
 (** Tagged union for reading mixed JSONL (tool calls + thinking). *)
 type trajectory_line =
@@ -129,24 +157,49 @@ type trajectory_lines_read_result = {
   io_errors : trajectory_read_error list;
 }
 
+type persistence_operation =
+  | Append_tool_call
+  | Flush_pending
+
+type persistence_error_cause =
+  | Durable_append_rejected of Fs_compat.private_jsonl_append_error
+  | Persistence_exception of exn
+
+type persistence_error = {
+  operation : persistence_operation;
+  path : string;
+  cause : persistence_error_cause;
+}
+
+exception Persistence_error of persistence_error
+
+val persistence_error_to_string : persistence_error -> string
+
+type round_hydration_error =
+  | Malformed_round_row of { trace_id : string; detail : string }
+  | Invalid_round_row of
+      { trace_id : string
+      ; error : entry_decode_error
+      }
+  | Round_store_error of { path : string; detail : string }
+
+exception Round_hydration_error of round_hydration_error
+
+val round_hydration_error_to_string : round_hydration_error -> string
+
 (** {1 JSON serialization} *)
 
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val default_result_truncation : int
-val default_thinking_truncation : int
-val entry_to_json :
-  ?result_max_len:int ->
-  tool_call_entry ->
-  Yojson.Safe.t
+val entry_to_json : tool_call_entry -> Yojson.Safe.t
 
 val tool_call_entry_of_json :
   Yojson.Safe.t -> tool_call_entry_decode
 (** Decode one persisted JSONL row back into a [tool_call_entry].
     Invalid data is a row-local [Invalid_entry] and does not stop other rows
     from decoding. *)
-val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
-val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
+val thinking_entry_to_json : thinking_entry -> Yojson.Safe.t
+val trajectory_line_to_json : trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 val invalid_entry_counts_to_json : invalid_entry_counts -> Yojson.Safe.t
 val entry_decode_summary_to_json : entry_decode_summary -> Yojson.Safe.t
@@ -160,18 +213,6 @@ val trajectory_read_errors_to_json :
 val trajectories_dir : string -> string -> string
 val trajectory_path : string -> string -> string -> string
 
-val append_entry :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  tool_call_entry -> unit
-
-val append_summary :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  trajectory -> unit
-
-val append_thinking :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  thinking_entry -> unit
-
 val read_entries_result :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   entries_read_result
@@ -180,10 +221,8 @@ val read_entries_result :
     I/O failures are preserved in [io_errors]. *)
 
 (** Get the next round number for a (keeper_name, trace_id, turn) without
-    reading the entire trajectory file. Lazily hydrates from disk on first
-    access per key, then increments in-memory. Round numbers already issued by
-    this process remain monotonic for the key even if an active counter is
-    evicted and later rehydrated. *)
+    reading the entire trajectory file. A cold key finds the latest durable
+    Tool row by exact exponential tail search, then increments in-memory. *)
 val next_round :
   masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
   int
@@ -213,38 +252,45 @@ val read_recent_lines_result :
 
 (** {1 Accumulator}
 
-    Mutable session-scoped state for tracking tool calls in progress. *)
+    Session-scoped mutable state whose queue, locks, and finalization flag stay
+    private to this module. Callers can observe identity/current entries but
+    cannot construct a second state representation or mutate persistence
+    internals. *)
 
-type pending_entry = {
-  pe_json : Yojson.Safe.t;
-}
+type accumulator
 
-type accumulator = {
-  mutable entries : tool_call_entry list;
-  mutable total_calls : int;
-  mutable turn : int;
-  keeper_name : string;
-  trace_id : string;
-  generation : int;
-  started_at : float;
-  masc_root : string;
-  pending_queue : pending_entry Queue.t;
-  pending_mu : Mutex.t;
-  mutable last_flush : float;
-  mutable on_flush_error : (exn -> unit) option;
-}
+type accumulator_registration_error =
+  | Active_accumulator_exists of
+      { masc_root : string
+      ; keeper_name : string
+      ; trace_id : string
+      }
+
+exception Accumulator_registration_error of accumulator_registration_error
+
+val accumulator_registration_error_to_string :
+  accumulator_registration_error -> string
 
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
   generation:int -> unit -> accumulator
 
+val accumulator_masc_root : accumulator -> string
+val accumulator_keeper_name : accumulator -> string
+val accumulator_trace_id : accumulator -> string
+val accumulator_turn : accumulator -> int
+val accumulator_entries : accumulator -> tool_call_entry list
+
 val increment_turn : accumulator -> unit
-val record_entry :
-  ?on_persist_error:(exn -> unit) ->
-  accumulator ->
-  tool_call_entry ->
-  unit
+val record_entry : accumulator -> tool_call_entry -> unit
+val record_thinking : accumulator -> thinking_entry -> unit
+val record_tool_call :
+  masc_root:string -> keeper_name:string -> trace_id:string ->
+  tool_call_entry -> unit
+(** Record through the active per-trace accumulator when one exists; otherwise
+    durably append through the same closed serializer. This is the only public
+    Tool-row persistence boundary. *)
 val finalize : accumulator -> trajectory_outcome -> trajectory
 
 val flush_pending : accumulator -> unit
@@ -252,12 +298,12 @@ val flush_pending : accumulator -> unit
     to disk in a single batch. Called automatically by [finalize] and
     by the background flush fiber. *)
 
-val flush_all_pending : unit -> unit
-(** [flush_all_pending ()] flushes pending entries for all active
-    accumulators. Called by the background flush fiber in
-    server_runtime_bootstrap. *)
-
-val calls_in_current_turn : accumulator -> int
+val flush_all_pending : sw:Eio.Switch.t -> unit
+(** [flush_all_pending ~sw] schedules each active accumulator on an independent
+    I/O fiber and returns without awaiting lane completion. A per-accumulator
+    in-flight guard prevents overlapping writes while one stalled Keeper lane
+    cannot delay later flush cycles for siblings. Must be called from an Eio
+    fiber. *)
 
 (** {1 Tool stats aggregation}
 
@@ -296,6 +342,5 @@ val read_entries_since_result :
   masc_root:string -> keeper_name:string -> since:float ->
   entries_read_result
 (** Read entries from all trace files for a keeper with [ts >= since]. Results
-    are sorted chronologically. Explicit gate rejection is a valid decoded
-    entry; malformed/unsupported rows and file failures are observed
-    separately and never stop other files or rows. *)
+    are sorted chronologically. Malformed/unsupported rows and file failures
+    are observed separately and never stop other files or rows. *)

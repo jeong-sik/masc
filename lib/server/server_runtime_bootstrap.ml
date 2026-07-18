@@ -536,18 +536,6 @@ let initialize_owner_state_blocking
       loop ()
     in
     loop ());
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock 2.0;
-      (try Trajectory.flush_all_pending () with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Keeper.warn
-           "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ());
   let t0 = Eio.Time.now clock in
   Llm_metric_bridge.install ();
   Log.Server.info
@@ -684,6 +672,18 @@ let initialize_owner_state_blocking
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      (try Trajectory.flush_all_pending ~sw with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
 (* Cap the per-boot file list in the sync log line; full counts are always

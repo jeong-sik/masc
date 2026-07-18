@@ -22,33 +22,34 @@ let with_temp_dir f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
+let record_thinking ~masc_root ~keeper_name ~trace_id ~ts ~ts_iso ~turn
+    ~content =
+  let block =
+    Agent_sdk.Types.Thinking { content; signature = None }
+  in
+  let entry =
+    match T.make_thinking_entry ~ts ~ts_iso ~turn ~block_index:0 ~block with
+    | Ok entry -> entry
+    | Error error ->
+        fail
+          ("invalid Thinking fixture: " ^ T.entry_decode_error_to_string error)
+  in
+  let acc =
+    T.create_accumulator ~masc_root ~keeper_name ~trace_id ~generation:0 ()
+  in
+  T.record_thinking acc entry;
+  T.finalize acc T.Completed |> ignore
+;;
+
 let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
   with_temp_dir (fun dir ->
     let config = Workspace.default_config dir in
     let masc_root = Workspace.masc_root_dir config in
     let keeper_name = "keeper-chat-trace" in
-    T.append_thinking
-      ~masc_root
-      ~keeper_name
-      ~trace_id:"trace-current"
-      { ts = 1.0
-      ; ts_iso = "2026-07-01T00:00:01Z"
-      ; turn = 1
-      ; content = "current turn"
-      ; content_length = String.length "current turn"
-      ; redacted = false
-      };
-    T.append_thinking
-      ~masc_root
-      ~keeper_name
-      ~trace_id:"trace-old"
-      { ts = 2.0
-      ; ts_iso = "2026-07-01T00:00:02Z"
-      ; turn = 42
-      ; content = "old turn"
-      ; content_length = String.length "old turn"
-      ; redacted = false
-      };
+    record_thinking ~masc_root ~keeper_name ~trace_id:"trace-current" ~ts:1.0
+      ~ts_iso:"2026-07-01T00:00:01Z" ~turn:1 ~content:"current turn";
+    record_thinking ~masc_root ~keeper_name ~trace_id:"trace-old" ~ts:2.0
+      ~ts_iso:"2026-07-01T00:00:02Z" ~turn:42 ~content:"old turn";
     let trace_block_by_turn_ref =
       Trace.chat_trace_block_by_turn_ref
         ~max_lines:10

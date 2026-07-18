@@ -351,13 +351,9 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
 export function fetchKeeperTrajectory(
   name: string,
   limit?: number,
-  fullOutput = false,
 ): Promise<TrajectoryResponse> {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
-  if (fullOutput) {
-    params.set('result_max_len', '0')
-  }
   const qs = params.toString()
   return get<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,

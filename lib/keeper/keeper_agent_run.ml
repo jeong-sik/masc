@@ -772,10 +772,10 @@ let run_turn
           | Some tacc ->
             (* entries are prepended on record; rev restores call order *)
             List.rev
-              (List.filter_map
+              (List.map
                  (fun (e : Trajectory.tool_call_entry) ->
-                    Option.map Ids.Execution_id.of_string e.execution_id)
-                 tacc.Trajectory.entries)
+                    Ids.Execution_id.of_string e.execution_id)
+                 (Trajectory.accumulator_entries tacc))
         in
         let usage : Turn_record.usage =
           match turn_result with

@@ -35,6 +35,16 @@ val dispatch_keeper_phase_event_checked :
   Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
 
+val create_trajectory_accumulator :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  generation:int ->
+  Trajectory.accumulator
+(** Create the per-trace accumulator with one lane-level durable coverage-gap
+    observer. Tool and Thinking producers share this persistence failure
+    boundary instead of installing competing callbacks per row. *)
+
 val finalize_trajectory_acc :
   config:Workspace.config ->
   keeper_name:string ->

@@ -13,6 +13,7 @@
   masc.json_field
   masc.telemetry_coverage_gap
   masc.telemetry_unified_source
+  masc.trajectory
   masc_core
   masc_log
   masc_types

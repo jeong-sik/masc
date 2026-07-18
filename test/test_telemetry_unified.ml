@@ -668,15 +668,13 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
             ("round", `Int 1);
             ("tool_name", `String "tool_execute");
             ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
+            ( "outcome",
+              `Assoc
+                [ ("status", `String "succeeded")
+                ; ("output", `String "ok")
+                ] );
             ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc [ ("keeper_name", `String "alice") ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
+            ("execution_id", `String "exec-telemetry-summary-1");
           ])
      ^ "\n");
   let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
@@ -730,15 +728,13 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
             ("round", `Int 1);
             ("tool_name", `String "tool_execute");
             ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
+            ( "outcome",
+              `Assoc
+                [ ("status", `String "succeeded")
+                ; ("output", `String "ok")
+                ] );
             ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc [ ("keeper_name", `String "alice") ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
+            ("execution_id", `String "exec-telemetry-read-1");
           ])
      ^ "\n");
   let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
@@ -774,62 +770,6 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
     (List.hd entries |> json_string_field "source");
   Alcotest.(check string) "oldest source" "execution_receipt"
     (List.nth entries 1 |> json_string_field "source")
-
-let test_scope_filter_matches_runtime_contract_fields () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_runtime_contract_scope" in
-  let root = masc_root dir in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
-  Fs_compat.mkdir_p trajectory_dir;
-  Fs_compat.append_file
-    (Filename.concat trajectory_dir "trace-1.jsonl")
-    (Yojson.Safe.to_string
-       (`Assoc
-          [
-            ("ts", `Float 3000.0);
-            ("ts_iso", `String "1970-01-01T00:50:00Z");
-            ("turn", `Int 1);
-            ("round", `Int 1);
-            ("tool_name", `String "tool_execute");
-            ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
-            ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc
-                [
-                  ("keeper_name", `String "alice");
-                  ("session_id", `String "sess-nested");
-                  ("operation_id", `String "op-nested");
-                  ("trace_id", `String "run-nested");
-                ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
-          ])
-     ^ "\n");
-  let result =
-    Telemetry_unified.read_unified_result
-      ~base_path:dir
-      ~masc_root:root
-      ~sources:[ Telemetry_unified.Trajectory_tool_call ]
-      ~session_id:"sess-nested"
-      ~operation_id:"op-nested"
-      ~worker_run_id:"run-nested"
-      ~n:10
-      ()
-  in
-  Alcotest.(check int) "runtime contract scoped row visible" 1
-    result.total_matching_entries;
-  match result.entries with
-  | [ entry ] ->
-    Alcotest.(check string) "source" "trajectory_tool_call"
-      (json_string_field "source" entry);
-    Alcotest.(check string) "tool" "tool_execute"
-      (json_string_field "tool_name" entry)
-  | _ -> Alcotest.fail "expected one scoped trajectory row"
 
 let test_goal_event_source_and_summary () =
   Eio_main.run @@ fun env ->
@@ -989,7 +929,18 @@ let test_trajectory_parse_errors_are_aggregated_per_file () =
            (`Assoc
               [
                 ("ts", `Float 2000.0);
+                ("ts_iso", `String "1970-01-01T00:33:20Z");
+                ("turn", `Int 1);
+                ("round", `Int 1);
                 ("tool_name", `String "tool_execute");
+                ("args", `Assoc []);
+                ( "outcome",
+                  `Assoc
+                    [ ("status", `String "succeeded")
+                    ; ("output", `String "ok")
+                    ] );
+                ("duration_ms", `Int 7);
+                ("execution_id", `String "exec-telemetry-valid-1");
               ]);
          "{still-not-json";
          "";
@@ -1248,10 +1199,18 @@ let trajectory_row ~ts ~tool_name =
   Yojson.Safe.to_string
     (`Assoc
        [ ("ts", `Float ts)
+       ; ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts))
        ; ("turn", `Int 1)
+       ; ("round", `Int 1)
        ; ("tool_name", `String tool_name)
        ; ("args", `Assoc [])
-       ; ("result", `String "ok")
+       ; ( "outcome",
+           `Assoc
+             [ ("status", `String "succeeded")
+             ; ("output", `String "ok")
+             ] )
+       ; ("duration_ms", `Int 1)
+       ; ("execution_id", `String (Printf.sprintf "exec-%s-%.0f" tool_name ts))
        ])
   ^ "\n"
 
@@ -1260,7 +1219,14 @@ let thinking_row ~ts =
     (`Assoc
        [ ("type", `String "thinking")
        ; ("ts", `Float ts)
-       ; ("content", `String "reasoning text")
+       ; ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts))
+       ; ("turn", `Int 1)
+       ; ("block_index", `Int 0)
+       ; ( "block",
+           `Assoc
+             [ ("type", `String "thinking")
+             ; ("thinking", `String "reasoning text")
+             ] )
        ])
   ^ "\n"
 
@@ -1340,8 +1306,6 @@ let () =
             `Quick test_n_zero_no_window_returns_bounded;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
-          Alcotest.test_case "runtime contract scope filter" `Quick
-            test_scope_filter_matches_runtime_contract_fields;
           Alcotest.test_case "goal events" `Quick
             test_goal_event_source_and_summary;
           Alcotest.test_case "fixed source bad store type is observed" `Quick

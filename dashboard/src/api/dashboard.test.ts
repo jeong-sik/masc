@@ -595,9 +595,9 @@ describe('keeper tool telemetry fetchers', () => {
       }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const succeeded = await fetchKeeperTrajectory('keeper-alpha', 1, true)
+    const succeeded = await fetchKeeperTrajectory('keeper-alpha', 1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      '/api/v1/keepers/keeper-alpha/trajectory?limit=1&result_max_len=0',
+      '/api/v1/keepers/keeper-alpha/trajectory?limit=1',
     )
     expect(succeeded.entries[0]).toMatchObject({
       execution_id: 'exec-closed-outcome-1',

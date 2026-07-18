@@ -1,6 +1,6 @@
 (** RFC-0108: trajectory writer atomicity stress.
 
-    Drives many concurrent OCaml threads against [Trajectory.append_entry]
+    Drives many concurrent OCaml threads against [Trajectory.record_tool_call]
     for the same trace file (the contention surface that produced ~89
     utf-8 multibyte-tear lines in
     [.masc/trajectories/{analyst,imseonghan,sangsu,ramarama,issue_king,…}]
@@ -49,19 +49,19 @@ let make_entry ~tid ~seq : Trajectory.tool_call_entry =
      where the pre-fix shared-channel buffer corrupted lines. *)
   let kor_count = 100 + (seq mod 300) in
   let kor = String.concat "" (List.init kor_count (fun _ -> "가")) in
-  {
-    Trajectory.ts = Unix.gettimeofday ();
-    ts_iso = "2026-05-17T00:00:00Z";
-    turn = tid;
-    round = seq;
-    tool_name = Printf.sprintf "tool_%d" tid;
-    arguments =
-      [("k", `String kor); ("tid", `Int tid); ("seq", `Int seq)];
-    result = None;
-    duration_ms = 0;
-    error = None;
-    execution_id = None;
-  }
+  match
+    Trajectory.make_tool_call_entry ~ts:(Unix.gettimeofday ())
+      ~ts_iso:"2026-05-17T00:00:00Z" ~turn:tid ~round:(seq + 1)
+      ~tool_name:(Printf.sprintf "tool_%d" tid)
+      ~arguments:[ ("k", `String kor); ("tid", `Int tid); ("seq", `Int seq) ]
+      ~outcome:(Trajectory.Tool_succeeded "") ~duration_ms:0
+      ~execution_id:(Printf.sprintf "exec-%d-%d" tid seq)
+  with
+  | Ok entry -> entry
+  | Error error ->
+      fail
+        ("invalid atomicity fixture: "
+         ^ Trajectory.entry_decode_error_to_string error)
 
 let test_concurrent_threads () =
   let dir = tmpdir "traj_atomicity" in
@@ -75,7 +75,7 @@ let test_concurrent_threads () =
       Thread.create
         (fun () ->
           for seq = 0 to n_records_per_thread - 1 do
-            Trajectory.append_entry
+            Trajectory.record_tool_call
               ~masc_root
               ~keeper_name
               ~trace_id

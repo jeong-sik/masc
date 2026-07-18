@@ -25,6 +25,7 @@
   unix
   eio
   yojson
+  agent_sdk
   fs_compat
   time_compat
   dated_jsonl

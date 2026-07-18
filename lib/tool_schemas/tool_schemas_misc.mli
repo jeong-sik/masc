@@ -39,6 +39,7 @@ val config_category_enum_strings : string list
 type control_operation =
   | Pause
   | Resume
+  | Pause_status
 (** Closed set of operator control tools. *)
 
 val control_operations : control_operation list

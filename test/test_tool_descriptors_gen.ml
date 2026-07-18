@@ -91,6 +91,9 @@ let test_control_schemas_use_dedicated_typed_projection () =
   in
   let pause = Tool_schemas_misc.control_schema Tool_schemas_misc.Pause in
   let resume = Tool_schemas_misc.control_schema Tool_schemas_misc.Resume in
+  let pause_status =
+    Tool_schemas_misc.control_schema Tool_schemas_misc.Pause_status
+  in
   Alcotest.check
     yojson_testable
     "pause projection keeps generated canonical schema"
@@ -101,9 +104,14 @@ let test_control_schemas_use_dedicated_typed_projection () =
     "resume projection keeps generated canonical schema"
     Tool_descriptors_gen.masc_resume_schema.input_schema
     resume.input_schema;
+  Alcotest.check
+    yojson_testable
+    "pause_status projection keeps generated canonical schema"
+    Tool_descriptors_gen.masc_pause_status_schema.input_schema
+    pause_status.input_schema;
   Alcotest.(check (list string))
     "typed control projection is exhaustive"
-    [ "masc_pause"; "masc_resume" ]
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
     (List.map
        (fun operation ->
           (Tool_schemas_misc.control_schema operation).name)
@@ -118,7 +126,7 @@ let test_control_schemas_use_dedicated_typed_projection () =
          (name ^ " absent from effective public misc schemas")
          false
          (has_schema name Tool_schemas_misc.schemas))
-    [ "masc_pause"; "masc_resume" ];
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ];
   Alcotest.(check bool)
     "masc_pause has reason property"
     true
@@ -126,7 +134,11 @@ let test_control_schemas_use_dedicated_typed_projection () =
   Alcotest.(check int)
     "masc_resume has no input properties"
     0
-    (List.length (properties resume))
+    (List.length (properties resume));
+  Alcotest.(check int)
+    "masc_pause_status has no input properties"
+    0
+    (List.length (properties pause_status))
 ;;
 
 let test_masc_tool_help_name_matches () =
@@ -350,7 +362,7 @@ let () =
         ] )
     ; ( "control schema SSOT"
       , [ Alcotest.test_case
-            "pause and resume use a dedicated typed projection"
+            "control tools use a dedicated typed projection"
             `Quick
             test_control_schemas_use_dedicated_typed_projection
         ] )

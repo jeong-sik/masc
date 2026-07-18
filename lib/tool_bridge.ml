@@ -144,24 +144,27 @@ let params_of_json_schema schema =
         tbl
     | _ -> Hashtbl.create 0
   in
-  match Json_util.get_object schema "properties" with
-  | Some (`Assoc pairs) ->
-      List.map
-        (fun (name, prop) ->
-          let param_type =
-            prop
-            |> type_string_of_schema_property
-            |> Option.value ~default:"string"
-            |> param_type_of_string
-          in
-          let description =
-            Json_util.get_string prop "description"
-            |> Option.value ~default:""
-          in
-          let required = Hashtbl.mem required_set name in
-          { Agent_sdk.Types.name = name; description; param_type; required })
-        pairs
-  | _ -> []
+  let result =
+    match Json_util.get_object schema "properties" with
+    | Some (`Assoc pairs) ->
+        List.map
+          (fun (name, prop) ->
+            let param_type =
+              prop
+              |> type_string_of_schema_property
+              |> Option.value ~default:"string"
+              |> param_type_of_string
+            in
+            let description =
+              Json_util.get_string prop "description"
+              |> Option.value ~default:""
+            in
+            let required = Hashtbl.mem required_set name in
+            { Agent_sdk.Types.name = name; description; param_type; required })
+          pairs
+    | _ -> []
+  in
+  result
 
 (** {1 OAS Tool.t Creation}
 

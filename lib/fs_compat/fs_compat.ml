@@ -2110,6 +2110,8 @@ let private_jsonl_remove_rewrite_stage temp_path =
   | Error failure ->
     (match failure.exception_ with
      | Unix.Unix_error (error, _, _) when error = Unix.ENOENT -> None
+     (* DET-OK: [exn] is open. Every non-ENOENT cleanup exception is preserved
+        as typed failure evidence; this arm never chooses a permissive default. *)
      | _ -> Some failure)
 ;;
 

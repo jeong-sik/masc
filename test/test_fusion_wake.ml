@@ -138,27 +138,29 @@ let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
 
 let fusion_payload
       ?(run_id = "fus-1")
-      ?(ok = true)
       ?(resolved_answer = "use approach B because it is reversible")
+      ?terminal
       ?(board_post_id = "post-77")
       ()
   : Keeper_event_queue.fusion_completion
   =
+  let terminal =
+    Option.value terminal ~default:(Keeper_event_queue.Fusion_succeeded resolved_answer)
+  in
   { run_id
-  ; ok
-  ; resolved_answer
+  ; terminal
   ; board_post_id
   ; channel = Keeper_continuation_channel.unrouted "test fixture"
   }
 ;;
 
-let fusion_stimulus ?run_id ?ok ?resolved_answer ?board_post_id () : Keeper_event_queue.stimulus =
+let fusion_stimulus ?run_id ?terminal ?resolved_answer ?board_post_id () : Keeper_event_queue.stimulus =
   { post_id = "ignored-by-fusion-arm"
   ; urgency = Keeper_event_queue.Normal
   ; arrived_at = 1000.0
   ; payload =
       Keeper_event_queue.Fusion_completed
-        (fusion_payload ?run_id ?ok ?resolved_answer ?board_post_id ())
+        (fusion_payload ?run_id ?terminal ?resolved_answer ?board_post_id ())
   }
 ;;
 
@@ -293,6 +295,91 @@ let test_fusion_completion_is_actionable () =
     fail
       ("Fusion_completed stimulus must not hit a board read: "
        ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+;;
+
+let test_fusion_cancellation_is_typed_and_actionable () =
+  let meta = make_meta () in
+  let stimulus =
+    fusion_stimulus ~run_id:"fus-cancelled"
+      ~terminal:Keeper_event_queue.Fusion_cancelled ()
+  in
+  let decoded =
+    Keeper_event_queue.stimulus_to_yojson stimulus
+    |> Keeper_event_queue.stimulus_of_yojson
+  in
+  (match decoded with
+   | Ok
+       { payload =
+           Keeper_event_queue.Fusion_completed
+             { terminal = Keeper_event_queue.Fusion_cancelled; _ }
+       ; _
+       } -> ()
+   | Ok _ -> fail "fusion cancellation codec lost its typed terminal"
+   | Error detail -> fail ("fusion cancellation codec failed: " ^ detail));
+  match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+  | Ok (Some event) ->
+    check bool "cancellation is explicit in title" true
+      (contains ~needle:"cancelled" event.title);
+    check bool "cancellation is actionable" true
+      (contains ~needle:"structurally cancelled" event.preview)
+  | Ok None -> fail "Fusion_cancelled terminal must remain actionable"
+  | Error unavailable ->
+    fail
+      ("Fusion_cancelled terminal must not read Board: "
+       ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
+;;
+
+(* Rows persisted before the typed terminal carry { ok; resolved_answer }.
+   The compatibility read must derive the exact terminal from them; on main
+   before this branch these rows decoded, and a terminal-only decoder would
+   reject every pre-deploy row in a live store. *)
+let test_fusion_legacy_rows_decode_to_typed_terminal () =
+  let legacy ~ok =
+    let json =
+      fusion_stimulus ~run_id:"fus-legacy"
+        ~terminal:(Keeper_event_queue.Fusion_succeeded "unused") ()
+      |> Keeper_event_queue.stimulus_to_yojson
+    in
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if not (String.equal key "payload")
+              then key, value
+              else (
+                match value with
+                | `Assoc payload_fields ->
+                  ( key
+                  , `Assoc
+                      (List.filter
+                         (fun (name, _) -> not (String.equal name "terminal"))
+                         payload_fields
+                       @ [ "ok", `Bool ok
+                         ; "resolved_answer", `String "legacy answer"
+                         ]) )
+                | _ -> fail "stimulus payload must be an object"))
+           fields)
+    | _ -> fail "stimulus json must be an object"
+  in
+  (match Keeper_event_queue.stimulus_of_yojson (legacy ~ok:true) with
+   | Ok
+       { payload =
+           Keeper_event_queue.Fusion_completed
+             { terminal = Keeper_event_queue.Fusion_succeeded answer; _ }
+       ; _
+       } -> check string "legacy ok row keeps its answer" "legacy answer" answer
+   | Ok _ -> fail "legacy ok row lost its typed terminal"
+   | Error detail -> fail ("legacy ok row failed to decode: " ^ detail));
+  match Keeper_event_queue.stimulus_of_yojson (legacy ~ok:false) with
+  | Ok
+      { payload =
+          Keeper_event_queue.Fusion_completed
+            { terminal = Keeper_event_queue.Fusion_failed detail; _ }
+      ; _
+      } -> check string "legacy failed row keeps its detail" "legacy answer" detail
+  | Ok _ -> fail "legacy failed row lost its typed terminal"
+  | Error detail -> fail ("legacy failed row failed to decode: " ^ detail)
 ;;
 
 (* RFC-0290: a completed background job follows the same non-empty delivery
@@ -856,6 +943,14 @@ let () =
             "fusion completion is actionable (non-empty, carries answer)"
             `Quick
             test_fusion_completion_is_actionable
+        ; test_case
+            "fusion cancellation has a typed actionable terminal"
+            `Quick
+            test_fusion_cancellation_is_typed_and_actionable
+        ; test_case
+            "legacy ok/resolved_answer rows decode to the typed terminal"
+            `Quick
+            test_fusion_legacy_rows_decode_to_typed_terminal
         ; test_case
             "missing board_post_id falls back to fusion-run id"
             `Quick

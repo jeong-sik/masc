@@ -111,15 +111,20 @@ and board_attention = {
 
 and fusion_completion = {
   run_id : string;
-  ok : bool;
-  resolved_answer : string;
+  terminal : fusion_terminal;
   board_post_id : string;
   channel : Keeper_continuation_channel.t;
 }
-(** RFC-0266 payload for [Fusion_completed]: [ok] distinguishes a synthesized
-    judge result from denied/sink_failed/aborted; [resolved_answer] carries the
-    answer (or a failure label when [ok = false]); [board_post_id] correlates to
-    the sink's board evidence post ("" when none was created). *)
+
+and fusion_terminal =
+  | Fusion_succeeded of string
+  | Fusion_failed of string
+  | Fusion_cancelled
+(** Typed terminal receipt for [Fusion_completed]. Structural cancellation is
+    distinct from an ordinary deliberation failure, so consumers never infer
+    it from an error string. The string payloads are the synthesized answer or
+    explicit failure detail. [board_post_id] correlates to the sink's board
+    evidence post ("" when none was created). *)
 
 and bg_job_completion = {
   bg_run_id : string;

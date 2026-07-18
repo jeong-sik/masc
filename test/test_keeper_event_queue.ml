@@ -238,8 +238,7 @@ let () =
   let fusion_payload () =
     Fusion_completed
       { run_id = "fus-1"
-      ; ok = true
-      ; resolved_answer = "ok"
+      ; terminal = Fusion_succeeded "ok"
       ; board_post_id = "post-1"
       ; channel = Keeper_continuation_channel.unrouted "test fixture"
       }
@@ -250,8 +249,7 @@ let () =
     String.equal
       (fusion_completion_post_id
          { run_id = "fus-1"
-         ; ok = true
-         ; resolved_answer = "ok"
+         ; terminal = Fusion_succeeded "ok"
          ; board_post_id = "post-1"
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
@@ -261,8 +259,7 @@ let () =
      implicit [Unrouted] destination. *)
   (let routed : Keeper_event_queue.fusion_completion =
      { run_id = "fus-routed"
-     ; ok = true
-     ; resolved_answer = "answer"
+     ; terminal = Fusion_succeeded "answer"
      ; board_post_id = "post-9"
      ; channel =
          (Keeper_continuation_channel.discord
@@ -339,8 +336,7 @@ let () =
     String.equal
       (fusion_completion_post_id
          { run_id = "fus-2"
-         ; ok = false
-         ; resolved_answer = "sink_failed"
+         ; terminal = Fusion_failed "sink_failed"
          ; board_post_id = ""
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
@@ -640,8 +636,7 @@ let () =
          ; payload =
              Fusion_completed
                { run_id = "fus-3"
-               ; ok = false
-               ; resolved_answer = "denied"
+               ; terminal = Fusion_failed "denied"
                ; board_post_id = ""
                ; channel = Keeper_continuation_channel.unrouted "test fixture"
                }
@@ -692,10 +687,9 @@ let () =
   assert (String.equal fourth.post_id "fp1");
   assert (
     match fourth.payload with
-    | Fusion_completed { run_id; ok; resolved_answer; board_post_id } ->
+    | Fusion_completed { run_id; terminal = Fusion_failed detail; board_post_id; _ } ->
       String.equal run_id "fus-3"
-      && (not ok)
-      && String.equal resolved_answer "denied"
+      && String.equal detail "denied"
       && String.equal board_post_id ""
     | _ -> false);
   let fifth, restored =

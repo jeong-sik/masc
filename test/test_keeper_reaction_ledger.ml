@@ -41,8 +41,7 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   ; payload =
       Keeper_event_queue.Fusion_completed
         { run_id
-        ; ok = true
-        ; resolved_answer = "use approach B"
+        ; terminal = Keeper_event_queue.Fusion_succeeded "use approach B"
         ; board_post_id = "post-fus"
         ; channel = Keeper_continuation_channel.unrouted "test fixture"
         }

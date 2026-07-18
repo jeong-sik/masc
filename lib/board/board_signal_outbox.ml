@@ -9,6 +9,21 @@ type recipient =
       keeper_name : string option;
     }
 
+type recipient_retirement_reason =
+  | Keeper_metadata_removed
+  | Keeper_terminal
+
+let recipient_retirement_reason_to_string = function
+  | Keeper_metadata_removed -> "keeper_metadata_removed"
+  | Keeper_terminal -> "keeper_terminal"
+;;
+
+let recipient_retirement_reason_of_string = function
+  | "keeper_metadata_removed" -> Ok Keeper_metadata_removed
+  | "keeper_terminal" -> Ok Keeper_terminal
+  | value -> Error (Printf.sprintf "unknown recipient retirement reason %S" value)
+;;
+
 let non_empty_identity context value =
   match String.trim value with
   | "" -> Error (context ^ " must be non-empty")
@@ -32,6 +47,7 @@ type phase =
       mutation : Board_signal_command.t;
       recipients : recipient list option;
       settled_recipients : recipient list;
+      retired_recipients : (recipient * recipient_retirement_reason) list;
     }
   | Delivered of {
       mutation : Board_signal_command.t;
@@ -188,7 +204,11 @@ let apply_row ~order index json =
                  { prepared with
                    phase =
                      Committed
-                       { mutation; recipients = None; settled_recipients = [] }
+                       { mutation
+                       ; recipients = None
+                       ; settled_recipients = []
+                       ; retired_recipients = []
+                       }
                  }
                  index)
           | Some _ | None ->
@@ -217,7 +237,11 @@ let apply_row ~order index json =
             | Some
                 ({ phase =
                      Committed
-                       { mutation; recipients = None; settled_recipients = [] }
+                       { mutation
+                       ; recipients = None
+                       ; settled_recipients = []
+                       ; retired_recipients = []
+                       }
                  ; _
                  } as committed) ->
               Ok
@@ -229,6 +253,7 @@ let apply_row ~order index json =
                          { mutation
                          ; recipients = Some recipients
                          ; settled_recipients = []
+                         ; retired_recipients = []
                          }
                    }
                    index)
@@ -252,7 +277,11 @@ let apply_row ~order index json =
           | Some
               ({ phase =
                    Committed
-                     { mutation; recipients = Some recipients; settled_recipients }
+                     { mutation
+                     ; recipients = Some recipients
+                     ; settled_recipients
+                     ; retired_recipients
+                     }
                ; _
                } as committed) ->
             let rejected =
@@ -298,7 +327,11 @@ let apply_row ~order index json =
                     { committed with
                       phase =
                         Committed
-                          { mutation; recipients = Some recipients; settled_recipients }
+                          { mutation
+                          ; recipients = Some recipients
+                          ; settled_recipients
+                          ; retired_recipients
+                          }
                     }
                     index)
              | [ Target_identity { keeper_name = Some _; _ } ] ->
@@ -307,12 +340,25 @@ let apply_row ~order index json =
                Error (Printf.sprintf "resolution for unplanned target event_id=%s identity=%s" event_id identity))
           | Some _ | None ->
             Error (Printf.sprintf "target resolution without plan event_id=%s" event_id))
-       | ("recipient_rejected" | "recipient_settled") as terminal_phase ->
+       | ("recipient_rejected" | "recipient_settled" | "recipient_retired") as terminal_phase ->
+         let expected_fields =
+           if String.equal terminal_phase "recipient_retired"
+           then [ "schema"; "event_id"; "phase"; "recipient"; "reason" ]
+           else [ "schema"; "event_id"; "phase"; "recipient" ]
+         in
          let* () =
            exact_fields
              ~context
-             [ "schema"; "event_id"; "phase"; "recipient" ]
+             expected_fields
              fields
+         in
+         let* retirement_reason =
+           if String.equal terminal_phase "recipient_retired"
+           then
+             let* reason = required_string ~context "reason" fields in
+             Result.map (fun reason -> Some reason)
+               (recipient_retirement_reason_of_string reason)
+           else Ok None
          in
          let* recipient_json =
            match List.assoc_opt "recipient" fields with
@@ -325,6 +371,8 @@ let apply_row ~order index json =
            | "recipient_rejected", Target_identity { keeper_name = None; _ } -> true
            | ( "recipient_settled"
              , (Keeper_lane _ | Target_identity { keeper_name = Some _; _ }) ) -> true
+           | ( "recipient_retired"
+             , (Keeper_lane _ | Target_identity { keeper_name = Some _; _ }) ) -> true
            | _ -> false
          in
          let* () =
@@ -336,7 +384,11 @@ let apply_row ~order index json =
           | Some
               ({ phase =
                    Committed
-                     { mutation; recipients = Some recipients; settled_recipients }
+                     { mutation
+                     ; recipients = Some recipients
+                     ; settled_recipients
+                     ; retired_recipients
+                     }
                ; _
                } as committed) ->
             if not (List.exists (( = ) recipient) recipients)
@@ -365,6 +417,11 @@ let apply_row ~order index json =
                          ; settled_recipients =
                              List.sort_uniq compare_recipient
                                (recipient :: settled_recipients)
+                         ; retired_recipients =
+                             (match retirement_reason with
+                              | None -> retired_recipients
+                              | Some reason ->
+                                (recipient, reason) :: retired_recipients)
                          }
                    }
                    index)
@@ -379,7 +436,7 @@ let apply_row ~order index json =
          (match prior with
           | Some
               ({ phase =
-                   Committed { mutation; recipients; settled_recipients }
+                   Committed { mutation; recipients; settled_recipients; _ }
                ; _
                } as committed) ->
             (match recipients with
@@ -695,7 +752,11 @@ let settle_recipient ~event_id ~recipient =
       | Some
           { phase =
               Committed
-                { recipients = Some recipients; settled_recipients; _ }
+                { recipients = Some recipients
+                ; settled_recipients
+                ; retired_recipients
+                ; _
+                }
           ; _
           } ->
         if not (List.exists (( = ) recipient) recipients)
@@ -703,6 +764,13 @@ let settle_recipient ~event_id ~recipient =
           Error
             (Printf.sprintf
                "settlement for unplanned recipient event_id=%s recipient=%s"
+               event_id
+               (Yojson.Safe.to_string (recipient_to_yojson recipient)))
+        else if List.exists (fun (retired, _) -> retired = recipient) retired_recipients
+        then
+          Error
+            (Printf.sprintf
+               "retired recipient cannot settle as delivered event_id=%s recipient=%s"
                event_id
                (Yojson.Safe.to_string (recipient_to_yojson recipient)))
         else if List.exists (( = ) recipient) settled_recipients
@@ -755,6 +823,69 @@ let reject_target ~event_id ~identity =
         Error (Printf.sprintf "rejection does not belong to delivered event_id=%s" event_id)
       | Some _ | None ->
         Error (Printf.sprintf "target rejection without plan event_id=%s" event_id))
+;;
+
+let retire_recipient ~event_id ~recipient ~reason =
+  let ( let* ) = Result.bind in
+  let* () = validate_event_id event_id in
+  let* () =
+    match recipient with
+    | Target_identity { keeper_name = None; _ } ->
+      Error "An unresolved Board target must use reject_target"
+    | Keeper_lane _ | Target_identity { keeper_name = Some _; _ } -> Ok ()
+  in
+  transition
+    ~make_row:(fun () ->
+      `Assoc
+        [ "schema", `String schema
+        ; "event_id", `String event_id
+        ; "phase", `String "recipient_retired"
+        ; "recipient", recipient_to_yojson recipient
+        ; "reason", `String (recipient_retirement_reason_to_string reason)
+        ])
+    ~decide:(fun current ->
+      match Event_map.find_opt event_id current with
+      | Some
+          { phase =
+              Committed
+                { recipients = Some recipients
+                ; settled_recipients
+                ; retired_recipients
+                ; _
+                }
+          ; _
+          } ->
+        if not (List.exists (( = ) recipient) recipients)
+        then
+          Error
+            (Printf.sprintf
+               "retirement for unplanned recipient event_id=%s recipient=%s"
+               event_id
+               (Yojson.Safe.to_string (recipient_to_yojson recipient)))
+        else
+          (match List.assoc_opt recipient retired_recipients with
+           | Some existing when existing = reason -> Ok Unchanged
+           | Some _ ->
+             Error
+               (Printf.sprintf
+                  "recipient retirement reason conflict event_id=%s recipient=%s"
+                  event_id
+                  (Yojson.Safe.to_string (recipient_to_yojson recipient)))
+           | None when List.exists (( = ) recipient) settled_recipients ->
+             Error
+               (Printf.sprintf
+                  "delivered recipient cannot be retired event_id=%s recipient=%s"
+                  event_id
+                  (Yojson.Safe.to_string (recipient_to_yojson recipient)))
+           | None -> Ok Append)
+      | Some { phase = Delivered { recipients; _ }; _ }
+        when List.exists (( = ) recipient) recipients -> Ok Unchanged
+      | Some { phase = Delivered _; _ } ->
+        Error (Printf.sprintf "retirement does not belong to delivered event_id=%s" event_id)
+      | Some { phase = Prepared _; _ }
+      | Some { phase = Committed { recipients = None; _ }; _ }
+      | None ->
+        Error (Printf.sprintf "recipient retirement without plan event_id=%s" event_id))
 ;;
 
 let mark_delivered ~event_id ~at =
@@ -812,7 +943,7 @@ let unresolved_recipient = function
     Target_identity { identity; keeper_name = None }
 ;;
 
-let recipient_state_rows ~event_id ~recipients ~settled_recipients =
+let recipient_state_rows ~event_id ~recipients ~settled_recipients ~retired_recipients =
   let initial_plan = List.map unresolved_recipient recipients in
   [ `Assoc
       [ "schema", `String schema
@@ -836,18 +967,28 @@ let recipient_state_rows ~event_id ~recipients ~settled_recipients =
       recipients
   @ List.map
       (fun recipient ->
-         let phase =
-           match recipient with
-           | Target_identity { keeper_name = None; _ } -> "recipient_rejected"
-           | Keeper_lane _ | Target_identity { keeper_name = Some _; _ } ->
-             "recipient_settled"
-         in
-         `Assoc
-           [ "schema", `String schema
-           ; "event_id", `String event_id
-           ; "phase", `String phase
-           ; "recipient", recipient_to_yojson recipient
-           ])
+         match List.assoc_opt recipient retired_recipients with
+         | Some reason ->
+           `Assoc
+             [ "schema", `String schema
+             ; "event_id", `String event_id
+             ; "phase", `String "recipient_retired"
+             ; "recipient", recipient_to_yojson recipient
+             ; "reason", `String (recipient_retirement_reason_to_string reason)
+             ]
+         | None ->
+           let phase =
+             match recipient with
+             | Target_identity { keeper_name = None; _ } -> "recipient_rejected"
+             | Keeper_lane _ | Target_identity { keeper_name = Some _; _ } ->
+               "recipient_settled"
+           in
+           `Assoc
+             [ "schema", `String schema
+             ; "event_id", `String event_id
+             ; "phase", `String phase
+             ; "recipient", recipient_to_yojson recipient
+             ])
       settled_recipients
 ;;
 
@@ -856,7 +997,7 @@ let event_rows (entry : entry) =
   | Prepared command ->
     let payload = Board_signal_command.to_yojson command in
     [ transition_row ~event_id:entry.event_id ~phase:"prepared" ~payload ]
-  | Committed { mutation; recipients; settled_recipients } ->
+  | Committed { mutation; recipients; settled_recipients; retired_recipients } ->
     let payload = Board_signal_command.to_yojson mutation in
     [ transition_row ~event_id:entry.event_id ~phase:"prepared" ~payload
     ; `Assoc
@@ -871,7 +1012,8 @@ let event_rows (entry : entry) =
          recipient_state_rows
            ~event_id:entry.event_id
            ~recipients
-           ~settled_recipients)
+           ~settled_recipients
+           ~retired_recipients)
   | Delivered { mutation; recipients; at } ->
     let payload = Board_signal_command.to_yojson mutation in
     [ transition_row ~event_id:entry.event_id ~phase:"prepared" ~payload
@@ -885,6 +1027,7 @@ let event_rows (entry : entry) =
         ~event_id:entry.event_id
         ~recipients
         ~settled_recipients:recipients
+        ~retired_recipients:[]
     @ [ `Assoc
         [ "schema", `String schema
         ; "event_id", `String entry.event_id
@@ -915,12 +1058,7 @@ let compact_terminal () =
          |> List.map snd
          |> List.sort (fun left right -> Int.compare left.order right.order)
        in
-       let retained =
-         match List.find_opt is_pending ordered with
-         | None -> []
-         | Some first_pending ->
-           List.filter (fun entry -> entry.order >= first_pending.order) ordered
-       in
+       let retained = List.filter is_pending ordered in
        let content =
          retained
          |> List.concat_map event_rows

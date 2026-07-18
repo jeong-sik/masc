@@ -282,6 +282,10 @@ type store = {
   pending_comment_durability : (string, string) Hashtbl.t;
   (** Comment ids whose create append had an unknown commit outcome. The value
       is the original typed failure detail retained for settlement diagnostics. *)
+  pending_reaction_durability : (string, string) Hashtbl.t;
+  (** Canonical reaction keys whose snapshot rewrite had an unknown commit
+      outcome. Exact replay must settle this obligation before reporting the
+      reaction command as durable. *)
   pending_parent_projection_repairs : (string, unit) Hashtbl.t;
   (** Comment ids whose durable row exists but whose parent projection still
       requires an idempotent rewrite. *)

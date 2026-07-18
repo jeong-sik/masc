@@ -660,7 +660,7 @@ let test_pending_routing_command_fences_only_referenced_sweep_entity () =
   | Ok _ -> Alcotest.fail "unrelated expired post was globally fenced"
 ;;
 
-let test_outbox_compaction_retains_terminal_successors () =
+let test_outbox_compaction_drops_terminal_successors () =
   let first = "test-outbox-first" in
   let second = "test-outbox-second" in
   let first_command = test_outbox_command first in
@@ -685,14 +685,11 @@ let test_outbox_compaction_retains_terminal_successors () =
     "deliver second"
     (Board_signal_outbox.mark_delivered ~event_id:second ~at:(Time_compat.now ()));
   expect_outbox_ok "compact with older pending" (Board_signal_outbox.compact_terminal ());
-  let retained = expect_outbox_ok "read retained outbox" (Board_signal_outbox.entries ()) in
+  let retained = expect_outbox_ok "read compacted outbox" (Board_signal_outbox.entries ()) in
   (match retained with
-   | [ { event_id = first_id; phase = Board_signal_outbox.Prepared _; _ }
-     ; { event_id = second_id; phase = Board_signal_outbox.Delivered _; _ }
-     ] ->
-     Alcotest.(check string) "oldest pending retained" first first_id;
-     Alcotest.(check string) "terminal successor retained" second second_id
-   | _ -> Alcotest.fail "expected pending command followed by terminal successor");
+   | [ { event_id = first_id; phase = Board_signal_outbox.Prepared _; _ } ] ->
+     Alcotest.(check string) "pending command retained" first first_id
+   | _ -> Alcotest.fail "expected only the pending command after compaction");
   expect_outbox_ok "commit first" (Board_signal_outbox.commit ~event_id:first);
   expect_outbox_ok
     "plan atomic first"
@@ -789,6 +786,49 @@ let test_outbox_rejected_target_is_terminal () =
   | Ok Board_signal_outbox.Recipients_settled -> ()
   | Ok _ -> Alcotest.fail "terminal rejection was changed by failed resolution"
   | Error detail -> Alcotest.fail detail
+;;
+
+let test_outbox_retired_keeper_is_terminal () =
+  let event_id = "test-outbox-terminal-retirement" in
+  let recipient = keeper_recipient "removed-keeper" in
+  expect_outbox_ok
+    "prepare retired-recipient event"
+    (Board_signal_outbox.prepare
+       ~event_id
+       ~command:(test_outbox_command "terminal-retirement"));
+  expect_outbox_ok
+    "commit retired-recipient event"
+    (Board_signal_outbox.commit ~event_id);
+  expect_outbox_ok
+    "plan retired recipient"
+    (Board_signal_outbox.plan_recipients ~event_id ~recipients:[ recipient ]);
+  expect_outbox_ok
+    "retire removed Keeper"
+    (Board_signal_outbox.retire_recipient
+       ~event_id
+       ~recipient
+       ~reason:Board_signal_outbox.Keeper_metadata_removed);
+  expect_outbox_ok
+    "idempotent Keeper retirement"
+    (Board_signal_outbox.retire_recipient
+       ~event_id
+       ~recipient
+       ~reason:Board_signal_outbox.Keeper_metadata_removed);
+  (match
+     Board_signal_outbox.retire_recipient
+       ~event_id
+       ~recipient
+       ~reason:Board_signal_outbox.Keeper_terminal
+   with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "conflicting Keeper retirement reason was accepted");
+  (match Board_signal_outbox.recipient_progress ~event_id with
+   | Ok Board_signal_outbox.Recipients_settled -> ()
+   | Ok _ -> Alcotest.fail "retired Keeper remained pending"
+   | Error detail -> Alcotest.fail detail);
+  expect_outbox_ok
+    "deliver event with retired Keeper"
+    (Board_signal_outbox.mark_delivered ~event_id ~at:(Time_compat.now ()))
 ;;
 
 let test_comment_replay_repairs_partial_parent_projection () =
@@ -1074,6 +1114,87 @@ let test_pending_comment_durability_fences_replay () =
        (match Board_dispatch.get_comments ~post_id with
         | Ok comments -> comments
         | Error error -> Alcotest.fail (Board.show_board_error error)))
+;;
+
+let test_pending_reaction_durability_fences_replay () =
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post
+        store
+        ~author:"pending-reaction-parent"
+        ~content:"reaction settlement parent"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let user_id = "pending-reaction-user" in
+  let emoji = "👍" in
+  let created_at = Time_compat.now () in
+  (match
+     Board.set_reaction
+       store
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id
+       ~emoji
+       ~reacted:true
+       ~created_at
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  (match
+     Board.rewrite_jsonl_durable_result
+       ~where:"test_pending_reaction_projection_loss"
+       (Board.reactions_path ())
+       ""
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let key =
+    Board.reaction_key
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id
+      ~emoji
+  in
+  Board.with_lock store (fun () ->
+    Hashtbl.replace
+      store.Board.pending_reaction_durability
+      key
+      "injected original reaction commit-unknown";
+    store.dirty_posts <- true);
+  (match
+     Board.set_reaction
+       store
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id
+       ~emoji
+       ~reacted:true
+       ~created_at
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool)
+    "reaction durability obligation cleared only after settlement"
+    false
+    (Hashtbl.mem store.Board.pending_reaction_durability key);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.list_reactions ~target_type:Board.Reaction_post ~target_id:post_id () with
+  | Ok [ summary ] ->
+    Alcotest.(check string) "durable reaction emoji" emoji summary.emoji;
+    Alcotest.(check int) "durable reaction count" 1 summary.count
+  | Ok _ -> Alcotest.fail "settled reaction was not restored exactly once"
+  | Error error -> Alcotest.fail (Board.show_board_error error)
 ;;
 
 let test_comment_projection_failure_replays_without_duplicate_append () =
@@ -3298,12 +3419,16 @@ let () =
         (with_eio test_reaction_toggle_and_summary);
       Alcotest.test_case "toggle events keep distinct routing identities" `Quick
         (with_eio test_reaction_toggles_have_distinct_routing_event_ids);
-      Alcotest.test_case "outbox keeps terminal successors behind pending command" `Quick
-        (with_eio test_outbox_compaction_retains_terminal_successors);
+      Alcotest.test_case "pending reaction durability fences replay" `Quick
+        (with_eio test_pending_reaction_durability_fences_replay);
+      Alcotest.test_case "outbox drops terminal successors behind pending command" `Quick
+        (with_eio test_outbox_compaction_drops_terminal_successors);
       Alcotest.test_case "outbox requires every recipient settlement" `Quick
         (with_eio test_outbox_requires_every_planned_recipient_settlement);
       Alcotest.test_case "outbox target rejection is terminal" `Quick
         (with_eio test_outbox_rejected_target_is_terminal);
+      Alcotest.test_case "outbox Keeper retirement is terminal" `Quick
+        (with_eio test_outbox_retired_keeper_is_terminal);
       Alcotest.test_case "typed outbox command codec is strict" `Quick
         (with_eio test_board_signal_command_codec_is_strict_and_canonical);
       Alcotest.test_case "pending routing fences only referenced sweep entity" `Quick

@@ -741,27 +741,54 @@ let mutate_reaction store ~target_type ~target_id ~user_id ~emoji ~created_at ~d
             { target_type; target_id; user_id = user_id_string; emoji; reacted; summary }
           in
           let changed = not (Option.equal ( = ) previous applied) in
-          let content = if changed then Some (reactions_jsonl_unlocked store) else None in
-          Ok (result, key, previous, applied, content))
+          let pending_detail =
+            Hashtbl.find_opt store.pending_reaction_durability key
+          in
+          let content =
+            if changed || Option.is_some pending_detail
+            then Some (reactions_jsonl_unlocked store)
+            else None
+          in
+          Ok (result, key, previous, applied, changed, pending_detail, content))
       in
       match mutation with
       | Error _ as error -> error
-      | Ok (result, _key, _previous, _applied, None) -> Ok result
-      | Ok (result, key, previous, applied, Some content) ->
-        (match save_reactions_jsonl_result content with
-        | Ok () -> Ok result
-        | Error (Persistence_commit_unknown _ as error) ->
-          with_lock store (fun () -> store.dirty_posts <- true);
-          Error error
-        | Error error ->
-          with_lock store (fun () ->
-            let current = Hashtbl.find_opt store.reactions key in
-            if Option.equal ( = ) current applied
-            then
-              match previous with
-              | None -> Hashtbl.remove store.reactions key
-              | Some reaction -> Hashtbl.replace store.reactions key reaction);
-          Error error))
+      | Ok (result, _key, _previous, _applied, _changed, _pending, None) ->
+        Ok result
+      | Ok (result, key, previous, applied, changed, pending_detail, Some content) ->
+        let settle initial_detail =
+          settle_unknown_durable_snapshot
+            store
+            ~initial_detail
+            ~retry:(fun () -> save_reactions_jsonl_result content)
+            ~on_settled:(fun () ->
+              with_lock store (fun () ->
+                Hashtbl.remove store.pending_reaction_durability key))
+        in
+        (match pending_detail with
+         | Some initial_detail -> Result.map (fun () -> result) (settle initial_detail)
+         | None ->
+           (match save_reactions_jsonl_result content with
+            | Ok () -> Ok result
+            | Error (Persistence_commit_unknown initial_detail) ->
+              with_lock store (fun () ->
+                Hashtbl.replace
+                  store.pending_reaction_durability
+                  key
+                  initial_detail;
+                store.dirty_posts <- true);
+              Result.map (fun () -> result) (settle initial_detail)
+            | Error error ->
+              if changed
+              then
+                with_lock store (fun () ->
+                  let current = Hashtbl.find_opt store.reactions key in
+                  if Option.equal ( = ) current applied
+                  then
+                    match previous with
+                    | None -> Hashtbl.remove store.reactions key
+                    | Some reaction -> Hashtbl.replace store.reactions key reaction);
+              Error error)))
 ;;
 
 let set_reaction store ~target_type ~target_id ~user_id ~emoji ~reacted ~created_at =

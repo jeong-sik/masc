@@ -347,6 +347,7 @@ type store = {
   dirty_comment_ids: (string, unit) Hashtbl.t;              (** Deferred comment snapshots *)
   pending_post_durability: (string, string) Hashtbl.t;      (** post_id -> original commit-unknown detail *)
   pending_comment_durability: (string, string) Hashtbl.t;   (** comment_id -> original commit-unknown detail *)
+  pending_reaction_durability: (string, string) Hashtbl.t;  (** reaction key -> original commit-unknown detail *)
   pending_parent_projection_repairs: (string, unit) Hashtbl.t; (** comment_id -> parent rewrite required *)
   mutable last_flush: float;
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)

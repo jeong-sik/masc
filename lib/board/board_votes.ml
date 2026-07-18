@@ -886,6 +886,7 @@ let clear_dirty_if_snapshot_current store snapshot =
       Hashtbl.clear store.dirty_comment_ids;
       Hashtbl.clear store.pending_post_durability;
       Hashtbl.clear store.pending_comment_durability;
+      Hashtbl.clear store.pending_reaction_durability;
       Hashtbl.clear store.pending_parent_projection_repairs;
       store.dirty_posts <- false;
       store.dirty_comments <- false;

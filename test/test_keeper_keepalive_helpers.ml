@@ -383,6 +383,51 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
          [ "alpha"; "beta" ])
 ;;
 
+let test_startup_delivery_uses_durable_recipient_authority () =
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.clear
+    (fun () ->
+       Keeper_registry.clear ();
+       let alpha = make_board_resume_meta "startup-alpha" in
+       let beta = make_board_resume_meta "startup-beta" in
+       List.iter
+         (fun meta ->
+            match Keeper_meta_store.write_meta config meta with
+            | Ok () -> ()
+            | Error detail -> fail ("write_meta failed: " ^ detail))
+         [ alpha; beta ];
+       check int
+         "startup registry is empty"
+         0
+         (List.length (Keeper_registry.all ~base_path:config.base_path ()));
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-startup-authority"
+         ; author = "external-author"
+         ; title = "startup broadcast"
+         ; content = "deliver before Keeper autoboot"
+         ; hearth = None
+         ; updated_at = Some 123.5
+         }
+       in
+       let event_id = "event-startup-authority" in
+       prepare_committed_routing_event event_id;
+       (match
+          KKS.wakeup_relevant_keeper_for_board_signal
+            ~config
+            { event_id; audience = Board_signal_audience.Broadcast; signal }
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check int "startup alpha durable queue" 1 (board_queue_length config alpha.name);
+       check int "startup beta durable queue" 1 (board_queue_length config beta.name);
+       match Board_signal_outbox.recipient_progress ~event_id with
+       | Ok Board_signal_outbox.Recipients_settled -> ()
+       | Ok _ -> fail "startup authority did not settle every durable recipient"
+       | Error detail -> fail detail)
+;;
+
 let test_paused_exact_mention_is_durable_without_wake () =
   with_temp_workspace @@ fun config ->
   Fun.protect
@@ -674,6 +719,8 @@ let () =
             test_board_mentions_use_exact_typed_keeper_ids
         ; test_case "exact mentions deliver and wake every lane" `Quick
             test_exact_mentions_deliver_and_wake_each_lane_independently
+        ; test_case "startup delivery uses durable recipient authority" `Quick
+            test_startup_delivery_uses_durable_recipient_authority
         ; test_case "paused exact mention is durable without wake" `Quick
             test_paused_exact_mention_is_durable_without_wake
         ; test_case "Restarting exact mention is durable with deferred wake" `Quick

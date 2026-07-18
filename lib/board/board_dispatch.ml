@@ -151,7 +151,7 @@ type pending_routing_references = {
   comment_ids : string list;
 }
 
-let pending_routing_references () =
+let prepared_routing_references () =
   Result.map
     (fun entries ->
        List.fold_left
@@ -159,8 +159,7 @@ let pending_routing_references () =
             let command =
               match entry.phase with
               | Board_signal_outbox.Prepared command -> Some command
-              | Board_signal_outbox.Committed { mutation; _ } -> Some mutation
-              | Board_signal_outbox.Delivered _ -> None
+              | Board_signal_outbox.Committed _ | Board_signal_outbox.Delivered _ -> None
             in
             match command with
             | None -> references
@@ -182,7 +181,7 @@ let pending_routing_references () =
 ;;
 
 let reject_referenced_post_mutation ~operation ~post_id mutation =
-  match pending_routing_references () with
+  match prepared_routing_references () with
   | Error detail -> Error (Board_types.Io_error detail)
   | Ok references ->
     if List.exists (String.equal post_id) references.post_ids
@@ -221,6 +220,30 @@ let flusher_start_cas_retries = 3
 let flusher_start_backoff_base_s = 0.001
 let flusher_start_backoff_cap_s = 0.02
 let forced_flusher_start_cas_conflicts_for_test : int Atomic.t = Atomic.make 0
+
+type routing_callback = unit -> (unit, string) result
+
+let run_routing_callback ~name callback =
+  match Atomic.get callback with
+  | Some callback -> callback ()
+  | None -> Error (name ^ " is not installed")
+;;
+
+let routing_retry_callback : routing_callback option Atomic.t =
+  Atomic.make None
+;;
+
+let routing_retry_requested = Atomic.make false
+let routing_retry_inbox = Eio.Stream.create 1
+
+let request_routing_retry () =
+  if Atomic.compare_and_set routing_retry_requested false true
+  then
+    try Eio.Stream.add routing_retry_inbox () with
+    | exn ->
+      Atomic.set routing_retry_requested false;
+      raise exn
+;;
 
 let flusher_start_backoff_delay_s ~attempt =
   let rec pow2 acc n =
@@ -274,7 +297,7 @@ let start_flusher_actor ~sw store =
       | Board_types.Sweep ->
           (try
              with_routing_mutation_lock (fun () ->
-               match pending_routing_references () with
+               match prepared_routing_references () with
                | Ok references ->
                  (match
                     Board.sweep_and_flush
@@ -295,7 +318,39 @@ let start_flusher_actor ~sw store =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
     done
-  )
+  );
+  match Eio_context.get_clock_opt () with
+  | None ->
+    Log.BoardLog.error
+      "Board routing retry actor was not started because the Eio clock is unavailable"
+  | Some clock ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Log.BoardLog.info "Board routing retry actor started";
+      while true do
+        Eio.Stream.take routing_retry_inbox;
+        Atomic.set routing_retry_requested false;
+        let outcome =
+          try
+            run_routing_callback
+              ~name:"Board routing retry authority"
+              routing_retry_callback
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error
+              (Printf.sprintf
+                 "Board routing retry actor callback raised: %s"
+                 (Printexc.to_string exn))
+        in
+        match outcome with
+        | Ok () -> ()
+        | Error detail ->
+          Log.BoardLog.error
+            "Board signal outbox retry remains pending: %s"
+            detail;
+          Eio.Time.sleep clock Env_config.Board.flush_interval_sec;
+          request_routing_retry ()
+      done)
 
 (** CAS [Active (b, false) -> Active (b, true)] for the current [b], then
     spawn the flusher daemon.  If the CAS loses to another fiber, retry a
@@ -370,19 +425,23 @@ let board_signal_hook :
 ;;
 
 let recover_and_drain_callback :
-    (unit -> (unit, string) result) Atomic.t
+    routing_callback option Atomic.t
   =
-  Atomic.make (fun () -> Ok ())
+  Atomic.make None
 ;;
 
 let recover_prepared_callback :
-    (unit -> (unit, string) result) Atomic.t
+    routing_callback option Atomic.t
   =
-  Atomic.make (fun () -> Ok ())
+  Atomic.make None
 ;;
 
 let admit_routing_mutation mutation =
-  match (Atomic.get recover_prepared_callback) () with
+  match
+    run_routing_callback
+      ~name:"Board prepared-event recovery authority"
+      recover_prepared_callback
+  with
   | Error detail ->
     Error (Board_types.Io_error ("board routing-event recovery failed: " ^ detail))
   | Ok () ->
@@ -394,10 +453,17 @@ let admit_routing_mutation mutation =
 
 let set_board_signal_hook hook =
   Atomic.set board_signal_hook (Some hook);
-  match (Atomic.get recover_and_drain_callback) () with
-  | Ok () -> ()
-  | Error detail ->
-    Log.BoardLog.error "Board signal outbox recovery failed: %s" detail
+  match Eio_context.get_root_switch_opt (), Eio_context.get_clock_opt () with
+  | Some _, Some _ -> request_routing_retry ()
+  | _ ->
+    (match
+       run_routing_callback
+         ~name:"Board signal recovery-and-drain authority"
+         recover_and_drain_callback
+     with
+     | Ok () -> ()
+     | Error detail ->
+       Log.BoardLog.error "Board signal outbox recovery failed: %s" detail)
 ;;
 
 let deliver_committed_signal event_id =
@@ -494,10 +560,17 @@ let commit_routing_event ~event_id value =
 ;;
 
 let drain_after_mutation () =
-  match (Atomic.get recover_and_drain_callback) () with
-  | Ok () -> ()
-  | Error detail ->
-    Log.BoardLog.error "Board signal outbox drain remains pending: %s" detail
+  match Eio_context.get_root_switch_opt (), Eio_context.get_clock_opt () with
+  | Some _, Some _ -> request_routing_retry ()
+  | _ ->
+    (match
+       run_routing_callback
+         ~name:"Board signal recovery-and-drain authority"
+         recover_and_drain_callback
+     with
+     | Ok () -> ()
+     | Error detail ->
+       Log.BoardLog.error "Board signal outbox drain remains pending: %s" detail)
 ;;
 
 let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make None
@@ -977,40 +1050,29 @@ let collect_result errors = function
 ;;
 
 let recover_prepared_entries store entries =
-  let rec from_oldest_pending = function
-    | [] -> []
-    | ({ Board_signal_outbox.phase = Board_signal_outbox.Prepared _; _ } :: _ as pending)
-    | ({ Board_signal_outbox.phase = Board_signal_outbox.Committed _; _ } :: _ as pending)
-      -> pending
-    | _ :: rest -> from_oldest_pending rest
-  in
   let rec replay = function
     | [] -> Ok ()
     | (entry : Board_signal_outbox.entry) :: successors ->
-      let command, commit_after_apply =
-        match entry.phase with
-        | Board_signal_outbox.Prepared command -> command, true
-        | Board_signal_outbox.Committed { mutation = command; _ } -> command, false
-        | Board_signal_outbox.Delivered { mutation; _ } -> mutation, false
-      in
-      let recovery =
-        Result.bind (Board_signal_command.apply store command) (fun () ->
-          if commit_after_apply
-          then Board_signal_outbox.commit ~event_id:entry.event_id
-          else Ok ())
-      in
-      (match recovery with
-       | Ok () -> replay successors
-       | Error detail ->
-         Error
-           (Printf.sprintf
-              "Board routing recovery stopped at event_id=%s; \
-               successors_not_attempted=%d; error=%s"
-              entry.event_id
-              (List.length successors)
-              detail))
+      (match entry.phase with
+       | Board_signal_outbox.Committed _ | Board_signal_outbox.Delivered _ ->
+         replay successors
+       | Board_signal_outbox.Prepared command ->
+         let recovery =
+           Result.bind (Board_signal_command.apply store command) (fun () ->
+             Board_signal_outbox.commit ~event_id:entry.event_id)
+         in
+         (match recovery with
+          | Ok () -> replay successors
+          | Error detail ->
+            Error
+              (Printf.sprintf
+                 "Board routing recovery stopped at event_id=%s; \
+                  successors_not_attempted=%d; error=%s"
+                 entry.event_id
+                 (List.length successors)
+                 detail)))
   in
-  replay (from_oldest_pending entries)
+  replay entries
 ;;
 
 let deliver_committed_entries entries =
@@ -1035,7 +1097,11 @@ let recover_prepared_board_signal_outbox () =
 ;;
 
 let recover_and_drain_board_signal_outbox () =
-  let recovery_errors = (Atomic.get recover_prepared_callback) () in
+  let recovery_errors =
+    run_routing_callback
+      ~name:"Board prepared-event recovery authority"
+      recover_prepared_callback
+  in
   match recovery_errors with
   | Error _ as error -> error
   | Ok () ->
@@ -1049,8 +1115,9 @@ let recover_and_drain_board_signal_outbox () =
 ;;
 
 let () =
-  Atomic.set recover_prepared_callback recover_prepared_board_signal_outbox;
-  Atomic.set recover_and_drain_callback recover_and_drain_board_signal_outbox
+  Atomic.set recover_prepared_callback (Some recover_prepared_board_signal_outbox);
+  Atomic.set recover_and_drain_callback (Some recover_and_drain_board_signal_outbox);
+  Atomic.set routing_retry_callback (Some recover_and_drain_board_signal_outbox)
 ;;
 
 let list_reactions ~target_type ~target_id ?user_id () =
@@ -1115,7 +1182,7 @@ let sweep () =
   match backend () with
   | Jsonl store ->
     with_routing_mutation_lock (fun () ->
-      match pending_routing_references () with
+      match prepared_routing_references () with
       | Error detail -> Error detail
       | Ok references ->
         Result.map_error

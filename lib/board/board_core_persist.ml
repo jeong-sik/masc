@@ -66,6 +66,7 @@ let create_store () =
   ; dirty_comment_ids = Hashtbl.create 512
   ; pending_post_durability = Hashtbl.create 64
   ; pending_comment_durability = Hashtbl.create 64
+  ; pending_reaction_durability = Hashtbl.create 64
   ; pending_parent_projection_repairs = Hashtbl.create 64
   ; last_flush = Time_compat.now ()
   ; flusher_inbox = Eio.Stream.create flusher_inbox_capacity

@@ -16,12 +16,17 @@ type recipient = private
 val keeper_lane : string -> (recipient, string) result
 val target_identity : string -> (recipient, string) result
 
+type recipient_retirement_reason =
+  | Keeper_metadata_removed
+  | Keeper_terminal
+
 type phase =
   | Prepared of Board_signal_command.t
   | Committed of {
       mutation : Board_signal_command.t;
       recipients : recipient list option;
       settled_recipients : recipient list;
+      retired_recipients : (recipient * recipient_retirement_reason) list;
     }
   | Delivered of {
       mutation : Board_signal_command.t;
@@ -68,6 +73,15 @@ val reject_target : event_id:string -> identity:string -> (unit, string) result
     durable rejection proof; it is never reinterpreted as a successful
     delivery. *)
 
+val retire_recipient :
+  event_id:string ->
+  recipient:recipient ->
+  reason:recipient_retirement_reason ->
+  (unit, string) result
+(** Explicitly terminalize a previously planned concrete recipient after the
+    durable Keeper authority proves that it was removed or terminal. Unresolved
+    target identities continue to use {!reject_target}. *)
+
 val settle_recipient :
   event_id:string -> recipient:recipient -> (unit, string) result
 (** Durably settle one planned recipient.  Exact repeats are idempotent. *)
@@ -78,6 +92,5 @@ val entries : unit -> (entry list, string) result
 (** Current latest state for every event in durable prepare order. *)
 
 val compact_terminal : unit -> (unit, string) result
-(** Deterministic compaction. Removes the terminal prefix before the oldest
-    pending event. Terminal successors are retained because replay of an older
-    prepared mutation must reapply every later mutation in durable order. *)
+(** Deterministic compaction. Retains only prepared or committed events;
+    delivered events never participate in Board mutation replay. *)

@@ -379,8 +379,126 @@ let board_signal_stimulus
   }
 ;;
 
-let board_signal_entry_accepts_delivery (entry : Keeper_registry.registry_entry) =
-  not (Keeper_state_machine.is_terminal entry.phase)
+type board_delivery_entry =
+  { base_path : string
+  ; name : string
+  ; meta : keeper_meta
+  }
+
+let board_delivery_entry_compare left right = String.compare left.name right.name
+
+let board_delivery_entry_is_terminal entry =
+  match entry.meta.latched_reason with
+  | Some Keeper_latched_reason.Dead_tombstone -> true
+  | Some _ | None ->
+    (match Keeper_registry.get ~base_path:entry.base_path entry.name with
+     | Some live -> Keeper_state_machine.is_terminal live.phase
+     | None -> false)
+;;
+
+let canonical_board_delivery_entries entries =
+  entries
+  |> List.filter (fun entry -> not (board_delivery_entry_is_terminal entry))
+  |> List.sort_uniq board_delivery_entry_compare
+;;
+
+let read_board_delivery_entry config name =
+  Result.bind (Keeper_meta_store.read_effective_meta config name) (function
+    | Some meta -> Ok (Some { base_path = config.Workspace.base_path; name = meta.name; meta })
+    | None -> Ok None)
+;;
+
+let all_durable_board_delivery_entries config =
+  let ( let* ) = Result.bind in
+  let* persisted_names = Keeper_meta_store.keeper_names_result config in
+  let configured_names = Keeper_meta_store.configured_keeper_names config in
+  let unmaterialized =
+    List.filter
+      (fun name -> not (List.exists (String.equal name) persisted_names))
+      configured_names
+  in
+  if unmaterialized <> []
+  then
+    Error
+      (Printf.sprintf
+         "Board recipient authority is not materialized for configured Keepers: %s"
+         (String.concat "," unmaterialized))
+  else
+    let rec read acc = function
+      | [] -> Ok (canonical_board_delivery_entries (List.rev acc))
+      | name :: rest ->
+        let* entry = read_board_delivery_entry config name in
+        (match entry with
+         | Some entry -> read (entry :: acc) rest
+         | None ->
+           Error
+             (Printf.sprintf
+                "Board recipient metadata disappeared during authority read: keeper=%s"
+                name))
+    in
+    read [] persisted_names
+;;
+
+let board_delivery_entries_for_audience config audience =
+  match audience with
+  | Board_signal_audience.Targets identities ->
+    let configured_names = Keeper_meta_store.configured_keeper_names config in
+    let rec exact acc unresolved = function
+      | [] -> Ok (List.rev acc, List.rev unresolved)
+      | identity :: rest ->
+        Result.bind (read_board_delivery_entry config identity) (function
+          | Some entry -> exact (entry :: acc) unresolved rest
+          | None when List.exists (String.equal identity) configured_names ->
+            Error
+              (Printf.sprintf
+                 "Board target metadata is not materialized: target=%s"
+                 identity)
+          | None -> exact acc (identity :: unresolved) rest)
+    in
+    Result.bind (exact [] [] identities) (fun (exact_entries, unresolved) ->
+      if unresolved = []
+      then Ok (canonical_board_delivery_entries exact_entries)
+      else
+        Result.map
+          (fun all -> canonical_board_delivery_entries (exact_entries @ all))
+          (all_durable_board_delivery_entries config))
+  | Board_signal_audience.Broadcast
+  | Board_signal_audience.Discoverable
+  | Board_signal_audience.Thread_participants _ ->
+    all_durable_board_delivery_entries config
+;;
+
+let retirement_reason_for_missing_entry config keeper_name =
+  Result.bind (Keeper_meta_store.read_effective_meta config keeper_name) (function
+    | Some meta ->
+      let durable_terminal =
+        match meta.latched_reason with
+        | Some Keeper_latched_reason.Dead_tombstone -> true
+        | Some _ | None -> false
+      in
+      let live_terminal =
+        match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
+        | Some entry -> Keeper_state_machine.is_terminal entry.phase
+        | None -> false
+      in
+      if durable_terminal || live_terminal
+      then Ok Board_signal_outbox.Keeper_terminal
+      else
+        Error
+          (Printf.sprintf
+             "Board recipient is absent from an authority snapshot but remains eligible: keeper=%s"
+             keeper_name)
+    | None ->
+      if
+        List.exists
+          (String.equal keeper_name)
+          (Keeper_meta_store.configured_keeper_names config)
+      then
+        Error
+          (Printf.sprintf
+             "Board recipient metadata is not materialized: keeper=%s"
+             keeper_name)
+      else Ok Board_signal_outbox.Keeper_metadata_removed)
 ;;
 
 let record_board_attention_candidate
@@ -459,9 +577,7 @@ let keeper_ids identities =
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
-let entry_matches_target_identity
-      (entry : Keeper_registry.registry_entry)
-      target_identity
+let entry_matches_target_identity entry target_identity
   =
   match Keeper_identity.Keeper_id.of_string target_identity with
   | None -> false
@@ -473,9 +589,7 @@ let entry_matches_target_identity
     List.exists (Keeper_identity.Keeper_id.equal target_id) delivery_ids
 ;;
 
-let entry_matches_participant_identities
-      participant_ids
-      (entry : Keeper_registry.registry_entry)
+let entry_matches_participant_identities participant_ids entry
   =
   let self_ids = Keeper_world_observation_message_scope.self_ids entry.meta in
   List.exists
@@ -486,14 +600,8 @@ let entry_matches_participant_identities
 
 let dedupe_registry_entries entries =
   entries
-  |> List.sort (fun
-       (left : Keeper_registry.registry_entry)
-       (right : Keeper_registry.registry_entry) ->
-       String.compare left.name right.name)
-  |> List.sort_uniq (fun
-       (left : Keeper_registry.registry_entry)
-       (right : Keeper_registry.registry_entry) ->
-       String.compare left.name right.name)
+  |> List.sort board_delivery_entry_compare
+  |> List.sort_uniq board_delivery_entry_compare
 ;;
 
 let resolve_target_entry registry_entries identity =
@@ -512,7 +620,7 @@ let resolve_target_entry registry_entries identity =
          (String.concat
             ","
             (List.map
-               (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+               (fun entry -> entry.name)
                matches)))
 ;;
 
@@ -578,7 +686,7 @@ let delivery_units_for_audience registry_entries audience signal =
       Board_signal_outbox.keeper_lane
       []
       (List.map
-         (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+	      (fun entry -> entry.name)
          registry_entries)
   | Board_signal_audience.Broadcast
   | Board_signal_audience.Thread_participants _ ->
@@ -589,7 +697,7 @@ let delivery_units_for_audience registry_entries audience signal =
            Board_signal_outbox.keeper_lane
            []
            (List.map
-              (fun ((entry : Keeper_registry.registry_entry), _reason) -> entry.name)
+	              (fun (entry, _reason) -> entry.name)
               entries))
 ;;
 
@@ -598,10 +706,6 @@ let wakeup_relevant_keeper_for_board_signal
       ({ event_id = routing_event_id; audience; signal } :
         Board_dispatch.board_signal_event)
   =
-  let registry_entries =
-    Keeper_registry.all ~base_path:config.base_path ()
-    |> List.filter board_signal_entry_accepts_delivery
-  in
   let signal_kind_label =
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
@@ -623,13 +727,14 @@ let wakeup_relevant_keeper_for_board_signal
       detail;
     Error (Printf.sprintf "keeper=%s phase=%s error=%s" keeper phase detail)
   in
+  Result.bind (board_delivery_entries_for_audience config audience) (fun registry_entries ->
   let registry_entry recipient =
     List.find_opt
-      (fun (entry : Keeper_registry.registry_entry) ->
-         String.equal entry.name recipient)
+      (fun entry -> String.equal entry.name recipient)
       registry_entries
   in
-  let process_addressed_recipient recipient (reason : Board_wake.wake_reason) =
+  let process_addressed_recipient entry (reason : Board_wake.wake_reason) =
+    let recipient = entry.name in
     try
       match
         deliver_addressed_board_signal
@@ -642,10 +747,10 @@ let wakeup_relevant_keeper_for_board_signal
       | Error detail -> fail ~keeper:recipient ~phase:"board_signal_delivery" detail
       | Ok () ->
         let paused =
-          match registry_entry recipient with
-          | Some entry ->
-            entry.meta.paused || entry.phase = Keeper_state_machine.Paused
-          | None -> false
+          entry.meta.paused
+          || match Keeper_registry.get ~base_path:config.base_path recipient with
+             | Some live -> live.phase = Keeper_state_machine.Paused
+             | None -> false
         in
         if paused
         then
@@ -685,26 +790,19 @@ let wakeup_relevant_keeper_for_board_signal
         ~phase:"board_lane_failure"
         (Printexc.to_string exn)
   in
-  let process_discoverable_recipient recipient =
-    match registry_entry recipient with
-    | None ->
-      fail
-        ~keeper:recipient
-        ~phase:"board_attention_recipient_missing"
-        "planned Discoverable recipient is not registered"
-    | Some entry ->
-      Result.map_error
-        (fun detail ->
-           Printf.sprintf
-             "keeper=%s phase=board_attention_candidate_record error=%s"
-             entry.name
-             detail)
-        (record_board_attention_candidate
-           ~config
-           ~routing_event_id
-           ~signal_kind_label
-           ~meta:entry.meta
-           signal)
+  let process_discoverable_recipient entry =
+    Result.map_error
+      (fun detail ->
+         Printf.sprintf
+           "keeper=%s phase=board_attention_candidate_record error=%s"
+           entry.name
+           detail)
+      (record_board_attention_candidate
+         ~config
+         ~routing_event_id
+         ~signal_kind_label
+         ~meta:entry.meta
+         signal)
   in
   let ensure_recipient_plan () =
     match Board_signal_outbox.recipient_progress ~event_id:routing_event_id with
@@ -730,6 +828,23 @@ let wakeup_relevant_keeper_for_board_signal
   in
   let addressed_reason = addressed_reason_for_audience audience signal in
   let process_recipient recipient =
+    let retire_missing keeper_name phase =
+      Result.bind
+        (retirement_reason_for_missing_entry config keeper_name)
+        (fun reason ->
+           Log.Keeper.warn
+             "board signal recipient retired: event_id=%s keeper=%s phase=%s post=%s"
+             routing_event_id
+             keeper_name
+             phase
+             signal.post_id;
+           Result.map
+             (fun () -> `Terminalized)
+             (Board_signal_outbox.retire_recipient
+                ~event_id:routing_event_id
+                ~recipient
+                ~reason))
+    in
     match recipient, audience with
     | ( Board_signal_outbox.Target_identity { identity; keeper_name = None }
       , Board_signal_audience.Targets _ ) ->
@@ -753,25 +868,34 @@ let wakeup_relevant_keeper_for_board_signal
               Result.map
                 (fun () -> `Settle resolved)
                 (process_addressed_recipient
-                   entry.name
+                   entry
                    Board_wake.Explicit_mention)))
     | ( Board_signal_outbox.Target_identity
           { identity = _; keeper_name = Some keeper_name }
       , Board_signal_audience.Targets _ ) ->
-      Result.map
-        (fun () -> `Settle recipient)
-        (process_addressed_recipient keeper_name Board_wake.Explicit_mention)
+      (match registry_entry keeper_name with
+       | None -> retire_missing keeper_name "board_target_recipient_retired"
+       | Some entry ->
+         Result.map
+           (fun () -> `Settle recipient)
+           (process_addressed_recipient entry Board_wake.Explicit_mention))
     | Board_signal_outbox.Keeper_lane keeper_name, Board_signal_audience.Discoverable ->
-      Result.map
-        (fun () -> `Settle recipient)
-        (process_discoverable_recipient keeper_name)
+      (match registry_entry keeper_name with
+       | None -> retire_missing keeper_name "board_attention_recipient_retired"
+       | Some entry ->
+         Result.map
+           (fun () -> `Settle recipient)
+           (process_discoverable_recipient entry))
     | ( Board_signal_outbox.Keeper_lane keeper_name
       , (Board_signal_audience.Broadcast
         | Board_signal_audience.Thread_participants _) ) ->
-      Result.bind addressed_reason (fun reason ->
-        Result.map
-          (fun () -> `Settle recipient)
-          (process_addressed_recipient keeper_name reason))
+      (match registry_entry keeper_name with
+       | None -> retire_missing keeper_name "board_addressed_recipient_retired"
+       | Some entry ->
+         Result.bind addressed_reason (fun reason ->
+           Result.map
+             (fun () -> `Settle recipient)
+             (process_addressed_recipient entry reason)))
     | Board_signal_outbox.Keeper_lane _, Board_signal_audience.Targets _
     | Board_signal_outbox.Target_identity _, Board_signal_audience.Discoverable
     | Board_signal_outbox.Target_identity _, Board_signal_audience.Broadcast
@@ -800,7 +924,7 @@ let wakeup_relevant_keeper_for_board_signal
   in
   match failures with
   | [] -> Ok ()
-  | _ -> Error (String.concat "; " (List.rev failures)))
+  | _ -> Error (String.concat "; " (List.rev failures))))
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

@@ -1,8 +1,8 @@
 module U = Masc.Keeper_compaction_unit
 module T = Agent_sdk.Types
 
-let message role content : T.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+let message ?tool_call_id role content : T.message =
+  { role; content; name = None; tool_call_id; metadata = [] }
 
 let text role value = message role [ T.Text value ]
 
@@ -146,6 +146,122 @@ let test_mixed_request_result_error () =
       ()
   | _ -> Alcotest.fail "expected typed mixed request/result"
 
+let test_empty_tool_use_id_error () =
+  List.iter
+    (fun tool_use_id ->
+       match U.partition [ message T.Assistant [ use tool_use_id ] ] with
+       | Error
+           (U.Empty_tool_use_id
+             { message_index = 0; block_index = 0; tool_use_id = actual }) ->
+         Alcotest.(check string) "raw empty ToolUse id" tool_use_id actual
+       | _ -> Alcotest.fail "expected typed empty ToolUse id")
+    [ ""; " \t\n" ]
+;;
+
+let test_empty_tool_result_id_error () =
+  List.iter
+    (fun tool_use_id ->
+       let request = message T.Assistant [ use "expected" ] in
+       let response = message T.Tool [ result tool_use_id ] in
+       match U.partition [ request; response ] with
+       | Error
+           (U.Empty_tool_result_id
+             { message_index = 1; block_index = 0; tool_use_id = actual }) ->
+         Alcotest.(check string) "raw empty ToolResult id" tool_use_id actual
+       | _ -> Alcotest.fail "expected typed empty ToolResult id")
+    [ ""; " \t\n" ]
+;;
+
+let test_parallel_empty_tool_use_id_error () =
+  let request =
+    message T.Assistant
+      [ use "call-a"; T.Text "between"; use " \t"; use "call-b" ]
+  in
+  match U.partition [ request ] with
+  | Error
+      (U.Empty_tool_use_id
+        { message_index = 0; block_index = 2; tool_use_id = " \t" }) ->
+    ()
+  | _ -> Alcotest.fail "expected typed empty parallel ToolUse id"
+;;
+
+let test_parallel_empty_tool_result_id_error () =
+  let request = message T.Assistant [ use "call-a"; use "call-b" ] in
+  let response =
+    message T.Tool [ result "call-a"; T.Text "between"; result "\n " ]
+  in
+  match U.partition [ request; response ] with
+  | Error
+      (U.Empty_tool_result_id
+        { message_index = 1; block_index = 2; tool_use_id = "\n " }) ->
+    ()
+  | _ -> Alcotest.fail "expected typed empty parallel ToolResult id"
+;;
+
+let test_message_content_tool_id_mismatch_error () =
+  let request = message T.Assistant [ use "content-id" ] in
+  let response =
+    message ~tool_call_id:"message-id" T.Tool [ result "content-id" ]
+  in
+  match U.partition [ request; response ] with
+  | Error
+      (U.Message_tool_call_id_mismatch
+        { message_index = 1
+        ; message_tool_call_id = "message-id"
+        ; content_tool_use_ids = [ "content-id" ]
+        }) ->
+    ()
+  | _ -> Alcotest.fail "expected typed message/content ToolResult id mismatch"
+;;
+
+let test_message_tool_id_without_result_error () =
+  let message = message ~tool_call_id:"stray-id" T.Tool [ T.Text "no result" ] in
+  match U.partition [ message ] with
+  | Error
+      (U.Message_tool_call_id_mismatch
+        { message_index = 0
+        ; message_tool_call_id = "stray-id"
+        ; content_tool_use_ids = []
+        }) ->
+    ()
+  | _ -> Alcotest.fail "expected typed message ToolResult id mismatch"
+;;
+
+let test_nonblank_tool_ids_remain_exact () =
+  let exact_id = "  exact-id  " in
+  let request = message T.Assistant [ use exact_id ] in
+  let response =
+    message ~tool_call_id:exact_id T.Tool [ result exact_id ]
+  in
+  let cycle = [ request; response ] in
+  let output = U.partition cycle |> require_ok in
+  check_exact
+    "nonblank id is not normalized"
+    [ U.Closed_tool_cycle cycle ]
+    output.closed_prefix;
+  match
+    U.partition
+      [ request; message ~tool_call_id:"exact-id" T.Tool [ result "exact-id" ] ]
+  with
+  | Error (U.Unknown_tool_result { message_index = 1; tool_use_id = "exact-id" }) ->
+    ()
+  | _ -> Alcotest.fail "trimmed ToolResult id must not match the raw ToolUse id"
+;;
+
+let test_invalid_identity_prevents_plan_callback () =
+  let plan_calls = ref 0 in
+  let outcome =
+    U.partition [ message T.Assistant [ use " \t" ] ]
+    |> Result.map (fun (partition : U.partition) ->
+      incr plan_calls;
+      partition.closed_prefix)
+  in
+  (match outcome with
+   | Error (U.Empty_tool_use_id _) -> ()
+   | _ -> Alcotest.fail "expected invalid identity before plan callback");
+  Alcotest.(check int) "plan callback count" 0 !plan_calls
+;;
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -170,5 +286,21 @@ let () =
         ; Alcotest.test_case "duplicate use" `Quick test_duplicate_tool_use_error
         ; Alcotest.test_case "mixed request/result" `Quick
             test_mixed_request_result_error
+        ; Alcotest.test_case "empty ToolUse id" `Quick
+            test_empty_tool_use_id_error
+        ; Alcotest.test_case "empty ToolResult id" `Quick
+            test_empty_tool_result_id_error
+        ; Alcotest.test_case "parallel empty ToolUse id" `Quick
+            test_parallel_empty_tool_use_id_error
+        ; Alcotest.test_case "parallel empty ToolResult id" `Quick
+            test_parallel_empty_tool_result_id_error
+        ; Alcotest.test_case "message/content id mismatch" `Quick
+            test_message_content_tool_id_mismatch_error
+        ; Alcotest.test_case "message id without result" `Quick
+            test_message_tool_id_without_result_error
+        ; Alcotest.test_case "nonblank ids remain exact" `Quick
+            test_nonblank_tool_ids_remain_exact
+        ; Alcotest.test_case "invalid identity stops plan callback" `Quick
+            test_invalid_identity_prevents_plan_callback
         ] )
     ]

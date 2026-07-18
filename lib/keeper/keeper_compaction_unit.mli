@@ -10,6 +10,21 @@ type closed_unit =
   | Closed_tool_cycle of Agent_sdk.Types.message list
 
 type structural_error =
+  | Empty_tool_use_id of
+      { message_index : int
+      ; block_index : int
+      ; tool_use_id : string
+      }
+  | Empty_tool_result_id of
+      { message_index : int
+      ; block_index : int
+      ; tool_use_id : string
+      }
+  | Message_tool_call_id_mismatch of
+      { message_index : int
+      ; message_tool_call_id : string
+      ; content_tool_use_ids : string list
+      }
   | Orphan_tool_result of
       { message_index : int
       ; tool_use_id : string

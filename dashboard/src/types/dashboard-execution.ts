@@ -196,12 +196,8 @@ export interface DashboardKeeperReactionLedgerHealth {
   reaction_count: number | null
   turn_started_count: number | null
   cursor_ack_count: number | null
-  execution_receipt_count: number | null
-  terminal_reason_count: number | null
-  operator_escalation_count: number | null
-  unknown_reaction_count: number | null
+  quarantined_row_count: number | null
   cursor_swept_stimulus_count: number | null
-  legacy_cursor_swept_stimulus_count: number | null
   pending_stimulus_count: number | null
   read_error_count: number | null
   pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]

@@ -1771,6 +1771,21 @@ module Private_jsonl_cursor = struct
         inode
         end_offset
   ;;
+
+  let prefix_end_offset cursor ~device ~inode ~file_length =
+    match cursor with
+    | Missing -> None
+    | Present
+        { device = expected_device
+        ; inode = expected_inode
+        ; end_offset
+        } ->
+      if Int.equal expected_device device
+         && Int.equal expected_inode inode
+         && end_offset <= file_length
+      then Some end_offset
+      else None
+  ;;
 end
 
 type private_jsonl_snapshot =
@@ -2027,9 +2042,11 @@ let read_private_jsonl_durable_locked_result path ~after =
   | Ok None ->
     let actual = Private_jsonl_cursor.Missing in
     (match after with
-     | None | Some Private_jsonl_cursor.Missing ->
-       Ok { bytes = ""; cursor = actual }
-     | Some expected -> Error (Cursor_mismatch { expected; actual }))
+     | None -> Ok { bytes = ""; cursor = actual }
+     | Some expected ->
+       if Private_jsonl_cursor.equal expected actual
+       then Ok { bytes = ""; cursor = actual }
+       else Error (Cursor_mismatch { expected; actual }))
   | Ok (Some fd) ->
     Fun.protect
       ~finally:(fun () -> Unix.close fd)
@@ -2047,18 +2064,16 @@ let read_private_jsonl_durable_locked_result path ~after =
                  let from =
                    match after with
                    | None -> Ok 0
-                   | Some Private_jsonl_cursor.Missing ->
-                     Error
-                       (Cursor_mismatch
-                          { expected = Private_jsonl_cursor.Missing; actual })
-                   | Some
-                       (Private_jsonl_cursor.Present
-                         { device; inode; end_offset }) as expected ->
-                     if Int.equal device stats.Unix.st_dev
-                        && Int.equal inode stats.Unix.st_ino
-                        && end_offset <= stats.Unix.st_size
-                     then Ok end_offset
-                     else Error (Cursor_mismatch { expected; actual })
+                   | Some expected ->
+                     (match
+                        Private_jsonl_cursor.prefix_end_offset
+                          expected
+                          ~device:stats.Unix.st_dev
+                          ~inode:stats.Unix.st_ino
+                          ~file_length:stats.Unix.st_size
+                      with
+                      | Some end_offset -> Ok end_offset
+                      | None -> Error (Cursor_mismatch { expected; actual }))
                  in
                  (match from with
                   | Error _ as error -> error
@@ -2092,8 +2107,10 @@ let private_jsonl_current_cursor path =
 let private_jsonl_remove_rewrite_stage temp_path =
   match private_jsonl_capture Remove_rewrite_stage (fun () -> Unix.unlink temp_path) with
   | Ok () -> None
-  | Error { exception_ = Unix.Unix_error (Unix.ENOENT, _, _); _ } -> None
-  | Error failure -> Some failure
+  | Error failure ->
+    (match failure.exception_ with
+     | Unix.Unix_error (error, _, _) when error = Unix.ENOENT -> None
+     | _ -> Some failure)
 ;;
 
 let private_jsonl_replace_locked ~dir path content =

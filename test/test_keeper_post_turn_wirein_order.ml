@@ -108,6 +108,29 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
+let test_invalid_plan_is_distinct_from_provider_unavailable () =
+  let meta = make_meta () in
+  let context =
+    Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+  in
+  let decision failure =
+    Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+      (fun ~runtime_ids:_ ~keeper_name:_ () ->
+         Some (fun ~units:_ -> Error failure))
+      (fun () ->
+         Compact_policy.compact_for_request_typed
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           context)
+    |> fun preparation -> preparation.Compact_policy.decision
+  in
+  (match decision Masc.Keeper_compaction_llm_summarizer.Invalid_plan with
+   | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
+   | _ -> fail "invalid provider plan was not a typed source terminal");
+  match decision Masc.Keeper_compaction_llm_summarizer.Provider_unavailable with
+  | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
+  | _ -> fail "provider failure was collapsed into an invalid plan"
+
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -338,7 +361,8 @@ let test_manual_compaction_serializes_owner_lane () =
                              ]
                          ] )
                    ])
-               |> Result.to_option))
+               |> Result.map_error (fun _ ->
+                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
           run_cycle
       in
       (match outcome with
@@ -417,7 +441,8 @@ let test_manual_compaction_serializes_owner_lane () =
                              ]
                          ] )
                    ])
-               |> Result.to_option))
+               |> Result.map_error (fun _ ->
+                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
           (fun () ->
              Post_turn.recover_latest_checkpoint_for_compaction
                ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
@@ -491,6 +516,8 @@ let () =
         `Quick test_compaction_rejection_tag_is_stable;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
+      test_case "invalid plan is distinct from provider unavailability"
+        `Quick test_invalid_plan_is_distinct_from_provider_unavailable;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "malformed structure preserves checkpoint"

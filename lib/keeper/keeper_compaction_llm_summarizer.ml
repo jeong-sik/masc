@@ -30,8 +30,13 @@ type compaction_plan =
   ; source_units : Keeper_compaction_unit.closed_unit list
   }
 
+type summarization_failure =
+  | Provider_unavailable
+  | Invalid_plan
+
 type summarizer =
-  units:Keeper_compaction_unit.closed_unit list -> compaction_plan option
+  units:Keeper_compaction_unit.closed_unit list ->
+  (compaction_plan, summarization_failure) result
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
@@ -349,9 +354,9 @@ let run_plan
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~units
-    () : compaction_plan option =
+    () : (compaction_plan, summarization_failure) result =
   if not (has_eligible_units units)
-  then None
+  then Error Invalid_plan
   else
     let provider_cfg = provider_for_plan provider_cfg in
     let request = messages_for_plan ~units in
@@ -363,15 +368,15 @@ let run_plan
       Log.Keeper.warn ~keeper_name
         "compaction LLM plan failed runtime=%s: %s"
         runtime_id (Provider_http_error.to_message err);
-      None
+      Error Provider_unavailable
     | Ok response ->
       (match plan_of_response ~runtime_id ~units response with
-       | Ok plan -> Some plan
+       | Ok plan -> Ok plan
        | Error detail ->
          Log.Keeper.warn ~keeper_name
            "compaction LLM plan rejected runtime=%s: %s"
            runtime_id detail;
-         None)
+         Error Invalid_plan)
 
 type candidate =
   { runtime_id : string
@@ -470,26 +475,29 @@ let make_resolved ?complete ~(runtime_ids : string list) ~(keeper_name : string)
        let clock = Eio_context.get_clock_opt () in
        Some
          (fun ~units ->
-           let rec attempt = function
+           let rec attempt saw_provider_failure = function
              | [] ->
                Log.Keeper.warn ~keeper_name
                  "compaction LLM candidate chain exhausted assignments=%s"
                  assignments_label;
-               None
+               if saw_provider_failure
+               then Error Provider_unavailable
+               else Error Invalid_plan
              | candidate :: rest ->
                (match
                   run_plan ?complete ?clock ~keeper_name
                     ~runtime_id:candidate.runtime_id ~sw ~net
                     ~provider_cfg:candidate.provider_cfg ~units ()
                 with
-                | Some _ as plan ->
+                | Ok _ as plan ->
                   Log.Keeper.info ~keeper_name
                     "compaction LLM candidate succeeded assignments=%s runtime=%s"
                     assignments_label candidate.runtime_id;
                   plan
-                | None -> attempt rest)
+                | Error Provider_unavailable -> attempt true rest
+                | Error Invalid_plan -> attempt saw_provider_failure rest)
            in
-           attempt candidates)
+           attempt false candidates)
      | _ ->
        List.iter
          (fun candidate ->

@@ -7,12 +7,16 @@
     plan cannot be applied to a different source. *)
 type compaction_plan
 
-(** [summarizer ~units] returns [Some plan] when the LLM produced a valid plan
-    over [units], or [None] on any failure (provider error, empty
-    or invalid structured response). Total and synchronous; the effect is
-    hidden in the closure captured by {!make}. *)
+type summarization_failure =
+  | Provider_unavailable
+  | Invalid_plan
+
+(** A provider/transport failure remains retryable; a response that reached
+    the exact source but violated the closed plan contract is a typed terminal
+    for that source. *)
 type summarizer =
-  units:Keeper_compaction_unit.closed_unit list -> compaction_plan option
+  units:Keeper_compaction_unit.closed_unit list ->
+  (compaction_plan, summarization_failure) result
 
 (** The low-level provider completion the summarizer drives. Defaulted to
     {!Llm_provider.Complete.complete}; overridable in tests. *)

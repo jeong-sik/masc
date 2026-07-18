@@ -124,11 +124,13 @@ let compaction_recovery_error_data ?dispatch_error error =
         Keeper_checkpoint_store.Ref_not_found -> Not_found
     | Compaction_rejected Runtime_identity_unavailable
     | Compaction_rejected (Invalid_structure _)
+    | Compaction_rejected No_eligible_history
     | Compaction_rejected Structurally_unchanged
     | Compaction_rejected Checkpoint_not_reduced ->
       Precondition_failed
     | Compaction_rejected Summarizer_unavailable
-    | Compaction_rejected Plan_unavailable_or_invalid
+    | Compaction_rejected Plan_provider_unavailable
+    | Compaction_rejected Invalid_compaction_plan
     | Compaction_rejected (Invalid_structural_evidence _)
     | Compaction_evidence_missing
     | Unexpected_compaction_decision _

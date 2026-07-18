@@ -820,12 +820,8 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   const reactionCount = asNumber(raw.reaction_count)
   const turnStartedCount = asNumber(raw.turn_started_count)
   const cursorAckCount = asNumber(raw.cursor_ack_count)
-  const executionReceiptCount = asNumber(raw.execution_receipt_count)
-  const terminalReasonCount = asNumber(raw.terminal_reason_count)
-  const operatorEscalationCount = asNumber(raw.operator_escalation_count)
-  const unknownReactionCount = asNumber(raw.unknown_reaction_count)
+  const quarantinedRowCount = asNumber(raw.quarantined_row_count)
   const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
-  const legacyCursorSweptStimulusCount = asNumber(raw.legacy_cursor_swept_stimulus_count)
   const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
   const readErrorCount = asNumber(raw.read_error_count)
   const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
@@ -840,12 +836,8 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     && reactionCount == null
     && turnStartedCount == null
     && cursorAckCount == null
-    && executionReceiptCount == null
-    && terminalReasonCount == null
-    && operatorEscalationCount == null
-    && unknownReactionCount == null
+    && quarantinedRowCount == null
     && cursorSweptStimulusCount == null
-    && legacyCursorSweptStimulusCount == null
     && pendingStimulusCount == null
     && readErrorCount == null
     && pendingByKeeper.length === 0
@@ -861,12 +853,8 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     reaction_count: reactionCount ?? null,
     turn_started_count: turnStartedCount ?? null,
     cursor_ack_count: cursorAckCount ?? null,
-    execution_receipt_count: executionReceiptCount ?? null,
-    terminal_reason_count: terminalReasonCount ?? null,
-    operator_escalation_count: operatorEscalationCount ?? null,
-    unknown_reaction_count: unknownReactionCount ?? null,
+    quarantined_row_count: quarantinedRowCount ?? null,
     cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
-    legacy_cursor_swept_stimulus_count: legacyCursorSweptStimulusCount ?? null,
     pending_stimulus_count: pendingStimulusCount ?? null,
     read_error_count: readErrorCount ?? null,
     pending_by_keeper: pendingByKeeper,

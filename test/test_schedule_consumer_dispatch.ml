@@ -36,6 +36,31 @@ let write_empty_file path =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> ())
 ;;
 
+let write_file path content =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output content)
+;;
+
+let reaction_ledger_dir ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Common.keepers_runtime_dir_of_base ~base_path)
+          keeper_name)
+       "reaction-ledger")
+    "v3"
+;;
+
+let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
+  let month_dir =
+    Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2026-01"
+  in
+  mkdir_p month_dir;
+  write_file (Filename.concat month_dir "01.jsonl") "not-json\n"
+;;
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -104,19 +129,21 @@ let board_post_payload =
     ]
 ;;
 
-let keeper_wake_payload =
+let keeper_wake_payload_for keeper_name =
   `Assoc
     [ "kind", `String "masc.keeper_wake"
     ; "schema_version", `Int 1
     ; ( "body"
       , `Assoc
-          [ "keeper_name", `String "schedule-keeper"
+          [ "keeper_name", `String keeper_name
           ; "title", `String "Scheduled lane wake"
           ; "message", `String "Run the scheduled maintenance lane now."
           ; "urgency", `String "immediate"
           ] )
     ]
 ;;
+
+let keeper_wake_payload = keeper_wake_payload_for "schedule-keeper"
 
 let unsupported_payload =
   `Assoc
@@ -149,6 +176,24 @@ let create_keeper_wake_schedule ?recurrence config =
   | Ok request -> request
   | Error err ->
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_named_keeper_wake_schedule config ~schedule_id ~keeper_name =
+  match
+    Schedule_service.create
+      config
+      ~schedule_id
+      ~requested_at:100.0
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload_for keeper_name)
+      ~source:Schedule_domain.Operator_request
+      ()
+  with
+  | Ok request -> request
+  | Error error ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string error)
 ;;
 
 let create_unsupported_schedule config =
@@ -727,10 +772,9 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (inflight_evidence |> member "pending_count" |> to_int);
       check int "inflight count after lease" 1
         (inflight_evidence |> member "inflight_count" |> to_int);
-      Keeper_reaction_ledger.record_event_queue_reaction
+      Keeper_reaction_ledger.record_event_queue_turn_started
         ~base_path:config.Workspace_utils.base_path
         ~keeper_name
-        ~reaction_kind:Keeper_reaction_ledger.Turn_started
         leased;
       let reacted_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
@@ -765,11 +809,16 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
        with
        | Ok () -> ()
        | Error error -> fail ("scheduled wake projection failed: " ^ error));
-      Keeper_reaction_ledger.record_event_queue_reaction
-        ~base_path:config.Workspace_utils.base_path
-        ~keeper_name
-        ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-        leased;
+      (match
+         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+           ~base_path:config.Workspace_utils.base_path
+           ~keeper_name
+           ~source_index:0
+           ~receipt
+           leased
+       with
+       | Ok () -> ()
+       | Error error -> fail ("scheduled wake reaction projection failed: " ^ error));
       let acked_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
         |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
@@ -801,7 +850,9 @@ let test_keeper_wake_ledger_failure_is_retryable () =
       keeper_name
   in
   mkdir_p keeper_dir;
-  write_empty_file (Filename.concat keeper_dir "reaction-ledger");
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_dir);
+  write_empty_file ledger_dir;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
@@ -817,6 +868,161 @@ let test_keeper_wake_ledger_failure_is_retryable () =
      check bool "ledger failure is explicit" true
        (String_util.contains_substring detail "keeper reaction ledger")
    | None -> fail "ledger failure detail missing")
+;;
+
+let test_incomplete_ledger_is_occurrence_local_and_retryable () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let blocked_keeper = "incomplete-ledger-keeper" in
+  let healthy_keeper = "healthy-ledger-keeper" in
+  write_malformed_reaction_ledger_row
+    ~base_path
+    ~keeper_name:blocked_keeper;
+  let blocked =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"incomplete-ledger-schedule"
+      ~keeper_name:blocked_keeper
+  in
+  let healthy =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"healthy-ledger-schedule"
+      ~keeper_name:healthy_keeper
+  in
+  let result = tick_ok config ~now:201.0 in
+  check int "both due occurrences are dispatched" 2 (List.length result.dispatches);
+  let dispatch schedule_id =
+    List.find
+      (fun (item : Schedule_runner.dispatch_result) ->
+        String.equal item.schedule_id schedule_id)
+      result.dispatches
+  in
+  let blocked_dispatch = dispatch blocked.schedule_id in
+  let healthy_dispatch = dispatch healthy.schedule_id in
+  check string
+    "incomplete occurrence remains retryable"
+    "failed"
+    (Schedule_runner.dispatch_status_to_string blocked_dispatch.status);
+  (match blocked_dispatch.error with
+   | Some detail ->
+     check bool
+       "incomplete evidence is explicit"
+       true
+       (String_util.contains_substring detail "evidence incomplete")
+   | None -> fail "incomplete occurrence error missing");
+  check string
+    "other keeper lane continues"
+    "succeeded"
+    (Schedule_runner.dispatch_status_to_string healthy_dispatch.status);
+  (match Schedule_store.get_schedule config ~schedule_id:blocked.schedule_id with
+   | Some stored ->
+     check string
+       "blocked occurrence stays due"
+       "due"
+       (Schedule_domain.schedule_status_to_string stored.status)
+   | None -> fail "blocked schedule missing");
+  check int
+    "blocked occurrence was not enqueued"
+    0
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot ~base_path blocked_keeper));
+  check int
+    "healthy keeper received its own occurrence"
+    1
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot ~base_path healthy_keeper))
+;;
+
+let test_dashboard_projects_incomplete_reaction_evidence () =
+  with_workspace
+  @@ fun config ->
+  let request = create_keeper_wake_schedule config in
+  let result = tick_ok config ~now:201.0 in
+  check string
+    "initial dispatch succeeds"
+    "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  write_malformed_reaction_ledger_row
+    ~base_path:config.Workspace_utils.base_path
+    ~keeper_name:"schedule-keeper";
+  let evidence =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "keeper_reaction_evidence"
+  in
+  let open Yojson.Safe.Util in
+  check string
+    "dashboard does not project incomplete evidence as a match"
+    "incomplete"
+    (evidence |> member "projection_status" |> to_string);
+  check int
+    "dashboard syntax error count"
+    1
+    (evidence |> member "unattributed_syntax_error_count" |> to_int);
+  check int
+    "dashboard identity quarantine count"
+    0
+    (evidence |> member "unattributed_identity_quarantine_count" |> to_int)
+;;
+
+let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_keeper_wake_schedule config in
+  let result = tick_ok config ~now:201.0 in
+  let stimulus_id = single_occurrence_id result in
+  Dated_jsonl.append
+    (Dated_jsonl.create
+       ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
+       ())
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v3"
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 202.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "unknown_custom"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let evidence () =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "keeper_reaction_evidence"
+  in
+  let open Yojson.Safe.Util in
+  let quarantined = evidence () in
+  check string
+    "matching semantic-invalid row is quarantined"
+    "quarantined"
+    (quarantined |> member "projection_status" |> to_string);
+  check int
+    "dashboard matching quarantine count"
+    1
+    (quarantined |> member "quarantined_record_count" |> to_int);
+  check string
+    "dashboard typed quarantine reason"
+    "unknown_reaction_kind"
+    (quarantined |> member "reason" |> to_string);
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  rm_rf ledger_dir;
+  write_empty_file ledger_dir;
+  let unreadable = evidence () in
+  check string
+    "storage failure is not projected as empty evidence"
+    "read_error"
+    (unreadable |> member "projection_status" |> to_string);
+  check bool
+    "storage failure reason is explicit"
+    true
+    (unreadable |> member "reason" |> to_string |> String.length > 0)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
@@ -878,6 +1084,13 @@ let () =
             test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake ledger failure is retryable" `Quick
             test_keeper_wake_ledger_failure_is_retryable
+        ; test_case "incomplete ledger is occurrence-local and retryable" `Quick
+            test_incomplete_ledger_is_occurrence_local_and_retryable
+        ; test_case "dashboard projects incomplete reaction evidence" `Quick
+            test_dashboard_projects_incomplete_reaction_evidence
+        ; test_case "dashboard projects quarantined and unreadable reaction evidence"
+            `Quick
+            test_dashboard_projects_quarantined_and_unreadable_reaction_evidence
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ] )

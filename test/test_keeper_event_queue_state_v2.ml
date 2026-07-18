@@ -1041,7 +1041,6 @@ let test_transition_outbox_projects_with_stable_identity () =
     Masc.Keeper_reaction_ledger.record_event_queue_transition_reaction_result
       ~base_path
       ~keeper_name
-      ~reaction_kind:Masc.Keeper_reaction_ledger.Event_queue_ack
       ~source_index:0
       ~receipt
       source

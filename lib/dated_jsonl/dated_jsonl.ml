@@ -22,6 +22,89 @@ type t = {
   last_prune_day : string option Atomic.t;
 }
 
+type read_operation =
+  | Inspect
+  | List_directory
+  | Open_file
+  | Read_file
+
+type layout_entry_kind =
+  | Month_directory
+  | Day_file
+
+type non_regular_file_kind =
+  | Directory
+  | Symbolic_link
+  | Character_device
+  | Block_device
+  | Fifo
+  | Socket
+
+type read_error =
+  | Invalid_offset of { offset : int }
+  | Not_a_directory of { path : string }
+  | Invalid_layout_entry of
+      { parent : string
+      ; entry : string
+      ; expected : layout_entry_kind
+      }
+  | Non_regular_file of
+      { path : string
+      ; kind : non_regular_file_kind
+      }
+  | Io_error of
+      { operation : read_operation
+      ; path : string
+      ; detail : string
+      }
+
+type recent_entry =
+  | Parsed of Yojson.Safe.t
+  | Malformed_json of
+      { path : string
+      ; line_number : int option
+      ; detail : string
+      }
+
+let read_operation_to_string = function
+  | Inspect -> "inspect"
+  | List_directory -> "list directory"
+  | Open_file -> "open"
+  | Read_file -> "read"
+;;
+
+let layout_entry_kind_to_string = function
+  | Month_directory -> "YYYY-MM month directory"
+  | Day_file -> "DD.jsonl day file"
+;;
+
+let non_regular_file_kind_to_string = function
+  | Directory -> "directory"
+  | Symbolic_link -> "symbolic link"
+  | Character_device -> "character device"
+  | Block_device -> "block device"
+  | Fifo -> "FIFO"
+  | Socket -> "socket"
+;;
+
+let read_error_to_string = function
+  | Invalid_offset { offset } ->
+    Printf.sprintf "dated JSONL recent-read offset must be non-negative: %d" offset
+  | Not_a_directory { path } -> "dated JSONL path is not a directory: " ^ path
+  | Invalid_layout_entry { parent; entry; expected } ->
+    Printf.sprintf
+      "invalid dated JSONL layout entry %s: expected %s"
+      (Filename.concat parent entry)
+      (layout_entry_kind_to_string expected)
+  | Non_regular_file { path; kind } ->
+    Printf.sprintf
+      "dated JSONL path has an unsupported file kind: %s (%s)"
+      path
+      (non_regular_file_kind_to_string kind)
+  | Io_error { operation; path; detail } ->
+    Printf.sprintf "failed to %s %s: %s" (read_operation_to_string operation) path detail
+;;
+
 let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
@@ -114,7 +197,163 @@ let list_day_files month_path =
   list_subdirs month_path
   |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
 
+type directory_presence =
+  | Directory_present
+  | Directory_missing
+
+let directory_presence_of_stat path (stat : Unix.stats) =
+  match stat.st_kind with
+  | Unix.S_DIR -> Ok Directory_present
+  | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+  | Unix.S_SOCK -> Error (Not_a_directory { path })
+;;
+
+let inspect_directory_result ~missing_is_empty path =
+  let ( let* ) = Result.bind in
+  let inspected =
+    match Unix.lstat path with
+    | stat -> Ok (Some stat)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) when missing_is_empty ->
+      Ok None
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Io_error
+           { operation = Inspect; path; detail = Unix.error_message error })
+    | exception Sys_error detail ->
+      Error (Io_error { operation = Inspect; path; detail })
+  in
+  let* stat = inspected in
+  match stat with
+  | None -> Ok Directory_missing
+  | Some stat ->
+    if stat.Unix.st_kind <> Unix.S_LNK
+    then directory_presence_of_stat path stat
+    else Error (Non_regular_file { path; kind = Symbolic_link })
+;;
+
+let list_directory_result ~missing_is_empty path =
+  let ( let* ) = Result.bind in
+  let* presence = inspect_directory_result ~missing_is_empty path in
+  match presence with
+  | Directory_missing -> Ok []
+  | Directory_present ->
+    (match Sys.readdir path with
+     | entries ->
+       Ok
+         (entries
+          |> Array.to_list
+          |> List.sort (fun left right -> String.compare right left))
+     | exception Sys_error detail ->
+       Error (Io_error { operation = List_directory; path; detail }))
+;;
+
+let substring_is_ascii_digits value ~position ~length =
+  let rec loop index =
+    if index >= position + length
+    then true
+    else
+      match value.[index] with
+      | '0' .. '9' -> loop (index + 1)
+      | _ -> false
+  in
+  loop position
+;;
+
+let year_and_month_of_directory_name name =
+  if String.length name = 7
+     && name.[4] = '-'
+     && substring_is_ascii_digits name ~position:0 ~length:4
+     && substring_is_ascii_digits name ~position:5 ~length:2
+  then
+    match
+      int_of_string_opt (String.sub name 0 4),
+      int_of_string_opt (String.sub name 5 2)
+    with
+    | Some year, Some month when month >= 1 && month <= 12 -> Some (year, month)
+    | _ -> None
+  else None
+;;
+
+let month_directory_name_is_valid name =
+  Option.is_some (year_and_month_of_directory_name name)
+;;
+
+let year_is_leap year =
+  year mod 4 = 0 && (year mod 100 <> 0 || year mod 400 = 0)
+;;
+
+let days_in_month ~year = function
+  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> Some 31
+  | 4 | 6 | 9 | 11 -> Some 30
+  | 2 -> Some (if year_is_leap year then 29 else 28)
+  | _ -> None
+;;
+
+let day_file_name_is_valid ~year ~month name =
+  String.length name = 8
+  && String.equal (String.sub name 2 6) ".jsonl"
+  && substring_is_ascii_digits name ~position:0 ~length:2
+  &&
+  match int_of_string_opt (String.sub name 0 2), days_in_month ~year month with
+  | Some day, Some maximum -> day >= 1 && day <= maximum
+  | None, _ | _, None -> false
+;;
+
+let validate_layout_entries ~parent ~expected ~is_valid entries =
+  let rec loop valid_entries = function
+    | [] -> Ok (List.rev valid_entries)
+    | entry :: rest ->
+      if is_valid entry
+      then loop (entry :: valid_entries) rest
+      else Error (Invalid_layout_entry { parent; entry; expected })
+  in
+  loop [] entries
+;;
+
+let list_month_dirs_result base_dir =
+  let ( let* ) = Result.bind in
+  let* entries = list_directory_result ~missing_is_empty:true base_dir in
+  validate_layout_entries
+    ~parent:base_dir
+    ~expected:Month_directory
+    ~is_valid:month_directory_name_is_valid
+    entries
+;;
+
+let list_day_files_result month_path =
+  let ( let* ) = Result.bind in
+  let month_entry = Filename.basename month_path in
+  let* year, month =
+    match year_and_month_of_directory_name month_entry with
+    | Some value -> Ok value
+    | None ->
+      Error
+        (Invalid_layout_entry
+           { parent = Filename.dirname month_path
+           ; entry = month_entry
+           ; expected = Month_directory
+           })
+  in
+  let* entries = list_directory_result ~missing_is_empty:false month_path in
+  validate_layout_entries
+    ~parent:month_path
+    ~expected:Day_file
+    ~is_valid:(day_file_name_is_valid ~year ~month)
+    entries
+;;
+
 (* ── Lines from a single file ─────────────────────────── *)
+
+(* Keep the physical-row predicate identical to [String.trim]'s OCaml 5.4
+   whitespace contract: space, form feed, line feed, carriage return, tab. *)
+let trim_whitespace = function
+  | ' ' | '\012' | '\n' | '\r' | '\t' -> true
+  | _ -> false
+;;
+
+let line_is_non_empty line =
+  String.exists (fun character -> not (trim_whitespace character)) line
+;;
 
 let iter_non_empty_lines path f =
   if Fs_compat.file_exists path then
@@ -124,7 +363,7 @@ let iter_non_empty_lines path f =
         try
           while true do
             let line = input_line ic in
-            if String.trim line <> "" then f line
+            if line_is_non_empty line then f line
           done
         with End_of_file -> ())
     with Sys_error _ -> ()
@@ -139,7 +378,7 @@ let count_non_empty_lines path =
         (try
            while true do
              let line = input_line ic in
-             if String.trim line <> "" then incr count
+             if line_is_non_empty line then incr count
            done
          with End_of_file -> ());
         !count)
@@ -165,67 +404,176 @@ let remove_file_and_empty_month ~month_path path =
     true
   with Sys_error _ -> false
 
-(** Read the last [n] non-empty lines from a file without loading the entire
-    file into memory.  Reads backwards in 8 KB chunks from the end.
+let close_file_descriptor_noerr descriptor =
+  try Unix.close descriptor with
+  | Unix.Unix_error _ -> ()
+;;
 
-    Uses a generous 3x multiplier on newline counting to handle files with
-    blank lines between data.  Chunks are collected in a list (O(1) prepend)
-    and concatenated once at the end to avoid O(N^2) buffer copying. *)
-let load_tail_lines path ~max_lines =
-  if max_lines <= 0 || not (Fs_compat.file_exists path) then []
+let non_regular_file_kind_of_stats stats =
+  match stats.Unix.st_kind with
+  | Unix.S_REG -> None
+  | Unix.S_DIR -> Some Directory
+  | Unix.S_LNK -> Some Symbolic_link
+  | Unix.S_CHR -> Some Character_device
+  | Unix.S_BLK -> Some Block_device
+  | Unix.S_FIFO -> Some Fifo
+  | Unix.S_SOCK -> Some Socket
+;;
+
+let inspect_path_result path =
+  match Unix.lstat path with
+  | stats -> Ok stats
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (Io_error
+         { operation = Inspect; path; detail = Unix.error_message error })
+;;
+
+let same_file_identity left right =
+  left.Unix.st_dev = right.Unix.st_dev && left.Unix.st_ino = right.Unix.st_ino
+;;
+
+let open_regular_input_result path =
+  let ( let* ) = Result.bind in
+  let* initial_stats = inspect_path_result path in
+  match non_regular_file_kind_of_stats initial_stats with
+  | Some kind -> Error (Non_regular_file { path; kind })
+  | None ->
+    (match
+       Unix.openfile
+         path
+         [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+         0
+     with
+     | exception Unix.Unix_error (error, _, _) ->
+       Error
+         (Io_error
+            { operation = Open_file; path; detail = Unix.error_message error })
+     | descriptor ->
+       let reject error =
+         close_file_descriptor_noerr descriptor;
+         Error error
+       in
+       (match Unix.fstat descriptor with
+        | exception Unix.Unix_error (error, _, _) ->
+          reject
+            (Io_error
+               { operation = Inspect; path; detail = Unix.error_message error })
+        | opened_stats ->
+          (match non_regular_file_kind_of_stats opened_stats with
+           | Some kind -> reject (Non_regular_file { path; kind })
+           | None ->
+             (match inspect_path_result path with
+              | Error error -> reject error
+              | Ok current_stats ->
+                (match non_regular_file_kind_of_stats current_stats with
+                 | Some kind -> reject (Non_regular_file { path; kind })
+                 | None when not (same_file_identity opened_stats current_stats) ->
+                   reject
+                     (Io_error
+                        { operation = Inspect
+                        ; path
+                        ; detail = "path identity changed while opening"
+                        })
+                 | None ->
+                   Ok (Unix.in_channel_of_descr descriptor))))))
+;;
+
+(** Read the last [n] non-empty lines from an open file. Each byte is inspected
+    at most once while walking backwards. The loop stops after the chunk that
+    contains the [n]th physical non-empty line, so it overscans by at most one
+    8 KB chunk. Chunks are concatenated exactly once. *)
+let load_tail_lines_from_channel input ~max_lines =
+  if max_lines <= 0
+  then []
   else
-    let ic = open_in_bin path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let file_len = in_channel_length ic in
-      if file_len = 0 then []
-      else
-        let chunk_size = 8192 in
-        (* Use 3x multiplier: blank lines mean newlines > non-empty lines *)
-        let target_newlines = max_lines * 3 in
-        let chunks = ref [] in
-        let total_newlines = ref 0 in
-        let pos = ref file_len in
-        while !pos > 0 && !total_newlines <= target_newlines do
-          let read_start = max 0 (!pos - chunk_size) in
-          let read_len = !pos - read_start in
-          seek_in ic read_start;
-          let chunk = Bytes.create read_len in
-          really_input ic chunk 0 read_len;
-          chunks := chunk :: !chunks;
-          (* Count newlines in this chunk only (not accumulated) *)
-          for i = 0 to read_len - 1 do
-            if Bytes.get chunk i = '\n' then incr total_newlines
-          done;
-          pos := read_start
+    let file_len = in_channel_length input in
+    if file_len = 0
+    then []
+    else begin
+      let chunk_size = 8192 in
+      let chunks = ref [] in
+      let non_empty_line_count = ref 0 in
+      let current_line_is_non_empty = ref false in
+      let position = ref file_len in
+      while !position > 0 && !non_empty_line_count < max_lines do
+        let read_start = max 0 (!position - chunk_size) in
+        let read_len = !position - read_start in
+        seek_in input read_start;
+        let chunk = Bytes.create read_len in
+        really_input input chunk 0 read_len;
+        chunks := chunk :: !chunks;
+        for index = read_len - 1 downto 0 do
+          match Bytes.get chunk index with
+          | '\n' ->
+            if !current_line_is_non_empty then incr non_empty_line_count;
+            current_line_is_non_empty := false
+          | character ->
+            if not (trim_whitespace character)
+            then current_line_is_non_empty := true
         done;
-        (* Concatenate chunks once (already in file order) *)
-        let total_bytes = List.fold_left (fun acc c -> acc + Bytes.length c) 0 !chunks in
-        let combined = Bytes.create total_bytes in
-        let _ = List.fold_left (fun off c ->
-          let len = Bytes.length c in
-          Bytes.blit c 0 combined off len;
-          off + len
-        ) 0 !chunks in
-        let raw_lines =
-          Bytes.to_string combined
-          |> String.split_on_char '\n'
-        in
-        let raw_lines =
-          if !pos > 0 then
-            match raw_lines with
-            | _partial :: rest -> rest
-            | [] -> []
-          else raw_lines
-        in
-        let all_lines =
-          raw_lines
-          |> List.filter (fun l -> String.trim l <> "")
-        in
-        let total = List.length all_lines in
-        if total <= max_lines then all_lines
-        else
-          List.filteri (fun i _ -> i >= total - max_lines) all_lines
-    )
+        position := read_start
+      done;
+      let total_bytes =
+        List.fold_left (fun total chunk -> total + Bytes.length chunk) 0 !chunks
+      in
+      let combined = Bytes.create total_bytes in
+      let _next_offset =
+        List.fold_left
+          (fun offset chunk ->
+             let length = Bytes.length chunk in
+             Bytes.blit chunk 0 combined offset length;
+             offset + length)
+          0
+          !chunks
+      in
+      let lines =
+        combined
+        |> Bytes.to_string
+        |> String.split_on_char '\n'
+        |> List.filter line_is_non_empty
+      in
+      let line_count = List.length lines in
+      if line_count <= max_lines
+      then lines
+      else List.filteri (fun index _ -> index >= line_count - max_lines) lines
+    end
+;;
+
+let load_tail_lines path ~max_lines =
+  if max_lines <= 0 || not (Fs_compat.file_exists path)
+  then []
+  else
+    let input = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr input)
+      (fun () -> load_tail_lines_from_channel input ~max_lines)
+;;
+
+let load_tail_lines_result path ~max_lines =
+  if max_lines <= 0
+  then Ok []
+  else
+    match open_regular_input_result path with
+    | Error _ as error -> error
+    | Ok input ->
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr input)
+        (fun () ->
+           match load_tail_lines_from_channel input ~max_lines with
+           | lines -> Ok lines
+           | exception Sys_error detail ->
+             Error (Io_error { operation = Read_file; path; detail })
+           | exception End_of_file ->
+             Error
+               (Io_error
+                  { operation = Read_file
+                  ; path
+                  ; detail = "file changed while reading its tail"
+                  })
+           | exception Invalid_argument detail ->
+             Error (Io_error { operation = Read_file; path; detail }))
+;;
 
 let prune_unlocked t ~days =
   if days <= 0 then 0
@@ -383,6 +731,61 @@ let read_recent ?(offset=0) t n =
     !collected
   end
 
+let recent_entry_of_line ~path ?line_number line =
+  match Yojson.Safe.from_string line with
+  | json -> Parsed json
+  | exception Yojson.Json_error detail ->
+    Malformed_json { path; line_number; detail }
+;;
+
+let read_recent_result ?(offset=0) t n =
+  if offset < 0
+  then Error (Invalid_offset { offset })
+  else if n <= 0
+  then Ok []
+  else
+    let ( let* ) = Result.bind in
+    let skip = ref offset in
+    let collected = ref [] in
+    let count = ref 0 in
+    let requested_line_count () =
+      let remaining = n - !count in
+      if !skip > max_int - remaining then max_int else remaining + !skip
+    in
+    let rec visit_days month_path = function
+      | [] -> Ok ()
+      | _ when !count >= n -> Ok ()
+      | day :: rest ->
+        let path = Filename.concat month_path day in
+        let* lines =
+          load_tail_lines_result path ~max_lines:(requested_line_count ())
+        in
+        List.iter
+          (fun line ->
+             if !count < n
+             then if !skip > 0
+             then decr skip
+             else begin
+               collected := recent_entry_of_line ~path line :: !collected;
+               incr count
+             end)
+          (List.rev lines);
+        visit_days month_path rest
+    in
+    let rec visit_months = function
+      | [] -> Ok ()
+      | _ when !count >= n -> Ok ()
+      | month :: rest ->
+        let month_path = Filename.concat t.base_dir month in
+        let* days = list_day_files_result month_path in
+        let* () = visit_days month_path days in
+        visit_months rest
+    in
+    let* months = list_month_dirs_result t.base_dir in
+    let* () = visit_months months in
+    Ok !collected
+;;
+
 let read_recent_lines ?(offset=0) t n =
   if n <= 0 then []
   else begin
@@ -432,85 +835,46 @@ let iter_all t f =
          days)
     months
 
-let sorted_entries_result path =
-  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
-  | Sys_error message -> Error (Printf.sprintf "failed to list %s: %s" path message)
-;;
-
-let line_error operation path line_number message =
-  Printf.sprintf "%s %s:%d: %s" operation path line_number message
-;;
-
-let iter_json_file_result path f =
-  try
-    let input = open_in_bin path in
+let iter_json_file_entries_result path f =
+  match open_regular_input_result path with
+  | Error _ as error -> error
+  | Ok input ->
     Fun.protect
       ~finally:(fun () -> close_in_noerr input)
       (fun () ->
          let rec loop line_number =
            match input_line input with
            | exception End_of_file -> Ok ()
-           | exception Sys_error message ->
-             Error (line_error "failed to read" path line_number message)
-           | line when String.trim line = "" -> loop (line_number + 1)
+           | exception Sys_error detail ->
+             Error (Io_error { operation = Read_file; path; detail })
+           | line when not (line_is_non_empty line) -> loop (line_number + 1)
            | line ->
-             (match Yojson.Safe.from_string line with
-              | json ->
-                f json;
-                loop (line_number + 1)
-              | exception Yojson.Json_error message ->
-                Error (line_error "failed to parse" path line_number message))
+             f (recent_entry_of_line ~path ~line_number line);
+             loop (line_number + 1)
          in
          loop 1)
-  with
-  | Sys_error message -> Error (Printf.sprintf "failed to open %s: %s" path message)
 ;;
 
-let iter_all_result t f =
+let iter_all_entries_result t f =
   let ( let* ) = Result.bind in
-  let* store_present =
-    try
-      match (Unix.stat t.base_dir).st_kind with
-      | Unix.S_DIR -> Ok true
-      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-      | Unix.S_SOCK ->
-        Error ("dated JSONL base path is not a directory: " ^ t.base_dir)
-    with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-    | Unix.Unix_error (error, _, _) ->
-      Error
-        (Printf.sprintf
-           "failed to inspect %s: %s"
-           t.base_dir
-           (Unix.error_message error))
+  let rec iter_days month_path = function
+    | [] -> Ok ()
+    | day :: rest ->
+      let* () =
+        iter_json_file_entries_result (Filename.concat month_path day) f
+      in
+      iter_days month_path rest
   in
-  if not store_present then Ok ()
-  else
-    let* months = sorted_entries_result t.base_dir in
-    let months =
-      List.filter
-        (fun name ->
-           String.length name = 7
-           && name.[4] = '-'
-           && Option.is_some (int_of_string_opt (String.sub name 0 4)))
-        months
-    in
-    let rec iter_months = function
-      | [] -> Ok ()
-      | month :: rest ->
-        let month_path = Filename.concat t.base_dir month in
-        let* days = sorted_entries_result month_path in
-        let days = List.filter (fun name -> Filename.check_suffix name ".jsonl") days in
-        let rec iter_days = function
-          | [] -> Ok ()
-          | day :: rest ->
-            let* () = iter_json_file_result (Filename.concat month_path day) f in
-            iter_days rest
-        in
-        let* () = iter_days days in
-        iter_months rest
-    in
-    iter_months months
+  let rec iter_months = function
+    | [] -> Ok ()
+    | month :: rest ->
+      let month_path = Filename.concat t.base_dir month in
+      let* days = list_day_files_result month_path in
+      let* () = iter_days month_path (List.rev days) in
+      iter_months rest
+  in
+  let* months = list_month_dirs_result t.base_dir in
+  iter_months (List.rev months)
 ;;
 
 let iter_range t ~since ~until f =

@@ -86,6 +86,12 @@ let write_dated_file dir month day lines =
     (Filename.concat month_dir (day ^ ".jsonl"))
     (String.concat "\n" lines ^ "\n")
 
+let require_recent_result label = function
+  | Ok entries -> entries
+  | Error error ->
+    failf "%s: %s" label (Dated_jsonl.read_error_to_string error)
+;;
+
 let test_read_recent_skips_malformed_lines () =
   let dir = tmpdir "dated_jsonl_recent_malformed" in
   write_dated_file dir "2026-01" "01"
@@ -93,6 +99,245 @@ let test_read_recent_skips_malformed_lines () =
   let store = Dated_jsonl.create ~base_dir:dir () in
   let values = Dated_jsonl.read_recent store 10 |> List.map json_i in
   check (list int) "read_recent skips malformed rows" [ 1; 2 ] values
+
+let test_read_recent_result_counts_malformed_physical_row () =
+  let dir = tmpdir "dated_jsonl_recent_result_malformed" in
+  write_dated_file
+    dir
+    "2026-01"
+    "01"
+    [ {|{"i":1}|}; {|{"i":2}|}; "not-json"; {|{"i":3}|} ];
+  let path = Filename.concat (Filename.concat dir "2026-01") "01.jsonl" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match
+    Dated_jsonl.read_recent_result store 2
+    |> require_recent_result "strict malformed recent read"
+  with
+  | [ Dated_jsonl.Malformed_json { path = malformed_path; line_number = None; _ }
+    ; Dated_jsonl.Parsed json
+    ] ->
+    check string "malformed row path" path malformed_path;
+    check int "newest parsed row" 3 (json_i json)
+  | entries ->
+    failf "expected malformed + parsed physical tail, got %d entries" (List.length entries)
+;;
+
+let test_read_recent_result_offset_counts_malformed_physical_row () =
+  let dir = tmpdir "dated_jsonl_recent_result_offset" in
+  write_dated_file
+    dir
+    "2026-01"
+    "01"
+    [ {|{"i":1}|}; {|{"i":2}|}; "not-json"; {|{"i":3}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match
+    Dated_jsonl.read_recent_result ~offset:1 store 2
+    |> require_recent_result "strict offset recent read"
+  with
+  | [ Dated_jsonl.Parsed json; Dated_jsonl.Malformed_json _ ] ->
+    check int "oldest selected parsed row" 2 (json_i json)
+  | entries ->
+    failf "expected parsed + malformed offset window, got %d entries" (List.length entries)
+;;
+
+let test_read_recent_result_rejects_negative_offset () =
+  let store = Dated_jsonl.create ~base_dir:(tmpdir "dated_jsonl_negative_offset") () in
+  match Dated_jsonl.read_recent_result ~offset:(-1) store 1 with
+  | Error (Dated_jsonl.Invalid_offset { offset = -1 }) -> ()
+  | Error error ->
+    failf "unexpected negative-offset error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "negative strict recent-read offset was accepted"
+;;
+
+let test_read_recent_result_missing_store_is_empty () =
+  let base_dir = Filename.concat (tmpdir "dated_jsonl_missing_store") "absent" in
+  let store = Dated_jsonl.create ~base_dir () in
+  let entries =
+    Dated_jsonl.read_recent_result store 4
+    |> require_recent_result "missing strict store"
+  in
+  check int "missing store is empty" 0 (List.length entries)
+;;
+
+let test_read_recent_result_rejects_base_file () =
+  let dir = tmpdir "dated_jsonl_base_file" in
+  let base_dir = Filename.concat dir "ledger" in
+  Fs_compat.append_file base_dir "not-a-directory";
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error (Dated_jsonl.Not_a_directory { path }) ->
+    check string "base file path" base_dir path
+  | Error error ->
+    failf "unexpected base-file error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "base file was treated as an empty strict store"
+;;
+
+let test_read_recent_result_rejects_month_file () =
+  let base_dir = tmpdir "dated_jsonl_month_file" in
+  let month_path = Filename.concat base_dir "2026-01" in
+  Fs_compat.append_file month_path "not-a-directory";
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error (Dated_jsonl.Not_a_directory { path }) ->
+    check string "month file path" month_path path
+  | Error error ->
+    failf "unexpected month-file error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "month file was treated as an empty strict store"
+;;
+
+let test_read_recent_result_rejects_month_symlink () =
+  let dir = tmpdir "dated_jsonl_month_symlink" in
+  let base_dir = Filename.concat dir "ledger" in
+  let external_dir = Filename.concat dir "external" in
+  Fs_compat.mkdir_p base_dir;
+  write_dated_file external_dir "2026-01" "01" [ {|{"outside":true}|} ];
+  let month_path = Filename.concat base_dir "2026-01" in
+  Unix.symlink (Filename.concat external_dir "2026-01") month_path;
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Symbolic_link }) ->
+    check string "month symlink path" month_path error_path
+  | Error error ->
+    failf
+      "unexpected month-symlink error: %s"
+      (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "month symlink escaped the strict store boundary"
+;;
+
+let test_read_recent_result_rejects_day_symlink () =
+  let base_dir = tmpdir "dated_jsonl_day_symlink" in
+  let month_path = Filename.concat base_dir "2026-01" in
+  Fs_compat.mkdir_p month_path;
+  let path = Filename.concat month_path "01.jsonl" in
+  Unix.symlink (Filename.concat base_dir "missing-target") path;
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Symbolic_link }) ->
+    check string "day symlink path" path error_path
+  | Error error ->
+    failf "unexpected day-symlink error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "day symlink was accepted as a strict store file"
+;;
+
+let test_read_recent_result_rejects_base_symlink () =
+  let dir = tmpdir "dated_jsonl_dangling_base" in
+  let base_dir = Filename.concat dir "ledger" in
+  Unix.symlink (Filename.concat dir "missing-target") base_dir;
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Symbolic_link }) ->
+    check string "base symlink path" base_dir error_path
+  | Error error ->
+    failf
+      "unexpected base-symlink error: %s"
+      (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "base symlink was treated as an empty store"
+;;
+
+let test_read_recent_result_rejects_invalid_layout () =
+  let base_dir = tmpdir "dated_jsonl_invalid_layout" in
+  let invalid_month = "2026-aa" in
+  Fs_compat.mkdir_p (Filename.concat base_dir invalid_month);
+  let store = Dated_jsonl.create ~base_dir () in
+  (match Dated_jsonl.read_recent_result store 1 with
+   | Error
+       (Dated_jsonl.Invalid_layout_entry
+         { parent; entry; expected = Dated_jsonl.Month_directory }) ->
+     check string "invalid layout parent" base_dir parent;
+     check string "invalid month entry" invalid_month entry
+   | Error error ->
+     failf "unexpected layout error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "invalid month layout was silently ignored");
+  let day_base_dir = tmpdir "dated_jsonl_invalid_day_layout" in
+  let month_path = Filename.concat day_base_dir "2026-02" in
+  Fs_compat.mkdir_p month_path;
+  let invalid_day = "29.jsonl" in
+  Fs_compat.append_file (Filename.concat month_path invalid_day) "{}\n";
+  let day_store = Dated_jsonl.create ~base_dir:day_base_dir () in
+  match Dated_jsonl.read_recent_result day_store 1 with
+  | Error
+      (Dated_jsonl.Invalid_layout_entry
+        { parent; entry; expected = Dated_jsonl.Day_file }) ->
+    check string "invalid day parent" month_path parent;
+    check string "invalid day entry" invalid_day entry
+  | Error error ->
+    failf "unexpected day layout error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "invalid day layout was silently ignored"
+;;
+
+let test_read_recent_result_accepts_leap_day () =
+  let base_dir = tmpdir "dated_jsonl_leap_day" in
+  write_dated_file base_dir "2024-02" "29" [ {|{"i":29}|} ];
+  let store = Dated_jsonl.create ~base_dir () in
+  match
+    Dated_jsonl.read_recent_result store 1
+    |> require_recent_result "leap-day strict read"
+  with
+  | [ Dated_jsonl.Parsed row ] -> check int "leap day row" 29 (json_i row)
+  | entries -> failf "unexpected leap-day entries: %d" (List.length entries)
+;;
+
+let test_read_recent_result_rejects_fifo_without_blocking () =
+  let base_dir = tmpdir "dated_jsonl_fifo" in
+  let month_path = Filename.concat base_dir "2026-01" in
+  Fs_compat.mkdir_p month_path;
+  let path = Filename.concat month_path "01.jsonl" in
+  Unix.mkfifo path 0o600;
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 1 with
+  | Error
+      (Dated_jsonl.Non_regular_file
+        { path = error_path; kind = Dated_jsonl.Fifo }) ->
+    check string "FIFO path" path error_path
+  | Error error ->
+    failf "unexpected FIFO error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "FIFO day entry was accepted as a regular JSONL file"
+;;
+
+let test_read_recent_result_spans_months_and_physical_offset () =
+  let dir = tmpdir "dated_jsonl_recent_result_cross_month" in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ "not-json"; {|{"i":3}|} ];
+  write_dated_file dir "2026-02" "02" [ {|{"i":4}|}; {|{"i":5}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  match
+    Dated_jsonl.read_recent_result ~offset:1 store 4
+    |> require_recent_result "cross-month strict recent read"
+  with
+  | [ Dated_jsonl.Parsed oldest
+    ; Dated_jsonl.Malformed_json _
+    ; Dated_jsonl.Parsed middle
+    ; Dated_jsonl.Parsed newest
+    ] ->
+    check int "cross-month oldest selected row" 2 (json_i oldest);
+    check int "cross-month middle selected row" 3 (json_i middle);
+    check int "cross-month newest selected row" 4 (json_i newest)
+  | entries ->
+    failf "unexpected cross-month strict window: %d entries" (List.length entries)
+;;
+
+let test_read_recent_result_keeps_unterminated_tail_row () =
+  let base_dir = tmpdir "dated_jsonl_unterminated_tail" in
+  let month_path = Filename.concat base_dir "2026-01" in
+  Fs_compat.mkdir_p month_path;
+  Fs_compat.append_file
+    (Filename.concat month_path "01.jsonl")
+    {|{"i":1}
+{"i":2}|};
+  let store = Dated_jsonl.create ~base_dir () in
+  match
+    Dated_jsonl.read_recent_result store 1
+    |> require_recent_result "unterminated strict tail"
+  with
+  | [ Dated_jsonl.Parsed json ] -> check int "unterminated newest row" 2 (json_i json)
+  | entries -> failf "unexpected unterminated tail: %d entries" (List.length entries)
+;;
 
 let test_load_tail_lines_drops_partial_chunk_prefix () =
   let dir = tmpdir "dated_jsonl_partial_tail" in
@@ -105,8 +350,48 @@ let test_load_tail_lines_drops_partial_chunk_prefix () =
     ^ "\n"
   in
   Fs_compat.append_file path content;
-  let lines = Dated_jsonl.load_tail_lines path ~max_lines:10 in
+  let lines = Dated_jsonl.load_tail_lines path ~max_lines:5 in
   check (list string) "drops partial chunk prefix" expected lines
+
+let test_load_tail_lines_missing_file_is_empty () =
+  let path = Filename.concat (tmpdir "dated_jsonl_missing_tail") "missing.jsonl" in
+  check
+    (list string)
+    "missing tail is empty"
+    []
+    (Dated_jsonl.load_tail_lines path ~max_lines:5)
+;;
+
+let test_load_tail_lines_counts_nonempty_rows_exactly () =
+  let dir = tmpdir "dated_jsonl_exact_nonempty_tail" in
+  let path = Filename.concat dir "tail.jsonl" in
+  let blanks = List.init 40 (fun _ -> "") in
+  let expected = [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|} ] in
+  let lines =
+    [ List.nth expected 0 ]
+    @ blanks
+    @ [ List.nth expected 1 ]
+    @ blanks
+    @ [ List.nth expected 2 ]
+  in
+  Fs_compat.append_file path (String.concat "\n" lines ^ "\n");
+  check (list string)
+    "blank rows do not terminate the exact tail scan"
+    expected
+    (Dated_jsonl.load_tail_lines path ~max_lines:3)
+;;
+
+let test_load_tail_lines_counts_vertical_tab_as_physical_row () =
+  let dir = tmpdir "dated_jsonl_vertical_tab_tail" in
+  let path = Filename.concat dir "tail.jsonl" in
+  let vertical_tab_row = String.make 9000 '\011' in
+  Fs_compat.append_file path ({|{"i":1}|} ^ "\n" ^ vertical_tab_row ^ "\n");
+  check
+    (list string)
+    "vertical-tab row uses the same non-empty predicate as final selection"
+    [ vertical_tab_row ]
+    (Dated_jsonl.load_tail_lines path ~max_lines:1)
+;;
 
 let test_load_tail_lines_keeps_first_data_after_blank_prefix () =
   let dir = tmpdir "dated_jsonl_blank_partial_tail" in
@@ -238,13 +523,51 @@ let test_iter_all_chronological_skips_malformed () =
   Dated_jsonl.iter_all store (fun json -> seen := json_i json :: !seen);
   check (list int) "iter_all chronological" [ 1; 2; 3 ] (List.rev !seen)
 
-let test_iter_all_result_rejects_malformed () =
-  let dir = tmpdir "dated_jsonl_iter_all_result" in
-  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
+let test_iter_all_entries_result_continues_after_malformed () =
+  let dir = tmpdir "dated_jsonl_iter_all_entries_result" in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
+  write_dated_file
+    dir
+    "2026-02"
+    "01"
+    [ "not-json"; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
+  let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
   let store = Dated_jsonl.create ~base_dir:dir () in
-  match Dated_jsonl.iter_all_result store ignore with
-  | Ok () -> fail "strict iteration silently skipped malformed JSON"
-  | Error _ -> ()
+  let seen = ref [] in
+  (match
+     Dated_jsonl.iter_all_entries_result store (fun entry -> seen := entry :: !seen)
+   with
+   | Ok () -> ()
+   | Error error ->
+     failf "strict entry iteration failed: %s" (Dated_jsonl.read_error_to_string error));
+  match List.rev !seen with
+  | [ Dated_jsonl.Parsed first
+    ; Dated_jsonl.Malformed_json
+        { path = malformed_path; line_number = Some 1; _ }
+    ; Dated_jsonl.Parsed second
+    ; Dated_jsonl.Parsed third
+    ] ->
+    check int "first parsed entry" 1 (json_i first);
+    check string "stream malformed path" path malformed_path;
+    check int "iteration continued after malformed" 2 (json_i second);
+    check int "cross-month/day chronology" 3 (json_i third)
+  | entries ->
+    failf "expected parsed/malformed/parsed stream, got %d entries" (List.length entries)
+;;
+
+let test_iter_all_entries_result_surfaces_typed_io_error () =
+  let dir = tmpdir "dated_jsonl_iter_entries_io" in
+  let base_dir = Filename.concat dir "ledger" in
+  Fs_compat.append_file base_dir "not-a-directory";
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.iter_all_entries_result store ignore with
+  | Error (Dated_jsonl.Not_a_directory { path }) ->
+    check string "stream base file path" base_dir path
+  | Error error ->
+    failf "unexpected strict stream error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok () -> fail "strict stream treated base file as an empty store"
+;;
 
 let test_iter_range_chronological () =
   let dir = tmpdir "dated_jsonl_iter_range" in
@@ -360,7 +683,41 @@ let () =
           test_case "returns all when n > count" `Quick test_read_recent_more_than_exists;
           test_case "skips malformed rows" `Quick
             test_read_recent_skips_malformed_lines;
+          test_case "strict read counts malformed physical row" `Quick
+            test_read_recent_result_counts_malformed_physical_row;
+          test_case "strict offset counts malformed physical row" `Quick
+            test_read_recent_result_offset_counts_malformed_physical_row;
+          test_case "strict read rejects negative offset" `Quick
+            test_read_recent_result_rejects_negative_offset;
+          test_case "strict missing store is empty" `Quick
+            test_read_recent_result_missing_store_is_empty;
+          test_case "strict read rejects base file" `Quick
+            test_read_recent_result_rejects_base_file;
+          test_case "strict read rejects month file" `Quick
+            test_read_recent_result_rejects_month_file;
+          test_case "strict read rejects month symlink" `Quick
+            test_read_recent_result_rejects_month_symlink;
+          test_case "strict read rejects day symlink" `Quick
+            test_read_recent_result_rejects_day_symlink;
+          test_case "strict read rejects base symlink" `Quick
+            test_read_recent_result_rejects_base_symlink;
+          test_case "strict read rejects invalid layout" `Quick
+            test_read_recent_result_rejects_invalid_layout;
+          test_case "strict read accepts leap day" `Quick
+            test_read_recent_result_accepts_leap_day;
+          test_case "strict read rejects FIFO without blocking" `Quick
+            test_read_recent_result_rejects_fifo_without_blocking;
+          test_case "strict read spans months and physical offset" `Quick
+            test_read_recent_result_spans_months_and_physical_offset;
+          test_case "strict read keeps unterminated tail row" `Quick
+            test_read_recent_result_keeps_unterminated_tail_row;
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
+          test_case "missing tail is empty" `Quick
+            test_load_tail_lines_missing_file_is_empty;
+          test_case "counts nonempty tail rows exactly" `Quick
+            test_load_tail_lines_counts_nonempty_rows_exactly;
+          test_case "vertical tab is a physical tail row" `Quick
+            test_load_tail_lines_counts_vertical_tab_as_physical_row;
           test_case "keeps first data row after blank partial prefix" `Quick
             test_load_tail_lines_keeps_first_data_after_blank_prefix;
           test_case "keeps first row when full file spans chunks" `Quick
@@ -378,8 +735,10 @@ let () =
           test_case "range_recent returns newest n in window" `Quick test_read_range_recent;
           test_case "iter_all chronological" `Quick
             test_iter_all_chronological_skips_malformed;
-          test_case "iter_all result rejects malformed" `Quick
-            test_iter_all_result_rejects_malformed;
+          test_case "strict entry iteration continues after malformed" `Quick
+            test_iter_all_entries_result_continues_after_malformed;
+          test_case "strict entry iteration surfaces typed I/O" `Quick
+            test_iter_all_entries_result_surfaces_typed_io_error;
           test_case "iter_range chronological" `Quick test_iter_range_chronological;
         ] );
       ( "prune",

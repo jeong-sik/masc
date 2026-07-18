@@ -70,17 +70,15 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
     []
 ;;
 
-let record_event_queue_stimulus_reaction
+let record_event_queue_stimulus_turn_started
       ~(ctx : _ context)
       ~keeper_name
-      ~reaction_kind
       (stimulus : Keeper_event_queue.stimulus)
   =
   try
-    Keeper_reaction_ledger.record_event_queue_reaction
+    Keeper_reaction_ledger.record_event_queue_turn_started
       ~base_path:ctx.config.base_path
       ~keeper_name
-      ~reaction_kind
       stimulus
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -91,14 +89,6 @@ let record_event_queue_stimulus_reaction
       stimulus.post_id
       keeper_name
       (Printexc.to_string exn)
-;;
-
-let record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus =
-  record_event_queue_stimulus_reaction
-    ~ctx
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
-    stimulus
 ;;
 
 type heartbeat_event_intake = {

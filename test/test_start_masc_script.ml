@@ -329,7 +329,7 @@ let write_fake_dune_local ~path ~log_file =
        {|
 #!/bin/sh
 set -eu
-printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s DUNE_CACHE=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" "${DUNE_CACHE:-}" >> %s
+printf 'dune-local %%s DUNE_JOBS=%%s DUNE_CACHE=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_CACHE:-}" >> %s
 exec dune "$@"
 |}
        (quote log_file))
@@ -889,7 +889,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
                "dune-local build bin/main_eio.exe");
           check bool "startup forwards DUNE_JOBS into wrapper under CI" true
             (contains_substring dune_local_calls
-               "DUNE_JOBS=2 DUNE_LOCAL_JOBS=2");
+               "DUNE_JOBS=2");
           check bool "stale cleanup uses dune-local wrapper" true
             (contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true
@@ -945,10 +945,10 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
           let dune_local_calls = read_file dune_local_log in
           check bool "initial startup build used cache default" true
             (contains_substring dune_local_calls
-               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=");
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=");
           check bool "retry disabled Dune cache" true
             (contains_substring dune_local_calls
-               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=disabled");
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=disabled");
           check bool "original cache temp error preserved" true
             (contains_substring stderr
                "rmdir(/Users/test/.cache/dune/db/temp/dune_6eb519_artifacts): Directory not empty");

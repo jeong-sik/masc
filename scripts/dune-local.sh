@@ -12,7 +12,7 @@ Usage: scripts/dune-local.sh [dune-subcommand] [args...]
 Local Dune wrapper for multi-agent development:
   - serializes local Dune invocations with a machine-wide lock
   - serializes opam switch validation with opam pin mutations
-  - defaults local concurrency to DUNE_LOCAL_JOBS, or 2
+  - defaults local concurrency to DUNE_JOBS, or 2
   - disables the shared Dune artifact cache by default for local builds
   - injects --root <repo-root> unless --root is already present
   - asserts agent_sdk opam pin matches the repo SSOT before each build
@@ -21,7 +21,7 @@ Local Dune wrapper for multi-agent development:
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_CACHE=enabled or enabled-except-user-rules to opt into the shared Dune cache.
-Set MASC_OPAM_LOCK=0 or MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
+Set MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
 Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
 Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
 Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
@@ -284,7 +284,12 @@ _check_unwrapped_dune_processes
 
 _needs_opam_lock() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
-  [[ "${MASC_OPAM_LOCK:-1}" != "0" ]] || return 1
+  # MASC_OPAM_LOCK=0 was retired (masc#25123 Wave 2): MASC_SKIP_OPAM_LOCK=1
+  # is the single opt-out. Warn so an operator habit does not silently stop
+  # working.
+  if [[ "${MASC_OPAM_LOCK:-1}" == "0" ]]; then
+    echo "[dune-local] MASC_OPAM_LOCK is retired and ignored; use MASC_SKIP_OPAM_LOCK=1" >&2
+  fi
   [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" ]] || return 1
   [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 1
   [[ "${_subcommand}" != "clean" ]] || return 1
@@ -376,7 +381,13 @@ if _needs_opam_lock; then
 fi
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
-  export DUNE_JOBS="${DUNE_JOBS:-${DUNE_LOCAL_JOBS:-2}}"
+  # DUNE_LOCAL_JOBS was retired (masc#25123 Wave 2): DUNE_JOBS is the single
+  # concurrency knob (CI sets it directly; start-masc.sh derives it from
+  # MASC_DUNE_JOBS).
+  if [[ -n "${DUNE_LOCAL_JOBS:-}" && -z "${DUNE_JOBS:-}" ]]; then
+    echo "[dune-local] DUNE_LOCAL_JOBS is retired and ignored; set DUNE_JOBS" >&2
+  fi
+  export DUNE_JOBS="${DUNE_JOBS:-2}"
   export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$repo_root/_build}"
   # The shared Dune cache can return native artifacts compiled against an
   # older local opam pin, which then link with fresh CMIs and fail with

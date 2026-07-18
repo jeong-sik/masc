@@ -140,5 +140,5 @@ val should_use_sse_for_body :
 val force_json_response : bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.force_json_response}.
-    [true] iff [MASC_FORCE_JSON_RESPONSE] or [MCP_FORCE_JSON_RESPONSE]
+    [true] iff [MASC_FORCE_JSON_RESPONSE]
     is set at module init. *)

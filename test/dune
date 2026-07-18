@@ -778,6 +778,11 @@
  (modules test_fusion_run_registry_persist)
  (libraries alcotest fs_compat yojson masc.fusion_core))
 
+(test
+ (name test_fusion_run_authority)
+ (modules test_fusion_run_authority)
+ (libraries alcotest digestif fs_compat masc.fusion_core unix yojson))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test

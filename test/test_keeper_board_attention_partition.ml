@@ -3,6 +3,8 @@ module J = Masc.Keeper_board_attention_judgment
 module P = Masc.Keeper_board_attention_partition
 module U = Yojson.Safe.Util
 
+let worker_epoch = P.Worker_epoch.generate ()
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -146,7 +148,7 @@ let claim ~base_path =
   match
     P.claim_next
       ~now:110.0
-      ~worker_epoch:"worker-epoch-1"
+      ~worker_epoch
       ~base_path
       ~keeper_name:"partition-keeper"
   with
@@ -201,7 +203,7 @@ let test_response_failure_defers_without_split () =
   (match
     P.fail
       ~now:120.0
-      ~worker_epoch:"worker-epoch-1"
+      ~worker_epoch
       ~base_path
       ~partition:root
       (failure A.Response_contract_unavailable "exact id set mismatch")
@@ -303,7 +305,7 @@ let test_provider_failure_defers_until_signal_recovery () =
   (match
      P.fail
        ~now:120.0
-       ~worker_epoch:"worker-epoch-1"
+       ~worker_epoch
        ~base_path
        ~partition:root
        (failure A.Provider_unavailable "provider admission unavailable")
@@ -311,7 +313,7 @@ let test_provider_failure_defers_until_signal_recovery () =
    | Ok (P.Partition_deferred { state = P.Deferred _; _ }) -> ()
    | Ok _ -> Alcotest.fail "provider failure did not defer"
    | Error detail -> Alcotest.fail detail);
-  (match P.claim_next ~now:121.0 ~worker_epoch:"worker-epoch-1" ~base_path ~keeper_name:"partition-keeper" with
+  (match P.claim_next ~now:121.0 ~worker_epoch ~base_path ~keeper_name:"partition-keeper" with
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "deferred partition retried without a signal"
    | Error detail -> Alcotest.fail detail);
@@ -322,7 +324,7 @@ let test_provider_failure_defers_until_signal_recovery () =
   ignore (claim ~base_path : P.t)
 ;;
 
-let test_running_claim_recovers_after_actor_end () =
+let test_running_claim_recovers_at_process_start () =
   with_temp_base "board-partition-recover" @@ fun base_path ->
   let candidates = [ candidate 1; candidate 2 ] in
   record_all ~base_path candidates;
@@ -349,7 +351,7 @@ let test_completion_requires_exact_identity_then_settles () =
   (match
      P.complete
        ~now:120.0
-       ~worker_epoch:"worker-epoch-1"
+       ~worker_epoch
        ~base_path
        ~partition:root
        ~items:(List.tl items)
@@ -364,7 +366,7 @@ let test_completion_requires_exact_identity_then_settles () =
     match
       P.complete
         ~now:121.0
-        ~worker_epoch:"worker-epoch-1"
+        ~worker_epoch
         ~base_path
         ~partition:root
         ~items
@@ -420,9 +422,9 @@ let () =
             `Quick
             test_provider_failure_defers_until_signal_recovery
         ; Alcotest.test_case
-            "running claim recovers after actor end"
+            "running claim recovers at process start"
             `Quick
-            test_running_claim_recovers_after_actor_end
+            test_running_claim_recovers_at_process_start
         ; Alcotest.test_case
             "completion requires exact identity then settles"
             `Quick

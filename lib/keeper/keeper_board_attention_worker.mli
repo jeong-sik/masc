@@ -63,7 +63,7 @@ module For_testing : sig
   val start_with_judge :
     sw:Eio.Switch.t ->
     base_path:string ->
-    worker_epoch:string ->
+    worker_epoch:Partition.Worker_epoch.t ->
     judge:
       (Candidate.candidate list ->
        (Candidate.judgment Candidate.Candidate_map.t, Candidate.retryable_failure) result) ->

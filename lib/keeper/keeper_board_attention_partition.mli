@@ -22,6 +22,17 @@
 
 module Candidate = Keeper_board_attention_candidate
 
+module Worker_epoch : sig
+  type t
+
+  val generate : unit -> t
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+end
+(** Process-claim identity. UUID entropy distinguishes process workers only;
+    scheduling and recovery never branch on its random contents. *)
+
 type completed_item =
   { candidate_id : string
   ; judgment : Candidate.judgment
@@ -30,7 +41,7 @@ type completed_item =
 type state =
   | Ready
   | Running of
-      { worker_epoch : string
+      { worker_epoch : Worker_epoch.t
       ; started_at : float
       }
   | Deferred of
@@ -86,7 +97,7 @@ val recover_for_process_start :
 
 val claim_next :
   now:float ->
-  worker_epoch:string ->
+  worker_epoch:Worker_epoch.t ->
   base_path:string ->
   keeper_name:string ->
   (t option, string) result
@@ -94,7 +105,7 @@ val claim_next :
 
 val complete :
   now:float ->
-  worker_epoch:string ->
+  worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
   items:completed_item list ->
@@ -103,7 +114,7 @@ val complete :
 
 val fail :
   now:float ->
-  worker_epoch:string ->
+  worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
   Candidate.retryable_failure ->

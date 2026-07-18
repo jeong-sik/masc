@@ -4,6 +4,38 @@ module Candidate = Keeper_board_attention_candidate
 module Id_map = Map.Make (String)
 module Id_set = Set.Make (String)
 
+module Worker_epoch = struct
+  type t = string
+
+  let prefix = "board-attention-worker-"
+  (* NDT-OK: UUID entropy is process-claim identity only. State transitions
+     compare the opaque value for equality and never branch on random contents. *)
+  let rng = Random.State.make_self_init () (* NDT-OK: identity entropy only *)
+  let rng_mutex = Stdlib.Mutex.create ()
+
+  let generate () =
+    let uuid =
+      Stdlib.Mutex.protect rng_mutex (fun () -> Uuidm.v4_gen rng ())
+    in
+    prefix ^ Uuidm.to_string uuid
+  ;;
+
+  let of_string value =
+    let prefix_length = String.length prefix in
+    if
+      String.length value = prefix_length + 36
+      && String.equal (String.sub value 0 prefix_length) prefix
+    then
+      match Uuidm.of_string (String.sub value prefix_length 36) with
+      | Some _ -> Ok value
+      | None -> Error (Printf.sprintf "invalid Board attention worker epoch: %S" value)
+    else Error (Printf.sprintf "invalid Board attention worker epoch: %S" value)
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
+
 type completed_item =
   { candidate_id : string
   ; judgment : Candidate.judgment
@@ -12,7 +44,7 @@ type completed_item =
 type state =
   | Ready
   | Running of
-      { worker_epoch : string
+      { worker_epoch : Worker_epoch.t
       ; started_at : float
       }
   | Deferred of
@@ -70,7 +102,7 @@ let state_to_yojson = function
   | Running { worker_epoch; started_at } ->
     `Assoc
       [ "kind", `String "running"
-      ; "worker_epoch", `String worker_epoch
+      ; "worker_epoch", `String (Worker_epoch.to_string worker_epoch)
       ; "started_at", `Float started_at
       ]
   | Deferred { failure; deferred_at } ->
@@ -195,7 +227,10 @@ let state_of_yojson json =
   | "running" ->
     let* () = exact_fields ~context [ "kind"; "worker_epoch"; "started_at" ] fields in
     let* worker_epoch_json = field ~context "worker_epoch" fields in
-    let* worker_epoch = string_json ~context:(context ^ ".worker_epoch") worker_epoch_json in
+    let* worker_epoch_raw =
+      string_json ~context:(context ^ ".worker_epoch") worker_epoch_json
+    in
+    let* worker_epoch = Worker_epoch.of_string worker_epoch_raw in
     let* started_at_json = field ~context "started_at" fields in
     let* started_at = float_json ~context:(context ^ ".started_at") started_at_json in
     Ok (Running { worker_epoch; started_at })
@@ -594,14 +629,14 @@ let with_running_partition ~worker_epoch ~partition current f =
   | None -> Error ("partition not found: " ^ partition.partition_id)
   | Some persisted ->
     (match persisted.state with
-     | Running running when String.equal running.worker_epoch worker_epoch ->
+     | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
        f persisted
      | Running running ->
        Error
          (Printf.sprintf
             "partition %s is claimed by worker epoch %s"
             partition.partition_id
-            running.worker_epoch)
+            (Worker_epoch.to_string running.worker_epoch))
      | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
        Error
          (Printf.sprintf

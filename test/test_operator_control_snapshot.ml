@@ -335,6 +335,147 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check bool) "nested context payload omitted" true
         (Yojson.Safe.Util.member "context" keeper = `Null))
 
+let context_test_meta ~name ~last_input_tokens =
+  let base =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String (name ^ "-agent")
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "runtime_id", `String "primary"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> Alcotest.fail error
+  in
+  { base with
+    runtime =
+      { base.runtime with
+        usage = { base.runtime.usage with last_input_tokens }
+      }
+  }
+;;
+
+let init_context_test_runtime () =
+  let root = Masc_test_deps.find_project_root () in
+  let config_path = Filename.concat root "config/runtime.toml" in
+  match Runtime.init_default ~config_path with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "Runtime.init_default failed: %s" error
+;;
+
+let write_raw_metrics_row config keeper_name row =
+  let metrics_dir = Keeper_types_support.keeper_metrics_dir config keeper_name in
+  let month_dir = Filename.concat metrics_dir "2026-07" in
+  Fs_compat.mkdir_p month_dir;
+  let path = Filename.concat month_dir "18.jsonl" in
+  Fs_compat.save_file path (row ^ "\n");
+  path
+;;
+
+let test_context_snapshot_missing_metrics_uses_observed_metadata () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-missing" ~last_input_tokens:731 in
+       (match
+          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
+            config
+            meta.name
+        with
+        | Ok None -> ()
+        | Ok (Some _) -> Alcotest.fail "missing metrics store returned a snapshot"
+        | Error _ -> Alcotest.fail "missing metrics store returned a read failure");
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "metadata token observation" (Some 731)
+         snapshot.context_tokens;
+       Alcotest.(check (option string)) "explicit metadata source"
+         (Some "fallback_metadata") snapshot.context_source;
+       Alcotest.(check bool) "no metrics failure" true
+         (snapshot.context_metrics_unavailable = None))
+;;
+
+let test_context_snapshot_malformed_metrics_is_unavailable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-malformed" ~last_input_tokens:991 in
+       let path = write_raw_metrics_row config meta.name "{not-json" in
+       (match
+          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
+            config
+            meta.name
+        with
+        | Error
+            (Operator_control_context_snapshot.Malformed_metrics_row
+              { path = error_path; line_number = None; _ }) ->
+          Alcotest.(check string) "exact malformed row path" path error_path
+        | Error _ -> Alcotest.fail "unexpected metrics read error"
+        | Ok _ -> Alcotest.fail "malformed metrics row was silently accepted");
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "no metadata token fallback" None
+         snapshot.context_tokens;
+       Alcotest.(check (option string)) "no fabricated source" None
+         snapshot.context_source;
+       let json =
+         `Assoc
+           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+       in
+       let unavailable =
+         Yojson.Safe.Util.member "context_metrics_unavailable" json
+       in
+       Alcotest.(check string) "typed decode failure" "malformed_json"
+         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
+       Alcotest.(check string) "decode failure path" path
+         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
+;;
+
+let test_context_snapshot_storage_failure_is_unavailable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-storage-error" ~last_input_tokens:557 in
+       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
+       Fs_compat.mkdir_p (Filename.dirname metrics_dir);
+       Fs_compat.save_file metrics_dir "not a directory";
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "no metadata token fallback" None
+         snapshot.context_tokens;
+       let json =
+         `Assoc
+           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+       in
+       let unavailable =
+         Yojson.Safe.Util.member "context_metrics_unavailable" json
+       in
+       Alcotest.(check string) "typed storage failure" "storage_read_failed"
+         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
+       Alcotest.(check string) "exact storage reason" "not_a_directory"
+         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string))
+;;
+
 let test_keeper_up_clears_dead_tombstone_resume_state () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1724,6 +1865,20 @@ let () =
             "null runtime signal preserves surface status"
             `Quick
             test_align_keeper_runtime_status_tolerates_null_status_json;
+        ] );
+      ( "context metrics ledger"
+      , [ Alcotest.test_case
+            "missing ledger uses observed metadata"
+            `Quick
+            test_context_snapshot_missing_metrics_uses_observed_metadata
+        ; Alcotest.test_case
+            "malformed row is typed unavailable"
+            `Quick
+            test_context_snapshot_malformed_metrics_is_unavailable
+        ; Alcotest.test_case
+            "storage failure is typed unavailable"
+            `Quick
+            test_context_snapshot_storage_failure_is_unavailable
         ] );
     ]
 ;;

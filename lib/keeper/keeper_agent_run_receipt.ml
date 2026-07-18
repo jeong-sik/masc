@@ -52,10 +52,6 @@ let finalize
     ~receipt_started_at
     ~runtime_manifest_context
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~pre_dispatch_compacted
-    ~pre_dispatch_compaction_trigger
-    ~pre_dispatch_compaction_before_tokens
-    ~pre_dispatch_compaction_after_tokens
     ~degraded_retry_applied
     ~degraded_retry_runtime
     ~fallback_reason
@@ -186,10 +182,6 @@ let finalize
     ; extra_system_context_digest
     ; extra_system_context_computed_size
     ; extra_system_context_injected_size
-    ; pre_dispatch_compacted
-    ; pre_dispatch_compaction_trigger
-    ; pre_dispatch_compaction_before_tokens
-    ; pre_dispatch_compaction_after_tokens
     }
   in
   let disposition, reason = Keeper_execution_receipt.operator_disposition receipt in

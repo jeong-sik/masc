@@ -74,22 +74,12 @@ val save_oas_checkpoint
   -> generation:int
   -> (Agent_sdk.Checkpoint.t, string) result
 
-type compaction_event =
-  { attempted : bool
-  ; applied : bool
-  ; started_dispatched : bool
-  ; failure_reason : string option
-  ; trigger : Compaction_trigger.t option
-  ; decision : Keeper_compact_policy.compaction_decision
-  }
-
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; compaction : compaction_event
   ; turn_generation : int
   ; checkpoint_bytes : int
   ; message_count : int
@@ -108,9 +98,9 @@ type context_budget_source =
   | Requested_override
   | Requested_override_clamped_to_provider
 
-type overflow_retry_recovery =
+type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
-  ; compaction : compaction_event
+  ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
   }
@@ -141,13 +131,8 @@ val compaction_decision_prepared : compaction_decision -> bool
 val apply_post_turn_lifecycle_with_resilience_handles
   :  resilience_audit_store:Shared_audit.Store.t option
   -> resilience_strategy_executor:Resilience.Recovery.strategy_executor option
-  -> on_compaction_started:(unit -> unit)
-  -> on_handoff_started:(unit -> unit)
-  -> base_dir:string
   -> meta:keeper_meta
-  -> model:string
   -> primary_model_max_tokens:int
-  -> current_turn_blocker_info:blocker_info option
   -> checkpoint:Agent_sdk.Checkpoint.t option
   -> post_turn_lifecycle
 
@@ -186,12 +171,12 @@ val dispatch_post_turn_lifecycle_events
   -> post_turn_lifecycle
   -> unit
 
-val recover_latest_checkpoint_for_overflow_retry
+val recover_latest_checkpoint_for_compaction
   :  base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
   -> primary_model_max_tokens:int
-  -> (overflow_retry_recovery, Keeper_post_turn.compaction_recovery_error) result
+  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)
 

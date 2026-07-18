@@ -125,14 +125,14 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
 
 type provider_overflow_recovery =
   | Not_provider_overflow
-  | Provider_overflow_applied of
-      { trigger : Compaction_trigger.t
-      ; recovery : Keeper_context_runtime.overflow_retry_recovery
-      }
-  | Provider_overflow_retry of
+  | Provider_overflow_applied of Keeper_context_runtime.compaction_recovery
+  | Provider_overflow_retry_without_checkpoint of
       { trigger : Compaction_trigger.t
       ; reason : string
-      ; recovery : Keeper_context_runtime.overflow_retry_recovery option
+      }
+  | Provider_overflow_retry_with_checkpoint of
+      { reason : string
+      ; recovery : Keeper_context_runtime.compaction_recovery
       }
 
 let recover_provider_context_overflow_in_lane
@@ -183,19 +183,21 @@ let recover_provider_context_overflow_in_lane
     let retry_after_started ?recovery reason =
       record_overflow_failure ~config ~meta ~reason;
       release_failed_lifecycle reason;
-      Provider_overflow_retry { trigger; reason; recovery }
+      match recovery with
+      | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
+      | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery }
     in
     (match dispatch "context_overflow_detected" overflow_event with
      | Error reason ->
        record_overflow_failure ~config ~meta ~reason;
-       Provider_overflow_retry { trigger; reason; recovery = None }
+       Provider_overflow_retry_without_checkpoint { trigger; reason }
      | Ok () ->
        (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
         | Error reason -> retry_after_started reason
         | Ok () ->
           (try
              match
-               recover_latest_checkpoint_for_overflow_retry
+               recover_latest_checkpoint_for_compaction
                  ~base_dir
                  ~meta
                  ~trigger
@@ -212,10 +214,13 @@ let recover_provider_context_overflow_in_lane
                     ~keeper_name:meta.name
                 with
                 | Ok () ->
-                    Log.Keeper.info
-                      ~keeper_name:meta.name
-                      "provider overflow compaction committed; source stimulus will be requeued";
-                    Provider_overflow_applied { trigger; recovery }
+                  Log.Keeper.info
+                    ~keeper_name:meta.name
+                    "provider overflow compaction committed; source stimulus will be requeued";
+                  Keeper_unified_metrics.broadcast_compaction
+                    ~name:meta.name
+                    recovery;
+                  Provider_overflow_applied recovery
                 | Error error ->
                   retry_after_started
                     ~recovery
@@ -248,8 +253,9 @@ let append_provider_overflow_manifest
       ~base_dir
       outcome
   =
-  let append_recovery ~status ~error ~trigger ~recovery turn_state =
+  let append_recovery ~status ~error ~recovery turn_state =
     let evidence = recovery.evidence in
+    let trigger = recovery.trigger in
     let session_id = recovery.checkpoint.session_id in
     let checkpoint_path =
       Keeper_checkpoint_store.oas_checkpoint_path
@@ -284,27 +290,25 @@ let append_provider_overflow_manifest
   in
   match outcome with
   | Not_provider_overflow -> Follow_failure_route, turn_state
-  | Provider_overflow_applied { trigger; recovery } ->
+  | Provider_overflow_applied recovery ->
     let turn_state =
       append_recovery
         ~status:"compacted"
         ~error:`Null
-        ~trigger
         ~recovery
         turn_state
     in
     Requeue_after_context_compaction, turn_state
-  | Provider_overflow_retry { trigger; reason; recovery = Some recovery } ->
+  | Provider_overflow_retry_with_checkpoint { reason; recovery } ->
     let turn_state =
       append_recovery
         ~status:"retryable_failure"
         ~error:(`String reason)
-        ~trigger
         ~recovery
         turn_state
     in
     Requeue_after_context_compaction, turn_state
-  | Provider_overflow_retry { trigger; reason; recovery = None } ->
+  | Provider_overflow_retry_without_checkpoint { trigger; reason } ->
     let turn_state =
       Keeper_unified_turn_manifest.append_manifest
         ~config
@@ -1137,7 +1141,6 @@ dominant source of the observed CAS race exhaustion after
                   let success =
                     Keeper_unified_turn_success.handle
                       ~config
-                      ~base_dir
                       ~meta
                       ~turn_ctx_cell
                       ~observation
@@ -1146,7 +1149,6 @@ dominant source of the observed CAS race exhaustion after
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
-                      ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
                       result
                   in

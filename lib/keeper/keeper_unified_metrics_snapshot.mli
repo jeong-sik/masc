@@ -12,7 +12,6 @@ val append_metrics_snapshot :
   snapshot_source:string ->
   checkpoint_bytes:int ->
   message_count:int ->
-  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
   ?count_completed_turn:bool ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->

@@ -42,10 +42,6 @@ type run_result =
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
-  ; pre_dispatch_compacted : bool
-  ; pre_dispatch_compaction_trigger : string option
-  ; pre_dispatch_compaction_before_tokens : int option
-  ; pre_dispatch_compaction_after_tokens : int option
   }
 
 val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t

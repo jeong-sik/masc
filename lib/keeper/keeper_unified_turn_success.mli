@@ -36,7 +36,6 @@ type handle_result =
 
 val handle
   :  config:Workspace.config
-  -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> observation:Keeper_world_observation.world_observation
@@ -45,7 +44,6 @@ val handle
   -> degraded_retry_applied:bool
   -> degraded_retry_runtime:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
-  -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int
   -> Keeper_agent_run.run_result
   -> handle_result

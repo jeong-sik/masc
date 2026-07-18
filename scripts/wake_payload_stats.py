@@ -66,10 +66,6 @@ def validate_wake_payload_record(record: dict, path: str, lineno: int) -> bool:
     if record["message_count"] <= 0:
         warn_skip(path, lineno, "message_count must be positive")
         return False
-    compacted = record.get("has_compact_happened")
-    if not isinstance(compacted, bool):
-        warn_skip(path, lineno, "has_compact_happened must be a boolean")
-        return False
     role_counts = record.get("role_counts")
     if not isinstance(role_counts, dict):
         warn_skip(path, lineno, "role_counts must be an object")

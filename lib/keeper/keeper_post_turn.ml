@@ -1,6 +1,8 @@
-(** Keeper_post_turn — post-turn lifecycle: compaction and overflow retry recovery.
+(** Keeper_post_turn — post-turn checkpoint preservation and explicit
+    compaction recovery.
 
-    Orchestrates the end-of-turn checkpoint pipeline.
+    Orchestrates the end-of-turn checkpoint pipeline. Compaction is entered
+    only through an explicit typed request from its owner lane.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
     Memory bank append, episode flush, and Hebbian learning are recorded
@@ -40,40 +42,23 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
-type compaction_event = {
-  attempted : bool;
-  applied : bool;
-  (** [started_dispatched] is [true] when the [on_compaction_started] callback
-      successfully dispatched [Compaction_started] to the registry, placing the
-      FSM in [Compaction_compacting].  When [false] (callback failed, skipped,
-      or not attempted), the FSM is still at [Compaction_accumulating] and
-      [dispatch_post_turn_lifecycle_events] must dispatch [Compaction_started]
-      before [Compaction_completed] to avoid the forbidden
-      accumulating -> done transition. *)
-  started_dispatched : bool;
-  failure_reason : string option;
-  trigger : Compaction_trigger.t option;
-  decision : Keeper_compact_policy.compaction_decision;
-}
-
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  compaction : compaction_event;
   turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
 
-type overflow_retry_recovery = {
+type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
-  compaction : compaction_event;
+  trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
-} [@@warning "-69"]
+}
 
 type compaction_recovery_error =
   | Checkpoint_load_failed of Keeper_checkpoint_store.checkpoint_load_error
@@ -185,13 +170,7 @@ let apply_resilience_wirein
         lifecycle
     | Some cp -> (
         try
-          let maybe_error =
-            (* First non-None error signal from this turn's
-               compaction or handoff steps. *)
-            match lifecycle.compaction.failure_reason with
-            | Some _ as r -> r
-            | None -> lifecycle.handoff_failure_reason
-          in
+          let maybe_error = lifecycle.handoff_failure_reason in
           let witness = Resilience.Keeper_bridge.running_witness in
           let outcome =
             Resilience.Keeper_bridge.apply_post_turn_resilience
@@ -354,13 +333,8 @@ let apply_multimodal_wirein
 let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
-    ~on_compaction_started:_
-    ~on_handoff_started:_
-    ~base_dir:_
     ~(meta : keeper_meta)
-    ~model:_
     ~(primary_model_max_tokens : int)
-    ~current_turn_blocker_info:_
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
@@ -403,15 +377,6 @@ let apply_post_turn_lifecycle_with_resilience_handles
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        compaction =
-          {
-            attempted = false;
-            applied = false;
-            started_dispatched = false;
-            failure_reason = None;
-            trigger = None;
-            decision = no_checkpoint_decision;
-        };
         turn_generation = meta.runtime.generation;
         checkpoint_bytes = 0;
         message_count = 0;
@@ -433,7 +398,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
             meta
       in
       let decision = Keeper_compact_policy.Not_requested in
-      let meta_after_compaction =
+      let meta_after_context_check =
         map_runtime
           (fun rt ->
             {
@@ -451,20 +416,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
           base_meta
       in
       {
-        updated_meta = meta_after_compaction;
+        updated_meta = meta_after_context_check;
         checkpoint = Some cp;
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        compaction =
-          {
-            attempted = false;
-            applied = false;
-            started_dispatched = false;
-            failure_reason = None;
-            trigger = None;
-            decision;
-        };
         turn_generation = current_generation;
         checkpoint_bytes = serialized_bytes ctx;
         message_count = message_count ctx;
@@ -487,8 +443,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
 let commit_prepared_after_save ~trigger ~save =
   match save () with
   | Error _ as error -> error
-  | Ok checkpoint ->
-    Ok (checkpoint, Keeper_compact_policy.Applied trigger)
+  | Ok checkpoint -> Ok (checkpoint, trigger)
 ;;
 
 let checkpoint_of_save_outcome = function
@@ -501,12 +456,12 @@ let checkpoint_of_save_outcome = function
   | Error detail -> Error (Checkpoint_save_failed detail)
 ;;
 
-let recover_latest_checkpoint_for_overflow_retry
+let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
     ~(primary_model_max_tokens : int)
-  : (overflow_retry_recovery, compaction_recovery_error) result
+  : (compaction_recovery, compaction_recovery_error) result
   =
   let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
   match
@@ -515,14 +470,14 @@ let recover_latest_checkpoint_for_overflow_retry
   with
   | Error Keeper_checkpoint_store.Not_found ->
     Log.Keeper.debug
-      "keeper:%s overflow-retry OAS checkpoint not found"
+      "keeper:%s compaction OAS checkpoint not found"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
     Error (Checkpoint_load_failed Keeper_checkpoint_store.Not_found)
   | Error
       ((Parse_error detail | Store_error detail | Io_error detail
        | Sdk_other_error detail) as error) ->
     Log.Keeper.error
-      "keeper:%s overflow retry OAS load error: %s"
+      "keeper:%s compaction OAS load error: %s"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       detail;
     Otel_metric_store.inc_counter
@@ -530,7 +485,7 @@ let recover_latest_checkpoint_for_overflow_retry
       ~labels:
         [ "keeper", meta.name
         ; ( "phase"
-          , Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load) )
+          , Keeper_oas_execution_error_phase.(to_label Compaction_checkpoint_load) )
         ]
       ();
     Error (Checkpoint_load_failed error)
@@ -567,21 +522,14 @@ let recover_latest_checkpoint_for_overflow_retry
                   ~generation:turn_generation
                 |> checkpoint_of_save_outcome)
           with
-          | Ok (saved_checkpoint, decision) ->
+          | Ok (saved_checkpoint, trigger) ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string Compactions)
               ~labels:[ "keeper", retry_meta.name ]
               ();
             Ok
               { checkpoint = saved_checkpoint
-              ; compaction =
-                  { attempted = true
-                  ; applied = true
-                  ; started_dispatched = false
-                  ; failure_reason = None
-                  ; trigger = Some prepared_trigger
-                  ; decision
-                  }
+              ; trigger
               ; evidence
               ; turn_generation
               }
@@ -589,19 +537,20 @@ let recover_latest_checkpoint_for_overflow_retry
               (Checkpoint_superseded
                  { incoming_turn_count; known_turn_count } as error) ->
             Log.Keeper.warn
-              "overflow retry checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
+              "compaction checkpoint superseded: incoming_turn_count=%d known_turn_count=%d"
               incoming_turn_count
               known_turn_count;
             Error error
           | Error (Checkpoint_save_failed detail as error) ->
             Log.Keeper.error
-              "overflow retry checkpoint save failed: %s"
+              "compaction checkpoint save failed: %s"
               detail;
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CheckpointFailures)
               ~labels:
                 [ "keeper", retry_meta.agent_name
-                ; "operation", "overflow_save"
+                ; ( "operation"
+                  , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
                 ]
               ();
             Error error
@@ -611,7 +560,7 @@ let recover_latest_checkpoint_for_overflow_retry
         | exn ->
           let detail = Printexc.to_string exn in
           log_keeper_exn
-            ~label:"overflow retry checkpoint save exception"
+            ~label:"compaction checkpoint save exception"
             exn;
           Error (Checkpoint_save_failed detail))
      | Keeper_compact_policy.Rejected (_, reason), _ ->
@@ -620,7 +569,3 @@ let recover_latest_checkpoint_for_overflow_retry
        | Keeper_compact_policy.Not_requested
        | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
        Error (Unexpected_compaction_decision decision))
-
-module For_testing = struct
-  let commit_prepared_after_save = commit_prepared_after_save
-end

@@ -164,7 +164,6 @@ type t =
   | TurnPhaseDuration
   | LifecycleTransitions
   | LifecycleCallbackFailures
-  | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
   | RegistryUpdateDropped
@@ -387,8 +386,6 @@ let to_string = function
   | TurnPhaseDuration -> "masc_keeper_turn_phase_duration_seconds"
   | LifecycleTransitions -> "masc_keeper_lifecycle_transitions_total"
   | LifecycleCallbackFailures -> "masc_keeper_lifecycle_callback_failures_total"
-  | CompactionCallbackRecoveries ->
-    "masc_keeper_compaction_callback_recoveries_total"
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"

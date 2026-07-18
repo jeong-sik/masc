@@ -808,22 +808,11 @@ let compaction_context_snapshot_json
   =
   (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
      the keeper runtime/event bridge that produced the manifest row. *)
-  let pre_dispatch_compacted =
-    Json_util.get_bool row.decision "pre_dispatch_compacted" = Some true
-  in
-  if (not pre_dispatch_compacted) && Keeper_runtime_manifest.status_is_skipped row
+  if Keeper_runtime_manifest.status_is_skipped row
   then None
   else
-    let before_tokens =
-      match Json_util.get_int row.decision "before_tokens" with
-      | Some tokens -> Some tokens
-      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_before_tokens"
-    in
-    let after_tokens =
-      match Json_util.get_int row.decision "after_tokens" with
-      | Some tokens -> Some tokens
-      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_after_tokens"
-    in
+    let before_tokens = Json_util.get_int row.decision "before_tokens" in
+    let after_tokens = Json_util.get_int row.decision "after_tokens" in
     let compaction_source =
       compaction_snapshot_clock_string row.decision "compaction_source"
     in
@@ -841,7 +830,7 @@ let compaction_context_snapshot_json
          ; source = "runtime_manifest"
          (* DET-OK: manifest projection fallback only; a missing source maps to
             a stable UI label and does not drive keeper policy. *)
-         ; trigger = Option.value ~default:"pre_dispatch_hygiene" compaction_source
+         ; trigger = Option.value ~default:"context_compacted" compaction_source
          ; runtime_id = row.runtime_id
          ; before_tokens
          ; after_tokens

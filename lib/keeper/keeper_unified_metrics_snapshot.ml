@@ -18,7 +18,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(snapshot_source : string)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
-    ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
     ?(count_completed_turn = true)
     ?deliberation_execution () : unit =
@@ -114,15 +113,9 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("checkpoint_bytes", `Int checkpoint_bytes);
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
-        ("compacted", `Bool compaction.applied);
-        ("compaction_trigger",
-          match compaction.trigger with
-          | Some trigger -> `String (Compaction_trigger.to_label trigger)
-          | None -> `Null);
-        ("compaction_trigger_detail",
-          match compaction.trigger with
-          | Some trigger -> Compaction_trigger.to_detail_json trigger
-          | None -> `Null);
+        ("compacted", `Bool false);
+        ("compaction_trigger", `Null);
+        ("compaction_trigger_detail", `Null);
         ("turn_mode", `String (turn_mode_to_string turn_mode));
         ( "scheduled_autonomous_outcome",
           match scheduled_autonomous_outcome with

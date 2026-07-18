@@ -9,7 +9,6 @@ let record
     ~user_message
     ~start_turn_count
     ~max_context
-    ~pre_dispatch_compacted
     ()
   =
   try
@@ -34,7 +33,6 @@ let record
           ~message_count:sizes.message_count
           ~role_counts:sizes.role_counts
           ~tool_count:sizes.tool_count
-          ~has_compact_happened:pre_dispatch_compacted
       in
       ()
   with

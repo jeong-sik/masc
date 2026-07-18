@@ -79,7 +79,6 @@ type wake_payload_event =
   ; message_count : int
   ; role_counts : (string * int) list
   ; tool_count : int
-  ; has_compact_happened : bool
   }
 
 (** {1 Recorders} *)
@@ -124,7 +123,6 @@ val record_wake_payload
   -> message_count:int
   -> role_counts:(string * int) list
   -> tool_count:int
-  -> has_compact_happened:bool
   -> wake_payload_event
 
 (** {1 Verdict readers} *)

@@ -155,7 +155,6 @@ type t =
   | TurnPhaseDuration
   | LifecycleTransitions
   | LifecycleCallbackFailures
-  | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
   | RegistryUpdateDropped

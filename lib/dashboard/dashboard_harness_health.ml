@@ -37,10 +37,7 @@ type pre_compact_event =
 
     [message_count] and [role_counts] include the synthesized user turn
     that OAS will append from [~goal], matching the wire-level message
-    list the LLM will receive.
-
-    [has_compact_happened] marks whether MASC applied a pre-dispatch context
-    compaction before handing the resumed checkpoint to OAS. *)
+    list the LLM will receive. *)
 type wake_payload_event =
   { timestamp : float
   ; keeper_name : string
@@ -53,7 +50,6 @@ type wake_payload_event =
   ; message_count : int
   ; role_counts : (string * int) list
   ; tool_count : int
-  ; has_compact_happened : bool
   }
 
 type handoff_event =
@@ -388,7 +384,6 @@ let wake_payload_record_json (event : wake_payload_event) =
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
-    ; "has_compact_happened", `Bool event.has_compact_happened
     ]
 ;;
 
@@ -405,7 +400,6 @@ let wake_payload_event_json (event : wake_payload_event) =
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
-    ; "has_compact_happened", `Bool event.has_compact_happened
     ]
 ;;
 
@@ -444,7 +438,6 @@ let wake_payload_event_of_json json =
                message_count)
       in
       let* tool_count = required_nonnegative_int fields "tool_count" in
-      let* has_compact_happened = required_bool fields "has_compact_happened" in
       Ok
         { timestamp
         ; keeper_name
@@ -457,7 +450,6 @@ let wake_payload_event_of_json json =
         ; message_count
         ; role_counts
         ; tool_count
-        ; has_compact_happened
         }
   | _ -> Error "wake-payload record must be a JSON object"
 ;;
@@ -802,7 +794,6 @@ let record_wake_payload_at
       ~message_count
       ~role_counts
       ~tool_count
-      ~has_compact_happened
   =
   (* Project World Building: Broadcast live Yjs telemetry *)
   Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index;
@@ -818,7 +809,6 @@ let record_wake_payload_at
     ; message_count
     ; role_counts
     ; tool_count
-    ; has_compact_happened
     }
   in
   append_store_json_fail_open
@@ -840,7 +830,6 @@ let record_wake_payload
       ~message_count
       ~role_counts
       ~tool_count
-      ~has_compact_happened
   =
   record_wake_payload_at
     ~timestamp:(Time_compat.now ())
@@ -854,7 +843,6 @@ let record_wake_payload
     ~message_count
     ~role_counts
     ~tool_count
-    ~has_compact_happened
 ;;
 
 let recent_verdicts_json ?since ?until () =
@@ -972,11 +960,11 @@ let json ~(config : Workspace.config) ?since ?until () =
 ;;
 
 let () =
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ->
     let (_recorded : wake_payload_event) =
       record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window
         ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes
-        ~message_count ~role_counts ~tool_count ~has_compact_happened
+        ~message_count ~role_counts ~tool_count
     in
     ()
   );

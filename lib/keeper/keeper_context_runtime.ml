@@ -84,30 +84,20 @@ let compaction_decision_prepared =
 (* Re-export from Keeper_post_turn                                   *)
 (* ================================================================ *)
 
-type compaction_event = Keeper_post_turn.compaction_event = {
-  attempted : bool;
-  applied : bool;
-  started_dispatched : bool;
-  failure_reason : string option;
-  trigger : Compaction_trigger.t option;
-  decision : Keeper_compact_policy.compaction_decision;
-}
-
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  compaction : compaction_event;
   turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
 
-type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
+type compaction_recovery = Keeper_post_turn.compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
-  compaction : compaction_event;
+  trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
 }
@@ -162,8 +152,8 @@ let context_budget_json_of_resolution
 
 let apply_post_turn_lifecycle_with_resilience_handles =
   Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
-let recover_latest_checkpoint_for_overflow_retry =
-  Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
+let recover_latest_checkpoint_for_compaction =
+  Keeper_post_turn.recover_latest_checkpoint_for_compaction
 
 let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
   Otel_metric_store.inc_counter
@@ -240,49 +230,6 @@ let dispatch_post_turn_lifecycle_events
     ~(config : Workspace.config)
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
-  if lifecycle.compaction.attempted then
-    if lifecycle.compaction.applied then begin
-      (* FSM boundary: compaction_stage must be Compaction_compacting
-         before we dispatch Compaction_completed.  If the
-         on_compaction_started callback succeeded (started_dispatched =
-         true), the FSM is already in compacting.  If it failed or was
-         never called (recovery path), the FSM is still at accumulating
-         and we must dispatch Compaction_started first.  The Started
-         dispatch is idempotent from compacting, so this is safe in
-         both cases. *)
-      if not lifecycle.compaction.started_dispatched then begin
-        Otel_metric_store.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
-          ~labels:[ ("keeper", keeper_name) ] ();
-        Log.Keeper.warn
-          "%s: on_compaction_started callback did not fire — \
-           dispatching Compaction_started before Completed to recover \
-           FSM path.  If this repeats, investigate registry contention \
-           or keeper registration timing."
-          keeper_name;
-        dispatch_keeper_phase_event ~config
-          ~origin:Keeper_registry.Post_turn_lifecycle
-          ~keeper_name
-          Keeper_state_machine.Compaction_started
-      end;
-      dispatch_compaction_completed
-        ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-      |> ignore
-    end
-    else
-      dispatch_keeper_phase_event
-        ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-        (Keeper_state_machine.Compaction_failed
-           {
-             reason =
-               Option.value lifecycle.compaction.failure_reason
-                 ~default:
-                   (compaction_decision_to_string
-                      lifecycle.compaction.decision);
-           });
   match lifecycle.handoff_attempted, lifecycle.handoff_json with
   | true, Some _json ->
       dispatch_keeper_phase_event

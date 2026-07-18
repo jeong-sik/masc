@@ -182,12 +182,6 @@ val input_capabilities_of_runtime :
     with the model's declared media capabilities (the MASC SSOT). Used to score the
     assigned runtime and reroute candidates. *)
 
-val media_reroute_candidates :
-  exclude:string -> (string * Llm_provider.Capabilities.capabilities) list
-(** Ordered [(runtime_id, input_caps)] reroute candidates: [\[runtime\].media_failover]
-    order first, then remaining configured runtimes in declaration order, excluding
-    [exclude]. Reads the runtime cache; deterministic (no provider liveness). *)
-
 val caps_admit_required_modalities :
   Llm_provider.Capabilities.capabilities -> string list -> bool
 (** Shared RFC-0265 modality-admission predicate. Callers that need to preselect

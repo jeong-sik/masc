@@ -669,26 +669,6 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
     (Option.value rt.Runtime.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
 
-(* Ordered (runtime_id, input_caps) reroute candidates: [\[runtime\].media_failover]
-   order first (validated at load to resolve), then the remaining configured
-   runtimes in declaration order, excluding [exclude] (the assigned runtime).
-   Deterministic — no provider liveness (RFC-0260 deferred). *)
-let media_reroute_candidates ~(exclude : string) :
-    (string * Llm_provider.Capabilities.capabilities) list =
-  let all = Runtime.get_runtimes () in
-  let failover = Runtime.media_failover () in
-  let by_id id =
-    List.find_opt (fun (r : Runtime.t) -> String.equal r.Runtime.id id) all
-  in
-  let from_failover = List.filter_map by_id failover in
-  let rest =
-    List.filter (fun (r : Runtime.t) -> not (List.mem r.Runtime.id failover)) all
-  in
-  from_failover @ rest
-  |> List.filter (fun (r : Runtime.t) -> not (String.equal r.Runtime.id exclude))
-  |> List.map (fun (r : Runtime.t) ->
-       (r.Runtime.id, input_capabilities_of_runtime r))
-
 let validate_content_blocks_for_config
     ?oas_checkpoint
     ~(config : config)

@@ -689,17 +689,6 @@ let media_reroute_candidates ~(exclude : string) :
   |> List.map (fun (r : Runtime.t) ->
        (r.Runtime.id, input_capabilities_of_runtime r))
 
-(* First configured runtime that admits [modality] as input, in media_failover
-   order then declaration order. Reuses the RFC-0265 candidate ordering and the
-   single admit predicate ([caps_admit_required_modalities]), so the pick is
-   exactly a runtime the dispatch capability gate would accept (the SSOT
-   invariant above). [exclude:""] = consider every configured runtime. *)
-let first_media_capable_runtime ~(modality : string) : string option =
-  media_reroute_candidates ~exclude:""
-  |> List.find_opt (fun (_id, caps) ->
-       caps_admit_required_modalities caps [ modality ])
-  |> Option.map fst
-
 let validate_content_blocks_for_config
     ?oas_checkpoint
     ~(config : config)
@@ -746,21 +735,6 @@ let decide_modality_reroute
                 (String.concat "," required_modalities)
           }
     | None -> No_capable_runtime { required = required_modalities }
-
-(* Keeper-dispatch convenience (RFC-0265): gather candidates from the runtime
-   cache and decide a reroute for [assigned] given the active run view (prior
-   [initial_messages] plus current [blocks]). Pure [decide_modality_reroute] over
-   impure candidate gathering. *)
-let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
-    ?(checkpoint_messages = [])
-    ?(initial_messages = [])
-    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
-  decide_modality_reroute
-    ~assigned_caps:(input_capabilities_of_runtime assigned)
-    ~required_modalities:
-      (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
-         ~goal_blocks:blocks)
-    ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
 let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
     ~(candidates : Runtime.t list)

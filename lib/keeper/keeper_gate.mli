@@ -116,3 +116,15 @@ val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
+
+module For_testing : sig
+  val ready_auto_judges_for_owner :
+    base_path:string ->
+    keeper_name:string ->
+    Keeper_approval_queue.pending_approval list ->
+    Keeper_approval_queue.pending_approval list
+
+  val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
+  val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
+  val reset_active_auto_judges : unit -> unit
+end

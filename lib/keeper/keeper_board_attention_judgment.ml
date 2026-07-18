@@ -7,7 +7,6 @@ type t =
   ; rationale : string
   }
 
-let schema_name = "keeper_board_attention_judgment"
 let batch_schema_name = "keeper_board_attention_judgment_batch"
 
 let decision_to_string = function

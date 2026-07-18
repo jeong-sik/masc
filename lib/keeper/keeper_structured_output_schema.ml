@@ -159,16 +159,6 @@ let failure_judgment_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let board_attention_judgment_output_schema =
-  let fields =
-    [ ( "decision"
-      , enum_schema Keeper_board_attention_judgment.decision_tokens )
-    ; "rationale", string_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 let board_attention_judgment_batch_output_schema =
   let item_fields =
     [ "candidate_id", string_schema

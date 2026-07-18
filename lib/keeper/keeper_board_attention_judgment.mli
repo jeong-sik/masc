@@ -9,7 +9,6 @@ type t =
   ; rationale : string
   }
 
-val schema_name : string
 val batch_schema_name : string
 val decision_tokens : string list
 val decision_to_string : decision -> string

@@ -39,10 +39,6 @@ val failure_judgment_output_schema : Yojson.Safe.t
 (** Strict independent Keeper failure-judgment verdict. Decision tokens are
     owned by {!Keeper_failure_judgment_contract}. *)
 
-val board_attention_judgment_output_schema : Yojson.Safe.t
-(** Strict relevance verdict for one durable Board-attention candidate. Decision
-    tokens are owned by {!Keeper_board_attention_judgment}. *)
-
 val board_attention_judgment_batch_output_schema : Yojson.Safe.t
 (** Strict batch relevance verdict: one [verdicts] array whose items carry the
     exact candidate identity. Decision tokens are owned by

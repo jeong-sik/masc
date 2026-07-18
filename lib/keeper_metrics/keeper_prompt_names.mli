@@ -13,7 +13,6 @@ val reply_guidelines : string
 val core_behavior : string
 val recovery_block : string
 val failure_judgment : string
-val board_attention_judgment : string
 val board_attention_judgment_batch : string
 val gate_judgment : string
 val turn_intent : string

@@ -57,8 +57,8 @@ let all_provider_native_schema_cases =
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
   ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
-  ; ( "board_attention_judgment"
-    , Keeper_structured_output_schema.board_attention_judgment_output_schema )
+  ; ( "board_attention_judgment_batch"
+    , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
   ; ( "anti_rationalization_verdict"
     , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
   ]
@@ -295,21 +295,29 @@ let test_failure_judgment_schema_uses_contract_ssot () =
     (allows_additional_properties schema)
 ;;
 
-let test_board_attention_judgment_schema_uses_contract_ssot () =
+let test_board_attention_batch_schema_uses_contract_ssot () =
   let schema =
-    Keeper_structured_output_schema.board_attention_judgment_output_schema
+    Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
   in
   check
     (list string)
-    "Board attention required fields"
-    [ "decision"; "rationale" ]
+    "Board attention batch required fields"
+    [ "verdicts" ]
     (required_strings schema);
+  let item = schema |> schema_property "verdicts" |> schema_items in
   check
     (list string)
-    "Board attention decision enum"
+    "Board attention batch item required fields"
+    [ "candidate_id"; "decision"; "rationale" ]
+    (required_strings item);
+  check
+    (list string)
+    "Board attention batch decision enum"
     (List.sort String.compare Keeper_board_attention_judgment.decision_tokens)
-    (schema |> schema_property "decision" |> enum_strings);
-  check bool "Board attention verdict is closed" false
+    (item |> schema_property "decision" |> enum_strings);
+  check bool "Board attention batch item is closed" false
+    (allows_additional_properties item);
+  check bool "Board attention batch envelope is closed" false
     (allows_additional_properties schema)
 ;;
 
@@ -356,9 +364,9 @@ let () =
             `Quick
             test_failure_judgment_schema_uses_contract_ssot
         ; test_case
-            "Board attention judgment schema uses contract SSOT"
+            "Board attention batch schema uses contract SSOT"
             `Quick
-            test_board_attention_judgment_schema_uses_contract_ssot
+            test_board_attention_batch_schema_uses_contract_ssot
         ] )
     ]
 ;;

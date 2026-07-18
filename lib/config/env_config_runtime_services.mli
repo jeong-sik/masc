@@ -7,38 +7,6 @@
     process restart.  The few [() -> X] re-readers for dashboard
     fixture selection are documented exceptions. *)
 
-(** {1 Inference} *)
-
-module Inference : sig
-  val cache_enabled : bool
-  (** [MASC_INFERENCE_CACHE_ENABLED] feature flag.  Enable L1+L2
-      response cache. *)
-
-  val cache_ttl_seconds : int
-  (** [MASC_INFERENCE_CACHE_TTL_SEC] (default [300]). *)
-
-  val cache_max_prompt_chars : int
-  (** [MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS] (default [48000]).
-      Skip caching for oversized prompts (character count). *)
-
-  val cache_max_temperature : float
-  (** [MASC_INFERENCE_CACHE_MAX_TEMP] (default [0.0]).  Cache
-      only deterministic temperatures (default exact [0.0]). *)
-
-  val cache_l1_max_entries : int
-  (** [MASC_INFERENCE_CACHE_L1_MAX_ENTRIES] (default [512]).
-      L1 in-memory entry cap.  Reduced from 2048 (BUG-015) —
-      unbounded growth at 2048 caused excessive memory in
-      long-running servers. *)
-
-  val spawn_cache_policy : string
-  (** [MASC_SPAWN_CACHE_POLICY] (default ["safe_only"]).
-      Trimmed + lowercased.  Two operator-visible values:
-      - [["off"]]
-      - [["safe_only"]] — GLM direct HTTP only, no MCP-tool
-        side effects. *)
-end
-
 (** {1 Rate limit cleanup} *)
 
 module RateLimit : sig

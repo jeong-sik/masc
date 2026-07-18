@@ -80,11 +80,6 @@ module Runtime = struct
 
   (** @category Sandbox
       @ops_class operator *)
-  let docker_playground_container_name () =
-    get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
-
-  (** @category Sandbox
-      @ops_class operator *)
   let docker_playground_container_root () =
     get_string ~default:"/home/keeper/playground"
       "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
@@ -251,9 +246,6 @@ let raw_runtime () : Yojson.Safe.t =
     ; "docker_playground_enabled",
       entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
         (bool_v (Runtime.docker_playground_enabled ()))
-    ; "docker_playground_container_name",
-      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_CONTAINER"
-        (string_v (Runtime.docker_playground_container_name ()))
     ; "docker_playground_container_root",
       entry_env_overridable
         ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"

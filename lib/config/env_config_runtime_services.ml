@@ -1,39 +1,5 @@
 open Env_config_core
 
-(** {1 Inference Configuration} *)
-
-module Inference = struct
-  (** Enable inference response cache (L1+L2). *)
-  let cache_enabled =
-    Feature_flag_registry.get_bool "MASC_INFERENCE_CACHE_ENABLED"
-
-  (** Default TTL for inference response cache (seconds). *)
-  let cache_ttl_seconds =
-    get_int ~default:300 "MASC_INFERENCE_CACHE_TTL_SEC"
-
-  (** Skip caching for oversized prompts (character count). *)
-  let cache_max_prompt_chars =
-    get_int ~default:48000 "MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS"
-
-  (** Cache only deterministic temperatures (default exact 0.0). *)
-  let cache_max_temperature =
-    get_float ~default:0.0 "MASC_INFERENCE_CACHE_MAX_TEMP"
-
-  (** L1 in-memory entry cap.
-      BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default
-      caused excessive memory usage in long-running servers. *)
-  let cache_l1_max_entries =
-    get_int ~default:512 "MASC_INFERENCE_CACHE_L1_MAX_ENTRIES"
-
-  (** Spawn cache policy:
-      - off
-      - safe_only (GLM direct HTTP only, no MCP-tool side effects) *)
-  let spawn_cache_policy =
-    get_string ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
-    |> String.trim
-    |> String.lowercase_ascii
-end
-
 (** {1 Rate Limit Cleanup Configuration} *)
 
 module RateLimit = struct

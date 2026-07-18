@@ -9,18 +9,10 @@
     that operators may flip at runtime (feature flags via
     {!Feature_flag_registry}, optional env-vars). *)
 
-(** {1 Lock} *)
-
-module Lock : sig
-  val timeout_seconds : float
-  val expiry_warning_seconds : float
-end
-
 (** {1 Session} *)
 
 module Session : sig
   val max_age_seconds : float
-  val rate_limit_window_seconds : float
   val sse_grace_period_seconds : float
 end
 
@@ -70,12 +62,6 @@ end
 module Ollama : sig
   val server_url : string
   val default_model : string
-end
-
-(** {1 Cancellation tokens} *)
-
-module Cancellation : sig
-  val token_max_age_seconds : float
 end
 
 (** {1 Voice bridge} *)

@@ -186,7 +186,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0172 | Big-bang vendor purge across docs, audits, RFCs, design-system, tests | Draft | 03d5feaf25 2026-07-08 | - |
 | 0173 | OCaml lib/bin/test vendor purge (identifier + string literal) | Draft | 03d5feaf25 2026-07-08 | - |
 | 0174 | Dashboard substring classifier to typed — TypeScript | Draft | 03d5feaf25 2026-07-08 | - |
-| 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | 03d5feaf25 2026-07-08 | - |
+| 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | 71c70f2806 2026-07-18 | - |
 | 0176 | OAS vendor-purge migration — consume agent_sdk 0.198.0 | Implemented | 03d5feaf25 2026-07-08 | - |
 | 0177 | Phonebook internal vendor-coupled enum purge | Draft | 03d5feaf25 2026-07-08 | - |
 | 0178 | Types Sub-library Extraction with `_intf.ml` mli-only Surface (typed-SSOT) | Draft | 03d5feaf25 2026-07-08 | - |
@@ -200,7 +200,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0191 | Withdraw descriptor authorization policy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0192 | Runtime deadline propagation — retired admission-wait proposal | Retired | 7b62a87d44 2026-07-13 | - |
 | 0194 | Withdraw tool semantics as an authorization SSOT | Withdrawn | 7b62a87d44 2026-07-13 | - |
-| 0197 | Runtime Attempt Watchdog — Per-Candidate Wrap + Shared Deadline | Draft | 03d5feaf25 2026-07-08 | - |
+| 0197 | Runtime Attempt Watchdog — Per-Candidate Wrap + Shared Deadline | Draft | 44966887a6 2026-07-18 | - |
 | 0198 | Execute Typed Redirection (Shell IR Syntax Leakage Closure) | Draft | 214eec8f6c 2026-07-14 | - |
 | 0199 | Withdraw deterministic task-completion auto approval | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0200 | Time constants 를 leaf library 로 분리 | Draft | 03d5feaf25 2026-07-08 | - |
@@ -328,6 +328,8 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0341 | Keeper lifecycle projection SSOT | Draft | 7b62a87d44 2026-07-13 | - |
 | 0342 | Capability catalog overlay, deployment capability declarations, and boot posture | Draft | 25a1c593b5 2026-07-16 | - |
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | f463ec7b82 2026-07-15 | - |
+| chec | Immutable boot-pinned root capability for checkpoint containment | Draft | 810be9566e 2026-07-18 | - |
+| comp | Compaction summarizer must obey the per-Keeper lane, not a fleet-wide provide... | Draft | 420995dfb2 2026-07-18 | - |
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |

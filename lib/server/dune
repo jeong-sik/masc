@@ -22,6 +22,10 @@
   ;; #20929: server bootstrap converges <base>/.masc/config/prompts onto the
   ;; binary-embedded config/ tree so merged prompt edits ship on restart.
   masc.embedded_config
+  ;; server_dashboard_http_keeper_api reads the manifest decision payload
+  ;; through Keeper_compaction_evidence.exact_evidence_key; dune does not
+  ;; re-export it through the masc dep, so masc_server lists it explicitly.
+  masc.keeper_compaction_evidence
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.

@@ -38,8 +38,12 @@ source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
 agent_sdk_floor_path="${MASC_AGENT_SDK_FLOOR_PATH:-/tmp/me-agent-sdk-floor}"
 
-if [[ "${MASC_OPAM_LOCK:-1}" != "0" \
-      && "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
+if [[ "${MASC_OPAM_LOCK:-1}" == "0" ]]; then
+  # Retired alias (masc#25123 Wave 2): MASC_SKIP_OPAM_LOCK=1 is the single
+  # opt-out.
+  echo "[opam-pin] MASC_OPAM_LOCK is retired and ignored; use MASC_SKIP_OPAM_LOCK=1" >&2
+fi
+if [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
       && "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]]; then
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   env_cmd="${ENV_CMD:-/usr/bin/env}"
@@ -180,8 +184,13 @@ print_opam_lock_holder() {
 }
 
 allow_agent_sdk_pin_downgrade() {
-  [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" == "1" \
-    || "${MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE:-0}" == "1" ]]
+  # MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE was retired (masc#25123 Wave 2): the
+  # pin target is the oas repo, so MASC_ALLOW_OAS_PIN_DOWNGRADE is the single
+  # opt-in. Warn so an intentional rollback does not silently stop working.
+  if [[ "${MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE:-0}" == "1" ]]; then
+    echo "[opam-pin] MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE is retired and ignored; use MASC_ALLOW_OAS_PIN_DOWNGRADE=1" >&2
+  fi
+  [[ "${MASC_ALLOW_OAS_PIN_DOWNGRADE:-0}" == "1" ]]
 }
 
 guard_agent_sdk_downgrade() {
@@ -200,7 +209,7 @@ guard_agent_sdk_downgrade() {
       echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
       echo "[opam-pin] lock path: ${opam_lock_path}" >&2
       print_opam_lock_holder
-      echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+      echo "[opam-pin] repair: rebase/update this worktree to the current OAS pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
       exit 1
     fi
   fi
@@ -219,7 +228,7 @@ guard_agent_sdk_downgrade() {
         echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
         echo "[opam-pin] lock path: ${opam_lock_path}" >&2
         print_opam_lock_holder
-        echo "[opam-pin] repair: fix opam switch inspection, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional rollback" >&2
+        echo "[opam-pin] repair: fix opam switch inspection, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional rollback" >&2
         exit 1
         ;;
     esac
@@ -232,7 +241,7 @@ guard_agent_sdk_downgrade() {
     echo "[opam-pin] installed: agent_sdk ${installed_version}" >&2
     echo "[opam-pin] lock path: ${opam_lock_path}" >&2
     print_opam_lock_holder
-    echo "[opam-pin] repair: use the newer worktree pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1/MASC_ALLOW_AGENT_SDK_PIN_DOWNGRADE=1 for an intentional downgrade" >&2
+    echo "[opam-pin] repair: use the newer worktree pin, or set MASC_ALLOW_OAS_PIN_DOWNGRADE=1 for an intentional downgrade" >&2
     exit 1
   fi
 }

@@ -170,8 +170,6 @@ describe('KeeperWorkspaceRail', () => {
     context_tokens: 124000,
     context_max: 200000,
     compaction_profile: 'balanced',
-    compaction_ratio_gate: 0.72,
-    compaction_message_gate: 120,
     recent_tool_names: ['masc_amplitude_query', 'masc_board_metrics'],
   })
 
@@ -759,12 +757,10 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 
-  it('renders the auto-compact threshold label', () => {
+  it('does not invent an auto-compact threshold from retired gate data', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    // With meter data the gate renders as the "compact NN%" meter mark.
-    expect(container.textContent).toContain('compact 72%')
-    // The meter mark also exposes the gate percentage via its label element.
-    expect(container.querySelector('.meter-mark-lbl')?.textContent).toContain('compact 72%')
+    expect(container.textContent).not.toContain('compact 72%')
+    expect(container.querySelector('.meter-mark-lbl')).toBeNull()
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {

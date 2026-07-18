@@ -14,9 +14,6 @@
     Captured once per decision cycle to eliminate TOCTOU windows
     where [Runtime_params.get] could return different values. *)
 type threshold_params = {
-  compaction_ratio_gate : float;
-  compaction_message_gate : int;
-  compaction_token_gate : int;
   model_ratio_multiplier : float;
 }
 

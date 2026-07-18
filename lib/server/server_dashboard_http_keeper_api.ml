@@ -2091,7 +2091,7 @@ let handle_keeper_get_subroutes state req request reqd =
           let b = Buffer.create 256 in
           Buffer.add_string b "stateDiagram-v2\n";
           Buffer.add_string b "    [*] --> Accumulating\n";
-          Buffer.add_string b "    Accumulating --> Compacting: ratio_gate\n";
+          Buffer.add_string b "    Accumulating --> Compacting: Compaction_started\n";
           Buffer.add_string b "    Compacting --> Done: Compaction_completed\n";
           Buffer.add_string b "    Compacting --> Accumulating: Compaction_failed\n";
           Buffer.add_string b "    Done --> [*]\n";

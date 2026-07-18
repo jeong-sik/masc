@@ -623,7 +623,6 @@ describe('RuntimeLensSection', () => {
           fiber_alive: true,
           heartbeat_healthy: true,
           turn_healthy: true,
-          context_within_budget: true,
           context_handoff_needed: false,
           compaction_active: false,
           handoff_active: false,

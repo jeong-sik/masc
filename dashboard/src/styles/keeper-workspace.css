@@ -2078,10 +2078,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   font-size: var(--fs-14);
 }
 
-.ctx-meter-pct.hot {
-  color: var(--status-bad);
-}
-
 .kw-fleet-vitals {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

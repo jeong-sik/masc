@@ -1010,10 +1010,6 @@
 .meter.hot > span { background: linear-gradient(90deg, var(--status-warn), var(--status-bad)); }
 .meter-wrap { position: relative; margin-top: 7px; }
 .meter-wrap .meter { margin-top: 0; }
-.meter-mark { position: absolute; top: -2px; width: 1px; height: 11px; background: color-mix(in oklab, var(--status-warn) 75%, transparent); transform: translateX(-50%); pointer-events: none; }
-.meter-mark.hot { background: var(--status-bad); }
-.meter-mark-lbl { position: absolute; bottom: 100%; right: 1px; margin-bottom: 3px; font-size: 8.5px; font-style: normal; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; color: color-mix(in oklab, var(--status-warn) 80%, var(--text-dim)); }
-.meter-mark.hot .meter-mark-lbl { color: var(--status-bad); }
 
 /* fsm list */
 .fsm { display: flex; flex-direction: column; gap: 0; }

@@ -1245,9 +1245,6 @@ export interface Keeper {
     has_checkpoint?: boolean
   }
   compaction_profile?: string | null
-  compaction_ratio_gate?: number | null
-  compaction_message_gate?: number | null
-  compaction_token_gate?: number | null
   traits?: string[]
   interests?: string[]
   primaryValue?: string
@@ -1336,7 +1333,6 @@ export interface KeeperConditions {
   fiber_alive: boolean
   heartbeat_healthy: boolean
   turn_healthy: boolean
-  context_within_budget: boolean
   context_handoff_needed: boolean
   compaction_active: boolean
   handoff_active: boolean
@@ -1399,9 +1395,6 @@ interface KeeperConfigExecution {
 
 interface KeeperConfigCompaction {
   profile: string
-  ratio_gate: number
-  message_gate: number
-  token_gate: number
 }
 
 interface KeeperConfigProactive {

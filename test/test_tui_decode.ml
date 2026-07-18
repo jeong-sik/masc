@@ -58,7 +58,6 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
        ("total_cost_usd", `Float 0.42);
        ("last_turn_ts", last_turn_ts);
        ("compaction_count", `Int 1);
-       ("compaction_ratio_gate", `Float 0.8);
        ("trigger_mode", `String "mention");
        ("context_budget", `Int 32000);
        ("drift_enabled", `Bool true);

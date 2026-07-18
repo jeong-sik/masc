@@ -213,9 +213,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let compaction =
         `Assoc [
           ("profile", `String m.compaction.profile);
-          ("ratio_gate", `Float m.compaction.ratio_gate);
-          ("message_gate", `Int m.compaction.message_gate);
-          ("token_gate", `Int m.compaction.token_gate);
         ]
       in
       let proactive =

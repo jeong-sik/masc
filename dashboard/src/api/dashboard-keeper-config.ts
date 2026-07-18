@@ -208,9 +208,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     compaction: {
       profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
-      ratio_gate: asLooseNumber(compaction.ratio_gate) ?? 0.85,
-      message_gate: asInt(compaction.message_gate) ?? 0,
-      token_gate: asInt(compaction.token_gate) ?? 0,
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
@@ -302,9 +299,6 @@ export type KeeperConfigUpdatePayload = {
   proactive_enabled?: boolean
   // Compaction
   compaction_profile?: string
-  compaction_ratio_gate?: number
-  compaction_message_gate?: number
-  compaction_token_gate?: number
 }
 
 export async function patchKeeperConfig(

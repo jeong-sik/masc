@@ -19,7 +19,6 @@ let conditions_to_json (c : conditions) =
     ; "fiber_alive", `Bool c.fiber_alive
     ; "heartbeat_healthy", `Bool c.heartbeat_healthy
     ; "turn_healthy", `Bool c.turn_healthy
-    ; "context_within_budget", `Bool c.context_within_budget
     ; "context_handoff_needed", `Bool c.context_handoff_needed
     ; "compaction_active", `Bool c.compaction_active
     ; "handoff_active", `Bool c.handoff_active

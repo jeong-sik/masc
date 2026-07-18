@@ -61,9 +61,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     compaction: {
       profile: 'balanced',
-      ratio_gate: 0.85,
-      message_gate: 16,
-      token_gate: 24000,
     },
     proactive: {
       enabled: true,
@@ -128,7 +125,7 @@ describe('filterHookSlots', () => {
   const entries: HookSlotEntry[] = [
     ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['typed_input', 'path_scope'] })],
     ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
-    ['compaction_watcher', makeSlot({ source: 'persona', features: ['ratio_gate'] })],
+    ['compaction_watcher', makeSlot({ source: 'persona', features: ['snapshot'] })],
     ['orphan', makeSlot({ source: 'builtin' })],
   ]
 
@@ -161,7 +158,7 @@ describe('filterHookSlots', () => {
   })
 
   it('matches by features entry', () => {
-    const result = filterHookSlots(entries, 'ratio_gate')
+    const result = filterHookSlots(entries, 'snapshot')
     expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
   })
 
@@ -444,9 +441,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     prompt: {} as KeeperConfig['prompt'],
     execution: {} as KeeperConfig['execution'],
     compaction: {
-      ratio_gate: 0.8,
-      message_gate: 0,
-      token_gate: 0,
+      profile: 'balanced',
     } as KeeperConfig['compaction'],
     proactive: {
       enabled: false,
@@ -522,18 +517,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const payload = buildRuntimePayload(draftFrom(c), c)
     expect(payload.sandbox_profile).toBeUndefined()
     expect(payload.network_mode).toBeUndefined()
-  })
-
-  it('omits compaction_token_gate when unchanged but emits it when edited', () => {
-    const c = makeKeeperConfigForSandbox({})
-    // Unchanged draft → not in payload.
-    expect(buildRuntimePayload(draftFrom(c), c).compaction_token_gate).toBeUndefined()
-    // Editing the token gate (now reachable via the InlineNumberRow) → emitted.
-    const edited = buildRuntimePayload(
-      draftFrom(c, { compaction_token_gate: c.compaction.token_gate + 4096 }),
-      c,
-    )
-    expect(edited.compaction_token_gate).toBe(c.compaction.token_gate + 4096)
   })
 
   it('emits runtime_id when selected runtime changes', () => {
@@ -638,30 +621,12 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.mention_targets).toEqual([])
   })
 
-  it('emits compaction_token_gate when the token gate changes', () => {
-    const c = makeKeeperConfigForSandbox({
-      compaction: {
-        profile: 'balanced',
-        ratio_gate: 0.8,
-        message_gate: 0,
-        token_gate: 24000,
-      },
-    })
-    const payload = buildRuntimePayload(draftFrom(c, {
-      compaction_token_gate: 32000,
-    }), c)
-    expect(payload.compaction_token_gate).toBe(32000)
-  })
-
   it('emits compaction_profile, autoboot, and max_context_override edits', () => {
     const c = makeKeeperConfigForSandbox({
       autoboot_enabled: true,
       max_context_override: null,
       compaction: {
         profile: 'balanced',
-        ratio_gate: 0.8,
-        message_gate: 0,
-        token_gate: 24000,
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -1119,26 +1084,6 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
-  it('renders the compaction token gate as an editable number input (not a read-only row)', async () => {
-    // Regression guard for the ConfigRow → InlineNumberRow swap: a read-only
-    // ConfigRow renders no <input>, so asserting the input exists verifies the
-    // actual render change (buildRuntimePayload alone passed before the swap).
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const tokenGateInput = container.querySelector(
-      'input[aria-label="토큰 게이트"]',
-    ) as HTMLInputElement | null
-    expect(tokenGateInput).not.toBeNull()
-    expect(tokenGateInput!.type).toBe('number')
-    // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
-    expect(tokenGateInput!.value).toBe('24000')
-  })
-
   it('keeps runtime config controls read-only when the keeper is not manifest-backed', async () => {
     const base = makeKeeperConfig()
     const personaConfig = makeKeeperConfig({
@@ -1350,17 +1295,13 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
-  it('patches mention targets and compaction token gate from the dashboard panel', async () => {
+  it('patches mention targets without re-emitting retired compaction gates', async () => {
     const base = makeKeeperConfig()
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         workspace: {
           ...base.workspace,
           mention_targets: ['alpha', 'beta'],
-        },
-        compaction: {
-          ...base.compaction,
-          token_gate: 32000,
         },
       }),
     )
@@ -1369,22 +1310,12 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    // mention_targets lives in the access tab; the runtime draft is a shared
-    // signal, so editing it there persists when we switch to the policy tab.
     selectKcfTab(container, '권한·샌드박스')
     await flush()
     const mentionTargets = container.querySelector('textarea[aria-label="mention_targets"]') as HTMLTextAreaElement | null
     expect(mentionTargets).not.toBeNull()
     mentionTargets!.value = 'alpha\n beta \nalpha\n'
     mentionTargets!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-    const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
-    expect(tokenGate).not.toBeNull()
-    tokenGate!.value = '32000'
-    tokenGate!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1396,10 +1327,9 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
-      expect.objectContaining({
+      {
         mention_targets: ['alpha', 'beta'],
-        compaction_token_gate: 32000,
-      }),
+      },
     )
   })
 

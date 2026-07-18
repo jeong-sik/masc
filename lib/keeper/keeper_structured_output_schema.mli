@@ -18,13 +18,13 @@ val memory_bank_summary_output_schema : Yojson.Safe.t
     W2 compaction-plan parser as the single source of truth. *)
 val compaction_plan_field_summary : string
 
-val compaction_plan_field_kept_indices : string
-val compaction_plan_field_summarized_indices : string
-val compaction_plan_field_dropped_indices : string
+val compaction_plan_field_keep_from : string
+val compaction_plan_field_pinned_keep : string
 
 val compaction_plan_output_schema : Yojson.Safe.t
-(** JSON object the LLM compaction summarizer must return: a [summary] prose
-    block plus kept / summarized / dropped 0-based message indices. *)
+(** JSON object the LLM compaction summarizer must return (boundary form,
+    masc#25099): a [summary] prose block, the [keep_from] cut index, and the
+    [pinned_keep] verbatim exceptions below the cut. *)
 
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)

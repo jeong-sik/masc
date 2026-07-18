@@ -303,9 +303,8 @@ let test_manual_compaction_serializes_owner_lane () =
           ~message_count:4
           (`Assoc
             [ "summary", `String "owner-lane compacted context"
-            ; "kept_indices", `List [ `Int 0 ]
-            ; "summarized_indices", `List [ `Int 1; `Int 2; `Int 3 ]
-            ; "dropped_indices", `List []
+            ; "keep_from", `Int 4
+            ; "pinned_keep", `List [ `Int 0 ]
             ])
         |> Result.get_ok
       in

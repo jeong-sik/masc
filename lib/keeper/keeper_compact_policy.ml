@@ -245,14 +245,18 @@ let requested_messages (meta : keeper_meta) messages =
        (match summarize ~messages with
         | None -> Error Plan_unavailable_or_invalid
         | Some plan ->
-          if plan.summarized = [] && plan.dropped = []
+          if Keeper_compaction_llm_summarizer.summarized_count plan = 0
           then Error Structurally_unchanged
           else
             Ok
               { messages = Keeper_compaction_llm_summarizer.apply plan ~messages
               ; selected_runtime_id = plan.selected_runtime_id
-              ; summarized_message_count = List.length plan.summarized
-              ; dropped_message_count = List.length plan.dropped
+              ; summarized_message_count =
+                  Keeper_compaction_llm_summarizer.summarized_count plan
+                (* The boundary plan form has no drop bucket (masc#25099):
+                   everything below the cut folds into the summary. The
+                   evidence field stays for schema compatibility. *)
+              ; dropped_message_count = 0
               }))
 ;;
 

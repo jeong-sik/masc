@@ -9,13 +9,12 @@ open Masc
 module C = Keeper_compaction_llm_summarizer
 module Compact_policy = Keeper_compact_policy
 
-let plan_json ~summary ~kept ~summarized ~dropped : Yojson.Safe.t =
+let plan_json ~summary ~keep_from ~pinned : Yojson.Safe.t =
   let ints xs = `List (List.map (fun i -> `Int i) xs) in
   `Assoc
     [ "summary", `String summary
-    ; "kept_indices", ints kept
-    ; "summarized_indices", ints summarized
-    ; "dropped_indices", ints dropped
+    ; "keep_from", `Int keep_from
+    ; "pinned_keep", ints pinned
     ]
 
 let is_ok = function Ok _ -> true | Error _ -> false
@@ -239,79 +238,105 @@ let test_compact_policy_prefers_structured_judge_over_chat_runtime () =
     [ eligible_judge_runtime_id; ineligible_chat_runtime_id ]
     (Compact_policy.For_testing.compaction_runtime_ids meta)
 
-(* -- plan_of_json: valid partition accepted -- *)
+(* -- plan_of_json: valid boundary plans accepted -- *)
 
-let test_valid_partition_accepted () =
-  let json = plan_json ~summary:"folded" ~kept:[ 3; 4 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
+let test_valid_boundary_accepted () =
+  let json = plan_json ~summary:"folded" ~keep_from:3 ~pinned:[] in
   Alcotest.(check bool)
-    "a full disjoint partition of [0,5) parses"
+    "a cut inside [0,5] with no pins parses"
     true
     (is_ok (C.plan_of_json ~message_count:5 json))
 
+let test_valid_boundary_with_pins_accepted () =
+  let json = plan_json ~summary:"folded" ~keep_from:3 ~pinned:[ 1 ] in
+  match C.plan_of_json ~message_count:5 json with
+  | Error e -> Alcotest.failf "expected valid plan, got %s" e
+  | Ok plan ->
+    Alcotest.(check int)
+      "summarized_count excludes the pinned exception"
+      2
+      (C.summarized_count plan);
+    Alcotest.(check int) "message_count is recorded" 5 plan.C.message_count
+
+let test_full_summarization_accepted () =
+  (* keep_from = message_count folds the entire working set into the summary.
+     The summary message itself is the output, so — unlike the retired
+     enumeration form's all-dropped plan — the result is never empty. This is
+     the escape hatch for extreme overflow. *)
+  let json = plan_json ~summary:"everything folded" ~keep_from:2 ~pinned:[] in
+  Alcotest.(check bool)
+    "a cut at message_count summarizes everything"
+    true
+    (is_ok (C.plan_of_json ~message_count:2 json))
+
+let test_duplicate_pins_collapse () =
+  (* Duplicates inside pinned_keep denote the same set: set parsing, not a
+     validation game the LLM can lose. *)
+  let json = plan_json ~summary:"S" ~keep_from:3 ~pinned:[ 1; 1 ] in
+  match C.plan_of_json ~message_count:4 json with
+  | Error e -> Alcotest.failf "expected valid plan, got %s" e
+  | Ok plan ->
+    Alcotest.(check (list int)) "pins collapse to a set" [ 1 ] plan.C.pinned_keep
+
+(* -- plan_of_json: structural violations rejected (no silent repair) -- *)
+
 let test_all_kept_rejected () =
-  let json = plan_json ~summary:"n/a" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[] in
+  let json = plan_json ~summary:"n/a" ~keep_from:0 ~pinned:[] in
   Alcotest.(check bool)
     "keeping everything is not semantic compaction"
     true
     (is_error (C.plan_of_json ~message_count:3 json))
 
-let test_drop_only_with_kept_accepted () =
-  let json = plan_json ~summary:"unused" ~kept:[ 1 ] ~summarized:[] ~dropped:[ 0 ] in
+let test_all_pinned_below_cut_rejected () =
+  (* Pinning every message below the cut leaves nothing to summarize — the
+     boundary form's other spelling of the all-kept no-op. *)
+  let json = plan_json ~summary:"n/a" ~keep_from:2 ~pinned:[ 0; 1 ] in
   Alcotest.(check bool)
-    "drop-only plans are valid when at least one message remains"
+    "a cut whose prefix is fully pinned is a no-op plan"
     true
-    (is_ok (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~message_count:3 json))
 
-(* -- plan_of_json: structural violations rejected (no silent repair) -- *)
-
-let test_out_of_range_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0; 1 ] ~summarized:[ 5 ] ~dropped:[] in
+let test_keep_from_out_of_range_rejected () =
+  let json = plan_json ~summary:"x" ~keep_from:6 ~pinned:[] in
   Alcotest.(check bool)
-    "an index >= message_count is rejected"
+    "keep_from > message_count is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~message_count:5 json))
 
-let test_negative_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ -1; 0 ] ~summarized:[ 1 ] ~dropped:[] in
+let test_keep_from_negative_rejected () =
+  let json = plan_json ~summary:"x" ~keep_from:(-1) ~pinned:[] in
   Alcotest.(check bool)
-    "a negative index is rejected"
+    "a negative keep_from is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~message_count:5 json))
 
-let test_duplicate_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0; 1 ] ~summarized:[ 1 ] ~dropped:[] in
+let test_pin_at_or_after_cut_rejected () =
+  let json = plan_json ~summary:"x" ~keep_from:2 ~pinned:[ 2 ] in
   Alcotest.(check bool)
-    "an index appearing in two lists is rejected"
+    "a pin at or after keep_from is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~message_count:5 json))
 
-let test_missing_index_rejected () =
-  let json = plan_json ~summary:"x" ~kept:[ 0 ] ~summarized:[] ~dropped:[] in
+let test_negative_pin_rejected () =
+  let json = plan_json ~summary:"x" ~keep_from:2 ~pinned:[ -1 ] in
   Alcotest.(check bool)
-    "a partition that omits an in-range index is rejected"
+    "a negative pinned index is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:2 json))
+    (is_error (C.plan_of_json ~message_count:5 json))
 
-let test_all_dropped_rejected () =
-  let json = plan_json ~summary:"S" ~kept:[] ~summarized:[] ~dropped:[ 0; 1 ] in
+let test_empty_summary_rejected () =
+  let json = plan_json ~summary:"   " ~keep_from:1 ~pinned:[] in
   Alcotest.(check bool)
-    "a non-empty working set must not compact to empty output"
-    true
-    (is_error (C.plan_of_json ~message_count:2 json))
-
-let test_empty_summary_rejected_when_summarizing () =
-  let json = plan_json ~summary:"   " ~kept:[ 1 ] ~summarized:[ 0 ] ~dropped:[] in
-  Alcotest.(check bool)
-    "a blank summary is rejected when there are summarized indices to fold"
+    "a blank summary is rejected — it always stands in for messages"
     true
     (is_error (C.plan_of_json ~message_count:2 json))
 
 let test_missing_field_rejected () =
-  let json = `Assoc [ "summary", `String "x"; "kept_indices", `List [] ] in
+  let json = `Assoc [ "summary", `String "x"; "pinned_keep", `List [] ] in
   Alcotest.(check bool)
-    "a plan missing summarized_indices/dropped_indices is rejected"
+    "a plan missing keep_from is rejected"
     true
-    (is_error (C.plan_of_json ~message_count:0 json))
+    (is_error (C.plan_of_json ~message_count:2 json))
 
 (* -- apply: reconstruction honours the plan -- *)
 
@@ -326,16 +351,16 @@ let sample =
   ; msg Agent_sdk.Types.User "u3"
   ]
 
-let test_apply_keeps_summarizes_drops () =
-  (* kept: 3 ; summarized: 0,1 ; dropped: 2 *)
-  let json = plan_json ~summary:"S" ~kept:[ 3 ] ~summarized:[ 0; 1 ] ~dropped:[ 2 ] in
+let test_apply_folds_prefix_keeps_tail () =
+  (* keep_from: 3 → summarized: 0,1,2 ; kept: 3 *)
+  let json = plan_json ~summary:"S" ~keep_from:3 ~pinned:[] in
   match C.plan_of_json ~message_count:4 json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
     let out = C.apply plan ~messages:sample in
     let out_texts = texts out in
-    (* summary replaces indices 0,1 at position of first summarized (0);
-       index 2 dropped; index 3 kept. Result: [summary; u3]. *)
+    (* summary replaces indices 0..2 at the position of the first summarized
+       index (0); index 3 survives. Result: [summary; u3]. *)
     Alcotest.(check int) "two messages remain" 2 (List.length out);
     Alcotest.(check bool)
       "first is the compaction summary"
@@ -349,16 +374,59 @@ let test_apply_keeps_summarizes_drops () =
       [ "u3" ]
       (List.tl out_texts)
 
-let test_apply_drop_only_preserves_kept () =
-  let json = plan_json ~summary:"unused" ~kept:[ 0; 1; 2 ] ~summarized:[] ~dropped:[ 3 ] in
+let test_apply_pinned_survives_verbatim () =
+  (* keep_from: 3, pinned: 1 → summarized: 0,2 ; the summary lands at index 0
+     and the pinned message keeps its relative position. *)
+  let json = plan_json ~summary:"S" ~keep_from:3 ~pinned:[ 1 ] in
   match C.plan_of_json ~message_count:4 json with
   | Error e -> Alcotest.failf "expected valid plan, got %s" e
   | Ok plan ->
     let out = C.apply plan ~messages:sample in
-    Alcotest.(check (list string))
-      "drop-only removes only the selected message"
-      [ "u0"; "a1"; "t2" ]
-      (texts out)
+    (match texts out with
+     | summary :: rest ->
+       Alcotest.(check bool)
+         "summary leads the rebuilt working set"
+         true
+         (Astring.String.is_prefix ~affix:"[COMPACTION_SUMMARY]" summary);
+       Alcotest.(check (list string))
+         "pinned and tail messages survive verbatim, in order"
+         [ "a1"; "u3" ]
+         rest
+     | [] -> Alcotest.fail "apply produced an empty working set")
+
+let test_apply_pin_at_zero_shifts_summary_position () =
+  (* keep_from: 2, pinned: 0 → summarized: 1 only; the summary is emitted at
+     the first non-pinned index below the cut, after the pinned message. *)
+  let json = plan_json ~summary:"S" ~keep_from:2 ~pinned:[ 0 ] in
+  match C.plan_of_json ~message_count:4 json with
+  | Error e -> Alcotest.failf "expected valid plan, got %s" e
+  | Ok plan ->
+    (match texts (C.apply plan ~messages:sample) with
+     | [ first; second; third; fourth ] ->
+       Alcotest.(check string) "pinned message stays first" "u0" first;
+       Alcotest.(check bool)
+         "summary replaces the summarized message in place"
+         true
+         (Astring.String.is_prefix ~affix:"[COMPACTION_SUMMARY]" second);
+       Alcotest.(check (list string))
+         "tail survives verbatim"
+         [ "t2"; "u3" ]
+         [ third; fourth ]
+     | other ->
+       Alcotest.failf "expected 4 messages, got %d" (List.length other))
+
+let test_apply_full_summarization_leaves_only_summary () =
+  let json = plan_json ~summary:"S" ~keep_from:4 ~pinned:[] in
+  match C.plan_of_json ~message_count:4 json with
+  | Error e -> Alcotest.failf "expected valid plan, got %s" e
+  | Ok plan ->
+    (match texts (C.apply plan ~messages:sample) with
+     | [ only ] ->
+       Alcotest.(check bool)
+         "the summary is the entire rebuilt working set"
+         true
+         (Astring.String.is_prefix ~affix:"[COMPACTION_SUMMARY]" only)
+     | other -> Alcotest.failf "expected 1 message, got %d" (List.length other))
 
 let () =
   Alcotest.run "compaction_llm_summarizer"
@@ -383,22 +451,33 @@ let () =
             test_compact_policy_prefers_structured_judge_over_chat_runtime
         ] )
     ; ( "plan_of_json"
-      , [ Alcotest.test_case "valid partition accepted" `Quick test_valid_partition_accepted
+      , [ Alcotest.test_case "valid boundary accepted" `Quick test_valid_boundary_accepted
+        ; Alcotest.test_case "valid boundary with pins accepted" `Quick
+            test_valid_boundary_with_pins_accepted
+        ; Alcotest.test_case "full summarization accepted" `Quick
+            test_full_summarization_accepted
+        ; Alcotest.test_case "duplicate pins collapse" `Quick test_duplicate_pins_collapse
         ; Alcotest.test_case "all kept rejected" `Quick test_all_kept_rejected
-        ; Alcotest.test_case "drop-only with kept accepted" `Quick
-            test_drop_only_with_kept_accepted
-        ; Alcotest.test_case "out of range rejected" `Quick test_out_of_range_rejected
-        ; Alcotest.test_case "negative rejected" `Quick test_negative_rejected
-        ; Alcotest.test_case "duplicate rejected" `Quick test_duplicate_rejected
-        ; Alcotest.test_case "missing index rejected" `Quick test_missing_index_rejected
-        ; Alcotest.test_case "all dropped rejected" `Quick test_all_dropped_rejected
-        ; Alcotest.test_case "empty summary rejected when summarizing" `Quick
-            test_empty_summary_rejected_when_summarizing
+        ; Alcotest.test_case "all pinned below cut rejected" `Quick
+            test_all_pinned_below_cut_rejected
+        ; Alcotest.test_case "keep_from out of range rejected" `Quick
+            test_keep_from_out_of_range_rejected
+        ; Alcotest.test_case "keep_from negative rejected" `Quick
+            test_keep_from_negative_rejected
+        ; Alcotest.test_case "pin at or after cut rejected" `Quick
+            test_pin_at_or_after_cut_rejected
+        ; Alcotest.test_case "negative pin rejected" `Quick test_negative_pin_rejected
+        ; Alcotest.test_case "empty summary rejected" `Quick test_empty_summary_rejected
         ; Alcotest.test_case "missing field rejected" `Quick test_missing_field_rejected
         ] )
     ; ( "apply"
-      , [ Alcotest.test_case "keeps/summarizes/drops" `Quick test_apply_keeps_summarizes_drops
-        ; Alcotest.test_case "drop-only preserves kept" `Quick
-            test_apply_drop_only_preserves_kept
+      , [ Alcotest.test_case "folds prefix, keeps tail" `Quick
+            test_apply_folds_prefix_keeps_tail
+        ; Alcotest.test_case "pinned survives verbatim" `Quick
+            test_apply_pinned_survives_verbatim
+        ; Alcotest.test_case "pin at zero shifts summary position" `Quick
+            test_apply_pin_at_zero_shifts_summary_position
+        ; Alcotest.test_case "full summarization leaves only summary" `Quick
+            test_apply_full_summarization_leaves_only_summary
         ] )
     ]

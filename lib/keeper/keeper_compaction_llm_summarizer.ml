@@ -8,11 +8,15 @@ module Int_set = Set.Make (Int)
 
 type compaction_plan =
   { summary : string
-  ; kept : int list
-  ; summarized : int list
-  ; dropped : int list
+  ; keep_from : int
+  ; pinned_keep : int list
+  ; message_count : int
   ; selected_runtime_id : string option
   }
+
+(* Messages folded into the summary: everything below [keep_from] except the
+   pinned exceptions. [plan_of_json] guarantees pinned_keep ⊂ [0, keep_from). *)
+let summarized_count plan = plan.keep_from - List.length plan.pinned_keep
 
 type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
 
@@ -39,8 +43,8 @@ let plan_schema_supported provider_cfg =
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
-(* One indexed line per message: "[i] role: <text>". The model must classify
-   every [i] into exactly one of kept/summarized/dropped. *)
+(* One indexed line per message: "[i] role: <text>". The model reads the
+   indices to place the [keep_from] boundary and the pinned exceptions. *)
 let indexed_messages_text (messages : Agent_sdk.Types.message list) =
   messages
   |> List.mapi (fun idx (m : Agent_sdk.Types.message) ->
@@ -58,20 +62,21 @@ let indexed_messages_text (messages : Agent_sdk.Types.message list) =
 let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
   let count = List.length messages in
   let system =
-    "You compact a keeper's working context. Classify EVERY message, by its \
-     0-based index, into exactly one of: kept (verbatim, still load-bearing), \
-     summarized (folded into the summary), or dropped (low value, discard). \
-     Every index in range must appear in exactly one list; do not invent \
-     indices. Prefer keeping recent messages and any with concrete code paths, \
-     commands, decisions, or unresolved blockers. Write one durable [summary] \
-     prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include markdown fences."
+    "You compact a keeper's working context. Pick ONE cut index keep_from: \
+     every message at index >= keep_from is kept verbatim; every message \
+     before it is folded into one durable summary. Choose keep_from so the \
+     recent, still load-bearing tail survives. If a few messages BEFORE the \
+     cut must survive verbatim (concrete code paths, commands, decisions, \
+     unresolved blockers), list their indices in pinned_keep; keep that list \
+     short, and use [] when nothing qualifies. Write the summary so it stands \
+     in for everything before keep_from except the pinned messages. Do not \
+     invent facts. Do not include markdown fences."
   in
   let user =
     Printf.sprintf
       "message_count: %d\nmessages:\n%s\n\nReturn a JSON object with fields \
-       summary, kept_indices, summarized_indices, dropped_indices covering \
-       every index in [0, %d) exactly once."
+       summary (string), keep_from (integer in [0, %d]), and pinned_keep \
+       (array of integers, each in [0, keep_from), [] when empty)."
       count
       (indexed_messages_text messages)
       count
@@ -104,70 +109,75 @@ let string_field key = function
      | None -> Error (Printf.sprintf "missing %s" key))
   | _ -> Error "plan must be a JSON object"
 
+let int_field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Int n) -> Ok n
+     | Some _ -> Error (Printf.sprintf "%s must be an integer" key)
+     | None -> Error (Printf.sprintf "missing %s" key))
+  | _ -> Error "plan must be a JSON object"
+
 let ( let* ) = Result.bind
 
-(* The three index lists must together partition [0, message_count) exactly.
-   An invalid LLM plan is an explicit error, never a silent repair. *)
-let validate_partition ~message_count ~kept ~summarized ~dropped =
-  let all = kept @ summarized @ dropped in
-  let seen = Array.make message_count false in
-  let rec check = function
-    | [] -> Ok ()
-    | idx :: rest ->
-      if idx < 0 || idx >= message_count then
-        Error (Printf.sprintf "index %d out of range [0, %d)" idx message_count)
-      else if seen.(idx) then Error (Printf.sprintf "index %d appears more than once" idx)
-      else begin
-        seen.(idx) <- true;
-        check rest
-      end
-  in
-  let* () = check all in
-  let missing = ref [] in
-  Array.iteri (fun idx covered -> if not covered then missing := idx :: !missing) seen;
-  match !missing with
-  | [] -> Ok ()
-  | xs ->
-    Error
-      (Printf.sprintf
-         "indices not covered: %s"
-         (String.concat "," (List.rev_map string_of_int xs)))
-
-let validate_non_empty_output ~message_count ~kept ~summarized =
-  if message_count > 0 && kept = [] && summarized = [] then
-    Error "plan would produce empty compaction output"
-  else Ok ()
-
+(* Boundary validation (masc#25099): the cut must land inside [0,
+   message_count] and every pinned exception must precede it. Coverage gaps
+   and duplicate bucket assignments are unrepresentable in this form, so
+   there is no partition check to fail. Duplicates inside [pinned_keep]
+   denote the same set and collapse under set parsing; an out-of-range pin
+   is a semantic violation and stays an explicit error, never a silent
+   repair. *)
 let plan_of_json ~message_count json =
   let* summary = string_field Schema.compaction_plan_field_summary json in
   let summary = String.trim summary in
-  let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
-  let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
-  let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
-  (* The summary must be non-empty exactly when [apply] will use it. *)
+  let* keep_from = int_field Schema.compaction_plan_field_keep_from json in
+  let* pinned_raw = int_list_field Schema.compaction_plan_field_pinned_keep json in
   let* () =
-    if summarized <> [] && summary = ""
-    then Error "summary must be non-empty when summarized indices are present"
+    if keep_from < 0 || keep_from > message_count
+    then
+      Error
+        (Printf.sprintf "keep_from %d out of range [0, %d]" keep_from message_count)
     else Ok ()
   in
-  let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
-  let* () = validate_non_empty_output ~message_count ~kept ~summarized in
+  let pinned_keep = List.sort_uniq compare pinned_raw in
   let* () =
-    if summarized = [] && dropped = []
-    then Error "plan keeps every message without summarizing or dropping any"
+    match List.find_opt (fun idx -> idx < 0 || idx >= keep_from) pinned_keep with
+    | Some idx ->
+      Error
+        (Printf.sprintf
+           "pinned_keep index %d out of range [0, keep_from=%d)"
+           idx
+           keep_from)
+    | None -> Ok ()
+  in
+  let* () =
+    if keep_from - List.length pinned_keep = 0
+    then Error "plan keeps every message without summarizing any"
     else Ok ()
   in
-  Ok { summary; kept; summarized; dropped; selected_runtime_id = None }
+  (* The summary always stands in for at least one message here, so it must
+     carry content. *)
+  let* () =
+    if summary = "" then Error "summary must be non-empty" else Ok ()
+  in
+  Ok { summary; keep_from; pinned_keep; message_count; selected_runtime_id = None }
 
 (* Marker prefix so the folded summary is recognizable in the transcript and
    by downstream tooling, matching the memory-bank [MEMORY_SUMMARY] convention. *)
 let summary_marker = "[COMPACTION_SUMMARY]"
 
 let apply (plan : compaction_plan) ~(messages : Agent_sdk.Types.message list) =
-  let summarized = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.summarized in
-  let dropped = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.dropped in
+  let pinned = Int_set.of_list plan.pinned_keep in
+  (* Position of the first summarized message: the lowest index below the cut
+     that is not pinned. [plan_of_json] guarantees one exists; [-1] keeps this
+     total anyway (it matches no index, so a malformed plan degrades to
+     keeping the pinned/tail messages rather than raising). *)
   let first_summarized =
-    List.fold_left min max_int plan.summarized
+    let rec go idx =
+      if idx >= plan.keep_from then -1
+      else if Int_set.mem idx pinned then go (idx + 1)
+      else idx
+    in
+    go 0
   in
   let summary_msg =
     message Agent_sdk.Types.Assistant (summary_marker ^ " " ^ plan.summary)
@@ -175,12 +185,13 @@ let apply (plan : compaction_plan) ~(messages : Agent_sdk.Types.message list) =
   messages
   |> List.mapi (fun idx m -> idx, m)
   |> List.filter_map (fun (idx, m) ->
-    if Int_set.mem idx dropped then None
-    else if Int_set.mem idx summarized then
+    if idx >= plan.keep_from then Some m
+    else if Int_set.mem idx pinned then Some m
+    else if idx = first_summarized then
       (* Emit the single summary message at the position of the first
          summarized index; the rest of the summarized indices collapse away. *)
-      if idx = first_summarized then Some summary_msg else None
-    else Some m)
+      Some summary_msg
+    else None)
 
 let plan_of_response ~message_count response =
   match

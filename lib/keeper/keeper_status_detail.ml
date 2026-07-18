@@ -99,32 +99,37 @@ let optional_bool_argument fields key ~default =
       Error
         (Printf.sprintf "keeper_status argument %S must be a boolean" key)
 
-let optional_int_argument fields key ~default ~minimum =
-  match status_argument fields key with
-  | None -> Ok default
-  | Some (`Int value) when value >= minimum -> Ok value
-  | Some (`Intlit literal) ->
-      (match int_of_string_opt literal with
-       | Some value when value >= minimum -> Ok value
-       | Some value ->
-           Error
-             (Printf.sprintf
-                "keeper_status argument %S must be at least %d (received %d)"
-                key
-                minimum
-                value)
-       | None ->
-           Error
-             (Printf.sprintf
-                "keeper_status argument %S is outside the supported integer range"
-                key))
-  | Some (`Int value) ->
+let optional_int_argument fields key ~default ~minimum ~maximum =
+  let validate value =
+    if value < minimum
+    then
       Error
         (Printf.sprintf
            "keeper_status argument %S must be at least %d (received %d)"
            key
            minimum
            value)
+    else if value > maximum
+    then
+      Error
+        (Printf.sprintf
+           "keeper_status argument %S must be at most %d (received %d)"
+           key
+           maximum
+           value)
+    else Ok value
+  in
+  match status_argument fields key with
+  | None -> Ok default
+  | Some (`Int value) -> validate value
+  | Some (`Intlit literal) ->
+      (match int_of_string_opt literal with
+       | Some value -> validate value
+       | None ->
+           Error
+             (Printf.sprintf
+                "keeper_status argument %S is outside the supported integer range"
+                key))
   | Some _ ->
       Error
         (Printf.sprintf "keeper_status argument %S must be an integer" key)
@@ -149,14 +154,16 @@ let tail_order_of_fields fields =
   with
   | None -> Ok Oldest_first
   | Some (`String raw_value) ->
-      (match String.trim raw_value with
-       | "oldest_first" -> Ok Oldest_first
-       | "newest_first" -> Ok Newest_first
-       | value ->
+      (match Keeper_status_options_defaults.tail_order_of_string raw_value with
+       | Some order -> Ok order
+       | None ->
            Error
              (Printf.sprintf
-                "invalid tail_order %S (allowed: oldest_first, newest_first)"
-                value))
+                "invalid tail_order %S (allowed: %s)"
+                raw_value
+                (String.concat
+                   ", "
+                   Keeper_status_options_defaults.valid_tail_order_strings)))
   | Some _ ->
       Error "keeper_status argument \"tail_order\" must be a string"
 
@@ -184,6 +191,7 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.tail_turns
       ~default:Keeper_status_options_defaults.tail_turns
       ~minimum:Keeper_status_options_defaults.min_tail_turns
+      ~maximum:Keeper_status_options_defaults.max_tail_turns
   in
   let* tail_messages =
     optional_int_argument
@@ -191,6 +199,7 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.tail_messages
       ~default:Keeper_status_options_defaults.tail_messages
       ~minimum:Keeper_status_options_defaults.min_tail_messages
+      ~maximum:Keeper_status_options_defaults.max_tail_messages
   in
   let* tail_compactions =
     optional_int_argument
@@ -198,6 +207,7 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.tail_compactions
       ~default:Keeper_status_options_defaults.tail_compactions
       ~minimum:Keeper_status_options_defaults.min_tail_compactions
+      ~maximum:Keeper_status_options_defaults.max_tail_compactions
   in
   let* tail_bytes =
     optional_int_argument
@@ -205,6 +215,7 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.tail_bytes
       ~default:Keeper_status_options_defaults.tail_bytes
       ~minimum:Keeper_status_options_defaults.min_tail_bytes
+      ~maximum:Keeper_status_options_defaults.max_tail_bytes
   in
   let* include_context =
     optional_bool_argument
@@ -497,7 +508,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                  config
                  ~name:m.name
                  ~max_bytes:tail_bytes
-                 ~max_lines:(max (tail_turns * 10) 400)
+                 ~max_lines:
+                   (max
+                      (tail_turns
+                       * Keeper_status_options_defaults.metrics_lines_per_turn)
+                      Keeper_status_options_defaults.min_metrics_scan_lines)
                  ~recent_limit:8
              with
              | Ok summary ->
@@ -605,7 +620,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            if not include_compaction_history then
              (`List [], 0)
            else
-             let n = max 200 (tail_compactions * 20) in
+             let n =
+               max
+                 Keeper_status_options_defaults.min_compaction_scan_lines
+                 (tail_compactions
+                  * Keeper_status_options_defaults.compaction_lines_per_event)
+             in
              let lines = Dated_jsonl.read_recent_lines metrics_store n in
              let events_rev =
                List.fold_left

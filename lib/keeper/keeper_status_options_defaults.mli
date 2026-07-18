@@ -8,6 +8,14 @@ val min_tail_turns : int
 val min_tail_messages : int
 val min_tail_compactions : int
 val min_tail_bytes : int
+val max_tail_turns : int
+val max_tail_messages : int
+val max_tail_compactions : int
+val max_tail_bytes : int
+val metrics_lines_per_turn : int
+val compaction_lines_per_event : int
+val min_metrics_scan_lines : int
+val min_compaction_scan_lines : int
 
 type tail_order =
   | Oldest_first
@@ -16,6 +24,7 @@ type tail_order =
 val tail_order_to_string : tail_order -> string
 val all_tail_orders : tail_order list
 val valid_tail_order_strings : string list
+val tail_order_of_string : string -> tail_order option
 
 module Argument : sig
   val name : string

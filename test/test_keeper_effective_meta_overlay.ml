@@ -755,6 +755,22 @@ let test_status_rejects_malformed_options () =
     (`Assoc [ "name", `String name; "tail_turns", `Int (-1) ])
     "tail_turns\" must be at least";
   check_rejected
+    "tail turns above schema maximum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_turns"
+        , `Int (Masc.Keeper_status_options_defaults.max_tail_turns + 1) )
+      ])
+    "tail_turns\" must be at most";
+  check_rejected
+    "tail bytes above schema maximum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_bytes"
+        , `Int (Masc.Keeper_status_options_defaults.max_tail_bytes + 1) )
+      ])
+    "tail_bytes\" must be at most";
+  check_rejected
     "string tail messages"
     (`Assoc [ "name", `String name; "tail_messages", `String "10" ])
     "tail_messages\" must be an integer";
@@ -795,6 +811,13 @@ let test_status_rejects_malformed_options () =
     (`Assoc
       [ "name", `String name
       ; "tail_order", `String " "
+      ])
+    "invalid tail_order";
+  check_rejected
+    "padded tail order"
+    (`Assoc
+      [ "name", `String name
+      ; "tail_order", `String " oldest_first "
       ])
     "invalid tail_order"
 
@@ -841,7 +864,28 @@ let test_status_schema_tracks_argument_contract () =
   Alcotest.(check (list string))
     "tail order schema follows the typed variants"
     Status_detail.valid_tail_order_strings
-    tail_order_values
+    tail_order_values;
+  let properties =
+    match json_field "properties" schema.input_schema with
+    | Some (`Assoc fields) -> fields
+    | _ -> []
+  in
+  let schema_maximum argument =
+    match List.assoc_opt argument properties with
+    | Some (`Assoc fields) ->
+        (match List.assoc_opt "maximum" fields with
+         | Some (`Int value) -> Some value
+         | _ -> None)
+    | _ -> None
+  in
+  Alcotest.(check (option int))
+    "tail turns schema maximum follows runtime SSOT"
+    (Some Status_options_defaults.max_tail_turns)
+    (schema_maximum Status_options_defaults.Argument.tail_turns);
+  Alcotest.(check (option int))
+    "tail bytes schema maximum follows runtime SSOT"
+    (Some Status_options_defaults.max_tail_bytes)
+    (schema_maximum Status_options_defaults.Argument.tail_bytes)
 
 let test_status_tracks_persisted_meta_without_updated_at () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

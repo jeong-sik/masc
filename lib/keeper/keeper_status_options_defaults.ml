@@ -11,6 +11,19 @@ let min_tail_messages = 0
 let min_tail_compactions = 0
 let min_tail_bytes = 1_000
 
+(* A status request must not read more source bytes for one tail than the
+   process will publish for one tool result.  Count ceilings are derived from
+   that byte ceiling and the exact overscan factors used by the readers, so
+   the decoder cannot admit values that overflow the downstream products. *)
+let max_tail_bytes = Common.max_tool_output_bytes
+let metrics_lines_per_turn = 10
+let compaction_lines_per_event = 20
+let min_metrics_scan_lines = 400
+let min_compaction_scan_lines = 200
+let max_tail_turns = max_tail_bytes / metrics_lines_per_turn
+let max_tail_messages = max_tail_bytes
+let max_tail_compactions = max_tail_bytes / compaction_lines_per_event
+
 type tail_order =
   | Oldest_first
   | Newest_first
@@ -21,6 +34,11 @@ let tail_order_to_string = function
 
 let all_tail_orders = [ Oldest_first; Newest_first ]
 let valid_tail_order_strings = List.map tail_order_to_string all_tail_orders
+
+let tail_order_of_string value =
+  List.find_opt
+    (fun order -> String.equal value (tail_order_to_string order))
+    all_tail_orders
 
 module Argument = struct
   let name = "name"

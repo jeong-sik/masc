@@ -87,7 +87,6 @@ type drain_report =
 
 exception Candidate_unavailable of string
 
-val prompt_name : string
 val retryable_failure_kind_to_string : retryable_failure_kind -> string
 val retryable_failure_kind_of_string : string -> retryable_failure_kind option
 val delivery_to_string : delivery -> string

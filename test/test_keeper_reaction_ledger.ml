@@ -180,7 +180,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v1" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v2" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -258,6 +258,8 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     (summary |> member "event_queue_ack_count" |> to_int);
   check int "event queue ack is not unknown" 0
     (summary |> member "unknown_reaction_count" |> to_int);
+  check int "rows written by this binary carry the current schema" 0
+    (summary |> member "prior_schema_row_count" |> to_int);
   let missing =
     Keeper_reaction_ledger.event_queue_reaction_evidence
       ~base_path
@@ -1147,6 +1149,52 @@ let test_reaction_kind_string_roundtrip () =
        (Keeper_reaction_ledger.reaction_kind_of_string "legacy_custom"))
 ;;
 
+let test_prior_schema_rows_are_segregated_but_consumed () =
+  with_temp_base
+  @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ());
+  (* Hand-written v1-generation row (digest identity era, #25080): reads must
+     keep consuming it while the summary makes the mixed window visible. *)
+  let store =
+    Dated_jsonl.create
+      ~base_dir:
+        (Filename.concat
+           (Filename.concat
+              (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+              keeper_name)
+           "reaction-ledger")
+      ()
+  in
+  Dated_jsonl.append
+    store
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v1"
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String "krl:deadbeef"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1200.0
+        ; "stimulus_id", `String "board:post-legacy"
+        ; "stimulus", `Assoc [ "kind", `String "board_signal" ]
+        ]);
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check
+    int
+    "both generations are consumed"
+    2
+    (summary |> member "stimulus_count" |> to_int);
+  check
+    int
+    "prior-generation rows are segregated"
+    1
+    (summary |> member "prior_schema_row_count" |> to_int)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1155,6 +1203,10 @@ let () =
             "event queue stimulus and turn reaction are durable"
             `Quick
             test_event_queue_stimulus_and_turn_reaction
+        ; test_case
+            "prior schema rows are segregated but consumed"
+            `Quick
+            test_prior_schema_rows_are_segregated_but_consumed
         ; test_case
             "event queue reaction evidence matches exact stimulus id"
             `Quick

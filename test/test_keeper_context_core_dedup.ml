@@ -337,7 +337,7 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
         }
       in
       let context =
-        C.create ~eio:true ~system_prompt:"system" ~max_tokens:4096
+        C.create ~eio:true ~system_prompt:"system"
         |> fun context -> C.append context open_tool_use
       in
       match
@@ -383,7 +383,7 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
         }
       in
       let context =
-        C.create ~eio:true ~system_prompt:"system" ~max_tokens:4096
+        C.create ~eio:true ~system_prompt:"system"
         |> fun context -> C.append context orphan
       in
       (match

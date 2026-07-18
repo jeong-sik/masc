@@ -652,7 +652,7 @@ let test_old_pending_is_judged_without_wall_clock_expiry () =
     Alcotest.fail "old pending candidate was silently discarded"
 ;;
 
-let test_legacy_expired_row_is_recovered_to_pending () =
+let test_removed_expired_status_is_rejected () =
   let legacy_json =
     match A.candidate_to_json (candidate ()) with
     | `Assoc fields ->
@@ -662,21 +662,8 @@ let test_legacy_expired_row_is_recovered_to_pending () =
     | _ -> Alcotest.fail "candidate fixture did not encode as an object"
   in
   match A.candidate_of_json legacy_json with
-  | Ok
-      { status =
-          A.Pending
-            { last_failure =
-                Some
-                  { kind = A.Lifecycle_policy_migrated
-                  ; failed_at
-                  ; _
-                  }
-            }
-      ; _
-      } ->
-    Alcotest.(check (float 0.001)) "legacy expiry timestamp retained" 123.5 failed_at
-  | Ok _ -> Alcotest.fail "legacy Expired row was not recovered to Pending"
-  | Error detail -> Alcotest.failf "legacy Expired migration failed: %s" detail
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "removed Expired status was accepted by the durable schema"
 ;;
 
 let test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence () =
@@ -1096,9 +1083,9 @@ let () =
             `Quick
             test_old_pending_is_judged_without_wall_clock_expiry
         ; Alcotest.test_case
-            "legacy expired row is recovered to Pending"
+            "removed expired status is rejected"
             `Quick
-            test_legacy_expired_row_is_recovered_to_pending
+            test_removed_expired_status_is_rejected
         ; Alcotest.test_case
             "missing verdict fails the whole batch with evidence"
             `Quick

@@ -12,7 +12,6 @@ type retryable_failure_kind =
   | Provider_unavailable
   | Response_contract_unavailable
   | Durable_delivery_unavailable
-  | Lifecycle_policy_migrated
 
 type retryable_failure =
   { kind : retryable_failure_kind

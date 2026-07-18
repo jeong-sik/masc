@@ -160,7 +160,8 @@ let keeper_board_attention_partition_health_json () =
       ; "lane_failures", `List []
       ; "candidate_ledger_keeper_count", `Int 0
       ; "candidate_ledger_keeper_names", `List []
-      ; "candidate_ledger_discovery_error", `Null
+      ; "candidate_ledger_discovery_error_count", `Int 0
+      ; "candidate_ledger_discovery_errors", `List []
       ; "candidate_pending_count", `Int 0
       ; "candidate_judged_count", `Int 0
       ; "candidate_consumed_count", `Int 0
@@ -174,7 +175,6 @@ let keeper_board_attention_partition_health_json () =
       ; "ready_count", `Int 0
       ; "running_count", `Int 0
       ; "deferred_count", `Int 0
-      ; "split_count", `Int 0
       ; "completed_count", `Int 0
       ; "settled_count", `Int 0
       ; "blocked_count", `Int 0

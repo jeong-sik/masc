@@ -351,6 +351,37 @@ export interface OperatorSessionSnapshot {
   recent_events?: Record<string, unknown>[]
 }
 
+export const OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS = [
+  'invalid_offset',
+  'not_a_directory',
+  'invalid_layout_entry',
+  'non_regular_file',
+  'io_error',
+] as const
+
+export type OperatorContextMetricsStorageReadFailureReason =
+  typeof OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS[number]
+
+export type OperatorContextMetricsUnavailable =
+  | {
+      kind: 'storage_read_failed'
+      reason: OperatorContextMetricsStorageReadFailureReason
+      path: string | null
+      detail: string
+    }
+  | {
+      kind: 'malformed_json'
+      reason: 'malformed_metrics_row'
+      path: string
+      line_number: number | null
+      detail: string
+    }
+  | {
+      kind: 'invalid_payload'
+      reported_kind: string | null
+      reported_reason: string | null
+    }
+
 export interface OperatorKeeperSnapshot {
   name: string
   runtime_class?: 'keeper'
@@ -370,6 +401,7 @@ export interface OperatorKeeperSnapshot {
   context_tokens?: number
   context_max?: number
   context_source?: string
+  context_metrics_unavailable?: OperatorContextMetricsUnavailable
   keepalive_running?: boolean
   autonomous_action_count?: number
   autonomous_turn_count?: number

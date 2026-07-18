@@ -176,6 +176,63 @@ describe('Ops surface', () => {
     expect(container.querySelector('.v2-command-surface')).not.toBeNull()
   }, 60000)
 
+  it('surfaces typed context metrics failures instead of rendering missing context as blank', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorWorkspaceDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorWorkspaceDigest.value = null
+    operatorActionLog.value = []
+    operatorSnapshot.value = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [{
+        name: 'sojin',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/sojin-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      persistent_agents: [{
+        name: 'watcher',
+        context_metrics_unavailable: {
+          kind: 'malformed_json',
+          reason: 'malformed_metrics_row',
+          path: '/tmp/watcher-metrics.jsonl',
+          line_number: 7,
+          detail: 'unexpected end of input',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const panel = container.querySelector('[data-testid="ops-context-metrics-unavailable"]')
+    expect(panel?.textContent).toContain('Keeper sojin')
+    expect(panel?.textContent).toContain('io_error')
+    expect(panel?.textContent).toContain('/tmp/sojin-metrics.jsonl')
+    expect(panel?.textContent).toContain('Persistent agent watcher')
+    expect(panel?.textContent).toContain('/tmp/watcher-metrics.jsonl:7')
+    expect(panel?.textContent).toContain('unexpected end of input')
+  }, 60000)
+
   it('marks raw ops banner panels and activity rows with v2-command-* classes', async () => {
     const {
       Ops,

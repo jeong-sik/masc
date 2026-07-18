@@ -50,6 +50,9 @@ let runtime_entries =
        disables byte-cap pruning.";
     entry ~default:"60.0" "MASC_MAINTENANCE_PULSE_INTERVAL_SEC"
       "Maintenance Pulse interval for orphan observation and channel dedup";
+    entry ~default:"15.0" "MASC_SCHEDULE_RUNNER_INTERVAL_SEC"
+      "Schedule runner due-row poll interval (seconds, floor 1.0); \
+       stale_after is derived as interval x4";
   ]
 
 let rate_limiting_entries =

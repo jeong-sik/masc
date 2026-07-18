@@ -1032,6 +1032,66 @@ let cached_keeper_config_json config name =
   | other -> `OK, other
 ;;
 
+(* Dashboard hydration fetches every keeper's chat history concurrently on
+   page load. The uncached build ran inline on the main Eio domain at
+   ~1-2 s per keeper (chat tail parse + per-trace trajectory and
+   internal-history tail reads + redaction), so a 16-keeper hydration
+   serialized 15 s+ of main-domain work and pushed unrelated HTTP/WS
+   responses past the dashboard's 35 s client timeout. The cache key
+   embeds the chat file's (mtime, size): the store is append-only, so a
+   newly persisted message changes the key and is served fresh on the
+   next request without an invalidation hook. Enrichment-only drift
+   (trajectory/meta appends with no chat append) is bounded by the TTL,
+   the same staleness contract as the cached trajectory handler above. *)
+let keeper_chat_history_cache_key config name =
+  let base_dir = (config : Workspace.config).base_path in
+  let path = Keeper_chat_store.chat_path ~base_dir ~keeper_name:name in
+  (* Sound-partial freshness component: a missing chat file is its own
+     cache state ("absent"), never conflated with a real (mtime, size)
+     pair. A half-readable stat (racing writer) also maps to "absent",
+     which only costs a recompute on the next request. *)
+  let freshness =
+    match Fs_compat.file_mtime path, Fs_compat.file_size path with
+    | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
+    | Some _, None | None, Some _ | None, None -> "absent"
+  in
+  Printf.sprintf "keeper:chat-history:%s:%s:%s"
+    (Workspace.masc_root_dir config) name freshness
+;;
+
+let keeper_chat_history_json config name =
+  let base_dir = (config : Workspace.config).base_path in
+  let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
+  let trace_block_by_turn_ref =
+    match Keeper_meta_store.read_meta config name with
+    | Ok (Some m) ->
+      Some
+        (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
+           ~max_lines:trajectory_max_limit
+           ~max_internal_lines:trajectory_max_limit
+           ~config
+           ~keeper_name:name
+           ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
+    | Ok None -> None
+    | Error err ->
+      Log.Keeper.warn
+        "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+        name
+        err;
+      None
+  in
+  Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+;;
+
+let cached_keeper_chat_history_json config name =
+  Dashboard_cache.get_or_compute
+    (keeper_chat_history_cache_key config name)
+    ~ttl:keeper_hot_path_cache_ttl_s
+    (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        keeper_chat_history_json config name))
+;;
+
 let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
   let now = Time_compat.now () in
   let phase = if m.paused then "paused" else "offline" in
@@ -1229,31 +1289,8 @@ let handle_keeper_get_subroutes state req request reqd =
         (error_json "missing keeper name")
     else
       let config = Mcp_server.workspace_config state in
-      let base_dir = config.base_path in
-      let messages =
-        Keeper_chat_store.load ~base_dir ~keeper_name:name
-      in
-      let trace_block_by_turn_ref =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some m) ->
-          Some
-            (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
-               ~max_lines:trajectory_max_limit
-               ~max_internal_lines:trajectory_max_limit
-               ~config
-               ~keeper_name:name
-               ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
-        | Ok None -> None
-        | Error err ->
-          Log.Keeper.warn
-            "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
-            name
-            err;
-          None
-      in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-        (Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref
-           messages)
+        (cached_keeper_chat_history_json config name)
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool
@@ -1447,73 +1484,93 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:50
         |> max 1 |> min 200
       in
-      let entries =
-        Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
-      in
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
-      let latest_ts =
-        List.fold_left
-          (fun acc json ->
-            match Safe_ops.json_float_opt "ts" json with
-            | Some ts -> (
-                match acc with
-                | Some existing when existing >= ts -> acc
-                | _ -> Some ts)
-            | None -> acc)
-          None entries
+      (* [Keeper_tool_call_log.read_recent ~n:limit] Yojson-parses the
+         newest [limit * 5] rows of the fleet-wide dated store to filter
+         one keeper's entries (~3.6 s measured at limit=200), and it ran
+         inline on the main Eio domain for every keeper pane the
+         dashboard hydrates. Cache the built JSON and offload the
+         compute like the trajectory handler above. TTL-bounded
+         staleness also freezes the [latest_age_s] / [health] fields for
+         up to the TTL, which is well inside the freshness SLO this
+         surface reports on. *)
+      let cache_key =
+        Printf.sprintf "keeper:tool-calls:%s:%s:%d" masc_root name limit
       in
-      let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
-      let latest_age_s =
-        match latest_ts with
-        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-        | None -> None
+      let json =
+        Dashboard_cache.get_or_compute cache_key
+          ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+            Domain_pool_ref.submit_io_or_inline (fun () ->
+              let entries =
+                Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
+              in
+              let latest_ts =
+                List.fold_left
+                  (fun acc json ->
+                    match Safe_ops.json_float_opt "ts" json with
+                    | Some ts -> (
+                        match acc with
+                        | Some existing when existing >= ts -> acc
+                        | Some _ | None -> Some ts)
+                    | None -> acc)
+                  None entries
+              in
+              let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
+              let latest_age_s =
+                match latest_ts with
+                | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+                | None -> None
+              in
+              let coverage_gaps =
+                Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+                |> List.filter (fun gap ->
+                     String.equal "tool_call_io"
+                       (Safe_ops.json_string ~default:"" "source" gap)
+                     &&
+                     match Safe_ops.json_string_opt "keeper_name" gap with
+                     | Some keeper_name -> String.equal keeper_name name
+                     | None -> true)
+              in
+              let latest_gap =
+                List.rev coverage_gaps |> List.find_opt (fun _ -> true)
+              in
+              let health, stale_reason =
+                match latest_gap with
+                | Some gap ->
+                  ( "coverage_gap",
+                    Safe_ops.json_string ~default:"coverage_gap" "stale_reason"
+                      gap )
+                | None -> (
+                    match latest_age_s with
+                    | None -> ("empty", "no_entries")
+                    | Some age when age > freshness_slo_s ->
+                        ("stale", "freshness_slo_exceeded")
+                    | Some _ -> ("ok", ""))
+              in
+              `Assoc [
+                ("keeper", `String name);
+                ("count", `Int (List.length entries));
+                ("source", `String "tool_call_io");
+                ( "producer",
+                  `String
+                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                ("durable_store", `String (Filename.concat masc_root "tool_calls"));
+                ("dashboard_surface", `String dashboard_surface);
+                ("freshness_slo_s", `Float freshness_slo_s);
+                ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
+                ( "latest_ts_iso",
+                  match latest_ts with
+                  | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+                  | None -> `Null );
+                ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
+                ("health", `String health);
+                ( "stale_reason",
+                  if stale_reason = "" then `Null else `String stale_reason );
+                ("coverage_gaps", `List coverage_gaps);
+                ("entries", `List entries);
+              ]))
       in
-      let coverage_gaps =
-        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
-        |> List.filter (fun gap ->
-             String.equal "tool_call_io"
-               (Safe_ops.json_string ~default:"" "source" gap)
-             &&
-             match Safe_ops.json_string_opt "keeper_name" gap with
-             | Some keeper_name -> String.equal keeper_name name
-             | None -> true)
-      in
-      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
-      let health, stale_reason =
-        match latest_gap with
-        | Some gap ->
-          ( "coverage_gap",
-            Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-        | None -> (
-            match latest_age_s with
-            | None -> ("empty", "no_entries")
-            | Some age when age > freshness_slo_s ->
-                ("stale", "freshness_slo_exceeded")
-            | Some _ -> ("ok", ""))
-      in
-      let json = `Assoc [
-        ("keeper", `String name);
-        ("count", `Int (List.length entries));
-        ("source", `String "tool_call_io");
-        ( "producer",
-          `String
-            "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
-        ("durable_store", `String (Filename.concat masc_root "tool_calls"));
-        ("dashboard_surface", `String dashboard_surface);
-        ("freshness_slo_s", `Float freshness_slo_s);
-        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
-        ( "latest_ts_iso",
-          match latest_ts with
-          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-          | None -> `Null );
-        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
-        ("health", `String health);
-        ( "stale_reason",
-          if stale_reason = "" then `Null else `String stale_reason );
-        ("coverage_gaps", `List coverage_gaps);
-        ("entries", `List entries);
-      ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/feedback" then
     (* keeper-v2 #9: aggregated response-feedback tally (read API).

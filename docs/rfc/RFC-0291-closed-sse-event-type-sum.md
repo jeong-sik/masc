@@ -161,9 +161,10 @@ type oas_event =
   | Unknown_oas of string   (* Custom(name,_) and the pin-bump catch-all *)
 type t = … | Oas of oas_event | …
 ```
-- `to_string (Oas (Unknown_oas s)) = "oas:" ^ s` preserves the upstream string —
-  the TOTAL-with-escape policy of `keeper_reaction_ledger.reaction_kind`
-  (`Unknown_reaction of string`).
+- `to_string (Oas (Unknown_oas s)) = "oas:" ^ s` preserves the upstream string.
+  This exception is specific to the upstream OAS custom-event boundary; MASC-owned
+  closed codecs such as `keeper_reaction_ledger.reaction_kind_of_string` reject
+  unknown labels as typed decoder failures.
 - The 16 native arms become a no-catch-all exhaustive match, so a new
   `Event_bus` variant forces a compile error at the bridge (the mechanism
   `lifecycle_display`'s `display_of_custom_event` already uses).

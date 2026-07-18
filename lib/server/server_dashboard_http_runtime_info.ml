@@ -2684,6 +2684,8 @@ let schedule_keeper_reaction_evidence_dashboard_json
                then "matched_turn_started"
                else if evidence.stimulus_seen
                then "matched_stimulus"
+               else if evidence.quarantined_record_count > 0
+               then "quarantined"
                else "not_found"
              in
              `Assoc
@@ -2694,6 +2696,8 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
                   ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; "matched_record_count", `Int evidence.matched_record_count
+                  ; ( "quarantined_record_count"
+                    , `Int evidence.quarantined_record_count )
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
                       | None -> `Null

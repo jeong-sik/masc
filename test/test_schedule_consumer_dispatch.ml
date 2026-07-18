@@ -727,10 +727,9 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (inflight_evidence |> member "pending_count" |> to_int);
       check int "inflight count after lease" 1
         (inflight_evidence |> member "inflight_count" |> to_int);
-      Keeper_reaction_ledger.record_event_queue_reaction
+      Keeper_reaction_ledger.record_event_queue_turn_started
         ~base_path:config.Workspace_utils.base_path
         ~keeper_name
-        ~reaction_kind:Keeper_reaction_ledger.Turn_started
         leased;
       let reacted_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
@@ -765,11 +764,16 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
        with
        | Ok () -> ()
        | Error error -> fail ("scheduled wake projection failed: " ^ error));
-      Keeper_reaction_ledger.record_event_queue_reaction
-        ~base_path:config.Workspace_utils.base_path
-        ~keeper_name
-        ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-        leased;
+      (match
+         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+           ~base_path:config.Workspace_utils.base_path
+           ~keeper_name
+           ~source_index:0
+           ~receipt
+           leased
+       with
+       | Ok () -> ()
+       | Error error -> fail ("scheduled wake reaction projection failed: " ^ error));
       let acked_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
         |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id

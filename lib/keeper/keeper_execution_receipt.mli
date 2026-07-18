@@ -228,13 +228,6 @@ val operator_disposition_reason_to_string : operator_disposition_reason -> strin
     Exposed for test access; the runtime path consumes it via [append]. *)
 val operator_disposition : t -> operator_disposition_kind * operator_disposition_reason
 
-(** Typed ledger projection owned by the receipt boundary. Successful/passive
-    terminal receipts are execution evidence; failed, cancelled, fallback, or
-    unknown terminal receipts retain terminal-reason evidence. *)
-val reaction_kind_of_operator_disposition
-  :  operator_disposition_kind
-  -> Keeper_reaction_ledger.reaction_kind
-
 (** [needs_operator_broadcast disposition] returns true when the disposition
     indicates a silent dead-end that operators must be notified about. *)
 val needs_operator_broadcast : operator_disposition_kind -> bool

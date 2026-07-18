@@ -854,6 +854,20 @@ let test_memory_provider_configs_use_runtime_temperature () =
         consolidation.temperature)
 ;;
 
+let test_librarian_provider_config_preserves_provider_admission () =
+  let projected max_concurrent_requests =
+    Librarian_runtime.provider_for_librarian
+      { (test_provider_cfg ()) with max_concurrent_requests }
+  in
+  List.iter
+    (fun expected ->
+       Alcotest.(check (option int))
+         "librarian projection preserves OAS provider admission"
+         expected
+         (projected expected).max_concurrent_requests)
+    [ None; Some 5 ]
+;;
+
 let with_memory_os_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -3501,149 +3515,6 @@ let test_librarian_provider_slot_gate_is_per_keeper () =
         !first))
 ;;
 
-(* masc#25052 P3: process-global per-runtime slot, additive to the
-   per-keeper slot above. Capacity comes from the loaded runtime binding's
-   [max-concurrent], not an env var. *)
-let memory_runtime_max_concurrent_1_toml =
-  {|
-[runtime]
-default = "p0.default"
-
-[providers.p0]
-protocol = "openai-compatible-http"
-endpoint = "https://p0.example/v1"
-
-[models.default]
-api-name = "default"
-max-context = 4096
-temperature = 1.0
-
-[p0.default]
-max-concurrent = 1
-|}
-;;
-
-let memory_runtime_two_max_concurrent_1_toml =
-  {|
-[runtime]
-default = "p0.default"
-
-[providers.p0]
-protocol = "openai-compatible-http"
-endpoint = "https://p0.example/v1"
-
-[models.default]
-api-name = "default"
-max-context = 4096
-temperature = 1.0
-
-[models.alt]
-api-name = "alt"
-max-context = 4096
-temperature = 1.0
-
-[p0.default]
-max-concurrent = 1
-
-[p0.alt]
-max-concurrent = 1
-|}
-;;
-
-let test_librarian_runtime_slot_gate_caps_at_declared_capacity () =
-  with_runtime_config_toml memory_runtime_max_concurrent_1_toml (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      (* [max-concurrent = 1] in the loaded binding: while one entrant holds
-         the runtime slot, a concurrent entrant for the SAME runtime_id
-         drops ([None]) instead of blocking. *)
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
-                Eio.Promise.resolve resolve_entered ();
-                Eio.Promise.await release;
-                "ran")));
-      Eio.Promise.await entered;
-      let second =
-        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first runtime slot holder" first;
-      Alcotest.(check (option string))
-        "concurrent entrant drops at the runtime's declared capacity"
-        None
-        second;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
-let test_librarian_runtime_slot_gate_disabled_when_undeclared () =
-  (* [memory_runtime_resolution_toml]'s [p0.default] binding declares no
-     [max-concurrent] -> capacity 0 -> the gate is a no-op, both run. *)
-  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
-                Eio.Promise.resolve resolve_entered ();
-                Eio.Promise.await release;
-                "ran")));
-      Eio.Promise.await entered;
-      let second =
-        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first runtime slot holder" first;
-      Alcotest.(check (option string))
-        "no declared cap: concurrent entrant also ran"
-        (Some "ran")
-        second;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
-let test_librarian_runtime_slot_gate_is_per_runtime () =
-  with_runtime_config_toml memory_runtime_two_max_concurrent_1_toml (fun () ->
-    with_eio (fun ~sw ~net:_ ~clock ->
-      (* A slot held for runtime "p0.default" must not block runtime
-         "p0.alt", even though both declare the same capacity. *)
-      let entered, resolve_entered = Eio.Promise.create () in
-      let release, resolve_release = Eio.Promise.create () in
-      let first = ref None in
-      Eio.Fiber.fork ~sw (fun () ->
-        first
-        := Some
-             (Librarian_runtime.with_runtime_slot ~runtime_id:"p0.default" (fun () ->
-                Eio.Promise.resolve resolve_entered ();
-                Eio.Promise.await release;
-                "ran")));
-      Eio.Promise.await entered;
-      let other_runtime =
-        Librarian_runtime.with_runtime_slot ~runtime_id:"p0.alt" (fun () -> "ran")
-      in
-      Eio.Promise.resolve resolve_release ();
-      wait_for_ref ~clock "first runtime slot holder" first;
-      Alcotest.(check (option string))
-        "different runtime_id runs despite the other's capacity held"
-        (Some "ran")
-        other_runtime;
-      Alcotest.(check (option (option string)))
-        "slot holder ran"
-        (Some (Some "ran"))
-        !first))
-;;
-
 (* ---------- Explicit validity only ---------- *)
 
 let test_fact_validity_uses_only_stored_value () =
@@ -5053,17 +4924,9 @@ let () =
             `Quick
             test_librarian_provider_slot_gate_is_per_keeper
         ; Alcotest.test_case
-            "runtime slot gate caps at the declared max-concurrent"
+            "provider projection preserves OAS admission"
             `Quick
-            test_librarian_runtime_slot_gate_caps_at_declared_capacity
-        ; Alcotest.test_case
-            "runtime slot gate is a no-op when no max-concurrent is declared"
-            `Quick
-            test_librarian_runtime_slot_gate_disabled_when_undeclared
-        ; Alcotest.test_case
-            "runtime slot gate isolates runtimes"
-            `Quick
-            test_librarian_runtime_slot_gate_is_per_runtime
+            test_librarian_provider_config_preserves_provider_admission
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case

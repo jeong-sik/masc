@@ -7,7 +7,16 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 
 
-let compact_runtime_trust_cache_ttl_sec = 3.0
+(* TTL must exceed the operator_snapshot publish interval
+   (MASC_OPERATOR_REFRESH_INTERVAL_S, default 60s).  With the previous
+   3.0s, every trust entry aged out long before the next snapshot round,
+   so EVERY round recomputed all keepers (measured p50=319ms x 16 per
+   round).  65s lets a value computed in round N serve round N+1;
+   steady-state cost collapses to the misses alone.  Worst-case
+   staleness grows from one publish interval (60s) to two (~125s) —
+   trust fields are attention/disposition observations, not lifecycle
+   authority (RFC-0341), so the trade is acceptable. *)
+let compact_runtime_trust_cache_ttl_sec = 65.0
 
 (* Cache key for the per-keeper runtime-trust projection.
 
@@ -26,16 +35,18 @@ let compact_runtime_trust_cache_ttl_sec = 3.0
    - TTL was 1.0s, intended as the invalidation signal.  In practice
      dashboard polls every 5-7s, so the cache NEVER hit — every refresh
      paid 400-580ms for receipt file I/O per keeper.  Raising to 3.0s
-     keeps data fresh (at most 3s stale) while allowing cache reuse
-     between dashboard refresh cycles.  Measured impact: trust sub-op
-     drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
+     was meant to allow reuse between dashboard refresh cycles, but the
+     operator_snapshot publish interval is 60s: a 3.0s TTL still expired
+     before every round, so every round recomputed all keepers anyway
+     (measured p50=319ms x 16).  The TTL is now derived from the publish
+     cadence (65s > 60s interval) — see the constant's comment.
 
    Identity bits the key keeps:
    - [meta.runtime.generation]: bumped on supervisor restart / takeover.
    - [meta.paused]: explicit pause/unpause toggle.
 
    Result: each keeper has exactly one cache slot.  Turn transitions
-   are picked up via the 3s TTL refresh.  Pollution shrinks from
+   are picked up on TTL expiry (~65s).  Pollution shrinks from
    N keepers × M turns_per_window to just N keepers. *)
 let compact_runtime_trust_cache_key
       ~(config : Workspace.config)

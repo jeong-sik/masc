@@ -346,6 +346,12 @@ val append_user_message_once :
   unit ->
   (append_once_result, string) result
 
+(** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
+    this keeper's chat history. The file is append-only, so its
+    (mtime, size) pair changes on every persisted message — callers use
+    that pair as a freshness component in read-side cache keys. *)
+val chat_path : base_dir:string -> keeper_name:string -> string
+
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
     tool lines belonging to them (absolute bound 400 lines). Missing

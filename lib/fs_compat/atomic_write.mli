@@ -9,8 +9,7 @@
 
     Crash recovery is provided by [cleanup_atomic_orphans], a boot-time sweep
     for canonical [.atomic_*.tmp] files left behind when the owning process was
-    SIGKILL'd or temp-file creation itself raised ENFILE/EMFILE before the
-    with-handler could register.
+    SIGKILL'd after creating its temp file.
 
     The [save_file] primitive is injected so this module stays free of
     [Fs_compat]'s Eio bridge. Recovery uses only typed [Unix] operations and
@@ -20,8 +19,8 @@
     a temp file in [path]'s directory, fsyncs the tmp, renames it
     over [path], and best-effort fsyncs the parent directory.
 
-    Returns [Ok ()] on success or [Error msg] when the write or
-    rename fails (the tmp is cleaned up). Re-raises
+    Returns [Ok ()] on success or [Error msg] when temp-file creation,
+    writing, fsync, or rename fails (an existing tmp is cleaned up). Re-raises
     [Eio.Cancel.Cancelled] after cleaning up the tmp — cancellation
     must not be swallowed (RFC-0143). *)
 val save_file_atomic

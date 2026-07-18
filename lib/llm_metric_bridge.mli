@@ -75,5 +75,4 @@ val emit_streaming_chunk
 
 val emit_fallback_triggered : kind:string -> detail:string -> unit
 val make_sink : unit -> Llm_provider.Metrics.t
-val init : base_path:string -> unit
 val install : unit -> unit

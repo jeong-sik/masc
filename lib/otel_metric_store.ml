@@ -75,10 +75,6 @@ let record_error ?(error_type = "unknown") () =
   inc_counter metric_errors ~labels:[ "type", error_type ] ()
 ;;
 
-let reconcile_active_agents_gauge (_masc_dir : string) = ()
-
-let update_uptime () = ()
-
 let init () =
   (* Register histogram bucket upper bounds for histograms that use
      [observe_histogram] without manual [_bucket] counter management.

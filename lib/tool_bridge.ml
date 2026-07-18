@@ -122,7 +122,6 @@ let type_string_of_schema_property prop =
   | _ -> None
 
 let params_of_json_schema schema =
-  let __t0 = Mtime_clock.now () in
   (* [required] is conceptually a set (membership semantics, no ordering
      or duplicates) — materialise as Hashtbl so the per-property check
      below is O(1) instead of O(R) per property.  Per-call savings scale
@@ -165,9 +164,6 @@ let params_of_json_schema schema =
           pairs
     | _ -> []
   in
-  Otel_metric_hotpath.observe
-    ~metric:Otel_metric_hotpath.metric_oas_params_of_schema_sec
-    ~start:__t0;
   result
 
 (** {1 OAS Tool.t Creation}

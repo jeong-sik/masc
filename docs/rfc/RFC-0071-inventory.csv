@@ -39,7 +39,6 @@ lib/auth/auth_credential_base.ml,505,None,unclassified
 lib/auth/auth_error_kind.ml,43,None,unclassified
 lib/auth/auth_nickname.ml,43,None,unclassified
 lib/auth/auth_nickname.ml,62,None,unclassified
-lib/autonomous/autonomous_bridge.ml,101,None,unclassified
 lib/autonomous/autonomous_executor.ml,24,None,unclassified
 lib/autonomous/wirein_helpers.ml,7,false,unclassified
 lib/backend/backend_types.ml,77,false,unclassified

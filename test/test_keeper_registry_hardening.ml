@@ -9,6 +9,7 @@ module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KLH = Masc.Keeper_lifecycle_hooks
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
+module Reservation = Masc.Keeper_lifecycle_reservation
 module KSM = Keeper_state_machine
 module Lane = Masc.Keeper_lane
 
@@ -249,6 +250,169 @@ let test_wakeup_running_reports_typed_outcome () =
      check bool "offline keeper is not signaled" false (Atomic.get offline.fiber_wakeup)
    | KR.Signaled | KR.Deferred_unregistered | KR.Deferred_lifecycle _ ->
      fail "offline keeper did not return Deferred_not_running")
+;;
+
+let test_wakeup_running_exact_preserves_owner_lane () =
+  KR.clear ();
+  let captured = register "exact-owner" in
+  let peer = register "exact-peer" in
+  Atomic.set captured.fiber_wakeup false;
+  Atomic.set peer.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_signaled -> ()
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "current exact owner was not signaled");
+  check bool "current exact owner is signaled" true (Atomic.get captured.fiber_wakeup);
+  check bool "peer remains untouched" false (Atomic.get peer.fiber_wakeup);
+  Atomic.set captured.fiber_wakeup false;
+  (match
+     KR.update_entry ~base_path "exact-owner" (fun entry ->
+       { entry with last_error = Some "immutable record update" })
+   with
+   | Ok () -> ()
+   | Error error -> fail (KR.registry_entry_validation_error_to_string error));
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_signaled -> ()
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "same-lane immutable update changed exact ownership");
+  check bool "same lane record update remains signalable" true
+    (Atomic.get captured.fiber_wakeup);
+  Atomic.set captured.fiber_wakeup false;
+  let replacement = register "exact-owner" in
+  Atomic.set replacement.fiber_wakeup false;
+  Atomic.set peer.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_replaced -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "stale exact owner did not report replacement");
+  check bool "replaced captured lane is not signaled" false
+    (Atomic.get captured.fiber_wakeup);
+  check bool "replacement lane is not signaled" false
+    (Atomic.get replacement.fiber_wakeup);
+  check bool "peer remains untouched after replacement" false
+    (Atomic.get peer.fiber_wakeup)
+;;
+
+let test_wakeup_running_exact_reports_deferred_outcomes () =
+  KR.clear ();
+  let removed = register "exact-missing" in
+  KR.clear ();
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal removed with
+   | KR.Exact_wake_missing -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "removed exact owner did not report missing");
+  let offline_meta = make_meta "exact-offline" in
+  let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal offline with
+   | KR.Exact_wake_not_running phase ->
+     check string "exact deferred phase" "offline" (KSM.phase_to_string phase)
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "offline exact owner did not report phase");
+  let paused_meta = { (make_meta "exact-paused") with paused = true } in
+  let paused = KR.register ~base_path paused_meta.name paused_meta in
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal paused with
+   | KR.Exact_wake_lifecycle_denied
+       (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "paused exact owner did not report lifecycle denial")
+;;
+
+let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
+  KR.clear ();
+  let captured = register "exact-reserved" in
+  Atomic.set captured.fiber_wakeup false;
+  let token =
+    match
+      Reservation.acquire
+        ~base_path
+        ~keeper_name:captured.name
+        ~expected_generation:captured.meta.runtime.generation
+        ~purpose:Reservation.Dead_revival
+    with
+    | Ok token -> token
+    | Error _ -> fail "exact wake test could not acquire lifecycle ownership"
+  in
+  let replacement =
+    Fun.protect
+      ~finally:(fun () -> ignore (Reservation.release token : Reservation.release_outcome))
+      (fun () ->
+         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+          | KR.Exact_wake_lifecycle_reserved owner ->
+            check string "reservation owner is reported"
+              (Reservation.owner_id token)
+              owner.owner_id
+          | KR.Exact_wake_signaled
+          | KR.Exact_wake_missing
+          | KR.Exact_wake_replaced
+          | KR.Exact_wake_not_running _
+          | KR.Exact_wake_lifecycle_denied _ ->
+            fail "unowned exact wake crossed lifecycle ownership");
+         check bool "reserved captured lane is not signaled" false
+           (Atomic.get captured.fiber_wakeup);
+         let replacement_meta = make_meta captured.name in
+         let replacement =
+           match
+             KR.register_offline_if_admitted_for_lifecycle
+               token
+               ~base_path
+               captured.name
+               replacement_meta
+           with
+           | Ok replacement -> replacement
+           | Error _ -> fail "lifecycle owner could not install replacement lane"
+         in
+         Atomic.set replacement.fiber_wakeup false;
+         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+          | KR.Exact_wake_lifecycle_reserved _ -> ()
+          | KR.Exact_wake_signaled
+          | KR.Exact_wake_missing
+          | KR.Exact_wake_replaced
+          | KR.Exact_wake_not_running _
+          | KR.Exact_wake_lifecycle_denied _ ->
+            fail "exact wake observed an in-transaction replacement");
+         check bool "in-transaction replacement is not signaled" false
+           (Atomic.get replacement.fiber_wakeup);
+         replacement)
+  in
+  Atomic.set replacement.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+   | KR.Exact_wake_replaced -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "post-transaction stale wake did not report replacement");
+  check bool "stale lane stays unsignaled after replacement" false
+    (Atomic.get captured.fiber_wakeup);
+  check bool "replacement lane stays unsignaled" false
+    (Atomic.get replacement.fiber_wakeup)
 ;;
 
 let test_wakeup_denies_paused_and_dead_without_signaling () =
@@ -542,6 +706,18 @@ let () =
             "paused and dead keepers never receive runnable signal"
             `Quick
             test_wakeup_denies_paused_and_dead_without_signaling
+        ; test_case
+            "exact wake signals only the captured owner lane"
+            `Quick
+            test_wakeup_running_exact_preserves_owner_lane
+        ; test_case
+            "exact wake reports missing, phase, and lifecycle outcomes"
+            `Quick
+            test_wakeup_running_exact_reports_deferred_outcomes
+        ; test_case
+            "exact wake serializes lifecycle ownership and replacement"
+            `Quick
+            test_wakeup_running_exact_respects_lifecycle_owner_and_replacement
         ] )
     ; ( "wakeup_callers"
       , [ test_case

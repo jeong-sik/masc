@@ -430,6 +430,38 @@ let wakeup_running ~intent ~base_path name =
   | Some entry -> wakeup_running_entry ~intent entry
 ;;
 
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+let wakeup_running_exact ~intent (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Exact_wake_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Exact_wake_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Exact_wake_replaced
+       | Some current ->
+         (match wakeup_running_entry ~intent current with
+          | Signaled -> Exact_wake_signaled
+          | Deferred_unregistered -> Exact_wake_missing
+          | Deferred_not_running phase -> Exact_wake_not_running phase
+          | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
+;;
+
 let wakeup_all ~intent ?base_path () =
   let base_path = Option.map canonical_base_path_exn base_path in
   StringMap.iter

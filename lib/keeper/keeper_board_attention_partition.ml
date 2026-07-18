@@ -75,6 +75,10 @@ type transition =
   | Partition_deferred of t
   | Partition_blocked of t
 
+type claim_recovery =
+  | Claim_released of t
+  | Claim_already_transitioned of t
+
 let ( let* ) = Result.bind
 
 let state_to_string = function
@@ -575,6 +579,37 @@ let claim_next ~now ~worker_epoch ~base_path ~keeper_name =
           current
       in
       Ok (true, updated, Some claimed))
+;;
+
+let recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition =
+  update ~base_path ~keeper_name:partition.keeper_name (fun current ->
+    match
+      List.find_opt
+        (fun persisted -> String.equal persisted.partition_id partition.partition_id)
+        current
+    with
+    | None -> Error ("partition not found during claim recovery: " ^ partition.partition_id)
+    | Some persisted ->
+      (match persisted.state with
+       | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
+         let released = { persisted with state = Ready } in
+         let updated =
+           List.map
+             (fun current_partition ->
+                if String.equal current_partition.partition_id released.partition_id
+                then released
+                else current_partition)
+             current
+         in
+         Ok (true, updated, Claim_released released)
+       | Running running ->
+         Error
+           (Printf.sprintf
+              "partition %s claim recovery cannot revoke worker epoch %s"
+              partition.partition_id
+              (Worker_epoch.to_string running.worker_epoch))
+       | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
+         Ok (false, current, Claim_already_transitioned persisted)))
 ;;
 
 let requested_ids partition =

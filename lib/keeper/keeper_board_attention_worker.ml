@@ -317,6 +317,69 @@ let process_claimed ~base_path ~worker_epoch ~judge partition =
               ~items)))
 ;;
 
+let recover_claim_after_lane_abort instance partition =
+  let recovery =
+    Eio.Cancel.protect (fun () ->
+      run_storage ~label:"board-attention-recover-aborted-claim" (fun () ->
+        Partition.recover_claim_after_lane_abort
+          ~worker_epoch:instance.worker_epoch
+          ~base_path:instance.base_path
+          ~partition))
+  in
+  (match recovery with
+   | Ok (Partition.Claim_released released) ->
+     Log.Keeper.warn
+       "Board attention aborted claim released keeper=%s partition=%s"
+       released.keeper_name
+       released.partition_id
+   | Ok (Partition.Claim_already_transitioned persisted) ->
+     Log.Keeper.info
+       "Board attention aborted claim already transitioned keeper=%s partition=%s state=%s"
+       persisted.keeper_name
+       persisted.partition_id
+       (Partition.state_to_string persisted.state)
+   | Error detail ->
+     Log.Keeper.error
+       "Board attention aborted claim recovery rejected keeper=%s partition=%s: %s"
+       partition.keeper_name
+       partition.partition_id
+       detail);
+  recovery
+;;
+
+let process_claimed_with_recovery instance partition =
+  match
+    process_claimed
+      ~base_path:instance.base_path
+      ~worker_epoch:instance.worker_epoch
+      ~judge:instance.judge
+      partition
+  with
+  | Ok transition -> Ok transition
+  | Error detail ->
+    (match recover_claim_after_lane_abort instance partition with
+     | Ok (Partition.Claim_released _ | Partition.Claim_already_transitioned _) ->
+       Error detail
+     | Error recovery_detail ->
+       Error
+         (Printf.sprintf
+            "%s; durable claim recovery failed: %s"
+            detail
+            recovery_detail))
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match recover_claim_after_lane_abort instance partition with
+     | Ok (Partition.Claim_released _ | Partition.Claim_already_transitioned _) ->
+       Printexc.raise_with_backtrace exn backtrace
+     | Error recovery_detail ->
+       Log.Keeper.error
+         "Board attention aborted claim recovery failed keeper=%s partition=%s: %s"
+         partition.keeper_name
+         partition.partition_id
+         recovery_detail;
+       Printexc.raise_with_backtrace exn backtrace)
+;;
+
 let rec drain_keeper instance keeper_name =
   let base_path = instance.base_path in
   let* claimed =
@@ -338,13 +401,7 @@ let rec drain_keeper instance keeper_name =
   match claimed with
   | None -> Ok ()
   | Some partition ->
-    let* transition =
-      process_claimed
-        ~base_path
-        ~worker_epoch:instance.worker_epoch
-        ~judge:instance.judge
-        partition
-    in
+    let* transition = process_claimed_with_recovery instance partition in
     (match transition with
      | Partition.Partition_completed _ ->
        wake_owner ~base_path keeper_name;

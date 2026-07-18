@@ -93,6 +93,15 @@ let rec await_completed ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let rec await_completed_count ~base_path ~keeper_name ~expected =
+  match P.completed ~base_path ~keeper_name with
+  | Ok completed when List.length completed >= expected -> completed
+  | Ok _ ->
+    Eio.Fiber.yield ();
+    await_completed_count ~base_path ~keeper_name ~expected
+  | Error detail -> Alcotest.fail detail
+;;
+
 let rec await_deferred_candidate ~base_path ~keeper_name ~candidate_id =
   match P.load ~base_path ~keeper_name with
   | Ok partitions
@@ -330,6 +339,7 @@ let test_lane_cancellation_is_visible_and_sibling_survives () =
   with_temp_base "board-worker-lane-failure" @@ fun base_path ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+  let cancel_keeper_a_once = ref true in
   (try
      Eio.Switch.run @@ fun sw ->
      Eio.Fiber.fork ~sw (fun () ->
@@ -339,7 +349,9 @@ let test_lane_cancellation_is_visible_and_sibling_survives () =
          ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates ->
            match candidates with
-           | first :: _ when String.equal first.A.keeper_name "keeper-a" ->
+           | first :: _
+             when String.equal first.A.keeper_name "keeper-a" && !cancel_keeper_a_once ->
+             cancel_keeper_a_once := false;
              raise (Eio.Cancel.Cancelled Exit)
            | _ -> Ok (exact_map candidates))
          ());
@@ -352,6 +364,19 @@ let test_lane_cancellation_is_visible_and_sibling_survives () =
        "lane failure requires operator action"
        true
        U.(health |> member "operator_action_required" |> to_bool);
+     ignore
+       (record_candidate ~base_path (candidate ~keeper_name:"keeper-a" 2)
+        : W.record_acceptance);
+     let recovered =
+       within clock (fun () ->
+         await_completed_count ~base_path ~keeper_name:"keeper-a" ~expected:2)
+     in
+     Alcotest.(check (list string))
+       "a later signal can execute the released claim"
+       [ (candidate ~keeper_name:"keeper-a" 1).A.candidate_id
+       ; (candidate ~keeper_name:"keeper-a" 2).A.candidate_id
+       ]
+       (List.concat_map (fun partition -> partition.P.candidate_ids) recovered);
      ignore
        (record_candidate ~base_path (candidate ~keeper_name:"keeper-b" 1)
         : W.record_acceptance);

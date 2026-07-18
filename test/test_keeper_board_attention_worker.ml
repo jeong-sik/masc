@@ -93,6 +93,24 @@ let rec await_completed ~base_path ~keeper_name =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let rec await_deferred_candidate ~base_path ~keeper_name ~candidate_id =
+  match P.load ~base_path ~keeper_name with
+  | Ok partitions
+    when List.exists
+           (fun partition ->
+              partition.P.candidate_ids = [ candidate_id ]
+              && match partition.state with
+                 | P.Deferred _ -> true
+                 | P.Ready | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _ ->
+                   false)
+           partitions ->
+    ()
+  | Ok _ ->
+    Eio.Fiber.yield ();
+    await_deferred_candidate ~base_path ~keeper_name ~candidate_id
+  | Error detail -> Alcotest.fail detail
+;;
+
 let rec await_lane_failure ~base_path =
   let health = W.health_json ~base_path in
   if U.(health |> member "lane_failure_count" |> to_int) > 0
@@ -306,6 +324,55 @@ let test_lane_cancellation_is_visible_and_sibling_survives () =
    with Test_done -> ())
 ;;
 
+let test_candidate_signal_does_not_retry_deferred_partition () =
+  with_temp_base "board-worker-typed-signal" @@ fun base_path ->
+  let keeper_name = "keeper-signal" in
+  let first = candidate ~keeper_name 1 in
+  let second = candidate ~keeper_name 2 in
+  let judge_calls = ref 0 in
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       W.For_testing.start_with_judge
+         ~sw
+         ~base_path
+         ~worker_epoch:"typed-signal-epoch"
+         ~judge:(fun candidates ->
+           incr judge_calls;
+           match candidates with
+           | [ candidate ] when String.equal candidate.A.candidate_id first.candidate_id ->
+             Error
+               { A.kind = A.Provider_unavailable
+               ; detail = "provider unavailable"
+               ; failed_at = 200.0
+               }
+           | _ -> Ok (exact_map candidates))
+         ());
+     within clock (fun () -> await_registered ~base_path);
+     ignore (record_candidate ~base_path first : W.record_acceptance);
+     within clock (fun () ->
+       await_deferred_candidate
+         ~base_path
+         ~keeper_name
+         ~candidate_id:first.candidate_id);
+     ignore (record_candidate ~base_path second : W.record_acceptance);
+     let completed =
+       within clock (fun () -> await_completed ~base_path ~keeper_name)
+     in
+     Alcotest.(check (list string))
+       "new candidate completes independently"
+       [ second.candidate_id ]
+       (List.concat_map (fun partition -> partition.P.candidate_ids) completed);
+     Alcotest.(check int)
+       "deferred partition was not retried by candidate signal"
+       2
+       !judge_calls;
+     raise Test_done
+   with Test_done -> ())
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -326,6 +393,10 @@ let () =
             "lane cancellation is visible and sibling survives"
             `Quick
             test_lane_cancellation_is_visible_and_sibling_survives
+        ; Alcotest.test_case
+            "candidate signal does not retry deferred partition"
+            `Quick
+            test_candidate_signal_does_not_retry_deferred_partition
         ] )
     ]
 ;;

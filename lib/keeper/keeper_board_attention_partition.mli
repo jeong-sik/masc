@@ -1,8 +1,10 @@
 (** Durable, capacity-agnostic Board-attention judgment partitions.
 
-    A root partition contains every currently-unassigned Pending candidate in
-    one exact persisted Keeper-context cohort. No candidate-count, byte-count,
-    token estimate, wall-clock expiry, or attempt budget chooses its size.
+    Until the actual dispatched provider artifact exposes typed fit authority,
+    each root contains exactly one currently-unassigned Pending candidate. One
+    candidate is the irreducible work identity, not a guessed batch cap. No
+    byte count, token estimate, wall-clock expiry, or attempt budget chooses
+    membership.
 
     Lifecycle:
 
@@ -70,15 +72,16 @@ val ensure_roots :
   keeper_name:string ->
   Candidate.candidate list ->
   (t list, string) result
-(** Persist one root for each exact context cohort among unassigned Pending
-    candidates. Candidate order is [(recorded_at, candidate_id)]. Existing
-    live leaf membership is validated as a one-to-one assignment. *)
+(** Persist one singleton root for each unassigned Pending candidate.
+    Candidate order is [(recorded_at, candidate_id)]. Existing live leaf
+    membership is validated as a one-to-one assignment. *)
 
-val recover_and_resume :
+val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
 (** Change every [Running] and [Deferred] leaf to [Ready] in one durable
-    rewrite. The caller must own the keeper lane actor lifecycle. Returns the
-    number of recovered rows. *)
+    rewrite at process-worker startup. Ordinary candidate signals must not use
+    this operation to retry unrelated deferred work. Returns the number of
+    recovered rows. *)
 
 val claim_next :
   now:float ->

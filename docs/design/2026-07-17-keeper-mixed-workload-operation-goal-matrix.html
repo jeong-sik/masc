@@ -234,7 +234,7 @@
         <thead><tr><th>축</th><th>AS-IS live main</th><th>#25092 base draft</th><th>Stacked partition implementation</th><th>Hard proof / 남는 blocker</th></tr></thead>
         <tbody>
           <tr><td>Provider ownership</td><td>Keeper owner admission 안에서 judge 호출</td><td>admission당 1 batch</td><td>process-owned per-Keeper actor; owner는 completed delivery만 수행</td><td>owner-blocking test: provider promise 대기 중 owner attempted=0, consumed=0</td></tr>
-          <tr><td>Cohort size</td><td><code>batch_max_candidates = 8</code></td><td>고정 8 유지</td><td>동일 canonical context의 미할당 Pending 전체가 root; 개수·bytes·시간 cap 없음</td><td>17 candidates → root 1개, members 17</td></tr>
+          <tr><td>Cohort size</td><td><code>batch_max_candidates = 8</code></td><td>고정 8 유지</td><td>typed fit authority 전에는 durable candidate 1개가 root; atomic work identity이며 추정 batch cap이 아님</td><td>17 candidates → singleton roots 17개; 정상 candidate는 독립 진행</td></tr>
           <tr><td>Capacity failure</td><td>8이 실제 wire capacity의 대리값</td><td>동일</td><td>response-contract failure는 동일 partition에 Deferred</td><td>malformed/missing/duplicate output은 capacity 증거가 아니므로 split 금지. actual-wire overflow typing은 OAS #2667 blocker</td></tr>
           <tr><td>Terminal state</td><td>Pending/Judged/Consumed</td><td>batch exact-ID failure evidence</td><td><code>Ready → Running → Completed → Settled</code>, 또는 <code>Deferred / Blocked</code></td><td>제거된 Split 상태는 strict parser가 거부; 자동 폐기·attempt budget 없음</td></tr>
           <tr><td>Crash recovery</td><td>candidate 재조회</td><td>Judged replay</td><td>Running은 process claim; actor 시작 시 Ready로 복구. Completed는 candidate apply 후에만 Settled</td><td>running recovery 1/1, settlement replay idempotent</td></tr>
@@ -247,7 +247,7 @@
   └─ durable Candidate.record
        └─ process wake hint (loss/coalescing 허용)
             └─ per-Keeper judgment actor
-                 ├─ ensure immutable same-context root
+                 ├─ ensure immutable singleton root
                  ├─ claim Ready → Running
                  ├─ exact-ID structured judge
                  ├─ success → Completed ───────┐
@@ -406,7 +406,7 @@ type job_state =
       <h3>PR-2 — Persisted partition scheduler (stacked implementation)</h3>
       <ol>
         <li>fixed 8-cap과 owner-lane production judge entrypoint를 제거한다.</li>
-        <li>exact-context root와 Deferred, Blocked, Completed/Settled FSM을 durable JSONL로 저장하며 근거 없는 Split 상태는 두지 않는다.</li>
+        <li>exact-context singleton root와 Deferred, Blocked, Completed/Settled FSM을 durable JSONL로 저장하며 근거 없는 multi-candidate packing과 Split 상태는 두지 않는다.</li>
         <li>Keeper별 process-owned actor로 provider wait를 owner admission과 sibling Keeper에서 격리한다.</li>
         <li>startup scan은 sanitized filename이 아니라 row의 exact Keeper identity를 읽고 identity collision을 거부한다.</li>
         <li>full health에 candidate/partition/worker/read-error 상태를 추가한다.</li>
@@ -468,7 +468,7 @@ type job_state =
           <li>provider tokenizer 없이 bytes/4 등으로 batch token을 추정</li>
           <li>AFK를 wall-clock idle로 추정</li>
           <li>누락 verdict, job cancellation, delivery failure가 무증거 Pending으로 남음</li>
-          <li>OAS typed overflow 없이 unbounded partition worker를 merge</li>
+          <li>OAS typed fit authority 없이 multi-candidate partition packing을 merge</li>
           <li>일반 provider outage를 capacity failure로 오인해 recursive split</li>
           <li>background job이 turn switch 또는 server root switch에 FD를 누수</li>
         </ul>

@@ -13,9 +13,8 @@
       valid for the lifetime of the caller's reference; subsequent
       publishes do not mutate it.
     - {!refresh_loop} is the {b only} site that computes a fresh
-      snapshot.  Direct calls to {!Server_dashboard_http_core},
-      {!Telemetry_unified} for read traffic must migrate to read from
-      {!current_or_bootstrap}.
+      full snapshot. Request handlers read {!current}; before the first
+      publish, each selector retains its projection-specific fallback.
 
     OCaml 5 [Atomic] holds an immutable record reference; readers see a
     consistent snapshot per call (no torn reads). *)
@@ -39,8 +38,7 @@ type t = private {
       [limit=1000]).  Handlers slice this to the request's [limit] for
       default-shaped queries; non-default queries (cursor, kinds
       filter, since) fall through to the synchronous compute path.
-      [`Null] until the refresh fiber's first publish (bootstrap stays
-      [`Null] like [namespace_truth]). *)
+      [`Null] until the refresh fiber's first successful publish. *)
   activity_graph_default : Yojson.Safe.t;
   (** RFC-0201 Step 2.  [Activity_graph.graph_json] computed against
       the dashboard panel's default query ([kinds=[]], [limit=500],
@@ -60,12 +58,6 @@ type t = private {
 val current : unit -> t option
 (** [Atomic.get] from the live slot.  Returns [None] until the first
     successful publish.  Wait-free; total. *)
-
-val current_or_bootstrap : config:Workspace.config -> t
-(** [current ()] if populated; otherwise a single bootstrap value
-    computed synchronously on the calling fiber.  The bootstrap path is
-    taken at most once per process lifetime (first request before the
-    refresh loop has emitted). *)
 
 val refresh_loop :
   sw:Eio.Switch.t ->
@@ -118,6 +110,4 @@ val register_dashboard_tools_http_json : (Workspace.config -> Yojson.Safe.t) -> 
 
 val register_namespace_truth_snapshot :
   (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
-
-
 

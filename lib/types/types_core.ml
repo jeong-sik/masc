@@ -523,8 +523,6 @@ type task_contract = {
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-  evidence_claims : Evidence_claim.t list; [@default []]
-  (* RFC-0199 Phase B: typed deterministic completion criteria (see .mli). *)
   links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 

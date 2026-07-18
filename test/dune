@@ -331,7 +331,6 @@
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
-  test_event_log
   test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
@@ -648,7 +647,6 @@
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
-  test_event_log
   test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
@@ -883,7 +881,6 @@
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
-  test_streamable_http
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
@@ -1026,8 +1023,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_evidence_claim_schema
-  test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
@@ -1051,7 +1046,6 @@
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
-  test_streamable_http
   test_dashboard_workspace
   test_dashboard_briefing
   test_dashboard_briefing_sections
@@ -1193,8 +1187,6 @@
   test_prompt_registry_defaults
   test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
-  test_evidence_claim_schema
-  test_deterministic_evidence_evaluator
   test_mcp_session_store_roundtrip
   test_eval_calibration
   test_goal_tools
@@ -1442,7 +1434,6 @@
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage
-  test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
@@ -1486,7 +1477,6 @@
   test_session_coverage
   test_cache_eio_coverage
   test_run_eio_coverage
-  test_handover_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
   test_telemetry_eio_coverage
@@ -1772,11 +1762,9 @@
 
 (include stanzas/test_http_pages_asset_read.inc)
 
-(include stanzas/test_bounded_proc.inc)
 
 (include stanzas/test_bind_required_guard_counter.inc)
 
-(include stanzas/test_jsonl_atomic.inc)
 
 (include stanzas/test_k2_pipeline_e2e.inc)
 

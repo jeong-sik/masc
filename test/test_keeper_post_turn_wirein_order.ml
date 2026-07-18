@@ -182,9 +182,7 @@ let test_manual_compaction_serializes_owner_lane () =
       in
       let checkpoint =
         let context =
-          Masc.Keeper_context_core.context_of_oas_checkpoint
-            checkpoint
-            ~primary_model_max_tokens:8192
+          Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
         in
         match
           Masc.Keeper_context_core.save_oas_checkpoint_classified
@@ -424,8 +422,7 @@ let test_manual_compaction_serializes_owner_lane () =
              Post_turn.recover_latest_checkpoint_for_compaction
                ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
                ~meta
-               ~trigger:Compaction_trigger.Manual
-               ~primary_model_max_tokens:8192)
+               ~trigger:Compaction_trigger.Manual)
       in
       (match stale_plan_result with
        | Error
@@ -461,10 +458,7 @@ let test_malformed_structure_preserves_checkpoint () =
   let orphan = block_message User [ tool_result "orphan" ] in
   let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
   let context =
-    Masc.Keeper_context_core.context_of_oas_checkpoint
-      checkpoint
-      ~primary_model_max_tokens:8192
-  in
+    Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
   let make_called = Atomic.make false in
   let preparation =
     Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override

@@ -45,6 +45,11 @@ val json_non_null_member_present : string -> Yojson.Safe.t -> bool
 val parse_present_string_list_opt :
   Yojson.Safe.t -> string -> (string list option, string) result
 
+(** Parse the explicit context override. Missing is [(false, None)]; null or
+    zero explicitly clears it; positive integers are preserved exactly. *)
+val parse_max_context_override :
+  Yojson.Safe.t -> (bool * int option, string) result
+
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)
 val parse :

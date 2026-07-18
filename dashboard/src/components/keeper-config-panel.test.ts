@@ -14,6 +14,7 @@ import {
   keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
+  parseMaxContextOverrideDraft,
   type HookSlotEntry,
   type RuntimeDraft,
 } from './keeper-config-panel'
@@ -34,10 +35,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
@@ -444,10 +441,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
@@ -677,7 +670,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       autoboot_enabled: false,
-      max_context_override: 64000,
+      max_context_override: '64000',
       compaction_profile: 'conservative',
     }), c)
     expect(payload.autoboot_enabled).toBe(false)
@@ -688,23 +681,29 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('emits null to clear max_context_override when draft is zero', () => {
     const c = makeKeeperConfigForSandbox({ max_context_override: 64000 })
     const payload = buildRuntimePayload(draftFrom(c, {
-      max_context_override: 0,
+      max_context_override: '0',
     }), c)
     expect(payload.max_context_override).toBeNull()
   })
 
-  it('clamps max_context_override to the backend keeper bound before PATCH', () => {
+  it('preserves an explicit positive max_context_override before PATCH', () => {
     const c = makeKeeperConfigForSandbox({
       max_context_override: null,
-      limits: {
-        min_context_override_tokens: 64_000,
-        max_context_override_tokens: 128_000,
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      max_context_override: 128_001,
+      max_context_override: '128001',
     }), c)
-    expect(payload.max_context_override).toBe(128_000)
+    expect(payload.max_context_override).toBe(128_001)
+  })
+
+  it('rejects negative, fractional, and unsafe-integer override drafts without rewriting', () => {
+    expect(parseMaxContextOverrideDraft('')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('01')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('-1')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('3.9')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('9007199254740993')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('128001')).toEqual({ ok: true, value: 128_001 })
+    expect(parseMaxContextOverrideDraft('0')).toEqual({ ok: true, value: null })
   })
 })
 
@@ -1460,6 +1459,27 @@ describe('KeeperConfigPanel', () => {
         compaction_profile: 'conservative',
       }),
     )
+  })
+
+  it('blocks an invalid max-context override instead of silently clearing it', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+    const maxContext = container.querySelector('input[aria-label="컨텍스트 오버라이드"]') as HTMLInputElement | null
+    expect(maxContext).not.toBeNull()
+    maxContext!.value = '-1'
+    maxContext!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    expect(container.textContent).toContain('컨텍스트 오버라이드는 양의 정수여야 합니다')
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    expect(saveButton?.disabled).toBe(true)
+    expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
   })
 
   it('shows the sandbox preflight guide when docker is selected', async () => {

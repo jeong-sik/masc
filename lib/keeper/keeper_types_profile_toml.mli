@@ -1,6 +1,4 @@
 val default_runtime_id : unit -> string
-val min_keeper_context_tokens : int
-val max_keeper_context_tokens : int
 val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool

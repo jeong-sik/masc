@@ -161,7 +161,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const workspace = isRecord(data.workspace) ? data.workspace : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
-  const limits = isRecord(data.limits) ? data.limits : {}
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
@@ -169,10 +168,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: asInt(data.max_context_override) ?? null,
-    limits: {
-      min_context_override_tokens: asInt(limits.min_context_override_tokens) ?? null,
-      max_context_override_tokens: asInt(limits.max_context_override_tokens) ?? null,
-    },
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),

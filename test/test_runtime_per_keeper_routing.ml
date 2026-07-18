@@ -935,6 +935,11 @@ let test_context_budget_uses_selected_runtime () =
         ~requested_override:None
         [ "openai.small" ]
     in
+    let oversized_override =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:(Some 128_001)
+        [ "openai.small" ]
+    in
     Alcotest.(check int)
       "default runtime budget"
       128000
@@ -946,7 +951,11 @@ let test_context_budget_uses_selected_runtime () =
     Alcotest.(check int)
       "provider capacity below 64k is not enlarged"
       32000
-      small_budget.Keeper_context_runtime.effective_budget)
+      small_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "override cannot enlarge provider capacity"
+      32000
+      oversized_override.Keeper_context_runtime.effective_budget)
 ;;
 
 let test_context_budget_source_is_shared_ssot () =

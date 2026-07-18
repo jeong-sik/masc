@@ -562,14 +562,7 @@ let validate_dashboard_nonnegative_int key value =
 let validate_dashboard_max_context_override = function
   | `Null -> Ok ()
   | `Int value ->
-      let min_context = Keeper_config.min_keeper_context_tokens in
-      let max_context = Keeper_config.max_keeper_context_tokens in
-      if value >= min_context && value <= max_context then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "max_context_override must be within %d..%d tokens (received %d)"
-             min_context max_context value)
+      Keeper_config.validate_max_context_override_value value |> Result.map ignore
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
 let validate_dashboard_config_field key value =

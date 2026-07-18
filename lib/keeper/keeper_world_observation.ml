@@ -956,14 +956,21 @@ let collect_board_events_with_cursor_policy
                (ts, post_id)
                (fst base_cursor, Option.value ~default:"" (snd base_cursor))
              > 0 ->
-        Keeper_reaction_ledger.record_board_cursor_ack
-          ~base_path
-          ~keeper_name:meta.name
-          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
-          ~cursor_ts:ts
-          ~post_id:(Some post_id)
-          ();
-        Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+        (match
+           Keeper_reaction_ledger.record_board_cursor_ack_result
+             ~base_path
+             ~keeper_name:meta.name
+             ~cursor_ts:ts
+             ~post_id:(Some post_id)
+             ()
+         with
+         | Ok _ -> Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+         | Error error ->
+           Log.Keeper.error
+             "board cursor ledger commit failed; cursor retained keeper=%s post_id=%s: %s"
+             meta.name
+             post_id
+             (Keeper_reaction_ledger.ledger_error_to_string error))
       | Some base_cursor, Some (ts, post_id) ->
         Log.Keeper.debug
           "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"

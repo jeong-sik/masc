@@ -350,6 +350,27 @@ let last_execution_for_schedule state ~schedule_id =
   | execution :: _ -> Some execution
 ;;
 
+module Execution_map = Map.Make (String)
+
+let latest_execution_lookup state =
+  let latest =
+    List.fold_left
+      (fun by_schedule (candidate : execution_record) ->
+        Execution_map.update
+          candidate.schedule_id
+          (function
+            | None -> Some candidate
+            | Some current ->
+              if compare_execution_desc candidate current < 0
+              then Some candidate
+              else Some current)
+          by_schedule)
+      Execution_map.empty
+      state.executions
+  in
+  fun ~schedule_id -> Execution_map.find_opt schedule_id latest
+;;
+
 let update_latest_running_execution executions ~schedule_id update =
   let rec loop acc = function
     | [] ->

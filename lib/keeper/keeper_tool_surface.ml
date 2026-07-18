@@ -587,8 +587,8 @@ let keeper_compact_body
            detail;
          tool_result_error
            (Printf.sprintf "keeper %s: compaction request enqueue failed: %s" name detail)
-       | Stimulus_enqueued -> queued "enqueued"
-       | Stimulus_already_present -> queued "already_present")
+       | Stimulus_enqueued _ -> queued "enqueued"
+       | Stimulus_already_present _ -> queued "already_present")
 
 let handle_keeper_compact ?invocation_ref ctx args : tool_result =
   keeper_compact_body ?invocation_ref ~config:ctx.config args

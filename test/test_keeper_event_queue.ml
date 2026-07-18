@@ -482,11 +482,14 @@ let () =
     ; payload = Hitl_resolved resolution
     }
   in
+  let approved_hitl = hitl_stimulus Hitl_approved in
+  let rejected_hitl = hitl_stimulus (Hitl_rejected "operator declined") in
+  assert (not (stimulus_identity_equal approved_hitl rejected_hitl));
   assert (
     not
-      (stimulus_identity_equal
-      (hitl_stimulus Hitl_approved)
-      (hitl_stimulus (Hitl_rejected "operator declined"))));
+      (String.equal
+         (stimulus_identity_id approved_hitl)
+         (stimulus_identity_id rejected_hitl)));
 
   (* --- RFC-0315 P3 W0: Goal_assigned --- *)
   let assignment =
@@ -538,6 +541,10 @@ let () =
     }
   in
   assert (stimulus_identity_equal assignment_stim assignment_retitled);
+  assert (
+    String.equal
+      (stimulus_identity_id assignment_stim)
+      (stimulus_identity_id assignment_retitled));
   (* Producer diff is edge-only: additions wake, removals and unchanged ids
      never do. *)
   assert (
@@ -570,7 +577,18 @@ let () =
   let q = enqueue q bootstrap_stim in
   assert (length q = 2);
   assert (stimulus_identity_equal bootstrap_stim duplicate_bootstrap_stim);
-  assert (List.length (uniq_stimuli [ bootstrap_stim; duplicate_bootstrap_stim ]) = 1);
+  assert (
+    String.equal
+      (stimulus_identity_id bootstrap_stim)
+      (stimulus_identity_id duplicate_bootstrap_stim));
+  (match
+     uniq_stimuli
+       [ bootstrap_stim; ghost_stim; duplicate_bootstrap_stim; ghost_stim ]
+   with
+   | [ first; second ] ->
+     assert (String.equal first.post_id bootstrap_stim.post_id);
+     assert (String.equal second.post_id ghost_stim.post_id)
+   | _ -> Alcotest.fail "identity dedup must preserve first-occurrence order");
   let stim, q =
     match dequeue q with
     | Some s -> s

@@ -4,8 +4,6 @@
     Contains keeper reaction ledger, FD accountant, fleet resolution,
     runtime truth, and contract-verification health JSON renderers. *)
 
-val take : int -> 'a list -> 'a list
-
 val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
 
 val keeper_turn_admission_health_json : unit -> Yojson.Safe.t

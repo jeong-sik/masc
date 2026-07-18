@@ -12,9 +12,10 @@
 //     "yes, awaiting / mid drain". not_found means "in neither queue" — but that
 //     is ALSO the normal post-completion state (a drained wake leaves the
 //     queue), so not_found alone cannot mean "lost".
-//   · keeper_reaction_evidence — did the keeper actually handle the stimulus
-//     (consumed_ack / turn_started)? A matched_stimulus row proves only that the
-//     wake was enqueued; it is not evidence that the keeper drained it.
+//   · keeper_reaction_evidence — what is the causally latest typed reaction for
+//     the stimulus? ACK is completion; turn-start, requeue, and escalation are
+//     distinct non-terminal/operator-actionable outcomes. A matched_stimulus
+//     row proves only enqueue and cannot prove drain.
 //
 // A genuine miss is queue=not_found with either reaction=not_found or
 // reaction=matched_stimulus: dispatched, no longer in either queue, and no
@@ -27,7 +28,12 @@ import type { StatusChipTone } from '../common/status-chip'
 export type QueueDrainState =
   | 'pending' // in the pending queue — awaiting drain
   | 'inflight' // in the inflight queue — draining now
-  | 'drained' // left the queue AND the keeper reacted — healthy completion
+  | 'started' // left the queue after a turn began — not terminal yet
+  | 'drained' // left the queue with a consumed ACK — healthy completion
+  | 'requeued' // latest reaction explicitly returned the stimulus to work
+  | 'escalated' // latest reaction escalated without requesting external input
+  | 'external_input_requested' // escalation is waiting for external input
+  | 'identity_conflict' // multiple queue rows claim one canonical stimulus identity
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
   | 'indeterminate' // receipt / stimulus identity cannot be correlated
@@ -40,12 +46,6 @@ export interface QueueDrainStatus {
   readonly title: string
 }
 
-// keeper_reaction_evidence statuses that prove the keeper handled the stimulus.
-const REACTED: ReadonlySet<string> = new Set([
-  'matched_consumed_ack',
-  'matched_turn_started',
-])
-
 const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'state'>>> = {
   pending: {
     label: '큐 대기',
@@ -57,10 +57,35 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     tone: 'info',
     title: 'wake가 inflight — keeper가 지금 드레인 중',
   },
+  started: {
+    label: '처리 시작',
+    tone: 'info',
+    title: '큐에서 빠진 뒤 keeper turn_started가 기록됨 — 아직 종결 ACK는 없음',
+  },
   drained: {
     label: '완료',
     tone: 'neutral',
-    title: '큐에서 빠졌고 keeper 처리 증거가 기록됨 (consumed_ack / turn_started)',
+    title: '큐에서 빠졌고 최신 반응이 consumed ACK임',
+  },
+  requeued: {
+    label: '재큐됨',
+    tone: 'warn',
+    title: '최신 반응이 requeue임 — 완료가 아니며 후속 드레인을 확인해야 함',
+  },
+  escalated: {
+    label: '에스컬레이션',
+    tone: 'bad',
+    title: '최신 반응이 escalation임 — 완료로 처리되지 않음',
+  },
+  external_input_requested: {
+    label: '외부 입력 필요',
+    tone: 'bad',
+    title: '최신 escalation이 external_input_requested=true — 외부 입력 대기 중',
+  },
+  identity_conflict: {
+    label: '식별자 충돌',
+    tone: 'bad',
+    title: '동일한 canonical stimulus_id에 여러 queue row가 매칭됨 — operator 확인 필요',
   },
   missed: {
     label: '누락 ⚠',
@@ -75,7 +100,7 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   indeterminate: {
     label: '확인 불가',
     tone: 'neutral',
-    title: '영수증, stimulus_id, 또는 ledger completeness 부재로 큐-반응 상관 불가',
+    title: '영수증을 해석할 수 없거나 반응 증거가 없어 큐-반응 상관 불가',
   },
 }
 
@@ -90,16 +115,33 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
       return 'inflight'
     case 'read_error':
       return 'read_error'
+    case 'identity_conflict':
+      return 'identity_conflict'
     case 'unrecognized_receipt':
       return 'indeterminate'
     case 'not_found': {
-      const reaction = request.keeper_reaction_evidence?.projection_status
-      if (reaction != null && REACTED.has(reaction)) return 'drained'
-      if (reaction === 'not_found' || reaction === 'matched_stimulus') return 'missed'
-      if (reaction === 'read_error') return 'read_error'
-      // Missing identity / unrecognized receipt / absent evidence:
-      // exact negative evidence is unavailable, so this can never be a miss.
-      return 'indeterminate'
+      const reaction = request.keeper_reaction_evidence
+      if (reaction == null) return 'indeterminate'
+      switch (reaction.projection_status) {
+        case 'matched_consumed_ack':
+          return 'drained'
+        case 'matched_turn_started':
+          return 'started'
+        case 'matched_requeued':
+          return 'requeued'
+        case 'matched_escalated':
+          return 'escalated'
+        case 'matched_escalated_external_input':
+          return 'external_input_requested'
+        case 'matched_stimulus':
+        case 'not_found':
+          return 'missed'
+        case 'read_error':
+          return 'read_error'
+        case 'invalid_stimulus_id':
+        case 'unrecognized_receipt':
+          return 'indeterminate'
+      }
     }
     default:
       // Unknown future queue status: surface as indeterminate rather than
@@ -118,18 +160,22 @@ export function queueDrainStatusOf(
   return state === null ? null : { state, ...PRESENTATION[state] }
 }
 
-// States surfaced as a chip on the calendar rows. 'drained' and 'indeterminate'
-// are intentionally omitted: a healthy completion and an uncorrelatable record
-// are not actionable, and a chip on every recurring row would be noise.
-const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
-  'pending',
-  'inflight',
-  'missed',
-  'read_error',
-])
-
 export function isCalendarVisible(status: QueueDrainStatus): boolean {
-  return CALENDAR_VISIBLE.has(status.state)
+  switch (status.state) {
+    case 'drained':
+    case 'indeterminate':
+      return false
+    case 'pending':
+    case 'inflight':
+    case 'started':
+    case 'requeued':
+    case 'escalated':
+    case 'external_input_requested':
+    case 'identity_conflict':
+    case 'missed':
+    case 'read_error':
+      return true
+  }
 }
 
 /** Count of requests whose last keeper-wake execution has left the queue

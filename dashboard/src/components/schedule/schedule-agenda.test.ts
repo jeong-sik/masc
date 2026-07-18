@@ -265,7 +265,19 @@ describe('schedule calendar components', () => {
             schedule_id: 'done-1',
             due_at_iso: '2026-07-07T18:00:00Z',
             keeper_queue_evidence: { projection_status: 'not_found' },
-            keeper_reaction_evidence: { projection_status: 'matched_consumed_ack' },
+            keeper_reaction_evidence: {
+              projection_status: 'matched_consumed_ack',
+              latest_reaction: {
+                kind: 'event_queue_ack',
+                sequence: '3',
+                event_id: 'event-3',
+                recorded_at: 203,
+                recorded_at_iso: '1970-01-01T00:03:23Z',
+                transition_id: 'transition-3',
+                source_index: 0,
+                source_count: 1,
+              },
+            },
           }),
         ]}
         nowMs=${NOW_MS}

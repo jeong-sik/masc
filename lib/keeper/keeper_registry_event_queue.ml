@@ -51,6 +51,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
+let lease_sequence = Keeper_event_queue_persistence.lease_sequence
 
 let active_lease_result ~base_path name =
   match Keeper_registry.get ~base_path name with
@@ -253,8 +254,8 @@ let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
 ;;
 
 type enqueue_stimulus_durable_result =
-  | Stimulus_enqueued
-  | Stimulus_already_present
+  | Stimulus_enqueued of Keeper_event_queue.stimulus
+  | Stimulus_already_present of Keeper_event_queue.stimulus
   | Stimulus_storage_error of string
 
 let enqueue_stimulus_durable_result ~base_path name stimulus =
@@ -265,8 +266,10 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
       ~after_commit:(publish_pending ~base_path name)
       stimulus
   with
-  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
-  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Ok (Keeper_event_queue_persistence.Enqueued committed) ->
+    Stimulus_enqueued committed
+  | Ok (Keeper_event_queue_persistence.Already_present committed) ->
+    Stimulus_already_present committed
   | Error detail -> Stimulus_storage_error detail
 ;;
 

@@ -3,1484 +3,1263 @@ open Masc
 open Yojson.Safe.Util
 
 let with_temp_base f =
-  let base_path = Filename.temp_file "masc-krl-" "" in
+  let base_path = Filename.temp_file "masc-reaction-sqlite-" "" in
   Sys.remove base_path;
   Unix.mkdir base_path 0o755;
   f base_path
 ;;
 
-let board_payload ?updated_at ~post_id:(_ : string) () :
-  Keeper_event_queue.stimulus_payload
-  =
-  Keeper_event_queue.Board_signal
-    { kind = Keeper_event_queue.Post_created
-    ; author = "operator"
-    ; title = "Ship reaction ledger"
-    ; content = "Please react"
-    ; hearth = None
-    ; updated_at
-    }
-;;
-
-let board_stimulus ?(post_id = "post-42") ?updated_at () :
-  Keeper_event_queue.stimulus
-  =
-  { post_id
-  ; urgency = Immediate
-  ; arrived_at = 1234.5
-  ; payload = board_payload ?updated_at ~post_id ()
-  }
-;;
-
-let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
-  Keeper_event_queue.stimulus
-  =
-  { post_id = "fusion-run:" ^ run_id
-  ; urgency = Keeper_event_queue.Normal
-  ; arrived_at = 1234.5
-  ; payload =
-      Keeper_event_queue.Fusion_completed
-        { run_id
-        ; ok = true
-        ; resolved_answer = "use approach B"
-        ; board_post_id = "post-fus"
-        ; channel = Keeper_continuation_channel.unrouted "test fixture"
-        }
-  }
-;;
-
-let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
-  Keeper_event_queue.stimulus
-  =
-  { post_id = "schedule-due:" ^ schedule_id
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = 1234.5
-  ; payload =
-      Keeper_event_queue.Schedule_due
-        { schedule_id
-        ; due_at = 1200.0
-        ; payload_digest = "payload-digest"
-        ; title = Some "Wake"
-        ; message = "Scheduled lane wake"
-        }
-  }
-;;
-
-let failure_judgment_stimulus () : Keeper_event_queue.stimulus =
-  let judgment : Keeper_event_queue.failure_judgment =
-    { fj_runtime_id = "failed-runtime"
-    ; fj_judgment = Keeper_runtime_failure_route.Config_mismatch
-    ; fj_provenance = Keeper_runtime_failure_route.Oas_config_error
-    ; fj_detail = "configuration unavailable"
-    }
-  in
-  { post_id = Keeper_event_queue.failure_judgment_post_id judgment
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.Failure_judgment judgment
-  }
-;;
-
-let require_ok label = function
-  | Ok value -> value
-  | Error message -> failf "%s: %s" label message
-;;
-
-let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
-  Keeper_event_queue_persistence.update_result
-    ~base_path
-    ~keeper_name
-    (fun pending -> List.fold_left Keeper_event_queue.enqueue pending stimuli)
-  |> require_ok "persist transition sources";
-  let lease =
-    (match stimuli with
-     | [ _ ] ->
-       Keeper_event_queue_persistence.claim_when_result
-         ~base_path
-         ~keeper_name
-         ~claimed_at:1235.0
-         ~ready:(fun _ -> true)
-         ()
-     | _ ->
-       Keeper_event_queue_persistence.claim_board_result
-         ~base_path
-         ~keeper_name
-         ~claimed_at:1235.0
-         ())
-    |> require_ok "claim transition receipt stimulus"
-  in
-  let lease =
-    match lease with
-    | Some lease -> lease
-    | None -> fail "transition receipt stimulus was not claimed"
-  in
-  let receipt =
-    Keeper_event_queue_persistence.settle_result
-      ~base_path
-      ~keeper_name
-      ~settled_at:1236.0
-      ~lease
-      ~settlement
-      ()
-    |> require_ok "settle transition receipt stimulus"
-    |> function
-    | Keeper_event_queue_persistence.Settled receipt -> receipt
-    | Keeper_event_queue_persistence.Already_settled _ ->
-      fail "first transition receipt settlement was already settled"
-    | Keeper_event_queue_persistence.Committed_followup_failed { detail; _ } ->
-      failf "settlement follow-up failed: %s" detail
-  in
-  (match
-     Keeper_event_queue_persistence.transition_outbox_result
-       ~base_path
-       ~keeper_name
-     |> require_ok "read persisted transition outbox"
-   with
-   | [ entry ] ->
-     check bool "outbox retains the settled receipt" true
-       (Keeper_event_queue_state.transition_receipt_equal entry.receipt receipt)
-   | [] | _ :: _ :: _ -> fail "settled transition did not produce one outbox entry");
-  receipt
-;;
-
-let check_member_string label expected key json =
-  check string label expected (json |> member key |> to_string)
-;;
-
-let check_list_has_string label expected json =
-  check bool label true
-    (json
-     |> to_list
-     |> List.exists (fun item -> String.equal expected (to_string item)))
-;;
-
 let rec mkdir_p path =
-  if path = "" || path = "." || path = "/"
+  if Sys.file_exists path
   then ()
-  else if Sys.file_exists path
-  then ()
-  else (
+  else begin
     mkdir_p (Filename.dirname path);
-    Unix.mkdir path 0o755)
+    Unix.mkdir path 0o755
+  end
 ;;
 
-let write_file path content =
-  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+let board_stimulus ?(post_id = "post-42") ?(arrived_at = 1234.5) () =
+  Keeper_event_queue.
+    { post_id
+    ; urgency = Immediate
+    ; arrived_at
+    ; payload =
+        Board_signal
+          { kind = Post_created
+          ; author = "operator"
+          ; title = "Ship the SQLite reaction ledger"
+          ; content = "No dual authority"
+          ; hearth = None
+          ; updated_at = Some arrived_at
+          }
+    }
 ;;
 
-let event_queue_snapshot_path ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue.json"
+let schedule_stimulus index =
+  let post_id = Printf.sprintf "occurrence-%02d" index in
+  Keeper_event_queue.
+    { post_id
+    ; urgency = Immediate
+    ; arrived_at = 2000. +. float_of_int index
+    ; payload =
+        Schedule_due
+          { schedule_id = Printf.sprintf "schedule-%02d" index
+          ; due_at = 1900. +. float_of_int index
+          ; payload_digest = Printf.sprintf "digest-%02d" index
+          ; title = None
+          ; message = "wake"
+          }
+    }
 ;;
 
-let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-          keeper_name)
-       "reaction-ledger")
-    "v4"
+let fail_ledger_error context error =
+  fail (context ^ ": " ^ Keeper_reaction_ledger.ledger_error_to_string error)
 ;;
 
-let reaction_ledger_store ~base_path ~keeper_name =
-  Dated_jsonl.create
-    ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
-    ()
+let expect_write context = function
+  | Ok outcome -> outcome
+  | Error error -> fail_ledger_error context error
 ;;
 
-let read_recent_rows ~base_path ~keeper_name ~limit =
-  match
-    Dated_jsonl.read_recent_result
-      (reaction_ledger_store ~base_path ~keeper_name)
-      limit
-  with
-  | Error error -> fail (Dated_jsonl.read_error_to_string error)
-  | Ok entries ->
-    List.map
-      (function
-        | Dated_jsonl.Parsed row -> row
-        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-          failf
-            "unexpected malformed test row %s%s: %s"
-            path
-            (match line_number with
-             | Some value -> Printf.sprintf ":%d" value
-             | None -> "")
-            detail)
-      entries
-;;
-
-let require_complete_evidence label = function
-  | Error error ->
-    failf
-      "%s: %s"
-      label
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
-  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
-    failf
-      "%s: quarantined (%s)"
-      label
-      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-;;
-
-let latest_row rows =
-  match List.rev rows with
-  | row :: _ -> row
-  | [] -> fail "expected at least one reaction ledger row"
-;;
-
-let test_event_queue_stimulus_and_turn_reaction () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "ledger-keeper" in
-  let stimulus = board_stimulus () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let rows =
-    read_recent_rows ~base_path ~keeper_name ~limit:10
-  in
-  check int "two rows persisted" 2 (List.length rows);
-  let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v4" "schema" stimulus_row;
-  check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
-  check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
-  check_member_string
-    "stimulus kind"
-    "board_signal"
-    "kind"
-    (stimulus_row |> member "stimulus");
-  let reaction_row = List.nth rows 1 in
-  check_member_string "reaction record kind" "reaction" "record_kind" reaction_row;
-  check_member_string "reaction stimulus id" "board:post-42" "stimulus_id" reaction_row;
-  check_member_string
-    "reaction kind"
-    "turn_started"
-    "kind"
-    (reaction_row |> member "reaction")
-;;
-
-let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "ledger-schedule-keeper" in
-  let stimulus = schedule_due_stimulus () in
-  let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
-  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  check string "scheduled ledger id preserves occurrence" stimulus.post_id stimulus_id;
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    unrelated;
-  let stimulus_only =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "stimulus-only evidence"
-  in
-  check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
-  check bool "turn reaction absent" false stimulus_only.turn_started_seen;
-  check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
-  check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let reacted =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "turn-started evidence"
-  in
-  check bool "exact stimulus still seen" true reacted.stimulus_seen;
-  check bool "turn reaction seen" true reacted.turn_started_seen;
-  check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
-  check int "two exact rows after reaction" 2 reacted.matched_record_count;
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-       ~settlement:Keeper_event_queue_state.Ack
-       [ stimulus ]);
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record event queue ack";
-  let acknowledged =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-    |> require_complete_evidence "acknowledged evidence"
-  in
-  check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
-  check int "three exact rows after ack" 3 acknowledged.matched_record_count;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "summary counts event queue ack" 1
-    (summary |> member "event_queue_ack_count" |> to_int);
-  check int "current rows are not quarantined" 0
-    (summary |> member "quarantined_row_count" |> to_int);
-  let missing =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"stimulus:missing"
-    |> require_complete_evidence "missing evidence"
-  in
-  check bool "missing stimulus absent" false missing.stimulus_seen;
-  check bool "missing reaction absent" false missing.turn_started_seen;
-  check bool "missing ack absent" false missing.event_queue_ack_seen;
-  check int "missing exact rows" 0 missing.matched_record_count;
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:""
-  with
-  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
-  | Error (Keeper_reaction_ledger.Evidence_read_error _) ->
-    fail "empty evidence identity reached storage"
-  | Ok _ -> fail "empty evidence identity was accepted"
-;;
-
-let test_failure_judgment_external_input_is_typed_history () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "judgment-attention-keeper" in
-  let stimulus = failure_judgment_stimulus () in
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-      ~settlement:
-        (Keeper_event_queue_state.Escalate
-           { reason =
-               Keeper_event_queue_state.Failure_judgment_external_input_requested
-                 { judge_runtime_id = "opaque-judge-runtime"
-                 ; rationale = "Required external input is unavailable."
-                 }
-           ; successor = None
-           })
-       [ stimulus ]);
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record external-input judgment transition";
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "resolved judgment is historical" "ok" "status" summary;
-  check bool "historical judgment is not current action" false
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "external-input judgment counted" 1
-    (summary |> member "event_queue_external_input_count" |> to_int);
-  check int "typed transition row is current" 0
-    (summary |> member "quarantined_row_count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check bool "fleet history is not current action" false
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "fleet external-input history counted" 1
-    (fleet |> member "event_queue_external_input_count" |> to_int);
-  check (list string) "fleet has no false current reason" []
-    (fleet |> member "status_reasons" |> to_list |> List.map to_string)
-;;
-
-let test_transition_reactions_distinguish_ordered_sources () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "batch-projection-keeper" in
-  let first = board_stimulus ~post_id:"shared-post" ~updated_at:1.0 () in
-  let second = board_stimulus ~post_id:"shared-post" ~updated_at:2.0 () in
-  let receipt =
-    persist_transition_outbox
-      ~base_path
-      ~keeper_name
-      ~settlement:Keeper_event_queue_state.Ack
-      [ first; second ]
-  in
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record ordered settlement sources";
-  let rows =
-    read_recent_rows
-      ~base_path
-      ~keeper_name
-      ~limit:10
-  in
-  check (list string)
-    "ordered source ids are collision-free"
-    [ receipt.event_id ^ ":source:0"; receipt.event_id ^ ":source:1" ]
-    (List.map (fun row -> row |> member "event_id" |> to_string) rows);
-  check (list int)
-    "source index remains observable"
-    [ 0; 1 ]
-    (List.map
-       (fun row -> row |> member "reaction" |> member "source_index" |> to_int)
-       rows);
-  check (list int)
-    "every source is bound to the exact outbox cardinality"
-    [ 2; 2 ]
-    (List.map
-       (fun row -> row |> member "reaction" |> member "source_count" |> to_int)
-       rows);
-  check (list string)
-    "shared stimulus id does not collapse ordered sources"
-    [ "board:shared-post"; "board:shared-post" ]
-    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows);
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (List.hd rows);
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"board:shared-post"
-    |> require_complete_evidence "crash replay evidence"
-  in
-  check bool "replayed transition remains acknowledged" true
-    evidence.event_queue_ack_seen;
-  check int "deterministic event identity deduplicates crash replay" 2
-    evidence.matched_record_count
-;;
-
-let test_transition_reaction_rejects_recombined_stimulus_identity () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "receipt-binding-keeper" in
-  let stimulus = board_stimulus ~post_id:"receipt-source" () in
-  ignore
-    (persist_transition_outbox
-       ~base_path
-       ~keeper_name
-       ~settlement:Keeper_event_queue_state.Ack
-       [ stimulus ]);
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
-  |> require_ok "record receipt-bound settlement";
-  let valid_row =
-    read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row
-  in
-  let forged_stimulus_id = "board:recombined-source" in
-  let recombined_row =
-    match valid_row with
-    | `Assoc fields ->
-      `Assoc
-        (("stimulus_id", `String forged_stimulus_id)
-         :: List.remove_assoc "stimulus_id" fields)
-    | _ -> fail "settlement writer did not emit an object"
-  in
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    recombined_row;
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:forged_stimulus_id
-  with
-  | Ok
-      (Keeper_reaction_ledger.Evidence_quarantined
-        { evidence; first_reason }) ->
-    check bool "recombined receipt cannot become an ack" false
-      evidence.event_queue_ack_seen;
-    check int "recombined row is quarantined" 1
-      evidence.quarantined_record_count;
-    check string
-      "source binding failure is typed"
-      "transition_source_identity_mismatch"
-      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "recombined receipt evidence was accepted"
+let expect_evidence context = function
+  | Ok evidence -> evidence
   | Error error ->
     fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+      (context
+       ^ ": "
+       ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
 ;;
 
-let test_current_rows_require_complete_writer_shape () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "closed-row-shape-keeper" in
-  let stimulus = board_stimulus ~post_id:"closed-row" () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let rows = read_recent_rows ~base_path ~keeper_name ~limit:2 in
-  let remove_nested_field outer inner = function
-    | `Assoc fields ->
-      let nested =
-        match List.assoc_opt outer fields with
-        | Some (`Assoc nested_fields) ->
-          `Assoc (List.remove_assoc inner nested_fields)
-        | _ -> failf "missing nested object %s" outer
-      in
-      `Assoc ((outer, nested) :: List.remove_assoc outer fields)
-    | _ -> fail "ledger writer did not emit an object"
-  in
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (remove_nested_field "stimulus" "urgency" (List.nth rows 0));
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (remove_nested_field "reaction" "post_id" (List.nth rows 1));
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "incomplete current rows are quarantined" 2
-    (summary |> member "quarantined_row_count" |> to_int);
-  let reasons =
-    summary
-    |> member "quarantine_reason_counts"
-    |> to_list
-    |> List.map (fun item -> item |> member "reason" |> to_string)
-  in
-  check bool "missing stimulus urgency is typed" true
-    (List.mem "missing_stimulus_urgency" reasons);
-  check bool "missing reaction post id is typed" true
-    (List.mem "missing_reaction_post_id" reasons)
+let expect_store context = function
+  | Ok value -> value
+  | Error error -> fail (context ^ ": " ^ Keeper_reaction_store.error_to_string error)
 ;;
 
-let test_cursor_ack_is_replayable_state_entry () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-keeper" in
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:5678.25
-    ~post_id:(Some "post-99")
-    ();
-  let row =
-    read_recent_rows ~base_path ~keeper_name ~limit:1
-    |> latest_row
-  in
-  check_member_string "cursor ack record kind" "cursor_ack" "record_kind" row;
-  check_member_string "cursor ack stimulus id" "board:post-99" "stimulus_id" row;
-  check (float 0.0001) "cursor timestamp" 5678.25
-    (row |> member "cursor" |> member "cursor_ts" |> to_float);
-  check_member_string "cursor post id" "post-99" "post_id" (row |> member "cursor");
-  check bool "cursor acked" true
-    (row |> member "reaction" |> member "cursor_acked" |> to_bool)
+let database_path ~base_path ~keeper_name =
+  expect_store
+    "database path"
+    (Keeper_reaction_store.database_path ~base_path ~keeper_name)
 ;;
 
-let test_summary_marks_unreacted_and_reacted_stimuli () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "summary-keeper" in
-  let stimulus = board_stimulus ~post_id:"post-summary" () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "pending summary status" "degraded" "status" pending_summary;
-  check bool "pending summary asks for operator visibility" true
-    (pending_summary |> member "operator_action_required" |> to_bool);
-  check int "pending stimulus count" 1
-    (pending_summary |> member "pending_stimulus_count" |> to_int);
-  check string "pending stimulus id" "board:post-summary"
-    (pending_summary
-     |> member "pending_stimulus_ids"
-     |> to_list
-     |> List.hd
-     |> to_string);
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let reacted_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "reacted summary status" "ok" "status" reacted_summary;
-  check bool "reacted summary clears operator action" false
-    (reacted_summary |> member "operator_action_required" |> to_bool);
-  check int "reacted pending stimulus count" 0
-    (reacted_summary |> member "pending_stimulus_count" |> to_int);
-  check int "turn started count" 1
-    (reacted_summary |> member "turn_started_count" |> to_int)
-;;
-
-let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-sweep-keeper" in
-  let first = board_stimulus ~post_id:"post-1" ~updated_at:10.0 () in
-  let second = board_stimulus ~post_id:"post-2" ~updated_at:20.0 () in
-  let third = board_stimulus ~post_id:"post-3" ~updated_at:30.0 () in
-  List.iter
-    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
-    [ first; second ];
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:20.0
-    ~post_id:(Some "post-2")
-    ();
-  let swept_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "cursor-swept summary status" "ok" "status" swept_summary;
-  check int "cursor-swept pending count" 0
-    (swept_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor sweep count" 2
-    (swept_summary |> member "cursor_swept_stimulus_count" |> to_int);
-  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name third;
-  let future_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "future stimulus remains degraded" "degraded" "status" future_summary;
-  check int "future pending count" 1
-    (future_summary |> member "pending_stimulus_count" |> to_int);
-  check string "future pending stimulus id" "board:post-3"
-    (future_summary
-     |> member "pending_stimulus_ids"
-     |> to_list
-     |> List.hd
-     |> to_string)
-;;
-
-let test_summary_cursor_ack_respects_post_id_tiebreaker () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "cursor-tiebreaker-keeper" in
-  let first = board_stimulus ~post_id:"post-1" ~updated_at:50.0 () in
-  let second = board_stimulus ~post_id:"post-2" ~updated_at:50.0 () in
-  List.iter
-    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
-    [ first; second ];
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:50.0
-    ~post_id:(Some "post-1")
-    ();
-  let partial_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "partial cursor summary status" "degraded" "status" partial_summary;
-  check int "one post remains pending" 1
-    (partial_summary |> member "pending_stimulus_count" |> to_int);
-  check string "later same-timestamp post remains pending" "board:post-2"
-    (partial_summary
-     |> member "pending_stimulus_ids"
-     |> to_list
-     |> List.hd
-     |> to_string);
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~cursor_ts:50.0
-    ~post_id:(Some "post-2")
-    ();
-  let complete_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "complete cursor summary status" "ok" "status" complete_summary;
-  check int "same timestamp posts cleared" 0
-    (complete_summary |> member "pending_stimulus_count" |> to_int)
-;;
-
- let test_fleet_summary_surfaces_durable_event_queue_backlog () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "durable-backlog-keeper" in
-  Keeper_registry_event_queue.enqueue
-    ~base_path
-    keeper_name
-    (board_stimulus ~post_id:"post-live-backlog" ());
-  Keeper_registry_event_queue.enqueue
-    ~base_path
-    keeper_name
-    (board_stimulus ~post_id:"post-live-backlog-2" ());
-  Keeper_event_queue_persistence.record_inflight
-    ~base_path
-    ~keeper_name
-    [ fusion_completed_stimulus () ];
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check_member_string "durable queue backlog degrades fleet summary" "degraded" "status" fleet;
-  check_list_has_string
-    "durable queue stale reason is explicit"
-    "durable_event_queue_stale"
-    (fleet |> member "status_reasons");
-  check bool "durable queue backlog requires operator action" true
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "ledger pending rows stay independent" 0
-    (fleet |> member "pending_stimulus_count" |> to_int);
-  check int "durable queue backlog counted" 3
-    (fleet |> member "durable_event_queue_count" |> to_int);
-  check int "durable queue pending backlog counted" 2
-    (fleet |> member "durable_event_queue_pending_count" |> to_int);
-  check int "durable queue inflight backlog counted" 1
-    (fleet |> member "durable_event_queue_inflight_count" |> to_int);
-  check (float 0.001) "default durable queue stale threshold preserves prior behavior"
-    0.0
-    (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
-  check int "durable queue stale backlog counted" 3
-    (fleet |> member "durable_event_queue_stale_count" |> to_int);
-  check int "durable queue stale keeper counted" 1
-    (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
-  let keeper_queue =
-    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_queue;
-  check int "keeper durable queue backlog counted" 3
-    (keeper_queue |> member "durable_event_queue_count" |> to_int);
-  check int "keeper durable queue pending backlog counted" 2
-    (keeper_queue |> member "durable_event_queue_pending_count" |> to_int);
-  check int "keeper durable queue inflight backlog counted" 1
-    (keeper_queue |> member "durable_event_queue_inflight_count" |> to_int);
-  check int "keeper immediate durable queue backlog counted" 2
-    (keeper_queue |> member "immediate_count" |> to_int);
-  check bool "keeper durable queue is stale by default" true
-    (keeper_queue |> member "stale" |> to_bool);
-  check int "stale keeper list mirrors stale backlog" 1
-    (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length);
-  let payload_counts =
-    fleet |> member "durable_event_queue_payload_counts" |> to_list
-  in
-  check bool "board_signal durable payload count is surfaced" true
-    (List.exists
-       (fun json ->
-         String.equal (json |> member "payload_kind" |> to_string) "board_signal"
-         && json |> member "count" |> to_int = 2)
-       payload_counts);
-  check bool "inflight fusion_completed durable payload count is surfaced" true
-    (List.exists
-       (fun json ->
-         String.equal (json |> member "payload_kind" |> to_string) "fusion_completed"
-         && json |> member "count" |> to_int = 1)
-       payload_counts)
-;;
-
-let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "durable-only-keeper" in
-  Keeper_registry_event_queue.enqueue
-    ~base_path
-    keeper_name
-    (board_stimulus ~post_id:"post-durable-only" ());
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[]
-      ~limit_per_keeper:10
-  in
-  check_member_string
-    "durable-only queue degrades fleet summary"
-    "degraded"
-    "status"
-    fleet;
-  check int "durable-only keeper is included in fleet count" 1
-    (fleet |> member "keeper_count" |> to_int);
-  check_list_has_string
-    "durable-only keeper name is discovered"
-    keeper_name
-    (fleet |> member "keeper_names");
-  check int "durable-only discovery counted" 1
-    (fleet |> member "durable_event_queue_discovered_keeper_count" |> to_int);
-  check_list_has_string
-    "durable-only discovery names keeper"
-    keeper_name
-    (fleet |> member "durable_event_queue_discovered_keeper_names");
-  check bool "durable-only discovery has no read error" true
-    (match fleet |> member "durable_event_queue_discovery_error" with
-     | `Null -> true
-     | _ -> false);
-  check int "durable-only queue backlog counted" 1
-    (fleet |> member "durable_event_queue_count" |> to_int);
-  let keeper_queue =
-    fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable-only queue keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_queue;
-  check int "durable-only keeper queue backlog counted" 1
-    (keeper_queue |> member "durable_event_queue_count" |> to_int)
-;;
-
-let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
-  with_temp_base @@ fun base_path ->
-  let invalid_keeper_name = "invalid keeper name" in
-  let invalid_keeper_dir =
-    Filename.concat
-      (Common.keepers_runtime_dir_of_base ~base_path)
-      invalid_keeper_name
-  in
-  mkdir_p invalid_keeper_dir;
-  write_file
-    (Filename.concat invalid_keeper_dir "event-queue.json")
-    (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[]
-      ~limit_per_keeper:10
-  in
-  check_member_string
-    "durable queue discovery error makes fleet status unknown"
-    "unknown"
-    "status"
-    fleet;
-  check_list_has_string
-    "durable queue discovery error reason is explicit"
-    "durable_event_queue_discovery_error"
-    (fleet |> member "status_reasons");
-  check bool "durable queue discovery error requires operator action" true
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "durable queue discovery error counted" 1
-    (fleet |> member "durable_event_queue_discovery_error_count" |> to_int);
-  check bool "durable queue discovery error message is surfaced" true
-    (match fleet |> member "durable_event_queue_discovery_error" with
-     | `String value -> not (String.equal value "")
-     | _ -> false);
-  check int "invalid durable queue keeper is not accepted as a keeper" 0
-    (fleet |> member "keeper_count" |> to_int)
-;;
-
-let test_fleet_summary_allows_nonstale_durable_event_queue_backlog () =
-  if Sys.getenv_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" <> None then
-    skip ()
-  else
+let with_sqlite path f =
+  let db = Sqlite3.db_open ~mode:`NO_CREATE path in
   Fun.protect
-    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
-    (fun () ->
-       Config_boot_overrides.reset_for_tests ();
-       Config_boot_overrides.set "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" "1000000000000.0";
-       with_temp_base @@ fun base_path ->
-       let keeper_name = "fresh-durable-backlog-keeper" in
-       Keeper_registry_event_queue.enqueue
-         ~base_path
-         keeper_name
-         (board_stimulus ~post_id:"post-fresh-backlog" ());
-       let fleet =
-         Keeper_reaction_ledger.fleet_summary_json
-           ~base_path
-           ~keeper_names:[ keeper_name ]
-           ~limit_per_keeper:10
-       in
-       check_member_string
-         "fresh durable backlog remains visible but not degraded"
-         "ok"
-         "status"
-         fleet;
-       check bool "fresh durable backlog does not require operator action" false
-         (fleet |> member "operator_action_required" |> to_bool);
-       check int "fresh durable queue backlog counted" 1
-         (fleet |> member "durable_event_queue_count" |> to_int);
-       check int "fresh durable queue stale count stays zero" 0
-         (fleet |> member "durable_event_queue_stale_count" |> to_int);
-       check int "fresh durable queue stale keeper count stays zero" 0
-         (fleet |> member "durable_event_queue_stale_keeper_count" |> to_int);
-       check (float 0.001) "durable stale threshold comes from boot override"
-         1000000000000.0
-         (fleet |> member "durable_event_queue_stale_after_sec" |> to_float);
-       let keeper_queue =
-         fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd
-       in
-       check bool "fresh durable queue is not stale" false
-         (keeper_queue |> member "stale" |> to_bool);
-       check int "fresh durable stale keeper list is empty" 0
-         (fleet |> member "durable_event_queue_stale_by_keeper" |> to_list |> List.length))
+    ~finally:(fun () ->
+      if not (Sqlite3.db_close db) then fail "SQLite fixture close failed")
+    (fun () -> f db)
 ;;
 
-let test_fleet_summary_surfaces_durable_event_queue_read_error () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "broken-durable-queue-keeper" in
-  let path = event_queue_snapshot_path ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname path);
-  write_file path "{not-json";
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check_member_string
-    "durable queue read error makes fleet status unknown"
-    "unknown"
-    "status"
-    fleet;
-  check_list_has_string
-    "durable queue read error reason is explicit"
-    "durable_event_queue_read_error"
-    (fleet |> member "status_reasons");
-  check bool "durable queue read error requires operator action" true
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "durable queue read error counted" 1
-    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
-  let keeper_error =
-    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue read error keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_error;
-  check int "keeper durable queue read error counted" 1
-    (keeper_error |> member "read_error_count" |> to_int);
-  let read_error =
-    keeper_error |> member "read_errors" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue read error kind"
-    "read_failed"
-    "kind"
-    read_error;
-  check_member_string "durable queue read error path" path "path" read_error
-;;
-
-let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "parse-broken-durable-queue-keeper" in
-  let path = event_queue_snapshot_path ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname path);
-  write_file path {|{"schema":"keeper.event_queue.v1","items":{}}|};
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check_member_string
-    "durable queue parse error makes fleet status unknown"
-    "unknown"
-    "status"
-    fleet;
-  check_list_has_string
-    "durable queue parse error reason is explicit"
-    "durable_event_queue_read_error"
-    (fleet |> member "status_reasons");
-  check bool "durable queue parse error requires operator action" true
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "durable queue parse error counted" 1
-    (fleet |> member "durable_event_queue_read_error_count" |> to_int);
-  let keeper_error =
-    fleet |> member "durable_event_queue_read_errors_by_keeper" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue parse error keeper name"
-    keeper_name
-    "keeper_name"
-    keeper_error;
-  check int "keeper durable queue parse error counted" 1
-    (keeper_error |> member "read_error_count" |> to_int);
-  let read_error =
-    keeper_error |> member "read_errors" |> to_list |> List.hd
-  in
-  check_member_string
-    "durable queue parse error kind"
-    "parse_failed"
-    "kind"
-    read_error;
-  check_member_string "durable queue parse error path" path "path" read_error
-;;
-
-let test_unknown_reaction_is_quarantined_without_clearing_pending () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "unknown-reaction-keeper" in
-  let stimulus = board_stimulus ~post_id:"post-unknown-reaction" () in
-  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
-        ; "record_kind", `String "reaction"
-        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
-        ; "keeper_name", `String keeper_name
-        ; "recorded_at_unix", `Float 1235.0
-        ; "stimulus_id", `String stimulus_id
-        ; ( "reaction"
-          , `Assoc
-              [ "kind", `String "unknown_custom"
-              ; "source", `String "keeper_event_queue"
-              ] )
-        ]);
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "unknown reaction summary status" "degraded" "status" summary;
-  check bool "unknown reaction requires operator action" true
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "unknown reaction quarantined" 1
-    (summary |> member "quarantined_row_count" |> to_int);
-  check int "unknown reaction contributes no current reaction" 0
-    (summary |> member "reaction_count" |> to_int);
-  check int "unknown reaction cannot clear pending" 1
-    (summary |> member "pending_stimulus_count" |> to_int);
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-  with
-  | Ok
-      (Keeper_reaction_ledger.Evidence_quarantined
-        { evidence; first_reason }) ->
-    check int "only current stimulus matches" 1 evidence.matched_record_count;
-    check int "matching invalid row is explicit" 1 evidence.quarantined_record_count;
-    check bool "invalid reaction is not a turn" false evidence.turn_started_seen;
-    check string
-      "typed quarantine reason"
-      "unknown_reaction_kind"
-      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-  | Error error ->
+let exec_sql db sql =
+  let rc = Sqlite3.exec db sql in
+  if not (Sqlite3.Rc.is_success rc)
+  then
     fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
-  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "matching invalid row was projected as complete evidence"
+      (Printf.sprintf
+         "SQLite fixture exec failed rc=%s detail=%s"
+         (Sqlite3.Rc.to_string rc)
+         (Sqlite3.errmsg db))
 ;;
 
-(* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
-   payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
-   covered a parse-error path that can no longer occur and was removed. *)
-
-(* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
-   closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
-   prior string whitelist
-   dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
-   summary on every async fusion wake.  (We assert only the unsupported counter:
-   with no reaction row the stimulus is still legitimately pending.) *)
-let test_fusion_completed_stimulus_is_supported () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "fusion-keeper" in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    (fusion_completed_stimulus ());
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "fusion_completed survives the closed row decoder" 0
-    (summary |> member "quarantined_row_count" |> to_int)
+let test_absent_database_is_exact_empty () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "absent-ledger" in
+    let stimulus_id = "never-recorded" in
+    let evidence =
+      expect_evidence
+        "absent evidence"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id)
+    in
+    check bool "stimulus absent" false evidence.stimulus_seen;
+    check bool "turn absent" false evidence.turn_started_seen;
+    check bool "ack absent" false evidence.event_queue_ack_seen;
+    check int "no matches" 0 evidence.matched_record_count;
+    check bool
+      "read does not create database"
+      false
+      (Sys.file_exists (database_path ~base_path ~keeper_name)))
 ;;
 
-(* Drift guard: [stimulus_kind_of_string] must stay the inverse of
-   [stimulus_kind_to_string] for every closed-sum variant, and reject unknowns.
-   Pairs with the exhaustive match in [note_stimulus_kind] so a new variant
-   cannot silently fall back to [unsupported]. *)
-let test_stimulus_kind_string_roundtrip () =
-  let roundtrips k =
+let test_stimulus_turn_and_idempotent_replay () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "idempotent-ledger" in
+    let stimulus = board_stimulus () in
+    let first =
+      expect_write
+        "first stimulus"
+        (Keeper_reaction_ledger.record_event_queue_stimulus_result
+           ~base_path
+           ~keeper_name
+           stimulus)
+    in
+    let replay =
+      expect_write
+        "stimulus replay"
+        (Keeper_reaction_ledger.record_event_queue_stimulus_result
+           ~base_path
+           ~keeper_name
+           stimulus)
+    in
+    check bool "first inserted" true (first = Keeper_reaction_ledger.Inserted);
+    check bool
+      "identical replay observed"
+      true
+      (replay = Keeper_reaction_ledger.Already_recorded);
+    ignore
+      (expect_write
+         "turn started"
+         (Keeper_reaction_ledger.record_event_queue_turn_started_result
+            ~base_path
+            ~keeper_name
+            ~lease_sequence:1L
+            stimulus));
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+    let evidence =
+      expect_evidence
+        "complete evidence"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id)
+    in
+    check bool "stimulus seen" true evidence.stimulus_seen;
+    check bool "turn seen" true evidence.turn_started_seen;
+    check bool "ack not fabricated" false evidence.event_queue_ack_seen;
+    check int "deduplicated physical rows" 2 evidence.matched_record_count)
+;;
+
+let test_queue_identity_replay_ignores_arrival_observation () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "arrival-replay" in
+    let first = schedule_stimulus 7 in
+    let replay = { first with Keeper_event_queue.arrived_at = first.arrived_at +. 60. } in
+    check string
+      "canonical identity unchanged"
+      (Keeper_event_queue.stimulus_identity_id first)
+      (Keeper_event_queue.stimulus_identity_id replay);
+    check bool
+      "identity equality shares canonical projection"
+      true
+      (Keeper_event_queue.stimulus_identity_equal first replay);
+    let board_created = board_stimulus ~post_id:"shared-board-post" () in
+    let board_commented =
+      { board_created with
+        Keeper_event_queue.payload =
+          (match board_created.payload with
+           | Keeper_event_queue.Board_signal signal ->
+             Keeper_event_queue.Board_signal
+               { signal with kind = Keeper_event_queue.Comment_added }
+           | _ -> fail "board fixture changed payload kind")
+      }
+    in
+    check bool
+      "different board signal at one post has a different identity"
+      false
+      (String.equal
+         (Keeper_event_queue.stimulus_identity_id board_created)
+         (Keeper_event_queue.stimulus_identity_id board_commented));
+    check bool
+      "identity equality rejects the different board signal"
+      false
+      (Keeper_event_queue.stimulus_identity_equal board_created board_commented);
+    ignore
+      (expect_write
+         "arrival seed"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            first));
+    let outcome =
+      expect_write
+        "arrival replay"
+        (Keeper_reaction_ledger.record_event_queue_stimulus_result
+           ~base_path
+           ~keeper_name
+           replay)
+    in
+    check bool
+      "arrival metadata is first-write-wins"
+      true
+      (outcome = Keeper_reaction_ledger.Already_recorded))
+;;
+
+let store_stimulus_event ~event_id ~stimulus_id ~post_id =
+  Keeper_reaction_store.
+    { event_id
+    ; stimulus_id
+    ; recorded_at = 1000.
+    ; payload =
+        Stimulus_event
+          { kind = Board_signal
+          ; post_id
+          ; urgency = Immediate
+          ; arrived_at = 900.
+          ; board_updated_at = Some 900.
+          }
+    }
+;;
+
+let test_event_identity_conflict_is_typed () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "event-conflict" in
+    let first = store_stimulus_event ~event_id:"event-1" ~stimulus_id:"s-1" ~post_id:"p-1" in
+    let conflicting =
+      store_stimulus_event ~event_id:"event-1" ~stimulus_id:"s-1" ~post_id:"p-2"
+    in
+    ignore
+      (expect_store
+         "insert event"
+         (Keeper_reaction_store.append_event ~base_path ~keeper_name first));
+    match Keeper_reaction_store.append_event ~base_path ~keeper_name conflicting with
+    | Error (Keeper_reaction_store.Event_identity_conflict { event_id }) ->
+      check string "conflicting identity" "event-1" event_id
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+    | Ok _ -> fail "conflicting event was accepted")
+;;
+
+let transition ?(transition_id = "transition-1") sources =
+  Keeper_reaction_store.
+    { transition_id
+    ; transition_event_id = transition_id ^ ":event"
+    ; lease_id = transition_id ^ ":lease"
+    ; lease_sequence = 1L
+    ; settled_at = 3000.
+    ; settlement_kind = Ack
+    ; settlement_identity = {|{"kind":"ack"}|}
+    ; external_input_requested = false
+    ; sources
+    }
+;;
+
+let transition_source index stimulus_id =
+  Keeper_reaction_store.
+    { event_id = Printf.sprintf "transition-1:event:source:%d" index
+    ; stimulus_id
+    ; stimulus_kind = Schedule_due
+    ; post_id = stimulus_id
+    }
+;;
+
+let test_transition_is_atomic_bound_and_replayable () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "transition-ledger" in
+    let value = transition [ transition_source 0 "s-a"; transition_source 1 "s-b" ] in
+    let first =
+      expect_store
+        "transition insert"
+        (Keeper_reaction_store.append_transition ~base_path ~keeper_name value)
+    in
+    let replay =
+      expect_store
+        "transition replay"
+        (Keeper_reaction_store.append_transition ~base_path ~keeper_name value)
+    in
+    check bool
+      "transition inserted"
+      true
+      (first = Keeper_reaction_store.Transition_inserted);
+    check bool
+      "transition replay"
+      true
+      (replay = Keeper_reaction_store.Transition_already_recorded);
+    let evidence =
+      expect_store
+        "batch transition evidence"
+        (Keeper_reaction_store.events_for_stimuli
+           ~base_path
+           ~keeper_name
+           ~stimulus_ids:[ "s-a"; "s-b" ])
+    in
+    List.iter
+      (fun (_, events) ->
+        match events with
+        | [ { Keeper_reaction_store.payload = Stored_transition_settlement row; _ } ] ->
+          check int "source cardinality" 2 row.source_count
+        | _ -> fail "transition source did not round-trip exactly")
+      evidence)
+;;
+
+let test_transition_child_kind_must_match_parent () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "transition-kind-integrity" in
+    let value = transition [ transition_source 0 "source-a" ] in
+    ignore
+      (expect_store
+         "transition kind seed"
+         (Keeper_reaction_store.append_transition ~base_path ~keeper_name value));
+    with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
+      exec_sql
+        db
+        "UPDATE events SET reaction_kind='event_queue_requeued' WHERE transition_id='transition-1'");
     match
-      Keeper_reaction_ledger.stimulus_kind_of_string
-        (Keeper_reaction_ledger.stimulus_kind_to_string k)
+      Keeper_reaction_store.events_for_stimuli
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ "source-a" ]
     with
-    | Some k' ->
-      String.equal
-        (Keeper_reaction_ledger.stimulus_kind_to_string k')
-        (Keeper_reaction_ledger.stimulus_kind_to_string k)
-    | None -> false
-  in
-  List.iter
-    (fun k ->
-      check bool "stimulus_kind round-trips through string" true (roundtrips k))
-    [ Keeper_reaction_ledger.Board_signal
-    ; Keeper_reaction_ledger.Bootstrap
-    ; Keeper_reaction_ledger.Fusion_completed
-    ; Keeper_reaction_ledger.Bg_completed
-    ; Keeper_reaction_ledger.Schedule_due
-    ; Keeper_reaction_ledger.Connector_attention
-    ; Keeper_reaction_ledger.Hitl_resolved
-    ; Keeper_reaction_ledger.Failure_judgment
-    ; Keeper_reaction_ledger.Manual_compaction
-    ; Keeper_reaction_ledger.Goal_assigned
-    ];
-  check bool "unknown stimulus kind string is None" true
-    (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
+    | Error (Keeper_reaction_store.Integrity_failure _) -> ()
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+    | Ok _ -> fail "transition child kind disagreement was accepted")
 ;;
 
-(* Drift guard: known reaction labels round-trip through the closed decoder;
-   unknown labels remain typed failures and never enter the reaction algebra. *)
-let test_reaction_kind_string_roundtrip () =
-  let roundtrips k =
+let test_transition_conflict_rolls_back_every_source () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "transition-rollback" in
+    let conflicting_event_id = "preexisting-event" in
+    ignore
+      (expect_store
+         "preexisting event"
+         (Keeper_reaction_store.append_event
+            ~base_path
+            ~keeper_name
+            (store_stimulus_event
+               ~event_id:conflicting_event_id
+               ~stimulus_id:"foreign-source"
+               ~post_id:"foreign-source")));
+    let sources =
+      [ Keeper_reaction_store.
+          { event_id = "fresh-source-event"
+          ; stimulus_id = "first-source"
+          ; stimulus_kind = Schedule_due
+          ; post_id = "first-source"
+          }
+      ; Keeper_reaction_store.
+          { event_id = conflicting_event_id
+          ; stimulus_id = "second-source"
+          ; stimulus_kind = Schedule_due
+          ; post_id = "second-source"
+          }
+      ]
+    in
+    (match Keeper_reaction_store.append_transition ~base_path ~keeper_name (transition sources) with
+     | Error (Keeper_reaction_store.Event_identity_conflict _) -> ()
+     | Error error -> fail (Keeper_reaction_store.error_to_string error)
+     | Ok _ -> fail "partial-conflict transition was accepted");
+    let rows =
+      expect_store
+        "rollback evidence"
+        (Keeper_reaction_store.events_for_stimuli
+           ~base_path
+           ~keeper_name
+           ~stimulus_ids:[ "first-source"; "second-source"; "foreign-source" ])
+    in
+    (match rows with
+     | [ _, first; _, second; _, foreign ] ->
+       check int "first source rolled back" 0 (List.length first);
+       check int "second source absent" 0 (List.length second);
+       check int "preexisting row retained" 1 (List.length foreign)
+     | _ -> fail "rollback query did not preserve request cardinality"))
+;;
+
+let test_transition_cardinality_conflict () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "transition-cardinality" in
+    let first = transition [ transition_source 0 "source-a" ] in
+    ignore
+      (expect_store
+         "initial transition"
+         (Keeper_reaction_store.append_transition ~base_path ~keeper_name first));
+    let conflicting =
+      transition [ transition_source 0 "source-a"; transition_source 1 "source-b" ]
+    in
+    match Keeper_reaction_store.append_transition ~base_path ~keeper_name conflicting with
+    | Error (Keeper_reaction_store.Transition_identity_conflict _) -> ()
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+    | Ok _ -> fail "changed source cardinality was accepted")
+;;
+
+let test_partial_transition_replay_is_rejected_without_healing () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "partial-transition" in
+    let value = transition [ transition_source 0 "source-a"; transition_source 1 "source-b" ] in
+    ignore
+      (expect_store
+         "seed complete transition"
+         (Keeper_reaction_store.append_transition ~base_path ~keeper_name value));
+    let path = database_path ~base_path ~keeper_name in
+    with_sqlite path (fun db ->
+      exec_sql db "PRAGMA foreign_keys=OFF";
+      exec_sql
+        db
+        "DELETE FROM events WHERE transition_id='transition-1' AND source_index=1");
+    (match Keeper_reaction_store.append_transition ~base_path ~keeper_name value with
+     | Error (Keeper_reaction_store.Integrity_failure _)
+     | Error (Keeper_reaction_store.Transition_cardinality_violation _) -> ()
+     | Error error -> fail (Keeper_reaction_store.error_to_string error)
+     | Ok _ -> fail "partial replay was healed or accepted");
+    with_sqlite path (fun db ->
+      let count = ref None in
+      let rc =
+        Sqlite3.exec_not_null_no_headers
+          db
+          ~cb:(fun row -> count := Some (int_of_string row.(0)))
+          "SELECT COUNT(*) FROM events WHERE transition_id='transition-1'"
+      in
+      if not (Sqlite3.Rc.is_success rc) then fail "source count query failed";
+      check (option int) "missing source remains missing" (Some 1) !count))
+;;
+
+let test_duplicate_transition_source_identity_is_rejected_before_write () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "duplicate-transition-source" in
+    let duplicate =
+      transition
+        [ transition_source 0 "same-stimulus"
+        ; { (transition_source 1 "same-stimulus") with event_id = "other-event" }
+        ]
+    in
+    (match Keeper_reaction_store.append_transition ~base_path ~keeper_name duplicate with
+     | Error (Keeper_reaction_store.Invalid_transition _) -> ()
+     | Error error -> fail (Keeper_reaction_store.error_to_string error)
+     | Ok _ -> fail "duplicate transition source identity was accepted");
+    check bool
+      "invalid transition does not create its database"
+      false
+      (Sys.file_exists (database_path ~base_path ~keeper_name)))
+;;
+
+let test_batch_evidence_uses_one_keeper_query () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "batch-ledger" in
+    let stimuli = List.init 20 schedule_stimulus in
+    List.iter
+      (fun stimulus ->
+        ignore
+          (expect_write
+             "batch stimulus"
+             (Keeper_reaction_ledger.record_event_queue_stimulus_result
+                ~base_path
+                ~keeper_name
+                stimulus)))
+      stimuli;
+    let stimulus_ids =
+      List.map Keeper_reaction_ledger.stimulus_id_of_event_queue stimuli
+    in
+    let evidence =
+      match
+        Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+          ~base_path
+          ~keeper_name
+          ~stimulus_ids
+      with
+      | Ok values -> values
+      | Error error ->
+        fail
+          (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    in
+    check int "all requested identities returned" 20 (List.length evidence);
+    List.iter
+      (fun (_, (row : Keeper_reaction_ledger.event_queue_reaction_evidence)) ->
+        check bool "batch stimulus seen" true row.stimulus_seen;
+        check int "one matching row" 1 row.matched_record_count)
+      evidence)
+;;
+
+let test_schema_index_tamper_fails_closed_per_keeper () =
+  with_temp_base (fun base_path ->
+    let broken_keeper = "broken-schema" in
+    let healthy_keeper = "healthy-schema" in
+    let broken_stimulus = board_stimulus ~post_id:"broken" () in
+    let healthy_stimulus = board_stimulus ~post_id:"healthy" () in
+    ignore
+      (expect_write
+         "broken seed"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name:broken_keeper
+            broken_stimulus));
+    ignore
+      (expect_write
+         "healthy seed"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name:healthy_keeper
+            healthy_stimulus));
+    with_sqlite (database_path ~base_path ~keeper_name:broken_keeper) (fun db ->
+      exec_sql db "DROP INDEX events_stimulus_sequence");
+    let broken_id =
+      Keeper_reaction_ledger.stimulus_id_of_event_queue broken_stimulus
+    in
+    (match
+       Keeper_reaction_ledger.event_queue_reaction_evidence_result
+         ~base_path
+         ~keeper_name:broken_keeper
+         ~stimulus_id:broken_id
+     with
+     | Error
+         (Keeper_reaction_ledger.Evidence_store_error
+           (Keeper_reaction_store.Schema_mismatch _)) -> ()
+     | Error error ->
+       fail
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+     | Ok _ -> fail "schema drift was accepted");
+    let healthy_id =
+      Keeper_reaction_ledger.stimulus_id_of_event_queue healthy_stimulus
+    in
+    let healthy =
+      expect_evidence
+        "other keeper remains readable"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name:healthy_keeper
+           ~stimulus_id:healthy_id)
+    in
+    check bool "other lane continued" true healthy.stimulus_seen)
+;;
+
+let test_application_id_tamper_is_typed () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "wrong-application-id" in
+    let stimulus = board_stimulus () in
+    ignore
+      (expect_write
+         "seed database"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            stimulus));
+    with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
+      exec_sql db "PRAGMA application_id=0");
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
     match
-      Keeper_reaction_ledger.reaction_kind_of_string
-        (Keeper_reaction_ledger.reaction_kind_to_string k)
+      Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_id
     with
-    | Ok parsed ->
-      String.equal
-        (Keeper_reaction_ledger.reaction_kind_to_string parsed)
-        (Keeper_reaction_ledger.reaction_kind_to_string k)
-    | Error _ -> false
-  in
-  List.iter
-    (fun k ->
-      check bool "reaction_kind round-trips through string" true (roundtrips k))
-    [ Keeper_reaction_ledger.Turn_started
-    ; Keeper_reaction_ledger.Event_queue_ack
-    ; Keeper_reaction_ledger.Event_queue_requeued
-    ; Keeper_reaction_ledger.Event_queue_escalated
-    ; Keeper_reaction_ledger.Cursor_ack
-    ];
-  match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
-  | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
-    check string "unknown reaction decoder preserves evidence" "unknown_custom" value
-  | Ok _ -> fail "unknown reaction string must not decode"
+    | Error
+        (Keeper_reaction_ledger.Evidence_store_error
+          (Keeper_reaction_store.Application_id_mismatch _)) -> ()
+    | Error error ->
+      fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    | Ok _ -> fail "foreign application id was accepted")
 ;;
 
-let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
-  with_temp_base
-  @@ fun base_path ->
-  let keeper_name = "sangsu" in
-  let stimulus = board_stimulus () in
-  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let current_event_id =
-    read_recent_rows ~base_path ~keeper_name ~limit:1
-    |> latest_row
-    |> member "event_id"
-    |> to_string
-  in
-  let store = reaction_ledger_store ~base_path ~keeper_name in
-  Dated_jsonl.append
-    store
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.foreign"
-        ; "record_kind", `String "stimulus"
-        ; "event_id", `String current_event_id
-        ; "keeper_name", `String keeper_name
-        ; "recorded_at_unix", `Float 1200.0
-        ; "stimulus_id", `String stimulus_id
-        ; ( "stimulus"
-          , `Assoc
-              [ "kind", `String "board_signal"
-              ; "source", `String "keeper_event_queue"
-              ; "post_id", `String stimulus.post_id
-              ] )
-        ]);
-  Dated_jsonl.append
-    store
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.foreign"
-        ; "record_kind", `String "reaction"
-        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
-        ; "keeper_name", `String keeper_name
-        ; "recorded_at_unix", `Float 1201.0
-        ; "stimulus_id", `String stimulus_id
-        ; ( "reaction"
-          , `Assoc
-              [ "kind", `String "turn_started"
-              ; "source", `String "keeper_event_queue"
-              ] )
-        ]);
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check
-    int
-    "only the current generation contributes"
-    1
-    (summary |> member "stimulus_count" |> to_int);
-  check int "unexpected reaction contributes zero" 0
-    (summary |> member "reaction_count" |> to_int);
-  check int "unexpected reaction cannot clear current pending" 1
-    (summary |> member "pending_stimulus_count" |> to_int);
-  check
-    int
-    "both unexpected rows are quarantined"
-    2
-    (summary |> member "quarantined_row_count" |> to_int);
-  let unexpected_reason =
-    summary |> member "quarantine_reason_counts" |> to_list |> List.hd
-  in
-  check_member_string
-    "unexpected schema reason is typed"
-    "unexpected_schema"
-    "reason"
-    unexpected_reason;
-  check int "unexpected schema reason count" 2
-    (unexpected_reason |> member "count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet exposes quarantined rows" 2
-    (fleet |> member "quarantined_row_count" |> to_int);
-  check_list_has_string
-    "fleet status names quarantine"
-    "reaction_ledger_quarantined_row"
-    (fleet |> member "status_reasons")
+let test_symlinked_database_is_rejected () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "symlink-ledger" in
+    let path = database_path ~base_path ~keeper_name in
+    mkdir_p (Filename.dirname path);
+    let target = Filename.temp_file "foreign-reaction-db-" ".sqlite3" in
+    Unix.symlink target path;
+    match
+      Keeper_reaction_store.events_for_stimuli
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ "x" ]
+    with
+    | Error (Keeper_reaction_store.Path_failure _) -> ()
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+    | Ok _ -> fail "symlinked database was accepted")
 ;;
 
-let test_quarantine_is_keeper_local () =
-  with_temp_base
-  @@ fun base_path ->
-  let quarantined_keeper = "quarantined-keeper" in
-  let healthy_keeper = "healthy-keeper" in
-  let quarantined_stimulus = board_stimulus ~post_id:"post-quarantined" () in
-  let quarantined_stimulus_id =
-    Keeper_reaction_ledger.stimulus_id_of_event_queue quarantined_stimulus
-  in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name:quarantined_keeper
-    quarantined_stimulus;
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name:quarantined_keeper)
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v2"
-        ; "record_kind", `String "reaction"
-        ; ( "event_id"
-          , `String (quarantined_stimulus_id ^ ":reaction:turn_started") )
-        ; "keeper_name", `String quarantined_keeper
-        ; "recorded_at_unix", `Float 1201.0
-        ; "stimulus_id", `String quarantined_stimulus_id
-        ; ( "reaction"
-          , `Assoc
-              [ "kind", `String "turn_started"
-              ; "source", `String "keeper_event_queue"
-              ] )
-        ]);
-  let healthy_stimulus = board_stimulus ~post_id:"post-healthy" () in
-  let healthy_stimulus_id =
-    Keeper_reaction_ledger.stimulus_id_of_event_queue healthy_stimulus
-  in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name:healthy_keeper
-    healthy_stimulus;
-  Keeper_reaction_ledger.record_event_queue_turn_started
-    ~base_path
-    ~keeper_name:healthy_keeper
-    healthy_stimulus;
-  (match
-     Keeper_reaction_ledger.event_queue_reaction_evidence_result
-       ~base_path
-       ~keeper_name:healthy_keeper
-       ~stimulus_id:healthy_stimulus_id
-   with
-   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-     check bool "healthy keeper turn remains visible" true evidence.turn_started_seen;
-     check int "healthy keeper has no quarantine" 0 evidence.quarantined_record_count
-   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-     fail "quarantine leaked across keeper stores"
-   | Error error ->
-     fail
-       ("healthy keeper read failed: "
-        ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-            error));
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ quarantined_keeper; healthy_keeper ]
-      ~limit_per_keeper:10
-  in
-  let healthy_summary =
-    fleet
-    |> member "keepers"
-    |> to_list
-    |> List.find (fun summary ->
-      String.equal (summary |> member "keeper_name" |> to_string) healthy_keeper)
-  in
-  check_member_string "healthy keeper summary stays ok" "ok" "status" healthy_summary;
-  check int "healthy keeper pending stays cleared" 0
-    (healthy_summary |> member "pending_stimulus_count" |> to_int);
-  check int "healthy keeper current reaction is preserved" 1
-    (healthy_summary |> member "reaction_count" |> to_int)
+let test_orphan_database_sidecar_is_rejected () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "orphan-sidecar" in
+    let path = database_path ~base_path ~keeper_name in
+    mkdir_p (Filename.dirname path);
+    let sidecar = path ^ "-journal" in
+    let fd =
+      Unix.openfile
+        sidecar
+        [ Unix.O_CLOEXEC; Unix.O_CREAT; Unix.O_EXCL; Unix.O_RDWR ]
+        0o600
+    in
+    Unix.close fd;
+    match
+      Keeper_reaction_store.events_for_stimuli
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ "x" ]
+    with
+    | Error (Keeper_reaction_store.Orphan_database_sidecars { sidecars; _ }) ->
+      check (list string) "exact orphan sidecar reported" [ sidecar ] sidecars
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+    | Ok _ -> fail "orphan database sidecar was treated as an empty ledger")
 ;;
 
-let test_syntax_error_does_not_claim_an_occurrence_identity () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "strict-evidence-keeper" in
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  let malformed_month = Filename.concat ledger_dir "2026-01" in
-  mkdir_p malformed_month;
-  let malformed_path = Filename.concat malformed_month "01.jsonl" in
-  write_file malformed_path "not-json\n";
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"schedule:test-occurrence"
-    |> require_complete_evidence "unattributed syntax row"
-  in
-  check int "no row is assigned to the queried occurrence" 0
-    evidence.matched_record_count;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "malformed summary row is quarantined" 1
-    (summary |> member "quarantined_row_count" |> to_int);
-  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
-  check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
+let test_private_staging_publish_and_permissions () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "private-publish" in
+    let path = database_path ~base_path ~keeper_name in
+    let staging = path ^ ".initializing" in
+    mkdir_p (Filename.dirname path);
+    let fd =
+      Unix.openfile
+        staging
+        [ Unix.O_CLOEXEC; Unix.O_CREAT; Unix.O_EXCL; Unix.O_RDWR ]
+        0o600
+    in
+    Unix.close fd;
+    ignore
+      (expect_write
+         "publish after abandoned staging"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            (schedule_stimulus 1)));
+    check bool "final published" true (Sys.file_exists path);
+    check bool "staging retired" false (Sys.file_exists staging);
+    check int "database private" 0o600 ((Unix.stat path).Unix.st_perm land 0o777);
+    check int
+      "lock private"
+      0o600
+      ((Unix.stat (path ^ ".lock")).Unix.st_perm land 0o777))
 ;;
 
-let test_missing_identity_does_not_claim_an_occurrence_identity () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "identity-incomplete-keeper" in
-  Dated_jsonl.append
-    (reaction_ledger_store ~base_path ~keeper_name)
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
-        ; "record_kind", `String "stimulus"
-        ; "event_id", `String "unattributed-event"
-        ; "keeper_name", `String keeper_name
-        ; "recorded_at_unix", `Float 1234.0
-        ; ( "stimulus"
-          , `Assoc
-              [ "kind", `String "schedule_due"
-              ; "source", `String "keeper_event_queue"
-              ] )
-        ]);
-  let evidence =
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:"schedule:test-occurrence"
-    |> require_complete_evidence "identity-less row"
-  in
-  check int "identity-less row is not assigned to the query" 0
-    evidence.matched_record_count;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "identity-less row remains operator-visible" 1
-    (summary |> member "quarantined_row_count" |> to_int);
-  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
-  check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
+let test_interrupted_hardlink_publish_is_recovered_without_loss () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "interrupted-publish" in
+    let stimulus = schedule_stimulus 31 in
+    ignore
+      (expect_write
+         "publish recovery seed"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            stimulus));
+    let path = database_path ~base_path ~keeper_name in
+    let staging = path ^ ".initializing" in
+    Unix.link path staging;
+    check int "fixture has two links" 2 (Unix.lstat path).Unix.st_nlink;
+    let evidence =
+      expect_evidence
+        "recover interrupted publish"
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id:
+             (Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus))
+    in
+    check bool "committed stimulus preserved" true evidence.stimulus_seen;
+    check bool "initializing link retired" false (Sys.file_exists staging);
+    check int "final link count restored" 1 (Unix.lstat path).Unix.st_nlink)
+;;
+
+let test_unsafe_database_permissions_fail_closed () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "unsafe-permissions" in
+    let stimulus = schedule_stimulus 2 in
+    ignore
+      (expect_write
+         "permission seed"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            stimulus));
+    let path = database_path ~base_path ~keeper_name in
+    Unix.chmod path 0o644;
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_id:(Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus)
+    with
+    | Error
+        (Keeper_reaction_ledger.Evidence_store_error
+          (Keeper_reaction_store.Path_failure _)) -> ()
+    | Error error ->
+      fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    | Ok _ -> fail "world-readable reaction database was accepted")
+;;
+
+let test_summary_is_typed_and_clears_pending () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "summary-ledger" in
+    let stimulus = board_stimulus () in
+    ignore
+      (expect_write
+         "summary stimulus"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            stimulus));
+    let before =
+      Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name
+        ~pending_id_display_limit:20
+    in
+    check string "summary schema" "keeper.reaction_ledger.summary.v3" (before |> member "schema" |> to_string);
+    check int "pending before turn" 1 (before |> member "pending_stimulus_count" |> to_int);
+    ignore
+      (expect_write
+         "summary turn"
+         (Keeper_reaction_ledger.record_event_queue_turn_started_result
+            ~base_path
+            ~keeper_name
+            ~lease_sequence:1L
+            stimulus));
+    let after =
+      Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name
+        ~pending_id_display_limit:20
+    in
+    check int "pending cleared" 0 (after |> member "pending_stimulus_count" |> to_int);
+    check int "turn counted" 1 (after |> member "turn_started_count" |> to_int))
+;;
+
+let test_summary_counts_old_pending_beyond_display_window () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "exact-summary" in
+    let stimuli = List.init 25 schedule_stimulus in
+    List.iter
+      (fun stimulus ->
+        ignore
+          (expect_write
+             "summary stimulus"
+             (Keeper_reaction_ledger.record_event_queue_stimulus_result
+                ~base_path
+                ~keeper_name
+                stimulus)))
+      stimuli;
+    stimuli
+    |> List.drop 5
+    |> List.iter (fun stimulus ->
+      ignore
+        (expect_write
+           "summary handling"
+           (Keeper_reaction_ledger.record_event_queue_turn_started_result
+              ~base_path
+              ~keeper_name
+              ~lease_sequence:1L
+              stimulus)));
+    let summary =
+      Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name
+        ~pending_id_display_limit:3
+    in
+    check int "all rows counted" 45 (summary |> member "row_count" |> to_int);
+    check int
+      "old pending exact"
+      5
+      (summary |> member "pending_stimulus_count" |> to_int);
+    check int
+      "only display sample limited"
+      3
+      (summary |> member "pending_stimulus_ids" |> to_list |> List.length);
+    check bool
+      "sample truncation explicit"
+      true
+      (summary |> member "pending_ids_truncated" |> to_bool))
+;;
+
+let test_keeper_name_discovery_failure_is_explicit () =
+  with_temp_base (fun base_path ->
+    let summary =
+      Keeper_reaction_ledger.fleet_summary_json
+        ~base_path
+        ~keeper_name_discovery:
+          (Keeper_reaction_ledger.Keeper_name_discovery_failed
+             "keeper meta store unreadable")
+        ~pending_id_display_limit_per_keeper:0
+    in
+    check string "status unknown" "unknown" (summary |> member "status" |> to_string);
+    check bool
+      "operator action required"
+      true
+      (summary |> member "operator_action_required" |> to_bool);
+    check bool
+      "counts incomplete"
+      false
+      (summary |> member "counts_complete" |> to_bool);
+    check int
+      "typed discovery error count"
+      1
+      (summary |> member "keeper_name_discovery_error_count" |> to_int);
+    check
+      (list string)
+      "typed discovery detail"
+      [ "keeper meta store unreadable" ]
+      (summary |> member "keeper_name_discovery_errors" |> to_list |> List.map to_string);
+    check bool
+      "reason retained"
+      true
+      (summary
+       |> member "status_reasons"
+       |> to_list
+       |> List.map to_string
+       |> List.mem "keeper_meta_discovery_error"))
+;;
+
+let test_reaction_store_discovery_uses_directory_shape () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "directory-shaped-store" in
+    ignore
+      (expect_write
+         "create discovered store"
+         (Keeper_reaction_ledger.record_event_queue_stimulus_result
+            ~base_path
+            ~keeper_name
+            (board_stimulus ())));
+    let metadata_path =
+      Filename.concat
+        (Common.keepers_runtime_dir_of_base ~base_path)
+        "directory-shaped-store.json"
+    in
+    let channel = open_out_bin metadata_path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () -> output_string channel "{}");
+    let discovery = Keeper_reaction_store.discover_keeper_names ~base_path in
+    check
+      (list string)
+      "only per-Keeper directory stores are discovered"
+      [ keeper_name ]
+      discovery.keeper_names;
+    check int "regular metadata files are not errors" 0 (List.length discovery.errors))
+;;
+
+let ordered_reaction_transition
+      ~transition_id
+      ~lease_sequence
+      ~settled_at
+      ~settlement_kind
+      ~external_input_requested
+      ~stimulus_id
+  =
+  Keeper_reaction_store.
+    { transition_id
+    ; transition_event_id = transition_id ^ ":event"
+    ; lease_id = transition_id ^ ":lease"
+    ; lease_sequence
+    ; settled_at
+    ; settlement_kind
+    ; settlement_identity = transition_id ^ ":settlement"
+    ; external_input_requested
+    ; sources =
+        [ { event_id = transition_id ^ ":source:0"
+          ; stimulus_id
+          ; stimulus_kind = Schedule_due
+          ; post_id = "ordered-post"
+          }
+        ]
+    }
+;;
+
+let test_latest_reaction_uses_ledger_sequence_and_preserves_outcome () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "ordered-reaction" in
+    let stimulus_id = "ordered-stimulus" in
+    ignore
+      (expect_store
+         "ordered stimulus"
+         (Keeper_reaction_store.append_event
+            ~base_path
+            ~keeper_name
+            (store_stimulus_event
+               ~event_id:"ordered-stimulus:event"
+               ~stimulus_id
+               ~post_id:"ordered-post")));
+    ignore
+      (expect_store
+         "ordered turn start"
+         (Keeper_reaction_store.append_event
+            ~base_path
+            ~keeper_name
+            Keeper_reaction_store.
+              { event_id = "ordered-turn:event"
+              ; stimulus_id
+              ; recorded_at = 4000.
+              ; payload =
+                  Turn_started_event
+                    { stimulus_kind = Schedule_due; post_id = "ordered-post" }
+              }));
+    let latest () =
+      (expect_evidence
+         "ordered evidence"
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_result
+            ~base_path
+            ~keeper_name
+            ~stimulus_id))
+        .latest_reaction
+    in
+    (match latest () with
+     | Some (Keeper_reaction_ledger.Latest_turn_started _) -> ()
+     | Some _ | None -> fail "turn-start was not the latest typed reaction");
+    let append_transition context transition =
+      ignore
+        (expect_store
+           context
+           (Keeper_reaction_store.append_transition
+              ~base_path
+              ~keeper_name
+              transition))
+    in
+    append_transition
+      "ordered ack"
+      (ordered_reaction_transition
+         ~transition_id:"ordered-ack"
+         ~lease_sequence:1L
+         ~settled_at:3000.
+         ~settlement_kind:Keeper_reaction_store.Ack
+         ~external_input_requested:false
+         ~stimulus_id);
+    (match latest () with
+     | Some (Keeper_reaction_ledger.Latest_event_queue_ack _) -> ()
+     | Some _ | None -> fail "ACK was not the latest typed reaction");
+    append_transition
+      "ordered requeue"
+      (ordered_reaction_transition
+         ~transition_id:"ordered-requeue"
+         ~lease_sequence:2L
+         ~settled_at:2000.
+         ~settlement_kind:Keeper_reaction_store.Requeue
+         ~external_input_requested:false
+         ~stimulus_id);
+    (match latest () with
+     | Some (Keeper_reaction_ledger.Latest_event_queue_requeued _) -> ()
+     | Some _ | None ->
+       fail "later requeue lost precedence to an earlier wall-clock timestamp");
+    ignore
+      (expect_store
+         "ordered retry turn start"
+         (Keeper_reaction_store.append_event
+            ~base_path
+            ~keeper_name
+            Keeper_reaction_store.
+              { event_id = "ordered-turn-retry:event"
+              ; stimulus_id
+              ; recorded_at = 1500.
+              ; payload =
+                  Turn_started_event
+                    { stimulus_kind = Schedule_due; post_id = "ordered-post" }
+              }));
+    (match latest () with
+     | Some (Keeper_reaction_ledger.Latest_turn_started _) -> ()
+     | Some _ | None -> fail "retry turn-start did not supersede its requeue");
+    append_transition
+      "ordered external-input escalation"
+      (ordered_reaction_transition
+         ~transition_id:"ordered-escalation"
+         ~lease_sequence:3L
+         ~settled_at:1000.
+         ~settlement_kind:Keeper_reaction_store.Escalate
+         ~external_input_requested:true
+         ~stimulus_id);
+    (match latest () with
+     | Some
+         (Keeper_reaction_ledger.Latest_event_queue_escalated
+           { external_input_requested = true; _ }) -> ()
+     | Some _ | None -> fail "external-input escalation outcome was not preserved");
+    let summary =
+      Keeper_reaction_ledger.summary_for_keeper
+        ~base_path
+        ~keeper_name
+        ~pending_id_display_limit:0
+    in
+    check string
+      "external input is not healthy"
+      "degraded"
+      (summary |> member "status" |> to_string);
+    check int
+      "latest external input remains actionable"
+      1
+      (summary
+       |> member "external_input_requested_stimulus_count"
+       |> to_int))
+;;
+
+let test_materialized_summary_tracks_all_current_states () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "materialized-summary" in
+    let schedule_event stimulus_id =
+      Keeper_reaction_store.
+        { event_id = stimulus_id ^ ":stimulus"
+        ; stimulus_id
+        ; recorded_at = 1000.
+        ; payload =
+            Stimulus_event
+              { kind = Schedule_due
+              ; post_id = stimulus_id
+              ; urgency = Immediate
+              ; arrived_at = 900.
+              ; board_updated_at = None
+              }
+        }
+    in
+    let turn_event stimulus_id =
+      Keeper_reaction_store.
+        { event_id = stimulus_id ^ ":turn"
+        ; stimulus_id
+        ; recorded_at = 1100.
+        ; payload =
+            Turn_started_event
+              { stimulus_kind = Schedule_due; post_id = stimulus_id }
+        }
+    in
+    let append_event context event =
+      ignore
+        (expect_store
+           context
+           (Keeper_reaction_store.append_event ~base_path ~keeper_name event))
+    in
+    let stimulus_ids =
+      [ "pending"; "in-progress"; "acked"; "requeued"; "escalated"; "external" ]
+    in
+    List.iter
+      (fun stimulus_id -> append_event "state stimulus" (schedule_event stimulus_id))
+      stimulus_ids;
+    append_event
+      "board stimulus"
+      (store_stimulus_event
+         ~event_id:"cursor-board:stimulus"
+         ~stimulus_id:"cursor-board"
+         ~post_id:"cursor-board");
+    List.iter
+      (fun stimulus_id -> append_event "state turn" (turn_event stimulus_id))
+      [ "in-progress"; "acked"; "requeued"; "escalated"; "external" ];
+    let settle transition_id lease_sequence settlement_kind external_input_requested stimulus_id =
+      ignore
+        (expect_store
+           "state settlement"
+           (Keeper_reaction_store.append_transition
+              ~base_path
+              ~keeper_name
+              (ordered_reaction_transition
+                 ~transition_id
+                 ~lease_sequence
+                 ~settled_at:1200.
+                 ~settlement_kind
+                 ~external_input_requested
+                 ~stimulus_id)))
+    in
+    settle "state-ack" 1L Keeper_reaction_store.Ack false "acked";
+    settle "state-requeue" 2L Keeper_reaction_store.Requeue false "requeued";
+    settle "state-escalate" 3L Keeper_reaction_store.Escalate false "escalated";
+    settle "state-external" 4L Keeper_reaction_store.Escalate true "external";
+    append_event
+      "cursor sweep"
+      Keeper_reaction_store.
+        { event_id = "cursor:event"
+        ; stimulus_id = "cursor:900:cursor-board"
+        ; recorded_at = 1300.
+        ; payload = Cursor_ack_event { cursor_ts = 900.; post_id = Some "cursor-board" }
+        };
+    append_event "orphan turn" (turn_event "orphan-later");
+    let orphan =
+      expect_store
+        "orphan summary"
+        (Keeper_reaction_store.exact_summary
+           ~base_path
+           ~keeper_name
+           ~pending_id_display_limit:20)
+    in
+    check int "one unique orphan identity" 1 orphan.orphan_reaction_stimulus_count;
+    append_event "late orphan stimulus" (schedule_event "orphan-later");
+    let summary =
+      expect_store
+        "materialized summary"
+        (Keeper_reaction_store.exact_summary
+           ~base_path
+           ~keeper_name
+           ~pending_id_display_limit:20)
+    in
+    check int "all immutable event rows" 19 summary.row_count;
+    check int "all stimuli" 8 summary.stimulus_count;
+    check int "all reactions" 11 summary.reaction_count;
+    check int "turn starts" 6 summary.turn_started_count;
+    check int "acks" 1 summary.event_queue_ack_count;
+    check int "requeues" 1 summary.event_queue_requeue_count;
+    check int "escalations" 2 summary.event_queue_escalation_count;
+    check int "external input events" 1 summary.event_queue_external_input_count;
+    check int "cursor acks" 1 summary.cursor_ack_count;
+    check int "pending states" 2 summary.pending_stimulus_count;
+    check int "swept states" 1 summary.cursor_swept_stimulus_count;
+    check int "in-progress states" 2 summary.in_progress_stimulus_count;
+    check int "acked states" 1 summary.acked_stimulus_count;
+    check int "escalated states" 1 summary.escalated_stimulus_count;
+    check int
+      "external input states"
+      1
+      summary.external_input_requested_stimulus_count;
+    check int "orphan resolved by canonical stimulus" 0 summary.orphan_reaction_stimulus_count;
+    check
+      (list string)
+      "bounded sample is stable stimulus order"
+      [ "pending"; "requeued" ]
+      summary.pending_stimulus_ids)
+;;
+
+let test_summary_hot_path_uses_projection_and_bounded_index () =
+  with_temp_base (fun base_path ->
+    let keeper_name = "summary-query-plan" in
+    ignore
+      (expect_store
+         "query-plan seed"
+         (Keeper_reaction_store.append_event
+            ~base_path
+            ~keeper_name
+            (store_stimulus_event
+               ~event_id:"query-plan:event"
+               ~stimulus_id:"query-plan:stimulus"
+               ~post_id:"query-plan:post")));
+    with_sqlite (database_path ~base_path ~keeper_name) (fun db ->
+      let schema_count =
+        let stmt =
+          Sqlite3.prepare
+            db
+            "SELECT COUNT(*) FROM sqlite_schema WHERE (type = 'table' AND name IN ('ledger_summary', 'stimulus_state')) OR (type = 'trigger' AND name IN ('events_project_summary', 'events_project_stimulus', 'events_project_handling', 'events_project_cursor', 'stimulus_state_count_insert', 'stimulus_state_count_update'))"
+        in
+        Fun.protect
+          ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
+          (fun () ->
+            match Sqlite3.step stmt with
+            | Sqlite3.Rc.ROW -> Int64.to_int (Sqlite3.column_int64 stmt 0)
+            | rc -> fail ("schema evidence query failed: " ^ Sqlite3.Rc.to_string rc))
+      in
+      check int "projection tables and triggers are exact schema" 8 schema_count;
+      let plan_details sql =
+        let stmt = Sqlite3.prepare db ("EXPLAIN QUERY PLAN " ^ sql) in
+        Fun.protect
+          ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
+          (fun () ->
+            let rec loop reversed =
+              match Sqlite3.step stmt with
+              | Sqlite3.Rc.DONE -> List.rev reversed
+              | Sqlite3.Rc.ROW -> loop (Sqlite3.column_text stmt 3 :: reversed)
+              | rc -> fail ("query-plan evidence failed: " ^ Sqlite3.Rc.to_string rc)
+            in
+            loop [])
+      in
+      let plans =
+        plan_details "SELECT * FROM ledger_summary WHERE singleton = 1"
+        @ plan_details
+            "SELECT stimulus_id FROM stimulus_state INDEXED BY stimulus_state_pending_order WHERE current_state = 'pending' ORDER BY stimulus_sequence, stimulus_id LIMIT 20"
+      in
+      check bool
+        "summary plans never read immutable event history"
+        false
+        (List.exists
+           (fun detail ->
+             let detail = String.lowercase_ascii detail in
+             String.starts_with ~prefix:"scan events" detail
+             || String.starts_with ~prefix:"search events" detail)
+           plans);
+      check bool
+        "pending sample uses its bounded covering index"
+        true
+        (List.exists
+           (fun detail ->
+             String.starts_with
+               ~prefix:"SEARCH stimulus_state USING COVERING INDEX stimulus_state_pending_order"
+               detail)
+           plans)))
 ;;
 
 let () =
   run
-    "keeper_reaction_ledger"
-    [ ( "ledger"
-      , [ test_case
-            "event queue stimulus and turn reaction are durable"
-            `Quick
-            test_event_queue_stimulus_and_turn_reaction
+    "keeper reaction SQLite v3"
+    [ ( "authority"
+      , [ test_case "absent database is exact empty" `Quick test_absent_database_is_exact_empty
+        ; test_case "stimulus and turn replay" `Quick test_stimulus_turn_and_idempotent_replay
         ; test_case
-            "unexpected schema rows cannot double-count current occurrences"
+            "queue identity arrival replay"
             `Quick
-            test_unexpected_schema_rows_are_quarantined_without_double_counting
+            test_queue_identity_replay_ignores_arrival_observation
+        ; test_case "typed event identity conflict" `Quick test_event_identity_conflict_is_typed
+        ; test_case "transition atomic replay" `Quick test_transition_is_atomic_bound_and_replayable
         ; test_case
-            "quarantine remains keeper-local"
+            "transition child kind matches parent"
             `Quick
-            test_quarantine_is_keeper_local
+            test_transition_child_kind_must_match_parent
+        ; test_case "transition conflict rolls back" `Quick test_transition_conflict_rolls_back_every_source
+        ; test_case "transition cardinality conflict" `Quick test_transition_cardinality_conflict
         ; test_case
-            "event queue reaction evidence matches exact stimulus id"
+            "partial transition replay rejected"
             `Quick
-            test_event_queue_reaction_evidence_matches_exact_stimulus_id
+            test_partial_transition_replay_is_rejected_without_healing
         ; test_case
-            "syntax error cannot claim an occurrence identity"
+            "duplicate transition source rejected"
             `Quick
-            test_syntax_error_does_not_claim_an_occurrence_identity
+            test_duplicate_transition_source_identity_is_rejected_before_write
+        ; test_case "batch evidence" `Quick test_batch_evidence_uses_one_keeper_query
+        ; test_case "schema drift is lane-local" `Quick test_schema_index_tamper_fails_closed_per_keeper
+        ; test_case "application id mismatch" `Quick test_application_id_tamper_is_typed
+        ; test_case "symlink database rejected" `Quick test_symlinked_database_is_rejected
+        ; test_case "orphan database sidecar rejected" `Quick test_orphan_database_sidecar_is_rejected
         ; test_case
-            "missing identity cannot claim an occurrence identity"
+            "private staging publish"
             `Quick
-            test_missing_identity_does_not_claim_an_occurrence_identity
+            test_private_staging_publish_and_permissions
         ; test_case
-            "failure judgment external input is typed history"
+            "interrupted hardlink publish recovery"
             `Quick
-            test_failure_judgment_external_input_is_typed_history
+            test_interrupted_hardlink_publish_is_recovered_without_loss
         ; test_case
-            "transition reactions distinguish ordered sources"
+            "unsafe permissions rejected"
             `Quick
-            test_transition_reactions_distinguish_ordered_sources
+            test_unsafe_database_permissions_fail_closed
+        ; test_case "typed summary" `Quick test_summary_is_typed_and_clears_pending
         ; test_case
-            "transition reaction rejects recombined stimulus identity"
+            "exact summary beyond display window"
             `Quick
-            test_transition_reaction_rejects_recombined_stimulus_identity
+            test_summary_counts_old_pending_beyond_display_window
         ; test_case
-            "current rows require complete writer shape"
+            "keeper name discovery failure is explicit"
             `Quick
-            test_current_rows_require_complete_writer_shape
+            test_keeper_name_discovery_failure_is_explicit
         ; test_case
-            "cursor ack is replayable state entry"
+            "reaction store discovery uses directory shape"
             `Quick
-            test_cursor_ack_is_replayable_state_entry
+            test_reaction_store_discovery_uses_directory_shape
         ; test_case
-            "summary marks unreacted and reacted stimuli"
+            "latest reaction is sequence ordered and typed"
             `Quick
-            test_summary_marks_unreacted_and_reacted_stimuli
+            test_latest_reaction_uses_ledger_sequence_and_preserves_outcome
         ; test_case
-            "summary cursor ack sweeps covered board stimuli"
+            "materialized summary tracks exact current states"
             `Quick
-            test_summary_cursor_ack_sweeps_covered_board_stimuli
+            test_materialized_summary_tracks_all_current_states
         ; test_case
-            "summary cursor ack respects board post id tiebreaker"
+            "summary hot path uses projection and bounded index"
             `Quick
-            test_summary_cursor_ack_respects_post_id_tiebreaker
-        ; test_case
-            "fleet summary surfaces durable event queue backlog"
-            `Quick
-            test_fleet_summary_surfaces_durable_event_queue_backlog
-        ; test_case
-            "fleet summary discovers durable event queue backlog without meta name"
-            `Quick
-            test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name
-        ; test_case
-            "fleet summary surfaces durable event queue discovery errors"
-            `Quick
-            test_fleet_summary_surfaces_durable_event_queue_discovery_error
-        ; test_case
-            "fleet summary separates fresh durable event queue backlog from stale"
-            `Quick
-            test_fleet_summary_allows_nonstale_durable_event_queue_backlog
-        ; test_case
-            "fleet summary surfaces durable event queue read errors"
-            `Quick
-            test_fleet_summary_surfaces_durable_event_queue_read_error
-        ; test_case
-            "fleet summary surfaces durable event queue parse errors"
-            `Quick
-            test_fleet_summary_surfaces_durable_event_queue_parse_error
-        ; test_case
-            "unknown reaction is quarantined without clearing pending"
-            `Quick
-            test_unknown_reaction_is_quarantined_without_clearing_pending
-        ; test_case
-            "fusion_completed stimulus is supported (RFC-0266)"
-            `Quick
-            test_fusion_completed_stimulus_is_supported
-        ; test_case
-            "stimulus_kind string round-trip drift guard"
-            `Quick
-            test_stimulus_kind_string_roundtrip
-        ; test_case
-            "reaction_kind string round-trip drift guard"
-            `Quick
-            test_reaction_kind_string_roundtrip
+            test_summary_hot_path_uses_projection_and_bounded_index
         ] )
     ]
-;;

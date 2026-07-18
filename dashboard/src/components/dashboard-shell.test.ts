@@ -716,6 +716,35 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).toContain('pending=2')
   })
 
+  it('does not turn historical cursor sweeps into an active health chip', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_reaction_ledger: {
+            status: 'ok',
+            status_reasons: [],
+            counts_complete: true,
+            operator_action_required: false,
+            pending_stimulus_count: 0,
+            cursor_swept_stimulus_count: 7,
+            read_error_count: 0,
+            reaction_store_discovery_error_count: 0,
+            keeper_name_discovery_error_count: 0,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips.some(chip => chip.key === 'reaction-ledger')).toBe(false)
+  })
+
   it('attaches drill-down routes so HEALTH chips deep-link operators to the right view', () => {
     const chips = dashboardHealthChips({
       connected: true,

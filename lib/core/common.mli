@@ -60,12 +60,14 @@ type keeper_runtime_store =
   | Keeper_metrics
   | Keeper_execution_receipts
   | Keeper_turn_records
-  | Keeper_reaction_ledger
   | Keeper_trajectories
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
+
+val keeper_reaction_database_filename : string
+(** Canonical per-Keeper SQLite reaction authority filename. *)
 val keeper_runtime_store_dirnames : string list
 
 val auth_dir_from_base_path : base_path:string -> string

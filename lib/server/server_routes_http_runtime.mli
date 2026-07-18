@@ -226,7 +226,7 @@ val make_health_probe_json :
 (** [make_health_probe_json ?listener ~request_authority request] builds the cheap default
     [/health] probe body.  It keeps liveness/readiness-facing fields such as
     [startup], [paths], [transport], [logs], and quick GC counters, but skips
-    durable keeper scans, reaction-ledger JSONL reads, config TOML scans, and
+    durable keeper scans, typed reaction-store reads, config TOML scans, and
     contract-verdict ledger inspection. *)
 
 val make_health_response_json :
@@ -291,7 +291,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
 (** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
-    reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
+    reaction-store query for the [/api/v1/dashboard/shell?light=true]
     header hot path.  It keeps [keeper_turn_admission] because admission
     pressure is in-memory and cheap to read, and keeps
     [keeper_board_event_collection] because the failure snapshot is in-memory

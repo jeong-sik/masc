@@ -298,12 +298,24 @@ describe('ScheduleSurface', () => {
   it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
     const automation = sampleAutomation()
     automation.requests = [
-      // Healthy completion: not in queue but the keeper reacted → not a miss.
+      // Healthy completion: not in queue and the latest reaction is ACK.
       {
         ...automation.requests[0]!,
         schedule_id: 'sched-drained',
         keeper_queue_evidence: { projection_status: 'not_found' },
-        keeper_reaction_evidence: { projection_status: 'matched_turn_started' },
+        keeper_reaction_evidence: {
+          projection_status: 'matched_consumed_ack',
+          latest_reaction: {
+            kind: 'event_queue_ack',
+            sequence: '3',
+            event_id: 'event-3',
+            recorded_at: 203,
+            recorded_at_iso: '1970-01-01T00:03:23Z',
+            transition_id: 'transition-3',
+            source_index: 0,
+            source_count: 1,
+          },
+        },
       },
       // Genuine miss: dispatched, in no queue, no keeper reaction recorded.
       {

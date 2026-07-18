@@ -999,13 +999,18 @@ let test_transition_outbox_projects_with_stable_identity () =
       |> require_ok "claim projection source"
       |> require_some "projection lease"
     in
+    let retry_candidate = { source with arrived_at = 99.0 } in
     (match
        Persistence.enqueue_stimulus_if_absent_result
-         ~base_path ~keeper_name source
+         ~base_path ~keeper_name retry_candidate
        |> require_ok "dedupe active lease"
      with
-     | Persistence.Already_present -> ()
-     | Persistence.Enqueued -> Alcotest.fail "active lease was duplicated");
+     | Persistence.Already_present committed ->
+       Alcotest.(check (float 0.0))
+         "active lease returns its committed arrival"
+         source.arrived_at
+         committed.arrived_at
+     | Persistence.Enqueued _ -> Alcotest.fail "active lease was duplicated");
     (match
        Persistence.settle_result
          ~base_path
@@ -1024,11 +1029,15 @@ let test_transition_outbox_projects_with_stable_identity () =
     in
     (match
        Persistence.enqueue_stimulus_if_absent_result
-         ~base_path ~keeper_name source
+         ~base_path ~keeper_name retry_candidate
        |> require_ok "dedupe transition outbox"
      with
-     | Persistence.Already_present -> ()
-     | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
+     | Persistence.Already_present committed ->
+       Alcotest.(check (float 0.0))
+         "outbox returns its committed arrival"
+         source.arrived_at
+         committed.arrived_at
+     | Persistence.Enqueued _ -> Alcotest.fail "outbox stimulus was duplicated");
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "project transition outbox";
     let state =
@@ -1048,7 +1057,7 @@ let test_transition_outbox_projects_with_stable_identity () =
       Masc.Keeper_reaction_ledger.summary_for_keeper
         ~base_path
         ~keeper_name
-        ~limit:20
+        ~pending_id_display_limit:20
     in
     let open Yojson.Safe.Util in
     Alcotest.(check int)

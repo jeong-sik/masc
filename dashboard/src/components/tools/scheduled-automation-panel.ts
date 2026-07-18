@@ -366,24 +366,21 @@ function dispatchReceiptRows(
   receipt: DashboardScheduledAutomationDispatchReceipt | null | undefined,
 ): Array<{ label: string; value: string }> {
   if (!receipt) return []
-  const rows: Array<{ label: string; value: string | null | undefined }> = [
+  if (receipt.projection_status === 'unrecognized_detail') {
+    return [{ label: 'reason', value: receipt.reason }]
+  }
+  return [
     { label: 'kind', value: receipt.kind },
     { label: 'queue', value: receipt.queue },
     { label: 'stimulus', value: receipt.stimulus },
     { label: 'stimulus_id', value: receipt.stimulus_id },
     { label: 'reaction_ledger_status', value: receipt.reaction_ledger_status },
-    { label: 'reaction_ledger_error', value: receipt.reaction_ledger_error },
     { label: 'keeper', value: receipt.keeper_name },
     { label: 'schedule', value: receipt.schedule_id },
     { label: 'urgency', value: receipt.urgency },
     { label: 'post_id', value: receipt.post_id },
-    { label: 'author', value: receipt.author },
-    { label: 'hearth', value: receipt.hearth },
-    { label: 'reason', value: receipt.reason },
+    { label: 'occurrence_status', value: receipt.occurrence_status },
   ]
-  return rows.filter((row): row is { label: string; value: string } => {
-    return typeof row.value === 'string' && row.value.trim() !== ''
-  })
 }
 
 function DispatchReceiptBlock({
@@ -401,7 +398,7 @@ function DispatchReceiptBlock({
         ? 'sch-kvs'
         : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
       data-schedule-dispatch-receipt=${receipt.projection_status}
-      data-schedule-dispatch-receipt-kind=${receipt.kind ?? ''}
+      data-schedule-dispatch-receipt-kind=${receipt.projection_status === 'recognized' ? receipt.kind : ''}
     >
       <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
         ${compact
@@ -440,21 +437,31 @@ function queueEvidenceRows(
     .map(error => [error.kind, error.path, error.message].filter(Boolean).join(': '))
     .filter(value => value.trim() !== '')
     .join(' | ')
-  const rows: Array<{ label: string; value: string | number | null | undefined }> = [
+  const rows: Array<{
+    label: string
+    value: string | number | boolean | null | undefined
+  }> = [
     { label: 'source', value: evidence.source },
     { label: 'queue', value: evidence.queue },
     { label: 'stimulus', value: evidence.stimulus },
     { label: 'keeper', value: evidence.keeper_name },
     { label: 'schedule', value: evidence.schedule_id },
     { label: 'post_id', value: evidence.post_id },
+    { label: 'stimulus_id', value: evidence.stimulus_id },
+    { label: 'execution_due_at', value: evidence.execution_due_at_iso },
+    { label: 'execution_payload_digest', value: evidence.execution_payload_digest },
     { label: 'pending_count', value: evidence.pending_count },
     { label: 'inflight_count', value: evidence.inflight_count },
+    { label: 'operator_action_required', value: evidence.projection_status === 'identity_conflict' ? evidence.operator_action_required : null },
+    { label: 'matched_identity_count', value: evidence.projection_status === 'identity_conflict' ? evidence.matched_identity_count : null },
     { label: 'matched_bucket', value: evidence.matched_bucket },
     { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
     { label: 'matched_post_id', value: evidence.matched_post_id },
     { label: 'matched_schedule_id', value: evidence.matched_schedule_id },
     { label: 'matched_arrived_at', value: evidence.matched_arrived_at_iso },
     { label: 'matched_age_seconds', value: evidence.matched_age_seconds },
+    { label: 'matched_due_at', value: evidence.matched_due_at_iso },
+    { label: 'matched_payload_digest', value: evidence.matched_payload_digest },
     { label: 'read_errors', value: readErrors },
     { label: 'reason', value: evidence.reason },
   ]
@@ -504,22 +511,53 @@ function reactionEvidenceTone(
   evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
 ): StatusChipTone {
   if (!evidence) return 'neutral'
-  if (
-    evidence.projection_status === 'matched_consumed_ack' ||
-    evidence.projection_status === 'matched_turn_started'
-  ) return 'ok'
-  if (
-    evidence.projection_status === 'matched_stimulus' ||
-    evidence.projection_status === 'not_found' ||
-    evidence.projection_status === 'missing_stimulus_id'
-  ) return 'warn'
-  return 'bad'
+  switch (evidence.projection_status) {
+    case 'matched_consumed_ack':
+      return 'ok'
+    case 'matched_turn_started':
+      return 'info'
+    case 'matched_requeued':
+    case 'matched_stimulus':
+    case 'not_found':
+      return 'warn'
+    case 'matched_escalated':
+    case 'matched_escalated_external_input':
+    case 'read_error':
+    case 'invalid_stimulus_id':
+    case 'unrecognized_receipt':
+      return 'bad'
+  }
 }
 
 function reactionEvidenceRows(
   evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
 ): Array<{ label: string; value: string }> {
   if (!evidence) return []
+  const latest = evidence.latest_reaction
+  const latestRows: Array<{
+    label: string
+    value: string | number | boolean | null | undefined
+  }> = latest == null
+    ? []
+    : [
+        { label: 'latest_reaction.kind', value: latest.kind },
+        { label: 'latest_reaction.sequence', value: latest.sequence },
+        { label: 'latest_reaction.event_id', value: latest.event_id },
+        { label: 'latest_reaction.recorded_at', value: latest.recorded_at_iso },
+        ...(latest.kind === 'turn_started'
+          ? []
+          : [
+              { label: 'latest_reaction.transition_id', value: latest.transition_id },
+              { label: 'latest_reaction.source_index', value: latest.source_index },
+              { label: 'latest_reaction.source_count', value: latest.source_count },
+            ]),
+        ...(latest.kind === 'event_queue_escalated'
+          ? [{
+              label: 'latest_reaction.external_input_requested',
+              value: latest.external_input_requested,
+            }]
+          : []),
+      ]
   const rows: Array<{ label: string; value: string | number | boolean | null | undefined }> = [
     { label: 'source', value: evidence.source },
     { label: 'keeper', value: evidence.keeper_name },
@@ -528,7 +566,6 @@ function reactionEvidenceRows(
     { label: 'stimulus', value: evidence.stimulus },
     { label: 'stimulus_id', value: evidence.stimulus_id },
     { label: 'stimulus_kind', value: evidence.stimulus_kind },
-    { label: 'reaction_kind', value: evidence.reaction_kind },
     { label: 'stimulus_seen', value: evidence.stimulus_seen },
     { label: 'turn_started_seen', value: evidence.turn_started_seen },
     { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
@@ -538,6 +575,7 @@ function reactionEvidenceRows(
     { label: 'event_queue_ack_recorded_at', value: evidence.event_queue_ack_recorded_at_iso },
     { label: 'latest_recorded_at', value: evidence.latest_recorded_at_iso },
     { label: 'reason', value: evidence.reason },
+    ...latestRows,
   ]
   return rows
     .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
@@ -605,11 +643,12 @@ function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): b
 }
 
 function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
+  const receipt = request.dispatch_receipt?.projection_status === 'recognized'
+    ? request.dispatch_receipt
+    : null
   const candidates = [
-    request.dispatch_receipt?.post_id,
-    request.keeper_queue_evidence?.post_id,
-    request.keeper_reaction_evidence?.post_id,
-    request.dispatch_receipt?.stimulus_id,
+    receipt?.stimulus_id,
+    request.keeper_queue_evidence?.stimulus_id,
     request.keeper_reaction_evidence?.stimulus_id,
   ]
   for (const candidate of candidates) {
@@ -665,7 +704,7 @@ function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomatio
         </span>
       `)}
       ${joinKey
-        ? html`<span class="sch-wake-join mono" title=${joinKey}>post ${joinKey}</span>`
+        ? html`<span class="sch-wake-join mono" title=${joinKey}>stimulus ${joinKey}</span>`
         : null}
     </div>
   `

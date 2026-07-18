@@ -38,14 +38,24 @@ val pending_board_events_of_stimulus_result
   -> Keeper_world_observation.pending_board_event list
 
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
-    a generic [Turn_started] reaction for an event-queue stimulus after the
-    heartbeat scheduler has admitted a real keeper turn. Logs and swallows
-    errors except [Eio.Cancel.Cancelled]. *)
+    a generic [Turn_started] reaction after a real keeper turn is admitted.
+    Persistence failure is explicit so the owner cycle can requeue the lease. *)
 val record_event_queue_stimulus_turn_started
   :  ctx:_ context
   -> keeper_name:string
+  -> lease_sequence:int64
   -> Keeper_event_queue.stimulus
-  -> unit
+  -> (unit, string) result
+
+(** [record_event_queue_turn_admission ~ctx ~keeper_name ~lease_sequence stimuli]
+    atomically records the exact stimulus roots and their admitted turn-start
+    children for one claimed queue lease. *)
+val record_event_queue_turn_admission
+  :  ctx:_ context
+  -> keeper_name:string
+  -> lease_sequence:int64
+  -> Keeper_event_queue.stimulus list
+  -> (unit, string) result
 
 (** Result of one heartbeat intake — accumulated pending board events
     after dedup and the number of stimuli consumed from the queue. *)

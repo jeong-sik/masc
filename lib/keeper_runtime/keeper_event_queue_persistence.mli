@@ -53,6 +53,7 @@ type settle_result =
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> lease_kind
+val lease_sequence : lease -> int64
 
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
@@ -192,8 +193,8 @@ val update_checked_result :
   (unit, string) result
 
 type enqueue_stimulus_result =
-  | Enqueued
-  | Already_present
+  | Enqueued of Keeper_event_queue.stimulus
+  | Already_present of Keeper_event_queue.stimulus
 
 val enqueue_stimulus_if_absent_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -202,7 +203,10 @@ val enqueue_stimulus_if_absent_result :
   Keeper_event_queue.stimulus ->
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
-    full durable state: pending, active leases, and transition outbox. *)
+    full durable state: pending, active leases, and transition outbox. Both
+    successful variants carry the exact durable stimulus: the newly committed
+    value for [Enqueued], or the previously committed value for
+    [Already_present]. *)
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit

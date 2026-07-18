@@ -251,21 +251,17 @@ let identity_payload = function
     ) as payload ->
     payload
 
-let failure_judgment_identity_equal left right =
-  String.equal left.fj_runtime_id right.fj_runtime_id
-  && left.fj_judgment = right.fj_judgment
-  && Keeper_runtime_failure_route.judgment_provenance_same_boundary
-       left.fj_provenance
-       right.fj_provenance
+type stimulus_identity =
+  { identity_post_id : post_id
+  ; identity_urgency : urgency
+  ; identity_payload : stimulus_payload
+  }
 
-let stimulus_identity_equal a b =
-  String.equal a.post_id b.post_id
-  && a.urgency = b.urgency
-  &&
-  match a.payload, b.payload with
-  | Failure_judgment left, Failure_judgment right ->
-    failure_judgment_identity_equal left right
-  | _ -> identity_payload a.payload = identity_payload b.payload
+let stimulus_identity (stimulus : stimulus) =
+  { identity_post_id = stimulus.post_id
+  ; identity_urgency = stimulus.urgency
+  ; identity_payload = identity_payload stimulus.payload
+  }
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
@@ -299,23 +295,6 @@ let remove_by_post_id post_id queue =
     |> List.partition (fun stimulus -> String.equal stimulus.post_id post_id)
   in
   removed, of_list kept
-
-let uniq_stimuli stimuli =
-  List.fold_left
-    (fun acc stimulus ->
-       if List.exists (stimulus_identity_equal stimulus) acc
-       then acc
-       else stimulus :: acc)
-    []
-    stimuli
-  |> List.rev
-
-let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
-
-let remove_by_post_id_pair post_id left right =
-  let left_removed, left' = remove_by_post_id post_id left in
-  let right_removed, right' = remove_by_post_id post_id right in
-  uniq_stimuli (left_removed @ right_removed), left', right'
 
 let sort_by_urgency (queue : t) : t =
   queue
@@ -558,6 +537,48 @@ let payload_to_yojson = function
       ; "goal_title", `String ga.ga_goal_title
       ; "assigned_by", `String ga.ga_assigned_by
       ]
+
+let stimulus_identity_to_yojson identity =
+  `Assoc
+    [ "post_id", `String identity.identity_post_id
+    ; "urgency", `String (urgency_to_string identity.identity_urgency)
+    ; "payload", payload_to_yojson identity.identity_payload
+    ]
+
+let stimulus_identity_id stimulus =
+  let canonical =
+    stimulus |> stimulus_identity |> stimulus_identity_to_yojson
+    |> Yojson.Safe.to_string
+  in
+  "keeper-stimulus:sha256:"
+  ^ Digestif.SHA256.(digest_string canonical |> to_hex)
+
+(* In-process equality stays on the typed projection.  The digest is the
+   durable correlation key, not an intermediate representation for comparison. *)
+let stimulus_identity_equal left right =
+  stimulus_identity left = stimulus_identity right
+
+module Stimulus_identity_id_set = Set.Make (String)
+
+let uniq_stimuli stimuli =
+  let _, reversed =
+    List.fold_left
+      (fun (seen, acc) stimulus ->
+         let identity_id = stimulus_identity_id stimulus in
+         if Stimulus_identity_id_set.mem identity_id seen
+         then seen, acc
+         else Stimulus_identity_id_set.add identity_id seen, stimulus :: acc)
+      (Stimulus_identity_id_set.empty, [])
+      stimuli
+  in
+  List.rev reversed
+
+let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
+
+let remove_by_post_id_pair post_id left right =
+  let left_removed, left' = remove_by_post_id post_id left in
+  let right_removed, right' = remove_by_post_id post_id right in
+  uniq_stimuli (left_removed @ right_removed), left', right'
 
 let continuation_channel_field fields =
   let* json = required_field ~context:"stimulus.payload" "channel" fields in

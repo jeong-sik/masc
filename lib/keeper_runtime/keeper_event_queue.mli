@@ -247,6 +247,11 @@ val stimulus_identity_equal : stimulus -> stimulus -> bool
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
     not create an unbounded backlog of otherwise identical stimuli. *)
 
+val stimulus_identity_id : stimulus -> string
+(** Collision-resistant identifier of the exact closed identity projection
+    used by {!stimulus_identity_equal}. Consumers must not independently
+    reconstruct durable queue identity. *)
+
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)
 

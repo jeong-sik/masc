@@ -13,17 +13,87 @@ import {
 type QueueStatus = DashboardScheduledAutomationKeeperQueueEvidence['projection_status']
 type ReactionStatus = DashboardScheduledAutomationKeeperReactionEvidence['projection_status']
 
+const latestReactionBase = {
+  sequence: '2',
+  event_id: 'event-2',
+  recorded_at: 200,
+  recorded_at_iso: '1970-01-01T00:03:20Z',
+}
+
+const latestSettlementBase = {
+  ...latestReactionBase,
+  transition_id: 'transition-2',
+  source_index: 0,
+  source_count: 1,
+}
+
+function reactionEvidence(
+  projectionStatus: ReactionStatus,
+): DashboardScheduledAutomationKeeperReactionEvidence {
+  switch (projectionStatus) {
+    case 'matched_consumed_ack':
+      return {
+        projection_status: projectionStatus,
+        latest_reaction: { ...latestSettlementBase, kind: 'event_queue_ack' },
+      }
+    case 'matched_turn_started':
+      return {
+        projection_status: projectionStatus,
+        latest_reaction: { ...latestReactionBase, kind: 'turn_started' },
+      }
+    case 'matched_requeued':
+      return {
+        projection_status: projectionStatus,
+        latest_reaction: { ...latestSettlementBase, kind: 'event_queue_requeued' },
+      }
+    case 'matched_escalated':
+      return {
+        projection_status: projectionStatus,
+        latest_reaction: {
+          ...latestSettlementBase,
+          kind: 'event_queue_escalated',
+          external_input_requested: false,
+        },
+      }
+    case 'matched_escalated_external_input':
+      return {
+        projection_status: projectionStatus,
+        latest_reaction: {
+          ...latestSettlementBase,
+          kind: 'event_queue_escalated',
+          external_input_requested: true,
+        },
+      }
+    case 'matched_stimulus':
+    case 'not_found':
+    case 'read_error':
+    case 'invalid_stimulus_id':
+    case 'unrecognized_receipt':
+      return { projection_status: projectionStatus }
+  }
+}
+
 function req(
   queue: QueueStatus | null,
   reaction?: ReactionStatus,
 ): DashboardScheduledAutomationRequest {
+  const queueEvidence: DashboardScheduledAutomationKeeperQueueEvidence | null =
+    queue === null
+      ? null
+      : queue === 'identity_conflict'
+        ? {
+            projection_status: queue,
+            operator_action_required: true,
+            matched_identity_count: 2,
+          }
+        : { projection_status: queue }
   return {
     schedule_id: 'sched-1',
     status: 'scheduled',
     source: 'automated_request',
     recurrence: { kind: 'one_shot' },
-    keeper_queue_evidence: queue === null ? null : { projection_status: queue },
-    keeper_reaction_evidence: reaction === undefined ? null : { projection_status: reaction },
+    keeper_queue_evidence: queueEvidence,
+    keeper_reaction_evidence: reaction === undefined ? null : reactionEvidence(reaction),
   }
 }
 
@@ -45,12 +115,28 @@ describe('queueDrainStatusOf', () => {
     expect(status?.label).toBe('드레인 중')
   })
 
-  it('treats not_found + keeper handling evidence as a healthy 완료 (drained), never a miss', () => {
-    for (const reaction of ['matched_consumed_ack', 'matched_turn_started'] as const) {
-      const status = queueDrainStatusOf(req('not_found', reaction))
-      expect(status?.state, `reaction=${reaction}`).toBe('drained')
-      expect(status?.label).toBe('완료')
-    }
+  it('treats only a latest ACK as healthy 완료', () => {
+    const status = queueDrainStatusOf(req('not_found', 'matched_consumed_ack'))
+    expect(status?.state).toBe('drained')
+    expect(status?.label).toBe('완료')
+  })
+
+  it('keeps turn-start distinct from terminal completion', () => {
+    const status = queueDrainStatusOf(req('not_found', 'matched_turn_started'))
+    expect(status?.state).toBe('started')
+    expect(status?.label).toBe('처리 시작')
+    expect(status !== null && isCalendarVisible(status)).toBe(true)
+  })
+
+  it('preserves requeue and both escalation outcomes as actionable states', () => {
+    expect(queueDrainStatusOf(req('not_found', 'matched_requeued'))?.state).toBe('requeued')
+    expect(queueDrainStatusOf(req('not_found', 'matched_escalated'))?.state).toBe('escalated')
+    const externalInput = queueDrainStatusOf(
+      req('not_found', 'matched_escalated_external_input'),
+    )
+    expect(externalInput?.state).toBe('external_input_requested')
+    expect(externalInput?.label).toBe('외부 입력 필요')
+    expect(externalInput?.tone).toBe('bad')
   })
 
   it('treats matched_stimulus as enqueue-only evidence and reports a missing queue item as actionable', () => {
@@ -68,8 +154,7 @@ describe('queueDrainStatusOf', () => {
     expect(status?.tone).toBe('warn')
   })
 
-  it('does not conclude a miss when the reaction cannot be correlated (missing_stimulus_id / absent)', () => {
-    expect(queueDrainStatusOf(req('not_found', 'missing_stimulus_id'))?.state).toBe('indeterminate')
+  it('does not conclude a miss when reaction evidence is absent', () => {
     expect(queueDrainStatusOf(req('not_found'))?.state).toBe('indeterminate')
   })
 
@@ -86,6 +171,19 @@ describe('queueDrainStatusOf', () => {
   it('surfaces an unrecognized receipt as 확인 불가 (indeterminate)', () => {
     expect(queueDrainStatusOf(req('unrecognized_receipt'))?.state).toBe('indeterminate')
   })
+
+  it('surfaces a canonical stimulus identity conflict as operator-actionable', () => {
+    const request = req(null)
+    request.keeper_queue_evidence = {
+      projection_status: 'identity_conflict',
+      operator_action_required: true,
+      matched_identity_count: 2,
+    }
+    const status = queueDrainStatusOf(request)
+    expect(status?.state).toBe('identity_conflict')
+    expect(status?.tone).toBe('bad')
+    expect(status !== null && isCalendarVisible(status)).toBe(true)
+  })
 })
 
 describe('isCalendarVisible', () => {
@@ -98,7 +196,12 @@ describe('isCalendarVisible', () => {
     expect(visible('matched_inflight')).toBe(true)
     expect(visible('not_found', 'not_found')).toBe(true) // missed
     expect(visible('read_error')).toBe(true)
+    expect(visible('identity_conflict')).toBe(true)
     expect(visible('not_found', 'read_error')).toBe(true)
+    expect(visible('not_found', 'matched_turn_started')).toBe(true)
+    expect(visible('not_found', 'matched_requeued')).toBe(true)
+    expect(visible('not_found', 'matched_escalated')).toBe(true)
+    expect(visible('not_found', 'matched_escalated_external_input')).toBe(true)
     expect(visible('not_found', 'matched_consumed_ack')).toBe(false) // drained
     expect(visible('unrecognized_receipt')).toBe(false) // indeterminate
   })
@@ -109,7 +212,7 @@ describe('countQueueDrainMisses', () => {
     const requests: DashboardScheduledAutomationRequest[] = [
       req('matched_pending'),
       req('not_found', 'not_found'), // miss
-      req('not_found', 'matched_turn_started'), // drained — not a miss
+      req('not_found', 'matched_turn_started'), // in progress — not a miss
       req('not_found', 'matched_stimulus'), // enqueue-only evidence — miss
       req('not_found', 'not_found'), // miss
       req('read_error'), // read error — not counted as a miss

@@ -76,33 +76,59 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
-export interface DashboardScheduledAutomationDispatchReceipt {
-  projection_status: 'recognized' | 'unrecognized_detail'
-  kind?: string
-  queue?: string
-  stimulus?: string
-  stimulus_id?: string | null
-  reaction_ledger_status?: string | null
-  reaction_ledger_error?: string | null
-  keeper_name?: string
-  schedule_id?: string
-  urgency?: string
-  post_id?: string
-  author?: string
-  hearth?: string | null
-  reason?: string
+export type DashboardScheduledAutomationDispatchReceipt =
+  | {
+      projection_status: 'recognized'
+      kind: 'masc.keeper_wake.enqueued'
+      queue: string
+      stimulus: string
+      stimulus_id: string
+      reaction_ledger_status: 'recorded'
+      keeper_name: string
+      schedule_id: string
+      urgency: string
+      post_id: string
+      occurrence_status: 'awaiting_settlement' | 'already_settled'
+    }
+  | {
+      projection_status: 'unrecognized_detail'
+      reason: string
+    }
+
+interface DashboardScheduledAutomationLatestReactionBase {
+  sequence: string
+  event_id: string
+  recorded_at: number
+  recorded_at_iso: string
 }
 
-export interface DashboardScheduledAutomationKeeperReactionEvidence {
-  projection_status:
-    | 'matched_consumed_ack'
-    | 'matched_turn_started'
-    | 'matched_stimulus'
-    | 'not_found'
-    | 'read_error'
-    | 'missing_stimulus_id'
-    | 'invalid_stimulus_id'
-    | 'unrecognized_receipt'
+interface DashboardScheduledAutomationLatestSettlementBase
+  extends DashboardScheduledAutomationLatestReactionBase {
+  transition_id: string
+  source_index: number
+  source_count: number
+}
+
+export type DashboardScheduledAutomationLatestReaction =
+  | (DashboardScheduledAutomationLatestReactionBase & {
+      kind: 'turn_started'
+    })
+  | (DashboardScheduledAutomationLatestSettlementBase & {
+      kind: 'event_queue_ack'
+    })
+  | (DashboardScheduledAutomationLatestSettlementBase & {
+      kind: 'event_queue_requeued'
+    })
+  | (DashboardScheduledAutomationLatestSettlementBase & {
+      kind: 'event_queue_escalated'
+      external_input_requested: false
+    })
+  | (DashboardScheduledAutomationLatestSettlementBase & {
+      kind: 'event_queue_escalated'
+      external_input_requested: true
+    })
+
+interface DashboardScheduledAutomationKeeperReactionEvidenceBase {
   source?: string
   keeper_name?: string
   schedule_id?: string
@@ -110,7 +136,6 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   stimulus?: string
   stimulus_id?: string
   stimulus_kind?: string
-  reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
   event_queue_ack_seen?: boolean
@@ -126,14 +151,66 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reason?: string
 }
 
-export interface DashboardScheduledAutomationKeeperQueueEvidence {
-  projection_status: 'matched_pending' | 'matched_inflight' | 'not_found' | 'read_error' | 'unrecognized_receipt'
+export type DashboardScheduledAutomationKeeperReactionEvidence =
+  DashboardScheduledAutomationKeeperReactionEvidenceBase &
+  (
+    | {
+        projection_status: 'matched_consumed_ack'
+        latest_reaction: Extract<
+          DashboardScheduledAutomationLatestReaction,
+          { kind: 'event_queue_ack' }
+        >
+      }
+    | {
+        projection_status: 'matched_turn_started'
+        latest_reaction: Extract<
+          DashboardScheduledAutomationLatestReaction,
+          { kind: 'turn_started' }
+        >
+      }
+    | {
+        projection_status: 'matched_requeued'
+        latest_reaction: Extract<
+          DashboardScheduledAutomationLatestReaction,
+          { kind: 'event_queue_requeued' }
+        >
+      }
+    | {
+        projection_status: 'matched_escalated'
+        latest_reaction: Extract<
+          DashboardScheduledAutomationLatestReaction,
+          { kind: 'event_queue_escalated'; external_input_requested: false }
+        >
+      }
+    | {
+        projection_status: 'matched_escalated_external_input'
+        latest_reaction: Extract<
+          DashboardScheduledAutomationLatestReaction,
+          { kind: 'event_queue_escalated'; external_input_requested: true }
+        >
+      }
+    | {
+        projection_status:
+          | 'matched_stimulus'
+          | 'not_found'
+          | 'read_error'
+          | 'invalid_stimulus_id'
+          | 'unrecognized_receipt'
+        latest_reaction?: null
+      }
+  )
+
+interface DashboardScheduledAutomationKeeperQueueEvidenceBase {
   source?: string
   queue?: string
   stimulus?: string
   keeper_name?: string
   schedule_id?: string
   post_id?: string
+  stimulus_id?: string
+  execution_due_at?: number
+  execution_due_at_iso?: string
+  execution_payload_digest?: string
   pending_count?: number
   inflight_count?: number
   matched_bucket?: string
@@ -143,9 +220,28 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   matched_arrived_at?: number
   matched_arrived_at_iso?: string
   matched_age_seconds?: number
+  matched_due_at?: number | null
+  matched_due_at_iso?: string | null
+  matched_payload_digest?: string | null
   read_errors?: Array<{ kind?: string; path?: string | null; message?: string }>
   reason?: string
 }
+
+export type DashboardScheduledAutomationKeeperQueueEvidence =
+  DashboardScheduledAutomationKeeperQueueEvidenceBase &
+  (
+    | {
+        projection_status: 'matched_pending' | 'matched_inflight'
+      }
+    | {
+        projection_status: 'identity_conflict'
+        operator_action_required: true
+        matched_identity_count: number
+      }
+    | {
+        projection_status: 'not_found' | 'read_error' | 'unrecognized_receipt'
+      }
+  )
 
 export interface DashboardScheduledAutomationActor {
   id: string

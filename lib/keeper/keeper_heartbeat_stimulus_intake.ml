@@ -73,22 +73,29 @@ let pending_board_events_of_stimulus_result ~meta_after_triage stim =
 let record_event_queue_stimulus_turn_started
       ~(ctx : _ context)
       ~keeper_name
+      ~lease_sequence
       (stimulus : Keeper_event_queue.stimulus)
   =
-  try
-    Keeper_reaction_ledger.record_event_queue_turn_started
-      ~base_path:ctx.config.base_path
+  Keeper_reaction_ledger.record_event_queue_turn_admission_result
+    ~base_path:ctx.config.base_path
+    ~keeper_name
+    ~lease_sequence
+    [ stimulus ]
+  |> Result.map_error Keeper_reaction_ledger.ledger_error_to_string
+;;
+
+let record_event_queue_turn_admission
+      ~(ctx : _ context)
       ~keeper_name
-      stimulus
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Keeper.error
-      "turn entry: failed to persist event queue stimulus reaction post_id=%s \
-       (keeper=%s): %s"
-      stimulus.post_id
-      keeper_name
-      (Printexc.to_string exn)
+      ~lease_sequence
+      stimuli
+  =
+  Keeper_reaction_ledger.record_event_queue_turn_admission_result
+    ~base_path:ctx.config.base_path
+    ~keeper_name
+    ~lease_sequence
+    stimuli
+  |> Result.map_error Keeper_reaction_ledger.ledger_error_to_string
 ;;
 
 type heartbeat_event_intake = {

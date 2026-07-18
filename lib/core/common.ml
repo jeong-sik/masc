@@ -62,7 +62,6 @@ type keeper_runtime_store =
   | Keeper_metrics
   | Keeper_execution_receipts
   | Keeper_turn_records
-  | Keeper_reaction_ledger
   | Keeper_trajectories
 
 let keeper_runtime_store_dirname = function
@@ -71,7 +70,6 @@ let keeper_runtime_store_dirname = function
   | Keeper_metrics -> "metrics"
   | Keeper_execution_receipts -> "execution-receipts"
   | Keeper_turn_records -> "turn-records"
-  | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
 
 let keeper_runtime_stores =
@@ -80,9 +78,10 @@ let keeper_runtime_stores =
   ; Keeper_metrics
   ; Keeper_execution_receipts
   ; Keeper_turn_records
-  ; Keeper_reaction_ledger
   ; Keeper_trajectories
   ]
+
+let keeper_reaction_database_filename = "reaction-ledger.sqlite3"
 
 let keeper_runtime_store_dirnames =
   List.map keeper_runtime_store_dirname keeper_runtime_stores

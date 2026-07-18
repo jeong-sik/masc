@@ -21,6 +21,7 @@ import type {
   DashboardBlockerClassObject,
   DashboardBlockerInfo,
   DashboardKeeperReactionLedgerHealth,
+  DashboardKeeperReactionLedgerKeeperHealth,
   DashboardKeeperReactionLedgerPendingKeeper,
   DashboardPausedKeeperDetail,
   DashboardPausedKeeperReadError,
@@ -804,7 +805,46 @@ function normalizeDashboardKeeperReactionLedgerPendingKeeper(
   return {
     keeper_name: keeperName,
     pending_stimulus_count: pendingStimulusCount,
+    pending_ids_truncated: asBoolean(raw.pending_ids_truncated) ?? null,
     pending_stimulus_ids: asStringArray(raw.pending_stimulus_ids),
+  }
+}
+
+function normalizeDashboardKeeperReactionLedgerKeeperHealth(
+  raw: unknown,
+): DashboardKeeperReactionLedgerKeeperHealth | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  if (!keeperName) return null
+  return {
+    schema: asString(raw.schema) ?? null,
+    keeper_name: keeperName,
+    status: asString(raw.status) ?? null,
+    operator_action_required: asBoolean(raw.operator_action_required) ?? null,
+    counts_complete: asBoolean(raw.counts_complete) ?? null,
+    pending_id_display_limit: asNumber(raw.pending_id_display_limit) ?? null,
+    row_count: asNumber(raw.row_count) ?? null,
+    stimulus_count: asNumber(raw.stimulus_count) ?? null,
+    reaction_count: asNumber(raw.reaction_count) ?? null,
+    turn_started_count: asNumber(raw.turn_started_count) ?? null,
+    event_queue_ack_count: asNumber(raw.event_queue_ack_count) ?? null,
+    event_queue_requeue_count: asNumber(raw.event_queue_requeue_count) ?? null,
+    event_queue_escalation_count: asNumber(raw.event_queue_escalation_count) ?? null,
+    event_queue_external_input_count: asNumber(raw.event_queue_external_input_count) ?? null,
+    cursor_ack_count: asNumber(raw.cursor_ack_count) ?? null,
+    cursor_swept_stimulus_count: asNumber(raw.cursor_swept_stimulus_count) ?? null,
+    orphan_reaction_stimulus_count: asNumber(raw.orphan_reaction_stimulus_count) ?? null,
+    in_progress_stimulus_count: asNumber(raw.in_progress_stimulus_count) ?? null,
+    acked_stimulus_count: asNumber(raw.acked_stimulus_count) ?? null,
+    escalated_stimulus_count: asNumber(raw.escalated_stimulus_count) ?? null,
+    external_input_requested_stimulus_count:
+      asNumber(raw.external_input_requested_stimulus_count) ?? null,
+    pending_stimulus_count: asNumber(raw.pending_stimulus_count) ?? null,
+    pending_ids_truncated: asBoolean(raw.pending_ids_truncated) ?? null,
+    pending_stimulus_ids: asStringArray(raw.pending_stimulus_ids),
+    latest_recorded_at_unix: asNumber(raw.latest_recorded_at_unix) ?? null,
+    latest_stimulus_id: asString(raw.latest_stimulus_id) ?? null,
+    read_error: asString(raw.read_error) ?? null,
   }
 }
 
@@ -812,49 +852,117 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   raw: unknown,
 ): DashboardKeeperReactionLedgerHealth | null {
   if (!isRecord(raw)) return null
+  const schema = asString(raw.schema) ?? null
   const status = asString(raw.status) ?? null
+  const statusReasons = asStringArray(raw.status_reasons)
   const operatorActionRequired = asBoolean(raw.operator_action_required) ?? null
+  const empty = asBoolean(raw.empty) ?? null
   const keeperCount = asNumber(raw.keeper_count)
+  const keeperNames = asStringArray(raw.keeper_names)
+  const keeperNameDiscoveryErrorCount = asNumber(raw.keeper_name_discovery_error_count)
+  const keeperNameDiscoveryErrors = asStringArray(raw.keeper_name_discovery_errors)
+  const countsComplete = asBoolean(raw.counts_complete) ?? null
+  const pendingIdDisplayLimitPerKeeper = asNumber(raw.pending_id_display_limit_per_keeper)
   const rowCount = asNumber(raw.row_count)
   const stimulusCount = asNumber(raw.stimulus_count)
   const reactionCount = asNumber(raw.reaction_count)
   const turnStartedCount = asNumber(raw.turn_started_count)
+  const eventQueueAckCount = asNumber(raw.event_queue_ack_count)
+  const eventQueueRequeueCount = asNumber(raw.event_queue_requeue_count)
+  const eventQueueEscalationCount = asNumber(raw.event_queue_escalation_count)
+  const eventQueueExternalInputCount = asNumber(raw.event_queue_external_input_count)
   const cursorAckCount = asNumber(raw.cursor_ack_count)
   const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
+  const orphanReactionStimulusCount = asNumber(raw.orphan_reaction_stimulus_count)
+  const inProgressStimulusCount = asNumber(raw.in_progress_stimulus_count)
+  const ackedStimulusCount = asNumber(raw.acked_stimulus_count)
+  const escalatedStimulusCount = asNumber(raw.escalated_stimulus_count)
+  const externalInputRequestedStimulusCount = asNumber(raw.external_input_requested_stimulus_count)
   const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  const reactionStoreDiscoveredKeeperCount = asNumber(raw.reaction_store_discovered_keeper_count)
+  const reactionStoreDiscoveredKeeperNames = asStringArray(raw.reaction_store_discovered_keeper_names)
+  const reactionStoreDiscoveryErrorCount = asNumber(raw.reaction_store_discovery_error_count)
+  const reactionStoreDiscoveryErrors = asStringArray(raw.reaction_store_discovery_errors)
   const readErrorCount = asNumber(raw.read_error_count)
   const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
     .map(normalizeDashboardKeeperReactionLedgerPendingKeeper)
     .filter((item): item is DashboardKeeperReactionLedgerPendingKeeper => item !== null)
+  const keepers = (Array.isArray(raw.keepers) ? raw.keepers : [])
+    .map(normalizeDashboardKeeperReactionLedgerKeeperHealth)
+    .filter((item): item is DashboardKeeperReactionLedgerKeeperHealth => item !== null)
   if (
-    status == null
+    schema == null
+    && status == null
+    && statusReasons.length === 0
     && operatorActionRequired == null
+    && empty == null
     && keeperCount == null
+    && keeperNames.length === 0
+    && keeperNameDiscoveryErrorCount == null
+    && keeperNameDiscoveryErrors.length === 0
+    && countsComplete == null
+    && pendingIdDisplayLimitPerKeeper == null
     && rowCount == null
     && stimulusCount == null
     && reactionCount == null
     && turnStartedCount == null
+    && eventQueueAckCount == null
+    && eventQueueRequeueCount == null
+    && eventQueueEscalationCount == null
+    && eventQueueExternalInputCount == null
     && cursorAckCount == null
     && cursorSweptStimulusCount == null
+    && orphanReactionStimulusCount == null
+    && inProgressStimulusCount == null
+    && ackedStimulusCount == null
+    && escalatedStimulusCount == null
+    && externalInputRequestedStimulusCount == null
     && pendingStimulusCount == null
+    && reactionStoreDiscoveredKeeperCount == null
+    && reactionStoreDiscoveredKeeperNames.length === 0
+    && reactionStoreDiscoveryErrorCount == null
+    && reactionStoreDiscoveryErrors.length === 0
     && readErrorCount == null
     && pendingByKeeper.length === 0
+    && keepers.length === 0
   ) {
     return null
   }
   return {
+    schema,
     status,
+    status_reasons: statusReasons,
     operator_action_required: operatorActionRequired,
+    empty,
     keeper_count: keeperCount ?? null,
+    keeper_names: keeperNames,
+    keeper_name_discovery_error_count: keeperNameDiscoveryErrorCount ?? null,
+    keeper_name_discovery_errors: keeperNameDiscoveryErrors,
+    counts_complete: countsComplete,
+    pending_id_display_limit_per_keeper: pendingIdDisplayLimitPerKeeper ?? null,
     row_count: rowCount ?? null,
     stimulus_count: stimulusCount ?? null,
     reaction_count: reactionCount ?? null,
     turn_started_count: turnStartedCount ?? null,
+    event_queue_ack_count: eventQueueAckCount ?? null,
+    event_queue_requeue_count: eventQueueRequeueCount ?? null,
+    event_queue_escalation_count: eventQueueEscalationCount ?? null,
+    event_queue_external_input_count: eventQueueExternalInputCount ?? null,
     cursor_ack_count: cursorAckCount ?? null,
     cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
+    orphan_reaction_stimulus_count: orphanReactionStimulusCount ?? null,
+    in_progress_stimulus_count: inProgressStimulusCount ?? null,
+    acked_stimulus_count: ackedStimulusCount ?? null,
+    escalated_stimulus_count: escalatedStimulusCount ?? null,
+    external_input_requested_stimulus_count: externalInputRequestedStimulusCount ?? null,
     pending_stimulus_count: pendingStimulusCount ?? null,
+    reaction_store_discovered_keeper_count: reactionStoreDiscoveredKeeperCount ?? null,
+    reaction_store_discovered_keeper_names: reactionStoreDiscoveredKeeperNames,
+    reaction_store_discovery_error_count: reactionStoreDiscoveryErrorCount ?? null,
+    reaction_store_discovery_errors: reactionStoreDiscoveryErrors,
     read_error_count: readErrorCount ?? null,
     pending_by_keeper: pendingByKeeper,
+    keepers,
   }
 }
 

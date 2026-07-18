@@ -223,26 +223,38 @@ let test_distinct_connector_events_are_not_collapsed () =
   let keeper_name = "connector-attention-durable-keeper" in
   let first = connector_stimulus ~event_id:"event-1" ~arrived_at:1.0 in
   let second = connector_stimulus ~event_id:"event-2" ~arrived_at:2.0 in
+  let first_retry = { first with arrived_at = 99.0 } in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let enqueue expected stimulus =
-        match
+        match expected,
           Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
             ~base_path
             keeper_name
             stimulus
         with
-        | actual when actual = expected -> ()
-        | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+        | ( `Enqueued
+          , Masc.Keeper_registry_event_queue.Stimulus_enqueued committed )
+        | ( `Already_present
+          , Masc.Keeper_registry_event_queue.Stimulus_already_present committed ) ->
+          check (float 0.0)
+            "durable result carries the committed arrival"
+            (match expected with
+             | `Enqueued -> stimulus.arrived_at
+             | `Already_present -> first.arrived_at)
+            committed.arrived_at
+        | _, Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
           Alcotest.failf "durable Connector delivery failed: %s" detail
-        | Masc.Keeper_registry_event_queue.Stimulus_enqueued
-        | Masc.Keeper_registry_event_queue.Stimulus_already_present ->
+        | ( `Enqueued
+          , Masc.Keeper_registry_event_queue.Stimulus_already_present _ )
+        | ( `Already_present
+          , Masc.Keeper_registry_event_queue.Stimulus_enqueued _ ) ->
           Alcotest.fail "unexpected durable Connector delivery result"
       in
-      enqueue Masc.Keeper_registry_event_queue.Stimulus_enqueued first;
-      enqueue Masc.Keeper_registry_event_queue.Stimulus_enqueued second;
-      enqueue Masc.Keeper_registry_event_queue.Stimulus_already_present first;
+      enqueue `Enqueued first;
+      enqueue `Enqueued second;
+      enqueue `Already_present first_retry;
       let event_ids =
         Keeper_event_queue_persistence.load ~base_path ~keeper_name
         |> Keeper_event_queue.to_list

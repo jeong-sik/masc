@@ -6,7 +6,6 @@ let supported_payload_kinds = Schedule_payload_projection.supported_payload_kind
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
-let reaction_ledger_record_failed_label = "record_failed"
 
 let ( let* ) = Result.bind
 
@@ -43,15 +42,6 @@ let string_field name fields =
   | _ -> Error ("expected string field: " ^ name)
 ;;
 
-let optional_string_field name fields =
-  match List.assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) ->
-    let value = String.trim value in
-    if String.equal value "" then Ok None else Ok (Some value)
-  | Some _ -> Error ("expected string field: " ^ name)
-;;
-
 let optional_keeper_wake_urgency_field name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -76,56 +66,25 @@ let keeper_queue_urgency_of_schedule_urgency = function
   | Schedule_supported_kinds.Keeper_wake_low -> Keeper_event_queue.Low
 ;;
 
-type keeper_wake_reaction_ledger_status =
-  | Keeper_wake_reaction_ledger_recorded
-  | Keeper_wake_reaction_ledger_record_failed of string
-
-let keeper_wake_reaction_ledger_status_to_string = function
-  | Keeper_wake_reaction_ledger_recorded -> reaction_ledger_recorded_label
-  | Keeper_wake_reaction_ledger_record_failed _ -> reaction_ledger_record_failed_label
-;;
-
-let keeper_wake_reaction_ledger_error = function
-  | Keeper_wake_reaction_ledger_recorded -> None
-  | Keeper_wake_reaction_ledger_record_failed reason -> Some reason
-;;
-
-let keeper_wake_reaction_ledger_status_of_fields fields =
-  match optional_string_field "reaction_ledger_status" fields with
-  | Error reason -> Error reason
-  | Ok None -> Ok None
-  | Ok (Some value) when String.equal value reaction_ledger_recorded_label ->
-    Ok (Some Keeper_wake_reaction_ledger_recorded)
-  | Ok (Some value) when String.equal value reaction_ledger_record_failed_label ->
-    let* reason = string_field "reaction_ledger_error" fields in
-    Ok (Some (Keeper_wake_reaction_ledger_record_failed reason))
-  | Ok (Some value) -> Error ("unsupported reaction_ledger_status: " ^ value)
-;;
-
-let keeper_wake_reaction_ledger_status_json_fields = function
-  | None -> [ "reaction_ledger_status", `Null; "reaction_ledger_error", `Null ]
-  | Some status ->
-    [ "reaction_ledger_status"
-    , `String (keeper_wake_reaction_ledger_status_to_string status)
-    ; ( "reaction_ledger_error"
-      , match keeper_wake_reaction_ledger_error status with
-        | None -> `Null
-        | Some reason -> `String reason )
-    ]
+let recorded_reaction_ledger_field fields =
+  let* value = string_field "reaction_ledger_status" fields in
+  if String.equal value reaction_ledger_recorded_label
+  then Ok ()
+  else Error ("unsupported reaction_ledger_status: " ^ value)
 ;;
 
 type keeper_wake_occurrence_status =
-  | Keeper_wake_awaiting_ack
-  | Keeper_wake_already_acked
+  | Keeper_wake_awaiting_settlement
+  | Keeper_wake_already_settled
 
 let keeper_wake_occurrence_status_to_string = function
-  | Keeper_wake_awaiting_ack -> "awaiting_ack"
-  | Keeper_wake_already_acked -> "already_acked"
+  | Keeper_wake_awaiting_settlement -> "awaiting_settlement"
+  | Keeper_wake_already_settled -> "already_settled"
 ;;
 
 let keeper_wake_occurrence_status_of_string = function
-  | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
-  | "already_acked" -> Ok Keeper_wake_already_acked
+  | "awaiting_settlement" -> Ok Keeper_wake_awaiting_settlement
+  | "already_settled" -> Ok Keeper_wake_already_settled
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
 
@@ -137,8 +96,7 @@ type dispatch_receipt =
       ; post_id : string
       ; queue : string
       ; stimulus : string
-      ; stimulus_id : string option
-      ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; stimulus_id : string
       ; occurrence_status : keeper_wake_occurrence_status
       }
 
@@ -153,10 +111,8 @@ let dispatch_receipt_of_detail = function
       let* post_id = string_field "post_id" fields in
       let* queue = string_field "queue" fields in
       let* stimulus = string_field "stimulus" fields in
-      let* stimulus_id = optional_string_field "stimulus_id" fields in
-      let* reaction_ledger_status =
-        keeper_wake_reaction_ledger_status_of_fields fields
-      in
+      let* stimulus_id = string_field "stimulus_id" fields in
+      let* () = recorded_reaction_ledger_field fields in
       let* occurrence_status =
         let* value = string_field "occurrence_status" fields in
         keeper_wake_occurrence_status_of_string value
@@ -170,7 +126,6 @@ let dispatch_receipt_of_detail = function
            ; queue
            ; stimulus
            ; stimulus_id
-           ; reaction_ledger_status
            ; occurrence_status
            })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
@@ -186,25 +141,21 @@ let dispatch_receipt_to_yojson = function
       ; queue
       ; stimulus
       ; stimulus_id
-      ; reaction_ledger_status
       ; occurrence_status
       } ->
     `Assoc
-      ([ "kind", `String keeper_wake_enqueued_kind
-       ; "queue", `String queue
-       ; "stimulus", `String stimulus
-       ; ( "stimulus_id"
-         , match stimulus_id with
-           | None -> `Null
-           | Some value -> `String value )
-       ; "keeper_name", `String keeper_name
-       ; "schedule_id", `String schedule_id
-       ; "urgency", `String urgency
-       ; "post_id", `String post_id
-       ; ( "occurrence_status"
-         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
-       ]
-       @ keeper_wake_reaction_ledger_status_json_fields reaction_ledger_status)
+      [ "kind", `String keeper_wake_enqueued_kind
+      ; "queue", `String queue
+      ; "stimulus", `String stimulus
+      ; "stimulus_id", `String stimulus_id
+      ; "keeper_name", `String keeper_name
+      ; "schedule_id", `String schedule_id
+      ; "urgency", `String urgency
+      ; "post_id", `String post_id
+      ; "reaction_ledger_status", `String reaction_ledger_recorded_label
+      ; ( "occurrence_status"
+        , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+      ]
 ;;
 
 let accepts request =
@@ -236,16 +187,14 @@ let body_keeper_wake_urgency payload =
 ;;
 
 let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
-  try
-    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
-    Keeper_wake_reaction_ledger_recorded
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Keeper_wake_reaction_ledger_record_failed
-      (Printf.sprintf
-         "failed to persist keeper reaction ledger stimulus: %s"
-         (Printexc.to_string exn))
+  Keeper_reaction_ledger.record_event_queue_stimulus_result
+    ~base_path
+    ~keeper_name
+    stimulus
+  |> Result.map_error (fun error ->
+    "failed to persist keeper reaction ledger stimulus: "
+    ^ Keeper_reaction_ledger.ledger_error_to_string error)
+  |> Result.map (Fun.const ())
 ;;
 
 type keeper_wake_acceptance =
@@ -284,20 +233,16 @@ let accept_keeper_wake_occurrence
   match reaction_evidence_result ~base_path ~keeper_name ~stimulus_id with
   | Error detail -> retryable_dispatch_failure detail
   | Ok
-      (Keeper_reaction_ledger.Evidence_quarantined
-        { first_reason; _ }) ->
-    retryable_dispatch_failure
-      (Printf.sprintf
-         "keeper reaction ledger evidence quarantined for occurrence %s: %s"
-         stimulus_id
-         (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
-    when evidence.event_queue_ack_seen ->
-    (* The transition projector appends this exact-id ACK before retiring its
-       outbox entry. It is therefore the durable terminal occurrence fence,
-       independent of pending/lease/outbox retention. *)
+      { latest_reaction =
+          Some
+            (Keeper_reaction_ledger.Latest_event_queue_ack _
+            | Keeper_reaction_ledger.Latest_event_queue_escalated _)
+      ; _
+      } ->
+    (* The causally latest settlement is terminal. Historical ACKs do not mask
+       a later requeue, and escalation is not silently re-dispatched. *)
     Ok Already_drained
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+  | Ok evidence ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
          ~base_path
@@ -307,14 +252,18 @@ let accept_keeper_wake_occurrence
      | Keeper_registry_event_queue.Stimulus_storage_error detail ->
        retryable_dispatch_failure
          ("scheduled keeper wake durable enqueue failed: " ^ detail)
-     | Keeper_registry_event_queue.Stimulus_enqueued
-     | Keeper_registry_event_queue.Stimulus_already_present ->
+     | Keeper_registry_event_queue.Stimulus_enqueued committed_stimulus
+     | Keeper_registry_event_queue.Stimulus_already_present committed_stimulus ->
        if evidence.stimulus_seen then Ok Wake_required
        else
-         (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
-          | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
-          | Keeper_wake_reaction_ledger_record_failed detail ->
-            retryable_dispatch_failure detail))
+         (match
+            record_keeper_wake_stimulus
+              ~base_path
+              ~keeper_name
+              committed_stimulus
+          with
+          | Ok () -> Ok Wake_required
+          | Error detail -> retryable_dispatch_failure detail))
 ;;
 
 let dispatch_keeper_wake
@@ -363,8 +312,8 @@ let dispatch_keeper_wake
   in
   let occurrence_status =
     match acceptance with
-    | Wake_required -> Keeper_wake_awaiting_ack
-    | Already_drained -> Keeper_wake_already_acked
+    | Wake_required -> Keeper_wake_awaiting_settlement
+    | Already_drained -> Keeper_wake_already_settled
   in
   (match acceptance with
    | Already_drained -> ()
@@ -396,19 +345,18 @@ let dispatch_keeper_wake
           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)));
   Ok
     (`Assoc
-      ([ "kind", `String keeper_wake_enqueued_kind
-       ; "queue", `String keeper_event_queue_label
-       ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-       ; "stimulus_id", `String stimulus_id
-       ; "keeper_name", `String keeper_name
-       ; "schedule_id", `String request.schedule_id
-       ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
-       ; "post_id", `String stimulus.post_id
-       ; ( "occurrence_status"
-         , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
-       ]
-       @ keeper_wake_reaction_ledger_status_json_fields
-           (Some Keeper_wake_reaction_ledger_recorded)))
+      [ "kind", `String keeper_wake_enqueued_kind
+      ; "queue", `String keeper_event_queue_label
+      ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+      ; "stimulus_id", `String stimulus_id
+      ; "keeper_name", `String keeper_name
+      ; "schedule_id", `String request.schedule_id
+      ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+      ; "post_id", `String stimulus.post_id
+      ; "reaction_ledger_status", `String reaction_ledger_recorded_label
+      ; ( "occurrence_status"
+        , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
+      ])
 ;;
 
 let dispatch config ~now signal request =

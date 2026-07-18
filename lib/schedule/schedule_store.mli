@@ -90,6 +90,11 @@ val executions_for_schedule :
 val last_execution_for_schedule :
   state -> schedule_id:string -> Schedule_domain.execution_record option
 
+val latest_execution_lookup :
+  state -> schedule_id:string -> Schedule_domain.execution_record option
+(** Builds the immutable schedule-to-latest-execution index once, then returns
+    an O(log n) lookup closure. *)
+
 val insert_request :
   Workspace_utils.config ->
   Schedule_domain.schedule_request ->

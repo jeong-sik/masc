@@ -53,6 +53,53 @@ type waiting_row =
 
 let external_attention_dashboard_row_limit = 64
 
+module Keeper_name_map = Map.Make (String)
+
+type request_observation =
+  { config : Workspace.config
+  ; schedule_state_result : (Schedule_store.state, Schedule_store.read_error) result
+  ; keeper_names_result : (string list, string) result
+  ; event_queue_snapshots :
+      Keeper_event_queue_persistence.snapshot_pair_with_errors Keeper_name_map.t
+  }
+
+let capture_request_observation
+      ?(additional_queue_keeper_names = fun _ -> [])
+      config
+  =
+  let schedule_state_result = Schedule_store.read_state_result config in
+  let keeper_names_result = Keeper_meta_store.keeper_names_result config in
+  let metadata_keeper_names =
+    match keeper_names_result with
+    | Ok names -> names
+    | Error _ -> []
+  in
+  let queue_keeper_names =
+    metadata_keeper_names @ additional_queue_keeper_names schedule_state_result
+    |> List.sort_uniq String.compare
+  in
+  let event_queue_snapshots =
+    List.fold_left
+      (fun snapshots keeper_name ->
+         let snapshot =
+           Keeper_event_queue_persistence.load_snapshot_pair_with_errors
+             ~base_path:config.Workspace.base_path
+             ~keeper_name
+         in
+         Keeper_name_map.add keeper_name snapshot snapshots)
+      Keeper_name_map.empty
+      queue_keeper_names
+  in
+  { config; schedule_state_result; keeper_names_result; event_queue_snapshots }
+;;
+
+let workspace_config observation = observation.config
+let schedule_state_result observation = observation.schedule_state_result
+
+let event_queue_snapshot observation ~keeper_name =
+  Keeper_name_map.find_opt keeper_name observation.event_queue_snapshots
+;;
+
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
   | Event_queue_inflight -> "event_queue_inflight"
@@ -217,21 +264,30 @@ let queue_read_error_rows ~keeper_name errors =
     errors
 ;;
 
-let event_queue_rows ~base_path ~keeper_name =
-  let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_pair_with_errors ~base_path ~keeper_name
-  in
-  rows_for_queue_snapshot
-    ~keeper_name
-    ~source:Event_queue_pending
-    ~next_action:"keeper_drain_event_queue"
-    snapshot.pending
-  @ rows_for_queue_snapshot
+let event_queue_rows observation ~keeper_name =
+  match event_queue_snapshot observation ~keeper_name with
+  | Some snapshot ->
+    rows_for_queue_snapshot
       ~keeper_name
-      ~source:Event_queue_inflight
-      ~next_action:"recover_inflight_turn"
-      snapshot.inflight
-  @ queue_read_error_rows ~keeper_name snapshot.read_errors
+      ~source:Event_queue_pending
+      ~next_action:"keeper_drain_event_queue"
+      snapshot.pending
+    @ rows_for_queue_snapshot
+        ~keeper_name
+        ~source:Event_queue_inflight
+        ~next_action:"recover_inflight_turn"
+        snapshot.inflight
+    @ queue_read_error_rows ~keeper_name snapshot.read_errors
+  | None ->
+    [ read_error_row
+        ~keeper_name
+        ~waiting_on:"event_queue_request_observation"
+        ~next_action:"inspect_dashboard_request_observation"
+        (`Assoc
+          [ "kind", `String "keeper_queue_not_captured"
+          ; "keeper_name", `String keeper_name
+          ])
+    ]
 ;;
 
 let schedule_read_error_detail = function
@@ -692,8 +748,8 @@ let schedule_rows ~keeper_names state =
     })
 ;;
 
-let schedule_rows_or_error config ~keeper_names =
-  match Schedule_store.read_state_result config with
+let schedule_rows_or_error observation ~keeper_names =
+  match observation.schedule_state_result with
   | Ok state -> schedule_rows ~keeper_names state
   | Error err ->
     [ read_error_row
@@ -715,8 +771,8 @@ let pending_confirms_or_error_rows config =
       ] )
 ;;
 
-let keeper_names_or_error_rows config =
-  match Keeper_meta_store.keeper_names_result config with
+let keeper_names_or_error_rows observation =
+  match observation.keeper_names_result with
   | Ok keeper_names -> keeper_names, []
   | Error err ->
     ( []
@@ -886,14 +942,15 @@ let keeper_json keeper_name ~busy ~external_attention_truncated rows =
     ]
 ;;
 
-let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
+let keeper_rows observation ~base_path ~pending_approvals ~fusion_runs ~pending_confirms
+    keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
     let external_attention_rows, external_attention_truncated =
       external_attention_rows ~base_path ~keeper_name
     in
     let rows =
-      event_queue_rows ~base_path ~keeper_name
+      event_queue_rows observation ~keeper_name
       @ chat_queue_rows ~base_path keeper_name
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
@@ -921,21 +978,22 @@ let global_rows_from rows =
     | Some _ -> false)
 ;;
 
-let dashboard_json config =
+let dashboard_json_of_observation observation =
+  let config = observation.config in
   let now = Time_compat.now () in
   let keeper_names, keeper_name_read_error_rows =
-    keeper_names_or_error_rows config
+    keeper_names_or_error_rows observation
   in
   let pending_approvals = Keeper_approval_queue.list_pending_entries () in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
   in
-  let schedule_rows = schedule_rows_or_error config ~keeper_names in
+  let schedule_rows = schedule_rows_or_error observation ~keeper_names in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
-    keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
-      ~pending_confirms keeper_names
+    keeper_rows observation ~base_path:config.Workspace.base_path ~pending_approvals
+      ~fusion_runs ~pending_confirms keeper_names
     |> List.map (fun (keeper_name, rows, external_attention_truncated) ->
       let rows = rows @ rows_for_keeper keeper_name schedule_rows in
       keeper_name, keeper_is_busy busy_names keeper_name, rows, external_attention_truncated)
@@ -995,4 +1053,8 @@ let dashboard_json config =
     ; "keepers", `List keeper_json_rows
     ; "global_waiting_on", `List (List.map waiting_row_json global_rows)
     ]
+;;
+
+let dashboard_json config =
+  capture_request_observation config |> dashboard_json_of_observation
 ;;

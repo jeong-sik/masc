@@ -356,31 +356,70 @@ function reactionLedgerHealthChip(
   const pending = ledgerCount(ledger.pending_stimulus_count)
   const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
   const readErrors = ledgerCount(ledger.read_error_count)
+  const keeperDiscoveryErrors = ledgerCount(ledger.keeper_name_discovery_error_count)
+  const discoveryErrors = ledgerCount(ledger.reaction_store_discovery_error_count)
   const cursorAck = ledgerCount(ledger.cursor_ack_count)
+  const inProgress = ledgerCount(ledger.in_progress_stimulus_count)
+  const acked = ledgerCount(ledger.acked_stimulus_count)
+  const escalated = ledgerCount(ledger.escalated_stimulus_count)
+  const externalInput = ledgerCount(ledger.external_input_requested_stimulus_count)
+  const orphanReactions = ledgerCount(ledger.orphan_reaction_stimulus_count)
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
-  if (!requiresAction && pending === 0 && readErrors === 0 && cursorSwept === 0 && status !== 'degraded') {
+  const countsIncomplete = ledger.counts_complete === false
+  if (
+    !requiresAction
+    && !countsIncomplete
+    && pending === 0
+    && readErrors === 0
+    && discoveryErrors === 0
+    && escalated === 0
+    && externalInput === 0
+    && orphanReactions === 0
+    && status !== 'degraded'
+    && status !== 'unknown'
+    && status !== 'unavailable'
+  ) {
     return null
   }
-  const tone: DashboardHealthChipTone = readErrors > 0
+  const tone: DashboardHealthChipTone =
+    readErrors > 0 || keeperDiscoveryErrors > 0 || discoveryErrors > 0 || countsIncomplete
     ? 'bad'
-    : requiresAction || pending > 0 || status === 'degraded'
+    : requiresAction
+        || pending > 0
+        || escalated > 0
+        || externalInput > 0
+        || orphanReactions > 0
+        || status === 'degraded'
       ? 'warn'
       : 'ok'
-  const label = pending > 0
-    ? `Reaction ledger pending ${pending}`
-    : cursorSwept > 0
-      ? `Reaction ledger swept ${cursorSwept}`
-      : `Reaction ledger ${status}`
+  const label = externalInput > 0
+    ? `Reaction ledger external input ${externalInput}`
+    : escalated > 0
+      ? `Reaction ledger escalated ${escalated}`
+      : orphanReactions > 0
+        ? `Reaction ledger orphan ${orphanReactions}`
+        : pending > 0
+          ? `Reaction ledger pending ${pending}`
+          : `Reaction ledger ${status}`
   return {
     key: 'reaction-ledger',
     label,
     detail: [
       `status=${status}`,
       `pending=${pending}`,
+      `in_progress=${inProgress}`,
+      `acked=${acked}`,
+      `escalated=${escalated}`,
+      `external_input=${externalInput}`,
+      `orphan_reactions=${orphanReactions}`,
       `cursor_swept=${cursorSwept}`,
       `cursor_ack=${cursorAck}`,
       `read_errors=${readErrors}`,
+      `keeper_discovery_errors=${keeperDiscoveryErrors}`,
+      `discovery_errors=${discoveryErrors}`,
+      `counts_complete=${ledger.counts_complete ?? 'unknown'}`,
+      `reasons=${(ledger.status_reasons ?? []).join('|') || 'none'}`,
     ].join(', '),
     tone,
     route: {

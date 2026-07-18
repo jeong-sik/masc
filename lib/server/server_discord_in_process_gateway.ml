@@ -560,8 +560,8 @@ let handle_ambient ?resolved_keeper_name ~base_dir
               keeper_name
               event_id
               detail
-          | Keeper_registry_event_queue.Stimulus_enqueued
-          | Keeper_registry_event_queue.Stimulus_already_present ->
+          | Keeper_registry_event_queue.Stimulus_enqueued _
+          | Keeper_registry_event_queue.Stimulus_already_present _ ->
             (match
                Keeper_registry.wakeup_running
                  ~intent:Keeper_registry.Reactive_signal

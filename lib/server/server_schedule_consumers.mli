@@ -1,12 +1,8 @@
 val supported_payload_kinds : string list
 
-type keeper_wake_reaction_ledger_status =
-  | Keeper_wake_reaction_ledger_recorded
-  | Keeper_wake_reaction_ledger_record_failed of string
-
 type keeper_wake_occurrence_status =
-  | Keeper_wake_awaiting_ack
-  | Keeper_wake_already_acked
+  | Keeper_wake_awaiting_settlement
+  | Keeper_wake_already_settled
 
 type dispatch_receipt =
   | Keeper_wake_enqueued of
@@ -16,8 +12,7 @@ type dispatch_receipt =
       ; post_id : string
       ; queue : string
       ; stimulus : string
-      ; stimulus_id : string option
-      ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; stimulus_id : string
       ; occurrence_status : keeper_wake_occurrence_status
       }
 

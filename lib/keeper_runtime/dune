@@ -28,6 +28,7 @@
  (libraries
   agent_sdk
   agent_sdk.llm_provider
+  digestif
   eio
   masc_eio_context
   masc.config

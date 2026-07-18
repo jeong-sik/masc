@@ -49,6 +49,7 @@ type settle_result =
 
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
+let lease_sequence (lease : lease) = lease.sequence
 
 let snapshot_filename = "event-queue.json"
 let settlement_wal_filename = "event-queue-settlements.jsonl"
@@ -554,20 +555,37 @@ let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name
 ;;
 
 type enqueue_stimulus_result =
-  | Enqueued
-  | Already_present
+  | Enqueued of Keeper_event_queue.stimulus
+  | Already_present of Keeper_event_queue.stimulus
 
-let state_accounts_for_stimulus state stimulus =
-  let same candidate =
+let exact_stimulus_equal left right =
+  Yojson.Safe.equal
+    (Keeper_event_queue.stimulus_to_yojson left)
+    (Keeper_event_queue.stimulus_to_yojson right)
+;;
+
+let durable_stimulus_by_identity state candidate =
+  let same stimulus =
     Keeper_event_queue.stimulus_identity_equal candidate stimulus
   in
-  List.exists same (Keeper_event_queue.to_list (State.pending state))
-  || List.exists
-       (fun (lease : lease) -> List.exists same lease.stimuli)
-       (State.leases state)
-  || List.exists
-       (fun (entry : outbox_entry) -> List.exists same entry.stimuli)
-       (State.transition_outbox state)
+  let matches =
+    List.filter same (Keeper_event_queue.to_list (State.pending state))
+    @ List.concat_map
+        (fun (lease : lease) -> List.filter same lease.stimuli)
+        (State.leases state)
+    @ List.concat_map
+        (fun (entry : outbox_entry) -> List.filter same entry.stimuli)
+        (State.transition_outbox state)
+  in
+  match matches with
+  | [] -> Ok None
+  | committed :: rest when List.for_all (exact_stimulus_equal committed) rest ->
+    Ok (Some committed)
+  | _ ->
+    Error
+      (Printf.sprintf
+         "event queue durable state contains conflicting values for stimulus identity %s"
+         (Keeper_event_queue.stimulus_identity_id candidate))
 ;;
 
 let enqueue_stimulus_if_absent_result
@@ -577,11 +595,12 @@ let enqueue_stimulus_if_absent_result
       stimulus
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    if state_accounts_for_stimulus state stimulus then
-      Ok (state, Already_present)
-    else
+    match durable_stimulus_by_identity state stimulus with
+    | Error _ as error -> error
+    | Ok (Some committed) -> Ok (state, Already_present committed)
+    | Ok None ->
       let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued))
+      Ok (State.with_pending pending state, Enqueued stimulus))
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =

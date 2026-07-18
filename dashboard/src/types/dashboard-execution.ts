@@ -184,22 +184,75 @@ export interface DashboardPausedKeepersHealth {
 export interface DashboardKeeperReactionLedgerPendingKeeper {
   keeper_name: string
   pending_stimulus_count: number
+  pending_ids_truncated: boolean | null
   pending_stimulus_ids: string[]
 }
 
-export interface DashboardKeeperReactionLedgerHealth {
+export interface DashboardKeeperReactionLedgerKeeperHealth {
+  schema: string | null
+  keeper_name: string
   status: string | null
   operator_action_required: boolean | null
-  keeper_count: number | null
+  counts_complete: boolean | null
+  pending_id_display_limit: number | null
   row_count: number | null
   stimulus_count: number | null
   reaction_count: number | null
   turn_started_count: number | null
+  event_queue_ack_count: number | null
+  event_queue_requeue_count: number | null
+  event_queue_escalation_count: number | null
+  event_queue_external_input_count: number | null
   cursor_ack_count: number | null
   cursor_swept_stimulus_count: number | null
+  orphan_reaction_stimulus_count: number | null
+  in_progress_stimulus_count: number | null
+  acked_stimulus_count: number | null
+  escalated_stimulus_count: number | null
+  external_input_requested_stimulus_count: number | null
   pending_stimulus_count: number | null
+  pending_ids_truncated: boolean | null
+  pending_stimulus_ids: string[]
+  latest_recorded_at_unix: number | null
+  latest_stimulus_id: string | null
+  read_error: string | null
+}
+
+export interface DashboardKeeperReactionLedgerHealth {
+  schema: string | null
+  status: string | null
+  status_reasons: string[]
+  operator_action_required: boolean | null
+  empty: boolean | null
+  keeper_count: number | null
+  keeper_names: string[]
+  keeper_name_discovery_error_count: number | null
+  keeper_name_discovery_errors: string[]
+  counts_complete: boolean | null
+  pending_id_display_limit_per_keeper: number | null
+  row_count: number | null
+  stimulus_count: number | null
+  reaction_count: number | null
+  turn_started_count: number | null
+  event_queue_ack_count: number | null
+  event_queue_requeue_count: number | null
+  event_queue_escalation_count: number | null
+  event_queue_external_input_count: number | null
+  cursor_ack_count: number | null
+  cursor_swept_stimulus_count: number | null
+  orphan_reaction_stimulus_count: number | null
+  in_progress_stimulus_count: number | null
+  acked_stimulus_count: number | null
+  escalated_stimulus_count: number | null
+  external_input_requested_stimulus_count: number | null
+  pending_stimulus_count: number | null
+  reaction_store_discovered_keeper_count: number | null
+  reaction_store_discovered_keeper_names: string[]
+  reaction_store_discovery_error_count: number | null
+  reaction_store_discovery_errors: string[]
   read_error_count: number | null
   pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]
+  keepers: DashboardKeeperReactionLedgerKeeperHealth[]
 }
 
 export interface DashboardFleetPressureHealth {

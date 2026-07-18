@@ -8,27 +8,29 @@ open Server_auth
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 
-let take = List.take
-;;
-
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
   | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
-    let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
+    let keeper_name_discovery =
+      try
+        Keeper_meta_store.keeper_names config
+        |> sorted_unique_strings
+        |> fun names -> Keeper_reaction_ledger.Keeper_names_discovered names
+      with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
+        let detail = Printexc.to_string exn in
         Log.Keeper.warn
           "health: failed to compute keeper reaction ledger names: %s"
-          (Printexc.to_string exn);
-        []
+          detail;
+        Keeper_reaction_ledger.Keeper_name_discovery_failed detail
     in
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path:config.base_path
-      ~keeper_names
-      ~limit_per_keeper:20
+      ~keeper_name_discovery
+      ~pending_id_display_limit_per_keeper:0
 ;;
 
 let keeper_turn_admission_health_json () =

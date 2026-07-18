@@ -50,6 +50,10 @@ let record_event_queue_stimulus_turn_started =
   Stimulus_intake.record_event_queue_stimulus_turn_started
 ;;
 
+let record_event_queue_turn_admission =
+  Stimulus_intake.record_event_queue_turn_admission
+;;
+
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
@@ -146,23 +150,22 @@ let connector_attention_event_ids_of_stimuli stimuli =
     stimuli
 ;;
 
-let record_schedule_due_turn_started_reactions ~ctx ~keeper_name stimuli =
-  List.iter
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-       match stimulus.payload with
-       | Keeper_event_queue.Schedule_due _ ->
-         record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Bg_completed _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Failure_judgment _
-       | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _ -> ())
-    stimuli
+let record_event_queue_turn_started_reactions
+      ~ctx
+      ~keeper_name
+      ~claimed_lease
+      stimuli
+  =
+  match stimuli, claimed_lease with
+  | [], _ -> Ok ()
+  | _ :: _, None -> Error "event-queue turn-start evidence has no claimed queue lease"
+  | stimuli, Some lease ->
+    let lease_sequence = Keeper_registry_event_queue.lease_sequence lease in
+    record_event_queue_turn_admission
+      ~ctx
+      ~keeper_name
+      ~lease_sequence
+      stimuli
 ;;
 
 let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
@@ -392,6 +395,7 @@ let project_transition_outbox ~base_path ~keeper_name =
   Keeper_reaction_ledger.project_event_queue_transition_outbox_result
     ~base_path
     ~keeper_name
+  |> Result.map_error Keeper_reaction_ledger.ledger_error_to_string
 ;;
 
 let settle_claimed_lease
@@ -730,10 +734,15 @@ let run_keepalive_unified_turn
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
              consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
-          record_schedule_due_turn_started_reactions
-            ~ctx
-            ~keeper_name:meta_after_triage.name
-            !consumed_stimuli;
+          (match
+             record_event_queue_turn_started_reactions
+               ~ctx
+               ~keeper_name:meta_after_triage.name
+               ~claimed_lease:!claimed_lease
+               !consumed_stimuli
+           with
+           | Ok () -> ()
+           | Error detail -> raise (Event_queue_settlement_failed detail));
           let event_bus = Keeper_event_bus.get () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an OAS approval. *)

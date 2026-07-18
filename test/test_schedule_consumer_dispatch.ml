@@ -344,7 +344,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "projection_status" |> to_string);
     check string "receipt kind" "masc.keeper_wake.enqueued"
       (receipt |> member "kind" |> to_string);
-    check string "receipt occurrence awaits ack" "awaiting_ack"
+    check string "receipt occurrence awaits settlement" "awaiting_settlement"
       (receipt |> member "occurrence_status" |> to_string);
     check string "receipt queue" "keeper_event_queue"
       (receipt |> member "queue" |> to_string);
@@ -463,6 +463,100 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
+let test_keeper_wake_retry_records_committed_arrival () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let request = create_keeper_wake_schedule config in
+  let payload_digest = Schedule_domain.payload_digest request.payload in
+  let occurrence_id =
+    Schedule_occurrence_id.make
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest
+  in
+  let signal : Schedule_runner.wake_signal =
+    { occurrence_id
+    ; kind = Schedule_runner.Due_candidate
+    ; schedule_id = request.schedule_id
+    ; emitted_at = 201.0
+    ; due_at = request.due_at
+    ; payload_digest
+    ; payload = Schedule_domain.payload_to_yojson request.payload
+    }
+  in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { schedule_id = request.schedule_id
+    ; due_at = request.due_at
+    ; payload_digest
+    ; title = Some "Scheduled lane wake"
+    ; message = "Run the scheduled maintenance lane now."
+    }
+  in
+  let original : Keeper_event_queue.stimulus =
+    { post_id = Schedule_occurrence_id.to_string occurrence_id
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = 201.0
+    ; payload = Keeper_event_queue.Schedule_due wake
+    }
+  in
+  (match
+     Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path
+       keeper_name
+       original
+   with
+   | Keeper_registry_event_queue.Stimulus_enqueued committed ->
+     check (float 0.0)
+       "seed returns committed arrival"
+       original.arrived_at
+       committed.arrived_at
+   | Keeper_registry_event_queue.Stimulus_already_present _ ->
+     fail "fresh schedule occurrence was already present"
+   | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail);
+  (match
+     Server_schedule_consumers.consumer.dispatch
+       config
+       ~now:202.0
+       signal
+       request
+   with
+   | Ok _ -> ()
+   | Error _ -> fail "schedule retry dispatch failed");
+  let stimulus_id = Keeper_event_queue.stimulus_identity_id original in
+  let events =
+    match
+      Keeper_reaction_store.events_for_stimuli
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ stimulus_id ]
+    with
+    | Ok [ (returned_id, events) ] ->
+      check string "reaction lookup preserves identity" stimulus_id returned_id;
+      events
+    | Ok _ -> fail "reaction lookup returned an unexpected identity set"
+    | Error error -> fail (Keeper_reaction_store.error_to_string error)
+  in
+  match
+    List.find_opt
+      (fun (event : Keeper_reaction_store.stored_event) ->
+         match event.payload with
+         | Keeper_reaction_store.Stored_stimulus _ -> true
+         | Keeper_reaction_store.Stored_turn_started _
+         | Keeper_reaction_store.Stored_transition_settlement _
+         | Keeper_reaction_store.Stored_cursor_ack _ -> false)
+      events
+  with
+  | Some { payload = Keeper_reaction_store.Stored_stimulus stimulus; _ } ->
+    check (float 0.0)
+      "ledger records the original durable arrival"
+      original.arrived_at
+      stimulus.arrived_at
+  | Some _ -> fail "matched reaction event was not a stimulus"
+  | None -> fail "schedule retry did not record its durable stimulus"
+;;
+
 let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
   with_workspace
   @@ fun config ->
@@ -539,7 +633,7 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
       check bool "retry sends no second wake" false (Atomic.get entry.fiber_wakeup);
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
-         check string "retry observes terminal ack" "already_acked"
+         check string "retry observes terminal settlement" "already_settled"
            Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
        | _ -> fail "retry completion receipt missing");
       check int "retry enqueues no second occurrence" 0
@@ -708,7 +802,6 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_evidence |> member "inflight_count" |> to_int);
       let pending_receipt = pending_row |> member "dispatch_receipt" in
       let stimulus_id = pending_receipt |> member "stimulus_id" |> to_string in
-      check string "ledger preserves occurrence id" occurrence_id stimulus_id;
       let pending_reaction_evidence =
         pending_row |> member "keeper_reaction_evidence"
       in
@@ -722,8 +815,8 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (pending_reaction_evidence |> member "stimulus_seen" |> to_bool);
       check bool "reaction evidence turn not started yet" false
         (pending_reaction_evidence |> member "turn_started_seen" |> to_bool);
-      check bool "queued stimulus has no fabricated reaction kind" true
-        (pending_reaction_evidence |> member "reaction_kind" = `Null);
+      check bool "queued stimulus has no fabricated latest reaction" true
+        (pending_reaction_evidence |> member "latest_reaction" = `Null);
       check int "one matched ledger row before turn" 1
         (pending_reaction_evidence |> member "matched_record_count" |> to_int);
       let lease, leased =
@@ -742,6 +835,9 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
            | [] | _ :: _ :: _ -> fail "scheduled wake lease cardinality drifted")
       in
       check string "leased occurrence id" occurrence_id leased.post_id;
+      check string "receipt uses canonical queue identity"
+        (Keeper_event_queue.stimulus_identity_id leased)
+        stimulus_id;
       (match leased.payload with
        | Keeper_event_queue.Schedule_due wake ->
          check string "leased schedule id" request.schedule_id wake.schedule_id
@@ -768,6 +864,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
       Keeper_reaction_ledger.record_event_queue_turn_started_result
         ~base_path:config.Workspace_utils.base_path
         ~keeper_name
+        ~lease_sequence:(Keeper_registry_event_queue.lease_sequence lease)
         leased
       |> require_reaction_ledger_write "record scheduled wake turn start";
       let reacted_row =
@@ -780,7 +877,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
       check bool "reaction evidence turn started" true
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
       check string "reaction evidence kind comes from turn evidence" "turn_started"
-        (reaction_evidence |> member "reaction_kind" |> to_string);
+        (reaction_evidence |> member "latest_reaction" |> member "kind" |> to_string);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
       (match
@@ -816,7 +913,7 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
       check bool "reaction evidence event queue acked" true
         (acked_reaction_evidence |> member "event_queue_ack_seen" |> to_bool);
       check string "reaction evidence kind prefers consumed ack" "event_queue_ack"
-        (acked_reaction_evidence |> member "reaction_kind" |> to_string);
+        (acked_reaction_evidence |> member "latest_reaction" |> member "kind" |> to_string);
       check int "three matched ledger rows after ack" 3
         (acked_reaction_evidence |> member "matched_record_count" |> to_int))
 ;;
@@ -969,8 +1066,8 @@ let test_dashboard_distinguishes_missing_and_unreadable_sqlite_evidence () =
     (missing |> member "projection_status" |> to_string);
   check int "missing SQLite database has no matched rows" 0
     (missing |> member "matched_record_count" |> to_int);
-  check bool "missing evidence has no reaction kind" true
-    (missing |> member "reaction_kind" = `Null);
+  check bool "missing evidence has no latest reaction" true
+    (missing |> member "latest_reaction" = `Null);
   mkdir_p database_path;
   let unreadable = evidence () in
   check string
@@ -981,8 +1078,8 @@ let test_dashboard_distinguishes_missing_and_unreadable_sqlite_evidence () =
     "storage failure reason is explicit"
     true
     (unreadable |> member "reason" |> to_string |> String.length > 0);
-  check bool "typed read failure has no reaction kind" true
-    (unreadable |> member "reaction_kind" = `Null)
+  check bool "typed read failure has no latest reaction" true
+    (unreadable |> member "latest_reaction" = `Null)
 ;;
 
 let test_keeper_wake_consumer_rejects_invalid_keeper_name () =
@@ -1030,6 +1127,8 @@ let () =
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "keeper wake durable enqueue retries same occurrence" `Quick
             test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
+        ; test_case "keeper wake retry records committed arrival" `Quick
+            test_keeper_wake_retry_records_committed_arrival
         ; test_case "acked occurrence recovery does not enqueue or wake again" `Quick
             test_acked_occurrence_recovery_does_not_enqueue_or_wake_again
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick

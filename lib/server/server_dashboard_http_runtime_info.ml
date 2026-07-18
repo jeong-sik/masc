@@ -2488,26 +2488,94 @@ let schedule_queue_read_error_dashboard_json
     ]
 ;;
 
-let schedule_queue_match
-  ~(schedule_id : string)
-  ~(due_at : float)
-  ~(payload_digest : string)
-  ~(post_id : string)
-  ~(stimulus_label : string)
-  (queue : Keeper_event_queue.t)
-  =
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.find_opt (fun (stimulus : Keeper_event_queue.stimulus) ->
-    String.equal stimulus.post_id post_id
-    && String.equal (Keeper_event_queue.payload_kind_label stimulus.payload) stimulus_label
-    &&
-    match stimulus.payload with
-    | Keeper_event_queue.Schedule_due wake ->
-      String.equal wake.schedule_id schedule_id
-      && Float.equal wake.due_at due_at
-      && String.equal wake.payload_digest payload_digest
-    | _ -> false)
+type schedule_queue_snapshot_index =
+  { pending_count : int
+  ; inflight_count : int
+  ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
+  ; matches :
+      ( string
+        , (schedule_queue_bucket * Keeper_event_queue.stimulus) list )
+        Hashtbl.t
+  }
+
+and schedule_queue_bucket =
+  | Schedule_queue_pending
+  | Schedule_queue_inflight
+
+type schedule_queue_identity_match =
+  | Schedule_queue_unique_match of
+      schedule_queue_bucket * Keeper_event_queue.stimulus
+  | Schedule_queue_identity_conflict of int
+
+let schedule_queue_bucket_to_string = function
+  | Schedule_queue_pending -> "pending"
+  | Schedule_queue_inflight -> "inflight"
+;;
+
+let schedule_queue_evidence_lookup observation executions =
+  let keeper_names =
+    List.filter_map
+      (fun execution ->
+        match execution.Schedule_domain.detail with
+        | None -> None
+        | Some detail ->
+          (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+           | Ok (Server_schedule_consumers.Keeper_wake_enqueued { keeper_name; _ }) ->
+             Some keeper_name
+           | Error _ -> None))
+      executions
+    |> List.sort_uniq String.compare
+  in
+  let snapshots = Hashtbl.create (List.length keeper_names) in
+  List.iter
+    (fun keeper_name ->
+      match
+        Server_keeper_waiting_inventory.event_queue_snapshot
+          observation
+          ~keeper_name
+      with
+      | None -> ()
+      | Some snapshot ->
+        let matches =
+          Hashtbl.create
+            (Keeper_event_queue.length snapshot.pending
+             + Keeper_event_queue.length snapshot.inflight)
+        in
+        let index bucket queue =
+          Keeper_event_queue.to_list queue
+          |> List.iter (fun stimulus ->
+            match stimulus.Keeper_event_queue.payload with
+            | Keeper_event_queue.Schedule_due _ ->
+              let identity = Keeper_event_queue.stimulus_identity_id stimulus in
+              let existing =
+                Option.value (Hashtbl.find_opt matches identity) ~default:[]
+              in
+              Hashtbl.replace matches identity ((bucket, stimulus) :: existing)
+            | _ -> ())
+        in
+        index Schedule_queue_inflight snapshot.inflight;
+        index Schedule_queue_pending snapshot.pending;
+        Hashtbl.replace
+          snapshots
+          keeper_name
+          { pending_count = Keeper_event_queue.length snapshot.pending
+          ; inflight_count = Keeper_event_queue.length snapshot.inflight
+          ; read_errors = snapshot.read_errors
+          ; matches
+          })
+    keeper_names;
+  fun ~keeper_name ~stimulus_id ->
+    match Hashtbl.find_opt snapshots keeper_name with
+    | None -> None
+    | Some snapshot ->
+      let matched =
+        match Hashtbl.find_opt snapshot.matches stimulus_id with
+        | None -> None
+        | Some [ bucket, stimulus ] ->
+          Some (Schedule_queue_unique_match (bucket, stimulus))
+        | Some matches -> Some (Schedule_queue_identity_conflict (List.length matches))
+      in
+      Some (snapshot, matched)
 ;;
 
 let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
@@ -2543,7 +2611,7 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
 
 let schedule_keeper_queue_evidence_dashboard_json
   ~now
-  (config : Workspace.config)
+  ~queue_evidence_lookup
   (execution : Schedule_domain.execution_record option)
   =
   match execution with
@@ -2566,62 +2634,120 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; post_id
               ; queue
               ; stimulus
-              ; stimulus_id = _
-              ; reaction_ledger_status = _
+              ; stimulus_id
               ; occurrence_status = _
               }) ->
           let due_at = execution.Schedule_domain.due_at in
           let payload_digest = execution.Schedule_domain.payload_digest in
-          let snapshot =
-            Keeper_event_queue_persistence.load_snapshot_pair_with_errors
-              ~base_path:config.Workspace_utils.base_path
-              ~keeper_name
-          in
-          let pending_match =
-            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
-              ~stimulus_label:stimulus snapshot.pending
-          in
-          let inflight_match =
-            schedule_queue_match ~schedule_id ~due_at ~payload_digest ~post_id
-              ~stimulus_label:stimulus snapshot.inflight
-          in
-          let read_errors =
-            List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
-          in
-          let base_fields =
-            [ "source", `String "durable_event_queue_snapshot"
-            ; "queue", `String queue
-            ; "stimulus", `String stimulus
-            ; "keeper_name", `String keeper_name
-            ; "schedule_id", `String schedule_id
-            ; "post_id", `String post_id
-            ; "execution_due_at", `Float due_at
-            ; "execution_due_at_iso", unix_iso_json due_at
-            ; "execution_payload_digest", `String payload_digest
-            ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
-            ; "inflight_count", `Int (Keeper_event_queue.length snapshot.inflight)
-            ; "read_errors", `List read_errors
-            ]
-          in
-          (match pending_match, inflight_match, snapshot.read_errors with
-           | Some match_, _, _ ->
+          (match
+             queue_evidence_lookup
+               ~keeper_name
+               ~stimulus_id
+           with
+           | None ->
              `Assoc
-               (("projection_status", `String "matched_pending")
-                :: base_fields
-                @ schedule_queue_match_fields ~now "pending" match_)
-           | None, Some match_, _ ->
-             `Assoc
-               (("projection_status", `String "matched_inflight")
-                :: base_fields
-                @ schedule_queue_match_fields ~now "inflight" match_)
-           | None, None, _ :: _ ->
-             `Assoc (("projection_status", `String "read_error") :: base_fields)
-           | None, None, [] ->
-             `Assoc (("projection_status", `String "not_found") :: base_fields))))
+               [ "projection_status", `String "read_error"
+               ; "reason", `String "batched queue evidence lookup omitted this Keeper"
+               ; "keeper_name", `String keeper_name
+               ; "schedule_id", `String schedule_id
+               ]
+           | Some (snapshot, matched) ->
+             let read_errors =
+               List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
+             in
+             let base_fields =
+               [ "source", `String "durable_event_queue_snapshot"
+               ; "queue", `String queue
+               ; "stimulus", `String stimulus
+               ; "keeper_name", `String keeper_name
+               ; "schedule_id", `String schedule_id
+               ; "post_id", `String post_id
+               ; "stimulus_id", `String stimulus_id
+               ; "execution_due_at", `Float due_at
+               ; "execution_due_at_iso", unix_iso_json due_at
+               ; "execution_payload_digest", `String payload_digest
+               ; "pending_count", `Int snapshot.pending_count
+               ; "inflight_count", `Int snapshot.inflight_count
+               ; "read_errors", `List read_errors
+               ]
+             in
+             (match matched, snapshot.read_errors with
+              | Some (Schedule_queue_unique_match (Schedule_queue_pending, match_)), _ ->
+                `Assoc
+                   (("projection_status", `String "matched_pending")
+                    :: base_fields
+                   @ schedule_queue_match_fields
+                       ~now
+                       (schedule_queue_bucket_to_string Schedule_queue_pending)
+                       match_)
+              | Some (Schedule_queue_unique_match (Schedule_queue_inflight, match_)), _ ->
+                `Assoc
+                   (("projection_status", `String "matched_inflight")
+                    :: base_fields
+                   @ schedule_queue_match_fields
+                       ~now
+                       (schedule_queue_bucket_to_string Schedule_queue_inflight)
+                       match_)
+              | Some (Schedule_queue_identity_conflict matched_identity_count), _ ->
+                `Assoc
+                  (("projection_status", `String "identity_conflict")
+                   :: ("operator_action_required", `Bool true)
+                   :: ("matched_identity_count", `Int matched_identity_count)
+                   :: base_fields)
+              | None, _ :: _ ->
+                `Assoc (("projection_status", `String "read_error") :: base_fields)
+              | None, [] ->
+                `Assoc (("projection_status", `String "not_found") :: base_fields)))))
+;;
+
+let keeper_reaction_identity_of_execution execution =
+  match execution.Schedule_domain.detail with
+  | None -> None
+  | Some detail ->
+    (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+     | Ok
+         (Server_schedule_consumers.Keeper_wake_enqueued
+           { keeper_name; stimulus_id; _ }) ->
+       Some (keeper_name, stimulus_id)
+     | Error _ -> None)
+;;
+
+let schedule_reaction_evidence_lookup config executions =
+  let grouped = Hashtbl.create (List.length executions) in
+  List.iter
+    (fun execution ->
+      match keeper_reaction_identity_of_execution execution with
+      | None -> ()
+      | Some (keeper_name, stimulus_id) ->
+        let current = Option.value (Hashtbl.find_opt grouped keeper_name) ~default:[] in
+        Hashtbl.replace grouped keeper_name (stimulus_id :: current))
+    executions;
+  let evidence = Hashtbl.create (List.length executions) in
+  Hashtbl.iter
+    (fun keeper_name reversed_stimulus_ids ->
+      let stimulus_ids = List.rev reversed_stimulus_ids in
+      match
+        Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+          ~base_path:config.Workspace_utils.base_path
+          ~keeper_name
+          ~stimulus_ids
+      with
+      | Ok entries ->
+        List.iter
+          (fun (stimulus_id, value) ->
+            Hashtbl.replace evidence (keeper_name, stimulus_id) (Ok value))
+          entries
+      | Error error ->
+        List.iter
+          (fun stimulus_id ->
+            Hashtbl.replace evidence (keeper_name, stimulus_id) (Error error))
+          stimulus_ids)
+    grouped;
+  fun ~keeper_name ~stimulus_id -> Hashtbl.find_opt evidence (keeper_name, stimulus_id)
 ;;
 
 let schedule_keeper_reaction_evidence_dashboard_json
-  (config : Workspace.config)
+  ~reaction_evidence_lookup
   (execution : Schedule_domain.execution_record option)
   =
   match execution with
@@ -2645,7 +2771,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
               ; queue = _
               ; stimulus
               ; stimulus_id
-              ; reaction_ledger_status = _
               ; occurrence_status = _
               }) ->
           let base_fields =
@@ -2660,14 +2785,83 @@ let schedule_keeper_reaction_evidence_dashboard_json
                      Keeper_reaction_ledger.Schedule_due) )
             ]
           in
-          (match stimulus_id with
-           | None ->
-             `Assoc
-               (("projection_status", `String "missing_stimulus_id")
-                :: ("reason", `String "dispatch receipt predates stimulus_id projection")
-                :: base_fields)
-           | Some stimulus_id ->
-             let evidence_fields
+          let latest_reaction_json
+                (reaction : Keeper_reaction_ledger.event_queue_latest_reaction)
+            =
+            let common_fields ~kind ~sequence ~event_id ~recorded_at =
+              [ ( "kind"
+                , `String
+                    (Keeper_reaction_ledger.reaction_kind_to_string kind) )
+              ; "sequence", `String (Int64.to_string sequence)
+              ; "event_id", `String event_id
+              ; "recorded_at", `Float recorded_at
+              ; "recorded_at_iso", unix_iso_json recorded_at
+              ]
+            in
+            let settlement_fields ~transition_id ~source_index ~source_count =
+              [ "transition_id", `String transition_id
+              ; "source_index", `Int source_index
+              ; "source_count", `Int source_count
+              ]
+            in
+            match reaction with
+            | Keeper_reaction_ledger.Latest_turn_started
+                { sequence; event_id; recorded_at } ->
+              `Assoc
+                (common_fields
+                   ~kind:Keeper_reaction_ledger.Turn_started
+                   ~sequence
+                   ~event_id
+                   ~recorded_at)
+            | Latest_event_queue_ack
+                { sequence
+                ; event_id
+                ; recorded_at
+                ; transition_id
+                ; source_index
+                ; source_count
+                } ->
+              `Assoc
+                (common_fields
+                   ~kind:Keeper_reaction_ledger.Event_queue_ack
+                   ~sequence
+                   ~event_id
+                   ~recorded_at
+                 @ settlement_fields ~transition_id ~source_index ~source_count)
+            | Latest_event_queue_requeued
+                { sequence
+                ; event_id
+                ; recorded_at
+                ; transition_id
+                ; source_index
+                ; source_count
+                } ->
+              `Assoc
+                (common_fields
+                   ~kind:Keeper_reaction_ledger.Event_queue_requeued
+                   ~sequence
+                   ~event_id
+                   ~recorded_at
+                 @ settlement_fields ~transition_id ~source_index ~source_count)
+            | Latest_event_queue_escalated
+                { sequence
+                ; event_id
+                ; recorded_at
+                ; transition_id
+                ; source_index
+                ; source_count
+                ; external_input_requested
+                } ->
+              `Assoc
+                (common_fields
+                   ~kind:Keeper_reaction_ledger.Event_queue_escalated
+                   ~sequence
+                   ~event_id
+                   ~recorded_at
+                 @ settlement_fields ~transition_id ~source_index ~source_count
+                 @ [ "external_input_requested", `Bool external_input_requested ])
+          in
+          let evidence_fields
                    (evidence : Keeper_reaction_ledger.event_queue_reaction_evidence)
                =
                [ "stimulus_id", `String stimulus_id
@@ -2675,8 +2869,6 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
                   ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; "matched_record_count", `Int evidence.matched_record_count
-                  ; ( "quarantined_record_count"
-                    , `Int evidence.quarantined_record_count )
                   ; ( "stimulus_recorded_at"
                     , match evidence.stimulus_recorded_at with
                       | None -> `Null
@@ -2695,6 +2887,10 @@ let schedule_keeper_reaction_evidence_dashboard_json
                       | Some ts -> `Float ts )
                   ; ( "event_queue_ack_recorded_at_iso"
                     , unix_iso_option_json evidence.event_queue_ack_recorded_at )
+                  ; ( "latest_reaction"
+                    , match evidence.latest_reaction with
+                      | None -> `Null
+                      | Some reaction -> latest_reaction_json reaction )
                   ; ( "latest_recorded_at"
                     , match evidence.latest_recorded_at with
                       | None -> `Null
@@ -2702,10 +2898,9 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   ; ( "latest_recorded_at_iso"
                     , unix_iso_option_json evidence.latest_recorded_at )
                   ]
-             in
-             let projection_json
+          in
+          let projection_json
                    ?reason
-                   ?reaction_kind
                    ?(extra_fields=[])
                    status
                    evidence
@@ -2715,78 +2910,70 @@ let schedule_keeper_reaction_evidence_dashboard_json
                  | Some value -> [ "reason", `String value ]
                  | None -> []
                in
-               let reaction_kind_fields =
-                 match reaction_kind with
-                 | Some reaction_kind ->
-                   [ ( "reaction_kind"
-                     , `String
-                         (Keeper_reaction_ledger.reaction_kind_to_string
-                            reaction_kind) )
-                   ]
-                 | None -> []
-               in
                `Assoc
                  (("projection_status", `String status)
                   :: base_fields
                   @ evidence_fields evidence
-                  @ reaction_kind_fields
                   @ reason_fields
                   @ extra_fields)
-             in
-             (match
-                Keeper_reaction_ledger.event_queue_reaction_evidence_result
-                  ~base_path:config.Workspace_utils.base_path
-                  ~keeper_name
-                  ~stimulus_id
-              with
-              | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id ->
-                let error =
-                  Keeper_reaction_ledger.Evidence_invalid_stimulus_id
-                in
-                `Assoc
-                  (("projection_status", `String "invalid_stimulus_id")
-                   :: ( "reason"
-                      , `String
-                          (Keeper_reaction_ledger
-                           .event_queue_reaction_evidence_error_to_string
-                             error) )
-                   :: base_fields
-                   @ [ "stimulus_id", `String stimulus_id ])
-              | Error (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
+          in
+          (match reaction_evidence_lookup ~keeper_name ~stimulus_id with
+           | None ->
                 `Assoc
                   (("projection_status", `String "read_error")
                    :: ( "reason"
-                      , `String
-                          (Keeper_reaction_ledger
-                           .event_queue_reaction_evidence_error_to_string
-                             error) )
+                      , `String "batched reaction evidence lookup omitted this identity" )
                    :: base_fields
                    @ [ "stimulus_id", `String stimulus_id ])
-              | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-                if evidence.event_queue_ack_seen
-                then
-                  projection_json
-                    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-                    "matched_consumed_ack"
-                    evidence
-                else if evidence.turn_started_seen
-                then
-                  projection_json
-                    ~reaction_kind:Keeper_reaction_ledger.Turn_started
-                    "matched_turn_started"
-                    evidence
-                else if evidence.stimulus_seen
-                then projection_json "matched_stimulus" evidence
-                else projection_json "not_found" evidence
-              | Ok
-                  (Keeper_reaction_ledger.Evidence_quarantined
-                    { evidence; first_reason }) ->
+           | Some (Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id) ->
+             let error = Keeper_reaction_ledger.Evidence_invalid_stimulus_id in
+             `Assoc
+               (("projection_status", `String "invalid_stimulus_id")
+                :: ( "reason"
+                   , `String
+                       (Keeper_reaction_ledger
+                        .event_queue_reaction_evidence_error_to_string
+                          error) )
+                :: base_fields
+                @ [ "stimulus_id", `String stimulus_id ])
+           | Some
+               (Error (Keeper_reaction_ledger.Evidence_store_error _ as error)) ->
+             `Assoc
+               (("projection_status", `String "read_error")
+                :: ( "reason"
+                   , `String
+                       (Keeper_reaction_ledger
+                        .event_queue_reaction_evidence_error_to_string
+                          error) )
+                :: base_fields
+                @ [ "stimulus_id", `String stimulus_id ])
+           | Some
+               (Ok
+                 (evidence : Keeper_reaction_ledger.event_queue_reaction_evidence)) ->
+             (match evidence.latest_reaction with
+              | Some (Keeper_reaction_ledger.Latest_event_queue_ack _) ->
+               projection_json
+                 "matched_consumed_ack"
+                 evidence
+              | Some (Latest_turn_started _) ->
+               projection_json
+                 "matched_turn_started"
+                 evidence
+              | Some (Latest_event_queue_requeued _) ->
+                projection_json "matched_requeued" evidence
+              | Some
+                  (Latest_event_queue_escalated
+                    { external_input_requested = true; _ }) ->
                 projection_json
-                  ~reason:
-                    (Keeper_reaction_ledger.row_quarantine_reason_to_string
-                       first_reason)
-                  "quarantined"
-                  evidence))))
+                  "matched_escalated_external_input"
+                  evidence
+              | Some
+                  (Latest_event_queue_escalated
+                    { external_input_requested = false; _ }) ->
+                projection_json "matched_escalated" evidence
+              | None when evidence.stimulus_seen ->
+                projection_json "matched_stimulus" evidence
+              | None -> projection_json "not_found" evidence))))
 ;;
 
 let schedule_signal_projection_limit = 20
@@ -2847,7 +3034,8 @@ let schedule_signal_rows_and_errors config limit =
 
 let schedule_request_dashboard_json
   ~now
-  ~config
+  ~queue_evidence_lookup
+  ~reaction_evidence_lookup
   ?last_execution
   (request : Schedule_domain.schedule_request)
   =
@@ -2905,9 +3093,15 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some execution -> execution_record_dashboard_json execution )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_execution
-    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_execution
+    ; ( "keeper_queue_evidence"
+      , schedule_keeper_queue_evidence_dashboard_json
+          ~now
+          ~queue_evidence_lookup
+          last_execution )
     ; ( "keeper_reaction_evidence"
-      , schedule_keeper_reaction_evidence_dashboard_json config last_execution )
+      , schedule_keeper_reaction_evidence_dashboard_json
+          ~reaction_evidence_lookup
+          last_execution )
     ]
 ;;
 
@@ -3029,8 +3223,44 @@ let schedule_live_supported_non_terminal_evidence_json schedules =
     ]
 ;;
 
-let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
+let scheduled_automation_request_rows (state : Schedule_store.state) =
+  let sorted =
+    state.schedules
+    |> List.sort (fun left right ->
+      match
+        ( schedule_request_active left
+        , schedule_request_active right
+        , compare left.due_at right.due_at )
+      with
+      | true, false, _ -> -1
+      | false, true, _ -> 1
+      | _, _, due_cmp when due_cmp <> 0 -> due_cmp
+      | _ -> String.compare left.schedule_id right.schedule_id)
+  in
+  let latest_execution = Schedule_store.latest_execution_lookup state in
+  take schedule_projection_request_limit sorted
+  |> List.map (fun (request : Schedule_domain.schedule_request) ->
+    ( request
+    , latest_execution ~schedule_id:request.Schedule_domain.schedule_id ))
+;;
+
+let scheduled_automation_queue_keeper_names = function
+  | Error _ -> []
+  | Ok state ->
+    scheduled_automation_request_rows state
+    |> List.filter_map (fun (_request, execution) ->
+      match execution with
+      | None -> None
+      | Some execution ->
+        (match keeper_reaction_identity_of_execution execution with
+         | None -> None
+         | Some (keeper_name, _stimulus_id) -> Some keeper_name))
+    |> List.sort_uniq String.compare
+;;
+
+let scheduled_automation_dashboard_json_of_observation observation : Yojson.Safe.t =
   (* Read-only projection; the schedule store remains the status SSOT. *)
+  let config = Server_keeper_waiting_inventory.workspace_config observation in
   let now = Unix.gettimeofday () in
   let signal_rows, signal_errors =
     schedule_signal_rows_and_errors config schedule_signal_projection_limit
@@ -3047,7 +3277,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     ; "signal_errors", `List signal_errors
     ]
   in
-  match Schedule_store.read_state_result config with
+  match Server_keeper_waiting_inventory.schedule_state_result observation with
   | Error err ->
     let read_error =
       "schedule store read failed: " ^ Schedule_store.read_error_to_string err
@@ -3082,20 +3312,14 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     in
     let terminal_count = List.length schedules - active_count in
     let payload_support = schedule_payload_support_json schedules in
-    let sorted =
-      schedules
-      |> List.sort (fun left right ->
-        match
-          ( schedule_request_active left
-          , schedule_request_active right
-          , compare left.due_at right.due_at )
-        with
-        | true, false, _ -> -1
-        | false, true, _ -> 1
-        | _, _, due_cmp when due_cmp <> 0 -> due_cmp
-        | _ -> String.compare left.schedule_id right.schedule_id)
+    let request_rows = scheduled_automation_request_rows state in
+    let executions = List.filter_map snd request_rows in
+    let queue_evidence_lookup =
+      schedule_queue_evidence_lookup observation executions
     in
-    let request_rows = take schedule_projection_request_limit sorted in
+    let reaction_evidence_lookup =
+      schedule_reaction_evidence_lookup config executions
+    in
     `Assoc
       (base_fields
        @ [ "status", `String "ok"
@@ -3118,14 +3342,22 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; ( "requests"
            , `List
                (List.map
-                  (fun (request : Schedule_domain.schedule_request) ->
-                     let last_execution =
-                       Schedule_store.last_execution_for_schedule state
-                         ~schedule_id:request.Schedule_domain.schedule_id
-                     in
-                     schedule_request_dashboard_json ~now ~config ?last_execution request)
+                  (fun (request, last_execution) ->
+                     schedule_request_dashboard_json
+                       ~now
+                       ~queue_evidence_lookup
+                       ~reaction_evidence_lookup
+                       ?last_execution
+                       request)
                   request_rows) )
          ])
+;;
+
+let scheduled_automation_dashboard_json config =
+  Server_keeper_waiting_inventory.capture_request_observation
+    ~additional_queue_keeper_names:scheduled_automation_queue_keeper_names
+    config
+  |> scheduled_automation_dashboard_json_of_observation
 ;;
 
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
@@ -3173,11 +3405,19 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       ]
   in
   let attach_live_tools_projections json =
+    let observation =
+      run Tools_compute (fun () ->
+        Server_keeper_waiting_inventory.capture_request_observation
+          ~additional_queue_keeper_names:scheduled_automation_queue_keeper_names
+          config)
+    in
     let scheduled_automation =
-      run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
+      run Tools_compute (fun () ->
+        scheduled_automation_dashboard_json_of_observation observation)
     in
     let keeper_waiting_inventory =
-      run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
+      run Tools_compute (fun () ->
+        Server_keeper_waiting_inventory.dashboard_json_of_observation observation)
     in
     match json with
     | `Assoc fields ->

@@ -146,6 +146,10 @@ val release_legacy_inflight :
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
+val settlement_to_yojson : settlement -> Yojson.Safe.t
+(** Canonical closed settlement encoding. Durable projectors may retain this
+    as an opaque equality proof; routing must continue to use the typed
+    [settlement] value. *)
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
 val to_yojson : t -> Yojson.Safe.t

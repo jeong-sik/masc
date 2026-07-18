@@ -3128,31 +3128,18 @@ let test_health_json_reaction_ledger_unavailable_shape () =
        let reaction_ledger = json |> member "keeper_reaction_ledger" in
        Alcotest.(check string) "unavailable reaction ledger status" "unavailable"
          (reaction_ledger |> member "status" |> to_string);
-       Alcotest.(check int) "unavailable reaction ledger reasons empty" 0
-         (reaction_ledger |> member "status_reasons" |> to_list |> List.length);
-       Alcotest.(check int) "unavailable durable queue count" 0
-         (reaction_ledger |> member "durable_event_queue_count" |> to_int);
-       Alcotest.(check int) "unavailable durable discovery count" 0
-         (reaction_ledger
-          |> member "durable_event_queue_discovered_keeper_count"
-          |> to_int);
-       Alcotest.(check bool) "unavailable durable discovery error null" true
-         (reaction_ledger |> member "durable_event_queue_discovery_error" = `Null);
-       ignore
-         (reaction_ledger
-          |> member "durable_event_queue_stale_after_sec"
-          |> to_float);
-       Alcotest.(check int) "unavailable durable stale count" 0
-         (reaction_ledger |> member "durable_event_queue_stale_count" |> to_int);
-       Alcotest.(check int) "unavailable durable stale keeper count" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_keeper_count"
-          |> to_int);
-       Alcotest.(check int) "unavailable durable stale rows empty" 0
-         (reaction_ledger
-          |> member "durable_event_queue_stale_by_keeper"
-          |> to_list
-          |> List.length))
+       Alcotest.(check (list string))
+         "unavailable reaction ledger reason"
+         [ "server_state_unavailable" ]
+         (reaction_ledger |> member "status_reasons" |> to_list |> List.map to_string);
+       Alcotest.(check bool) "unavailable counts are not authoritative" false
+         (reaction_ledger |> member "counts_complete" |> to_bool);
+       Alcotest.(check bool) "unavailable reaction ledger asks for action" true
+         (reaction_ledger |> member "operator_action_required" |> to_bool);
+       Alcotest.(check bool) "reaction health does not duplicate queue authority" true
+         (reaction_ledger |> member "durable_event_queue_count" = `Null);
+       Alcotest.(check string) "queue health remains its own authority" "unavailable"
+         (json |> member "keeper_event_queue" |> member "status" |> to_string))
 
 let test_health_json_turn_admission_unavailable_shape () =
   let previous_state = !Server_auth.server_state in

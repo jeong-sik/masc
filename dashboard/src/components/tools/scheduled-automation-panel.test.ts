@@ -431,10 +431,12 @@ describe('ScheduledAutomationPanel', () => {
           queue: 'keeper_event_queue',
           stimulus: 'schedule_due',
           stimulus_id: 'stimulus:keeper-wake-digest',
+          reaction_ledger_status: 'recorded',
           keeper_name: 'schedule-keeper',
           schedule_id: 'sched-keeper-wake',
           urgency: 'immediate',
           post_id: 'schedule-due:sched-keeper-wake',
+          occurrence_status: 'awaiting_settlement',
         },
         keeper_queue_evidence: {
           projection_status: 'matched_pending',
@@ -444,6 +446,7 @@ describe('ScheduledAutomationPanel', () => {
           keeper_name: 'schedule-keeper',
           schedule_id: 'sched-keeper-wake',
           post_id: 'schedule-due:sched-keeper-wake',
+          stimulus_id: 'stimulus:keeper-wake-digest',
           pending_count: 1,
           inflight_count: 0,
           matched_bucket: 'pending',
@@ -483,6 +486,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-dispatch-receipt-row="queue"]')?.textContent).toContain('keeper_event_queue')
     expect(container.querySelector('[data-dispatch-receipt-row="stimulus"]')?.textContent).toContain('schedule_due')
     expect(container.querySelector('[data-dispatch-receipt-row="stimulus_id"]')?.textContent).toContain('stimulus:keeper-wake-digest')
+    expect(container.querySelector('[data-dispatch-receipt-row="reaction_ledger_status"]')?.textContent).toContain('recorded')
     expect(container.querySelector('[data-dispatch-receipt-row="keeper"]')?.textContent).toContain('schedule-keeper')
     expect(container.querySelector('[data-dispatch-receipt-row="post_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
     const queueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
@@ -496,7 +500,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(reactionEvidence?.getAttribute('data-schedule-keeper-reaction-evidence-source')).toBe('keeper_reaction_ledger')
     expect(container.querySelector('[data-keeper-reaction-evidence-row="stimulus_id"]')?.textContent).toContain('stimulus:keeper-wake-digest')
     expect(container.querySelector('[data-keeper-reaction-evidence-row="turn_started_seen"]')?.textContent).toContain('false')
-    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')).toBeNull()
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.kind"]')).toBeNull()
 
     render(null, container)
     render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
@@ -514,7 +518,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(cardWakeSummary?.textContent).toContain('receipt recognized')
     expect(cardWakeSummary?.textContent).toContain('queue matched pending')
     expect(cardWakeSummary?.textContent).toContain('reaction matched stimulus')
-    expect(cardWakeSummary?.textContent).toContain('post schedule-due:sched-keeper-wake')
+    expect(cardWakeSummary?.textContent).toContain('stimulus stimulus:keeper-wake-digest')
 
     const openDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
     openDetail.click()
@@ -550,7 +554,13 @@ describe('ScheduledAutomationPanel', () => {
         keeper_reaction_evidence: {
           ...wakeRequest.keeper_reaction_evidence!,
           projection_status: 'matched_turn_started',
-          reaction_kind: 'turn_started',
+          latest_reaction: {
+            kind: 'turn_started',
+            sequence: '2',
+            event_id: 'turn-started-2',
+            recorded_at: 202,
+            recorded_at_iso: '2026-06-21T00:03:22Z',
+          },
           turn_started_seen: true,
           matched_record_count: 2,
           turn_started_recorded_at: 202,
@@ -581,7 +591,8 @@ describe('ScheduledAutomationPanel', () => {
     const turnReactionEvidence = container.querySelector('[data-schedule-keeper-reaction-evidence="matched_turn_started"]')
     expect(turnReactionEvidence).not.toBeNull()
     expect(turnReactionEvidence?.textContent).toContain('matched turn started')
-    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')?.textContent).toContain('turn_started')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.kind"]')?.textContent).toContain('turn_started')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.sequence"]')?.textContent).toContain('2')
     expect(turnReactionEvidence?.textContent).toContain('true')
 
     const ackedAuto = automation([
@@ -604,7 +615,16 @@ describe('ScheduledAutomationPanel', () => {
         keeper_reaction_evidence: {
           ...wakeRequest.keeper_reaction_evidence!,
           projection_status: 'matched_consumed_ack',
-          reaction_kind: 'event_queue_ack',
+          latest_reaction: {
+            kind: 'event_queue_ack',
+            sequence: '3',
+            event_id: 'ack-3',
+            recorded_at: 203,
+            recorded_at_iso: '2026-06-21T00:03:23Z',
+            transition_id: 'transition-3',
+            source_index: 0,
+            source_count: 1,
+          },
           turn_started_seen: true,
           event_queue_ack_seen: true,
           matched_record_count: 3,
@@ -639,8 +659,50 @@ describe('ScheduledAutomationPanel', () => {
     expect(ackReactionEvidence?.textContent).toContain('matched consumed ack')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
     expect(ackReactionEvidence?.textContent).toContain('true')
-    expect(container.querySelector('[data-keeper-reaction-evidence-row="reaction_kind"]')?.textContent).toContain('event_queue_ack')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.kind"]')?.textContent).toContain('event_queue_ack')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.transition_id"]')?.textContent).toContain('transition-3')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
+
+    const externalInputAuto = automation([
+      {
+        ...ackedAuto.requests[0]!,
+        keeper_reaction_evidence: {
+          ...ackedAuto.requests[0]!.keeper_reaction_evidence!,
+          projection_status: 'matched_escalated_external_input',
+          latest_reaction: {
+            kind: 'event_queue_escalated',
+            sequence: '4',
+            event_id: 'escalated-4',
+            recorded_at: 204,
+            recorded_at_iso: '2026-06-21T00:03:24Z',
+            transition_id: 'transition-4',
+            source_index: 0,
+            source_count: 1,
+            external_input_requested: true,
+          },
+          latest_recorded_at: 204,
+          latest_recorded_at_iso: '2026-06-21T00:03:24Z',
+        },
+      },
+    ])
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${externalInputAuto} variant="v2" />`, container)
+
+    const externalDoneFilter = container.querySelector('[data-schedule-filter="done"]') as HTMLButtonElement
+    externalDoneFilter.click()
+    await Promise.resolve()
+
+    const openExternalDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
+    openExternalDetail.click()
+    await Promise.resolve()
+
+    const externalReactionEvidence = container.querySelector(
+      '[data-schedule-keeper-reaction-evidence="matched_escalated_external_input"]',
+    )
+    expect(externalReactionEvidence).not.toBeNull()
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.kind"]')?.textContent).toContain('event_queue_escalated')
+    expect(container.querySelector('[data-keeper-reaction-evidence-row="latest_reaction.external_input_requested"]')?.textContent).toContain('true')
   })
 
   it('shows missing wake evidence explicitly for keeper wake cards', async () => {

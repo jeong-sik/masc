@@ -438,8 +438,8 @@ let deliver_addressed_board_signal
       meta.name
       stimulus
   with
-  | Keeper_registry_event_queue.Stimulus_enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+  | Keeper_registry_event_queue.Stimulus_enqueued _
+  | Keeper_registry_event_queue.Stimulus_already_present _ -> Ok ()
   | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
 ;;
 

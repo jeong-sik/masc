@@ -38,11 +38,6 @@ let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
 
 let wake_enqueue_counts_of_dispatches dispatches =
   let module Consumers = Server_schedule_consumers in
-  let bump_wake_failed
-        (counts : Schedule_runner_status.wake_enqueue_counts)
-    =
-    { counts with wake_failed = counts.wake_failed + 1 }
-  in
   let bump_wake_enqueued
         (counts : Schedule_runner_status.wake_enqueue_counts)
     =
@@ -57,20 +52,12 @@ let wake_enqueue_counts_of_dispatches dispatches =
           | Error _ -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
-                { occurrence_status = Consumers.Keeper_wake_already_acked; _ }) ->
+                { occurrence_status = Consumers.Keeper_wake_already_settled; _ }) ->
             counts
           | Ok
               (Consumers.Keeper_wake_enqueued
-                { occurrence_status = Consumers.Keeper_wake_awaiting_ack
-                ; reaction_ledger_status
-                ; _
-                }) ->
-            let counts = bump_wake_enqueued counts in
-            (match reaction_ledger_status with
-             | Some (Consumers.Keeper_wake_reaction_ledger_record_failed _) ->
-               bump_wake_failed counts
-             | None | Some Consumers.Keeper_wake_reaction_ledger_recorded ->
-               counts)))
+                { occurrence_status = Consumers.Keeper_wake_awaiting_settlement; _ }) ->
+            bump_wake_enqueued counts))
     Schedule_runner_status.empty_wake_enqueue_counts
     dispatches
 ;;

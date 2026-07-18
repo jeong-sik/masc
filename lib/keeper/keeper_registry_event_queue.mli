@@ -50,6 +50,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
+val lease_sequence : lease -> int64
 
 val active_lease_result :
   base_path:string -> string -> (lease option, string) result
@@ -114,8 +115,8 @@ val enqueue_if_missing_durable_result :
     field participates in identity. *)
 
 type enqueue_stimulus_durable_result =
-  | Stimulus_enqueued
-  | Stimulus_already_present
+  | Stimulus_enqueued of Keeper_event_queue.stimulus
+  | Stimulus_already_present of Keeper_event_queue.stimulus
   | Stimulus_storage_error of string
 
 val enqueue_stimulus_durable_result :
@@ -128,7 +129,9 @@ val enqueue_stimulus_durable_result :
     pending, active leases, and the transition outbox. This explicit-result
     path is for structurally addressed signals whose delivery must commit
     before a wake hint. Board-attention judgments use the stricter
-    opaque-event-id API above. *)
+    opaque-event-id API above. Both success variants carry the exact durable
+    stimulus so retry callers cannot substitute volatile fields from their
+    new candidate for the previously committed value. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

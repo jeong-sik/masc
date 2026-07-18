@@ -238,6 +238,68 @@ let test_event_queue_pending_and_inflight_are_visible () =
      | rows -> failf "expected two queue rows, got %d" (List.length rows))
 ;;
 
+let test_request_observation_freezes_shared_store_revisions () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "request-observation-keeper" in
+  ensure_keeper config keeper_name;
+  ignore
+    (create_schedule_exn
+       config
+       ~schedule_id:"captured-schedule"
+       ~scheduled_by:(automated keeper_name)
+      : Schedule_domain.schedule_request);
+  let captured_stimulus =
+    stimulus ~post_id:"captured-queue-row" ~arrived_at:100.0
+      Keeper_event_queue.Bootstrap
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list [ captured_stimulus ]);
+  let observation =
+    Server_keeper_waiting_inventory.capture_request_observation config
+  in
+  ignore
+    (create_schedule_exn
+       config
+       ~schedule_id:"later-schedule"
+       ~scheduled_by:(automated keeper_name)
+      : Schedule_domain.schedule_request);
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list
+       [ stimulus ~post_id:"later-queue-row" ~arrived_at:200.0
+           Keeper_event_queue.Bootstrap
+       ]);
+  let captured_json =
+    Server_keeper_waiting_inventory.dashboard_json_of_observation observation
+  in
+  check int "captured observation has one queue and one schedule row" 2
+    (json_int_member "row_count" captured_json);
+  (match find_keeper captured_json keeper_name with
+   | None -> fail "captured Keeper row missing"
+   | Some keeper ->
+     let rows = U.(keeper |> member "waiting_on" |> to_list) in
+     let row source =
+       match
+         List.find_opt
+           (fun row -> String.equal source (json_string_member "source" row))
+           rows
+       with
+       | Some row -> row
+       | None -> fail ("captured waiting row missing: " ^ source)
+     in
+     check string "captured queue row is stable" "captured-queue-row"
+       U.(row "event_queue_pending" |> member "detail" |> member "post_id" |> to_string);
+     check string "captured schedule row is stable" "captured-schedule"
+       U.(row "schedule_waiting" |> member "detail" |> member "schedule_id" |> to_string));
+  let fresh_json = Server_keeper_waiting_inventory.dashboard_json config in
+  check int "fresh observation sees the later schedule and replacement queue" 3
+    (json_int_member "row_count" fresh_json)
+;;
+
 let test_manual_compaction_waiting_row_has_typed_producer () =
   with_workspace
   @@ fun config ->
@@ -974,6 +1036,8 @@ let () =
     [ ( "dashboard_json"
       , [ test_case "event queue pending and inflight are visible" `Quick
             test_event_queue_pending_and_inflight_are_visible
+        ; test_case "request observation freezes shared store revisions" `Quick
+            test_request_observation_freezes_shared_store_revisions
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "chat queue pending rows are visible" `Quick

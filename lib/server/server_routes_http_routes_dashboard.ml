@@ -641,24 +641,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/nudges" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let limit =
-           Server_utils.int_query_param req "limit" ~default:50
-           |> Server_utils.clamp ~min_v:1 ~max_v:200
-         in
-         let cache_key =
-           Printf.sprintf "nudges:%s:%d"
-             (Mcp_server.workspace_config state).base_path limit
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_operator_nudges.json
-                 ~config:(Mcp_server.workspace_config state) ~limit ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -683,20 +665,6 @@ let add_routes ~sw ~clock router =
              ]
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         (* /branches spawns `git -C <repo> branch` via Exec_gate. Cache +
-            offload (respond_cached_read) so a parallel dashboard burst
-            collapses to one git spawn per realtime TTL and the spawn runs on
-            an Executor_pool domain instead of blocking the main HTTP domain. *)
-         let cache_key =
-           Printf.sprintf "branches:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key
-           ~ttl:realtime_cache_ttl_s (fun () ->
-             Dashboard_branches.json ~config:(Mcp_server.workspace_config state))
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)

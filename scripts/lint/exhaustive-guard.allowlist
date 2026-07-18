@@ -191,12 +191,6 @@ lib/dashboard_tool_source_freshness.ml:40
 lib/dashboard_utils/dashboard_utils.ml:10
 lib/dashboard.ml:84
 lib/dashboard.ml:211
-lib/dashboard/dashboard_branches.ml:48
-lib/dashboard/dashboard_branches.ml:61
-lib/dashboard/dashboard_branches.ml:85
-lib/dashboard/dashboard_branches.ml:93
-lib/dashboard/dashboard_branches.ml:101
-lib/dashboard/dashboard_branches.ml:148
 lib/dashboard/dashboard_cache.ml:98
 lib/dashboard/dashboard_cache.ml:115
 lib/dashboard/dashboard_cache.ml:163
@@ -244,12 +238,6 @@ lib/dashboard/dashboard_mission_assembly.ml:198
 lib/dashboard/dashboard_mission.ml:339
 lib/dashboard/dashboard_mission.ml:728
 lib/dashboard/dashboard_oas_bridge.ml:188
-lib/dashboard/dashboard_operator_nudges.ml:29
-lib/dashboard/dashboard_operator_nudges.ml:47
-lib/dashboard/dashboard_operator_nudges.ml:53
-lib/dashboard/dashboard_operator_nudges.ml:59
-lib/dashboard/dashboard_operator_nudges.ml:97
-lib/dashboard/dashboard_operator_nudges.ml:159
 lib/dashboard/dashboard_workspaces.ml:28
 lib/dashboard/dashboard_workspaces.ml:53
 lib/dashboard/dashboard_verification.ml:47

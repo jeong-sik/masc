@@ -30,7 +30,7 @@ type lane_signal =
 
 type instance =
   { base_path : string
-  ; worker_epoch : string
+  ; worker_epoch : Partition.Worker_epoch.t
   ; judge : judge
   ; sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
@@ -482,13 +482,6 @@ let close_instance instance =
   if notify then Eio.Stream.add instance.wakeup ()
 ;;
 
-let production_worker_epoch base_path =
-  let raw =
-    Printf.sprintf "%s:%d:%.17g" base_path (Unix.getpid ()) (Time_compat.now ())
-  in
-  "board-attention-worker-" ^ Digestif.SHA256.(digest_string raw |> to_hex)
-;;
-
 let start_instance ~sw ~base_path ~worker_epoch ~judge =
   let instance =
     { base_path
@@ -531,7 +524,7 @@ let start ~sw ~base_path () =
     start_instance
       ~sw:worker_sw
       ~base_path
-      ~worker_epoch:(production_worker_epoch base_path)
+      ~worker_epoch:(Partition.Worker_epoch.generate ())
       ~judge:(Candidate.judge_batch_exact ~base_path))
 ;;
 

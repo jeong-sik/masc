@@ -164,7 +164,7 @@ let test_owner_drain_never_waits_for_provider () =
        W.For_testing.start_with_judge
          ~sw
          ~base_path
-         ~worker_epoch:"owner-independent-epoch"
+         ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates ->
            Eio.Promise.resolve resolve_provider_started ();
            Eio.Promise.await release_provider;
@@ -229,7 +229,7 @@ let test_blocked_keeper_does_not_block_sibling () =
        W.For_testing.start_with_judge
          ~sw
          ~base_path
-         ~worker_epoch:"sibling-epoch"
+         ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates ->
            match candidates with
            | first :: _ when String.equal first.A.keeper_name "keeper-a" ->
@@ -309,7 +309,7 @@ let test_startup_scan_isolates_malformed_ledger () =
        W.For_testing.start_with_judge
          ~sw
          ~base_path
-         ~worker_epoch:"startup-epoch"
+         ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates -> Ok (exact_map candidates))
          ());
      within clock (fun () -> await_registered ~base_path);
@@ -336,7 +336,7 @@ let test_lane_cancellation_is_visible_and_sibling_survives () =
        W.For_testing.start_with_judge
          ~sw
          ~base_path
-         ~worker_epoch:"lane-failure-epoch"
+         ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates ->
            match candidates with
            | first :: _ when String.equal first.A.keeper_name "keeper-a" ->
@@ -377,7 +377,7 @@ let test_candidate_signal_does_not_retry_deferred_partition () =
        W.For_testing.start_with_judge
          ~sw
          ~base_path
-         ~worker_epoch:"typed-signal-epoch"
+         ~worker_epoch:(P.Worker_epoch.generate ())
          ~judge:(fun candidates ->
            incr judge_calls;
            match candidates with

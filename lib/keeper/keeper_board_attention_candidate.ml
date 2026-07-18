@@ -846,7 +846,7 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
       Ok
         ( (match updated_rows with
            | [] -> None
-           | _ -> Some (List.rev updated_rows))
+           | _ :: _ -> Some (List.rev updated_rows))
         , selected_in_request_order ))
 ;;
 

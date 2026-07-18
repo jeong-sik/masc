@@ -65,6 +65,7 @@
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
+  test_keeper_runtime_resolved_observability
   test_oas_diag_sink
   test_shutdown_benign_termination
   test_stop_reason_label
@@ -369,6 +370,7 @@
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
+  test_keeper_runtime_resolved_observability
   test_oas_diag_sink
   test_shutdown_benign_termination
   test_stop_reason_label
@@ -963,7 +965,6 @@
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
   test_memory_horizon_classifier
-  test_param_type_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage
@@ -1127,7 +1128,6 @@
   test_workspace_task_verification_phase_e
   test_verify_handoff_tool
   test_memory_horizon_classifier
-  test_param_type_classifier
   test_tool_contract_truth
   test_file_lock_eio
   test_error_logging_coverage

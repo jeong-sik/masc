@@ -184,7 +184,13 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
   | Keeper_event_queue.Fusion_completed fc ->
-    Printf.sprintf "fusion_completed run_id=%s ok=%b" fc.run_id fc.ok
+    let terminal =
+      match fc.terminal with
+      | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+      | Keeper_event_queue.Fusion_failed _ -> "failed"
+      | Keeper_event_queue.Fusion_cancelled -> "cancelled"
+    in
+    Printf.sprintf "fusion_completed run_id=%s terminal=%s" fc.run_id terminal
   | Keeper_event_queue.Bg_completed c ->
     Printf.sprintf
       "bg_completed run_id=%s kind=%s"

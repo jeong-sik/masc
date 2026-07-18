@@ -93,9 +93,7 @@ and board_attention = {
 
 and fusion_completion = {
   run_id : string;
-  ok : bool;  (* judge synthesized vs denied/sink_failed/aborted. *)
-  resolved_answer : string;
-  (* judge resolved answer; a failure label when [ok = false]. *)
+  terminal : fusion_terminal;
   board_post_id : string;
   (* correlates to the sink's board evidence post; "" if none was created. *)
   channel : Keeper_continuation_channel.t;
@@ -104,6 +102,11 @@ and fusion_completion = {
      the resolved answer back into the originating channel.  [Unrouted] when
      the run was not started from a connector conversation. *)
 }
+
+and fusion_terminal =
+  | Fusion_succeeded of string
+  | Fusion_failed of string
+  | Fusion_cancelled
 
 and bg_job_completion = {
   bg_run_id : string;
@@ -492,11 +495,18 @@ let payload_to_yojson = function
        @ board_stimulus_fields attention.signal)
   | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
   | Fusion_completed fusion ->
+    let terminal =
+      match fusion.terminal with
+      | Fusion_succeeded answer ->
+        `Assoc [ "kind", `String "succeeded"; "message", `String answer ]
+      | Fusion_failed detail ->
+        `Assoc [ "kind", `String "failed"; "message", `String detail ]
+      | Fusion_cancelled -> `Assoc [ "kind", `String "cancelled" ]
+    in
     `Assoc
       [ "kind", `String "fusion_completed"
       ; "run_id", `String fusion.run_id
-      ; "ok", `Bool fusion.ok
-      ; "resolved_answer", `String fusion.resolved_answer
+      ; "terminal", terminal
       ; "board_post_id", `String fusion.board_post_id
       ; "channel", Keeper_continuation_channel.to_yojson fusion.channel
       ]
@@ -602,11 +612,45 @@ let payload_of_yojson json =
   | "bootstrap" -> Ok Bootstrap
   | "fusion_completed" ->
     let* run_id = string_field ~context "run_id" fields in
-    let* ok = bool_field ~context "ok" fields in
-    let* resolved_answer = string_field ~context "resolved_answer" fields in
+    let* terminal =
+      match optional_field "terminal" fields with
+      | Some terminal_json ->
+        let* terminal_fields =
+          assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+        in
+        let* terminal_kind =
+          string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+        in
+        (match terminal_kind with
+         | "succeeded" ->
+           let* answer =
+             string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+           in
+           Ok (Fusion_succeeded answer)
+         | "failed" ->
+           let* detail =
+             string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+           in
+           Ok (Fusion_failed detail)
+         | "cancelled" -> Ok Fusion_cancelled
+         | value -> Error (Printf.sprintf "unknown fusion terminal kind: %s" value))
+      | None ->
+        (* Compatibility read for rows persisted before the typed terminal:
+           the old shape carried [ok]+[resolved_answer], and cancellation did
+           not exist, so the two legacy fields determine the terminal exactly.
+           The writer emits only the typed shape. removal target: the next
+           event-queue state generation bump, when pre-terminal rows can no
+           longer exist in a live store. *)
+        let* ok = bool_field ~context "ok" fields in
+        let* resolved_answer = string_field ~context "resolved_answer" fields in
+        Ok
+          (if ok
+           then Fusion_succeeded resolved_answer
+           else Fusion_failed resolved_answer)
+    in
     let* board_post_id = string_field ~context "board_post_id" fields in
     let* channel = continuation_channel_field fields in
-    Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id; channel })
+    Ok (Fusion_completed { run_id; terminal; board_post_id; channel })
   | "bg_completed" ->
     let* run_id = string_field ~context "run_id" fields in
     let* job_kind_s = string_field ~context "job_kind" fields in

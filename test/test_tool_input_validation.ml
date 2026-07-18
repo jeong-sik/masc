@@ -306,7 +306,7 @@ let test_required_without_properties_rejects_schema () =
       "expected malformed schema to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
-let test_schema_union_type_does_not_raise () =
+let test_schema_ambiguous_union_is_rejected () =
   let schema =
     `Assoc
       [
@@ -327,18 +327,42 @@ let test_schema_union_type_does_not_raise () =
       ]
   in
   match Tool_bridge.params_of_json_schema schema with
+  | _ -> Alcotest.fail "ambiguous union must not select its first member"
+  | exception Invalid_argument _ -> ()
+
+let test_schema_nullable_union_preserves_non_null_type () =
+  let schema =
+    `Assoc
+      [ ("type", `String "object")
+      ; ( "properties"
+        , `Assoc
+            [ ( "payload"
+              , `Assoc
+                  [ ("type", `List [ `String "null"; `String "object" ])
+                  ; ("description", `String "Optional object payload")
+                  ] )
+            ] )
+      ]
+  in
+  match Tool_bridge.params_of_json_schema schema with
   | [ (param : Agent_sdk.Types.tool_param) ] ->
-      Alcotest.(check string)
-        "name"
-        "payload"
-        param.name;
+      Alcotest.(check string) "name" "payload" param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
        | Agent_sdk.Types.Object -> ()
-       | _ -> Alcotest.fail "expected first non-null union type to be object")
+       | _ -> Alcotest.fail "nullable object must remain object")
   | params ->
       Alcotest.failf "expected one converted parameter, got %d"
         (List.length params)
+
+let test_all_masc_tool_schemas_project_through_oas () =
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      match Tool_bridge.params_of_json_schema schema.input_schema with
+      | _ -> ()
+      | exception Invalid_argument detail ->
+          Alcotest.failf "tool %s has invalid OAS schema: %s" schema.name detail)
+    Config.raw_all_tool_schemas
 
 (* ================================================================ *)
 (* Test: registered pre-hook path                                    *)
@@ -1974,8 +1998,12 @@ let () =
         test_empty_schema_rejects_arguments;
       Alcotest.test_case "required without properties rejects schema" `Quick
         test_required_without_properties_rejects_schema;
-      Alcotest.test_case "schema union type does not raise" `Quick
-        test_schema_union_type_does_not_raise;
+      Alcotest.test_case "ambiguous schema union is rejected" `Quick
+        test_schema_ambiguous_union_is_rejected;
+      Alcotest.test_case "nullable schema union keeps its type" `Quick
+        test_schema_nullable_union_preserves_non_null_type;
+      Alcotest.test_case "all MASC schemas project through OAS" `Quick
+        test_all_masc_tool_schemas_project_through_oas;
     ]);
     ("telemetry", [
       Alcotest.test_case "records pass and fail counters" `Quick

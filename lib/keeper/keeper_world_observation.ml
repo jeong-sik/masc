@@ -406,16 +406,21 @@ let pending_board_event_of_fusion_completion
   : pending_board_event
   =
   let post_id = Keeper_event_queue.fusion_completion_post_id fc in
-  let title =
-    if fc.ok
-    then Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id
-    else Printf.sprintf "Fusion deliberation failed (run %s)" fc.run_id
+  let title, message =
+    match fc.terminal with
+    | Keeper_event_queue.Fusion_succeeded answer ->
+      Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id, answer
+    | Keeper_event_queue.Fusion_failed detail ->
+      Printf.sprintf "Fusion deliberation failed (run %s)" fc.run_id, detail
+    | Keeper_event_queue.Fusion_cancelled ->
+      ( Printf.sprintf "Fusion deliberation cancelled (run %s)" fc.run_id
+      , "The asynchronous Fusion run was structurally cancelled before producing a result." )
   in
   { event_kind = Fusion_completed
   ; post_id
   ; author = meta.name
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len fc.resolved_answer
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len message
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

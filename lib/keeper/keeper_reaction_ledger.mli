@@ -3,7 +3,7 @@
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
     contract: queue-visible stimuli, queue settlement reactions, and board
     cursor acknowledgements are written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v3/YYYY-MM/DD.jsonl].  The
+    [.masc/keepers/<keeper>/reaction-ledger/v4/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
     written by this module. *)
 
@@ -68,16 +68,14 @@ val record_event_queue_turn_started :
 (** Append the sole non-settlement event-queue reaction. The writer fixes the
     reaction kind so callers cannot manufacture settlement evidence. *)
 
-val record_event_queue_transition_reaction_result :
-  base_path:string ->
-  keeper_name:string ->
-  source_index:int ->
-  receipt:Keeper_event_queue_state.transition_receipt ->
-  Keeper_event_queue.stimulus ->
-  (unit, string) result
-(** Append one settlement source at its exact ordered index. Persistence
-    failures remain explicit [Error]. Readers use the deterministic event id
-    as the logical idempotency identity. *)
+val project_event_queue_transition_outbox_result :
+  base_path:string -> keeper_name:string -> (unit, string) result
+(** Read the sole durable event-queue transition outbox, append every source in
+    exact order, then retire that same transition. Callers supply no receipt,
+    stimulus, source index, or outbox record, so settlement evidence can only
+    originate from the event-queue SSOT. Persistence failures remain explicit
+    [Error]. Retries are logically idempotent through deterministic per-source
+    event ids. *)
 
 type event_queue_reaction_evidence =
   { keeper_name : string
@@ -91,14 +89,6 @@ type event_queue_reaction_evidence =
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
-  ; unattributed_syntax_error_count : int
-  ; unattributed_identity_quarantine_count : int
-  }
-
-type unattributed_syntax_error =
-  { path : string
-  ; line_number : int option
-  ; detail : string
   }
 
 type event_queue_reaction_evidence_outcome =
@@ -106,12 +96,6 @@ type event_queue_reaction_evidence_outcome =
   | Evidence_quarantined of
       { evidence : event_queue_reaction_evidence
       ; first_reason : row_quarantine_reason
-      }
-  | Evidence_incomplete of
-      { evidence : event_queue_reaction_evidence
-      ; first_syntax_error : unattributed_syntax_error option
-      ; first_identity_quarantine_reason : row_quarantine_reason option
-      ; first_matching_quarantine_reason : row_quarantine_reason option
       }
 
 type event_queue_reaction_evidence_error =
@@ -128,9 +112,10 @@ val event_queue_reaction_evidence_result :
   (event_queue_reaction_evidence_outcome, event_queue_reaction_evidence_error) result
 (** Exact-id delivery scan over the complete keeper-local ledger. Matching
     semantic-invalid rows produce {!Evidence_quarantined}. Syntax-invalid rows
-    and parseable rows without a usable stimulus identity cannot be attributed
-    and therefore produce {!Evidence_incomplete}; they never become negative
-    evidence. Empty query identities and storage failures remain typed errors. *)
+    and parseable rows without the queried identity remain visible through the
+    operator summary, but cannot be attributed to this occurrence and therefore
+    do not become its negative evidence. Empty query identities and storage
+    failures remain typed errors. *)
 
 val record_board_cursor_ack :
   base_path:string ->

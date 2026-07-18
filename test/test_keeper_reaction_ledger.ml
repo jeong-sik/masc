@@ -86,14 +86,27 @@ let require_ok label = function
   | Error message -> failf "%s: %s" label message
 ;;
 
-let transition_receipt ~settlement stimulus =
-  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
-  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
-  let state, lease =
-    Keeper_event_queue_state.claim_when
-      ~claimed_at:1235.0
-      ~ready:(fun _ -> true)
-      state
+let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
+  Keeper_event_queue_persistence.update_result
+    ~base_path
+    ~keeper_name
+    (fun pending -> List.fold_left Keeper_event_queue.enqueue pending stimuli)
+  |> require_ok "persist transition sources";
+  let lease =
+    (match stimuli with
+     | [ _ ] ->
+       Keeper_event_queue_persistence.claim_when_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:1235.0
+         ~ready:(fun _ -> true)
+         ()
+     | _ ->
+       Keeper_event_queue_persistence.claim_board_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:1235.0
+         ())
     |> require_ok "claim transition receipt stimulus"
   in
   let lease =
@@ -101,18 +114,33 @@ let transition_receipt ~settlement stimulus =
     | Some lease -> lease
     | None -> fail "transition receipt stimulus was not claimed"
   in
-  let _state, result =
-    Keeper_event_queue_state.settle
+  let receipt =
+    Keeper_event_queue_persistence.settle_result
+      ~base_path
+      ~keeper_name
       ~settled_at:1236.0
       ~lease
       ~settlement
-      state
+      ()
     |> require_ok "settle transition receipt stimulus"
+    |> function
+    | Keeper_event_queue_persistence.Settled receipt -> receipt
+    | Keeper_event_queue_persistence.Already_settled _ ->
+      fail "first transition receipt settlement was already settled"
+    | Keeper_event_queue_persistence.Committed_followup_failed { detail; _ } ->
+      failf "settlement follow-up failed: %s" detail
   in
-  match result with
-  | Keeper_event_queue_state.Settled receipt -> receipt
-  | Keeper_event_queue_state.Already_settled _ ->
-    fail "first transition receipt settlement was already settled"
+  (match
+     Keeper_event_queue_persistence.transition_outbox_result
+       ~base_path
+       ~keeper_name
+     |> require_ok "read persisted transition outbox"
+   with
+   | [ entry ] ->
+     check bool "outbox retains the settled receipt" true
+       (Keeper_event_queue_state.transition_receipt_equal entry.receipt receipt)
+   | [] | _ :: _ :: _ -> fail "settled transition did not produce one outbox entry");
+  receipt
 ;;
 
 let check_member_string label expected key json =
@@ -153,7 +181,7 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
           keeper_name)
        "reaction-ledger")
-    "v3"
+    "v4"
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -196,12 +224,6 @@ let require_complete_evidence label = function
       "%s: quarantined (%s)"
       label
       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-  | Ok (Keeper_reaction_ledger.Evidence_incomplete { evidence; _ }) ->
-    failf
-      "%s: incomplete (syntax=%d identity=%d)"
-      label
-      evidence.unattributed_syntax_error_count
-      evidence.unattributed_identity_quarantine_count
 ;;
 
 let latest_row rows =
@@ -227,7 +249,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v3" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v4" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -286,15 +308,15 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check bool "turn reaction seen" true reacted.turn_started_seen;
   check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
   check int "two exact rows after reaction" 2 reacted.matched_record_count;
-  let receipt =
-    transition_receipt ~settlement:Keeper_event_queue_state.Ack stimulus
-  in
-  Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
+       ~settlement:Keeper_event_queue_state.Ack
+       [ stimulus ]);
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
     ~base_path
     ~keeper_name
-    ~source_index:0
-    ~receipt
-    stimulus
   |> require_ok "record event queue ack";
   let acknowledged =
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
@@ -339,8 +361,10 @@ let test_failure_judgment_external_input_is_typed_history () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "judgment-attention-keeper" in
   let stimulus = failure_judgment_stimulus () in
-  let receipt =
-    transition_receipt
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
       ~settlement:
         (Keeper_event_queue_state.Escalate
            { reason =
@@ -350,18 +374,14 @@ let test_failure_judgment_external_input_is_typed_history () =
                  }
            ; successor = None
            })
-      stimulus
-  in
+       [ stimulus ]);
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
     stimulus;
-  Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
     ~base_path
     ~keeper_name
-    ~source_index:0
-    ~receipt
-    stimulus
   |> require_ok "record external-input judgment transition";
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
@@ -393,19 +413,16 @@ let test_transition_reactions_distinguish_ordered_sources () =
   let first = board_stimulus ~post_id:"shared-post" ~updated_at:1.0 () in
   let second = board_stimulus ~post_id:"shared-post" ~updated_at:2.0 () in
   let receipt =
-    transition_receipt ~settlement:Keeper_event_queue_state.Ack first
-  in
-  let record source_index stimulus =
-    Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+    persist_transition_outbox
       ~base_path
       ~keeper_name
-      ~source_index
-      ~receipt
-      stimulus
-    |> require_ok "record ordered settlement source"
+      ~settlement:Keeper_event_queue_state.Ack
+      [ first; second ]
   in
-  record 0 first;
-  record 1 second;
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "record ordered settlement sources";
   let rows =
     read_recent_rows
       ~base_path
@@ -422,10 +439,130 @@ let test_transition_reactions_distinguish_ordered_sources () =
     (List.map
        (fun row -> row |> member "reaction" |> member "source_index" |> to_int)
        rows);
+  check (list int)
+    "every source is bound to the exact outbox cardinality"
+    [ 2; 2 ]
+    (List.map
+       (fun row -> row |> member "reaction" |> member "source_count" |> to_int)
+       rows);
   check (list string)
     "shared stimulus id does not collapse ordered sources"
     [ "board:shared-post"; "board:shared-post" ]
-    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows)
+    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows);
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (List.hd rows);
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"board:shared-post"
+    |> require_complete_evidence "crash replay evidence"
+  in
+  check bool "replayed transition remains acknowledged" true
+    evidence.event_queue_ack_seen;
+  check int "deterministic event identity deduplicates crash replay" 2
+    evidence.matched_record_count
+;;
+
+let test_transition_reaction_rejects_recombined_stimulus_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "receipt-binding-keeper" in
+  let stimulus = board_stimulus ~post_id:"receipt-source" () in
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
+       ~settlement:Keeper_event_queue_state.Ack
+       [ stimulus ]);
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "record receipt-bound settlement";
+  let valid_row =
+    read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row
+  in
+  let forged_stimulus_id = "board:recombined-source" in
+  let recombined_row =
+    match valid_row with
+    | `Assoc fields ->
+      `Assoc
+        (("stimulus_id", `String forged_stimulus_id)
+         :: List.remove_assoc "stimulus_id" fields)
+    | _ -> fail "settlement writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    recombined_row;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:forged_stimulus_id
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check bool "recombined receipt cannot become an ack" false
+      evidence.event_queue_ack_seen;
+    check int "recombined row is quarantined" 1
+      evidence.quarantined_record_count;
+    check string
+      "source binding failure is typed"
+      "transition_source_identity_mismatch"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "recombined receipt evidence was accepted"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
+let test_current_rows_require_complete_writer_shape () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "closed-row-shape-keeper" in
+  let stimulus = board_stimulus ~post_id:"closed-row" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:2 in
+  let remove_nested_field outer inner = function
+    | `Assoc fields ->
+      let nested =
+        match List.assoc_opt outer fields with
+        | Some (`Assoc nested_fields) ->
+          `Assoc (List.remove_assoc inner nested_fields)
+        | _ -> failf "missing nested object %s" outer
+      in
+      `Assoc ((outer, nested) :: List.remove_assoc outer fields)
+    | _ -> fail "ledger writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "stimulus" "urgency" (List.nth rows 0));
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "reaction" "post_id" (List.nth rows 1));
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "incomplete current rows are quarantined" 2
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reasons =
+    summary
+    |> member "quarantine_reason_counts"
+    |> to_list
+    |> List.map (fun item -> item |> member "reason" |> to_string)
+  in
+  check bool "missing stimulus urgency is typed" true
+    (List.mem "missing_stimulus_urgency" reasons);
+  check bool "missing reaction post id is typed" true
+    (List.mem "missing_reaction_post_id" reasons)
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -883,7 +1020,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v3"
+        [ "schema", `String "keeper.reaction_ledger.v4"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -928,8 +1065,6 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
   | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
     fail "matching invalid row was projected as complete evidence"
-  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
-    fail "matching identified invalid row was misclassified as unattributed"
 ;;
 
 (* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
@@ -1160,8 +1295,6 @@ let test_quarantine_is_keeper_local () =
      check int "healthy keeper has no quarantine" 0 evidence.quarantined_record_count
    | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
      fail "quarantine leaked across keeper stores"
-   | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
-     fail "incompleteness leaked across keeper stores"
    | Error error ->
      fail
        ("healthy keeper read failed: "
@@ -1187,7 +1320,7 @@ let test_quarantine_is_keeper_local () =
     (healthy_summary |> member "reaction_count" |> to_int)
 ;;
 
-let test_syntax_error_makes_evidence_incomplete () =
+let test_syntax_error_does_not_claim_an_occurrence_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "strict-evidence-keeper" in
   let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
@@ -1195,46 +1328,31 @@ let test_syntax_error_makes_evidence_incomplete () =
   mkdir_p malformed_month;
   let malformed_path = Filename.concat malformed_month "01.jsonl" in
   write_file malformed_path "not-json\n";
-  match
+  let evidence =
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id:"schedule:test-occurrence"
-  with
-  | Ok
-      (Keeper_reaction_ledger.Evidence_incomplete
-        { evidence; first_syntax_error = Some syntax_error; _ }) ->
-    check int "one unattributed syntax error" 1
-      evidence.unattributed_syntax_error_count;
-    check int "no identity quarantine" 0
-      evidence.unattributed_identity_quarantine_count;
-    check string "syntax error path retained" malformed_path syntax_error.path;
-    check (option int) "syntax error line retained" (Some 1) syntax_error.line_number;
-    let summary =
-      Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-    in
-    check int "malformed summary row is quarantined" 1
-      (summary |> member "quarantined_row_count" |> to_int);
-    let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
-    check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
-  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
-    fail "incomplete evidence lost syntax error location"
-  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "syntax-invalid row was projected as complete evidence"
-  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-    fail "unattributed syntax error was falsely attributed to the occurrence"
-  | Error error ->
-    fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    |> require_complete_evidence "unattributed syntax row"
+  in
+  check int "no row is assigned to the queried occurrence" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "malformed summary row is quarantined" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
 ;;
 
-let test_missing_identity_makes_evidence_incomplete () =
+let test_missing_identity_does_not_claim_an_occurrence_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "identity-incomplete-keeper" in
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v3"
+        [ "schema", `String "keeper.reaction_ledger.v4"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1245,34 +1363,22 @@ let test_missing_identity_makes_evidence_incomplete () =
               ; "source", `String "keeper_event_queue"
               ] )
         ]);
-  match
+  let evidence =
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id:"schedule:test-occurrence"
-  with
-  | Ok
-      (Keeper_reaction_ledger.Evidence_incomplete
-        { evidence
-        ; first_identity_quarantine_reason = Some first_reason
-        ; _
-        }) ->
-    check int "no syntax error" 0 evidence.unattributed_syntax_error_count;
-    check int "one identity quarantine" 1
-      evidence.unattributed_identity_quarantine_count;
-    check string
-      "identity quarantine reason"
-      "missing_stimulus_id"
-      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
-  | Ok (Keeper_reaction_ledger.Evidence_incomplete _) ->
-    fail "identity-incomplete evidence lost typed reason"
-  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-    fail "identity-less row was projected as complete evidence"
-  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-    fail "identity-less row was falsely attributed to the occurrence"
-  | Error error ->
-    fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    |> require_complete_evidence "identity-less row"
+  in
+  check int "identity-less row is not assigned to the query" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "identity-less row remains operator-visible" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
 ;;
 
 let () =
@@ -1296,13 +1402,13 @@ let () =
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
         ; test_case
-            "syntax error makes evidence incomplete"
+            "syntax error cannot claim an occurrence identity"
             `Quick
-            test_syntax_error_makes_evidence_incomplete
+            test_syntax_error_does_not_claim_an_occurrence_identity
         ; test_case
-            "missing identity makes evidence incomplete"
+            "missing identity cannot claim an occurrence identity"
             `Quick
-            test_missing_identity_makes_evidence_incomplete
+            test_missing_identity_does_not_claim_an_occurrence_identity
         ; test_case
             "failure judgment external input is typed history"
             `Quick
@@ -1311,6 +1417,14 @@ let () =
             "transition reactions distinguish ordered sources"
             `Quick
             test_transition_reactions_distinguish_ordered_sources
+        ; test_case
+            "transition reaction rejects recombined stimulus identity"
+            `Quick
+            test_transition_reaction_rejects_recombined_stimulus_identity
+        ; test_case
+            "current rows require complete writer shape"
+            `Quick
+            test_current_rows_require_complete_writer_shape
         ; test_case
             "cursor ack is replayable state entry"
             `Quick

@@ -50,7 +50,7 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Common.keepers_runtime_dir_of_base ~base_path)
           keeper_name)
        "reaction-ledger")
-    "v3"
+    "v4"
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -787,35 +787,22 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (reaction_evidence |> member "turn_started_seen" |> to_bool);
       check int "two matched ledger rows after turn" 2
         (reaction_evidence |> member "matched_record_count" |> to_int);
-      let receipt =
-        match
-          Keeper_registry_event_queue.settle_result
-            ~base_path:config.Workspace_utils.base_path
-            keeper_name
-            ~settled_at:(Time_compat.now ())
-            ~lease
-            ~settlement:Keeper_registry_event_queue.Ack
-        with
-        | Error error -> fail ("scheduled wake settlement failed: " ^ error)
-        | Ok (Keeper_registry_event_queue.Settled receipt)
-        | Ok (Keeper_registry_event_queue.Already_settled receipt) -> receipt
-        | Ok _ -> fail "scheduled wake settlement follow-up failed"
-      in
       (match
-         Keeper_registry_event_queue.mark_transition_projected_result
+         Keeper_registry_event_queue.settle_result
            ~base_path:config.Workspace_utils.base_path
            keeper_name
-           ~transition_id:receipt.transition_id
+           ~settled_at:(Time_compat.now ())
+           ~lease
+           ~settlement:Keeper_registry_event_queue.Ack
        with
-       | Ok () -> ()
-       | Error error -> fail ("scheduled wake projection failed: " ^ error));
+       | Error error -> fail ("scheduled wake settlement failed: " ^ error)
+       | Ok (Keeper_registry_event_queue.Settled _)
+       | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
+       | Ok _ -> fail "scheduled wake settlement follow-up failed");
       (match
-         Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+         Keeper_reaction_ledger.project_event_queue_transition_outbox_result
            ~base_path:config.Workspace_utils.base_path
            ~keeper_name
-           ~source_index:0
-           ~receipt
-           leased
        with
        | Ok () -> ()
        | Error error -> fail ("scheduled wake reaction projection failed: " ^ error));
@@ -870,20 +857,20 @@ let test_keeper_wake_ledger_failure_is_retryable () =
    | None -> fail "ledger failure detail missing")
 ;;
 
-let test_incomplete_ledger_is_occurrence_local_and_retryable () =
+let test_unattributed_ledger_damage_does_not_block_occurrences () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
-  let blocked_keeper = "incomplete-ledger-keeper" in
+  let damaged_keeper = "damaged-ledger-keeper" in
   let healthy_keeper = "healthy-ledger-keeper" in
   write_malformed_reaction_ledger_row
     ~base_path
-    ~keeper_name:blocked_keeper;
-  let blocked =
+    ~keeper_name:damaged_keeper;
+  let damaged =
     create_named_keeper_wake_schedule
       config
-      ~schedule_id:"incomplete-ledger-schedule"
-      ~keeper_name:blocked_keeper
+      ~schedule_id:"damaged-ledger-schedule"
+      ~keeper_name:damaged_keeper
   in
   let healthy =
     create_named_keeper_wake_schedule
@@ -899,35 +886,21 @@ let test_incomplete_ledger_is_occurrence_local_and_retryable () =
         String.equal item.schedule_id schedule_id)
       result.dispatches
   in
-  let blocked_dispatch = dispatch blocked.schedule_id in
+  let damaged_dispatch = dispatch damaged.schedule_id in
   let healthy_dispatch = dispatch healthy.schedule_id in
   check string
-    "incomplete occurrence remains retryable"
-    "failed"
-    (Schedule_runner.dispatch_status_to_string blocked_dispatch.status);
-  (match blocked_dispatch.error with
-   | Some detail ->
-     check bool
-       "incomplete evidence is explicit"
-       true
-       (String_util.contains_substring detail "evidence incomplete")
-   | None -> fail "incomplete occurrence error missing");
+    "unattributed damage cannot block a new occurrence"
+    "succeeded"
+    (Schedule_runner.dispatch_status_to_string damaged_dispatch.status);
   check string
     "other keeper lane continues"
     "succeeded"
     (Schedule_runner.dispatch_status_to_string healthy_dispatch.status);
-  (match Schedule_store.get_schedule config ~schedule_id:blocked.schedule_id with
-   | Some stored ->
-     check string
-       "blocked occurrence stays due"
-       "due"
-       (Schedule_domain.schedule_status_to_string stored.status)
-   | None -> fail "blocked schedule missing");
   check int
-    "blocked occurrence was not enqueued"
-    0
+    "damaged keeper still receives its identified occurrence"
+    1
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path blocked_keeper));
+       (Keeper_registry_event_queue.snapshot ~base_path damaged_keeper));
   check int
     "healthy keeper received its own occurrence"
     1
@@ -935,7 +908,7 @@ let test_incomplete_ledger_is_occurrence_local_and_retryable () =
        (Keeper_registry_event_queue.snapshot ~base_path healthy_keeper))
 ;;
 
-let test_dashboard_projects_incomplete_reaction_evidence () =
+let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
@@ -954,17 +927,13 @@ let test_dashboard_projects_incomplete_reaction_evidence () =
   in
   let open Yojson.Safe.Util in
   check string
-    "dashboard does not project incomplete evidence as a match"
-    "incomplete"
+    "dashboard preserves exact occurrence evidence"
+    "matched_stimulus"
     (evidence |> member "projection_status" |> to_string);
   check int
-    "dashboard syntax error count"
+    "only the identified occurrence row is matched"
     1
-    (evidence |> member "unattributed_syntax_error_count" |> to_int);
-  check int
-    "dashboard identity quarantine count"
-    0
-    (evidence |> member "unattributed_identity_quarantine_count" |> to_int)
+    (evidence |> member "matched_record_count" |> to_int)
 ;;
 
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
@@ -980,7 +949,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
        ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
        ())
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v3"
+        [ "schema", `String "keeper.reaction_ledger.v4"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1084,10 +1053,10 @@ let () =
             test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake ledger failure is retryable" `Quick
             test_keeper_wake_ledger_failure_is_retryable
-        ; test_case "incomplete ledger is occurrence-local and retryable" `Quick
-            test_incomplete_ledger_is_occurrence_local_and_retryable
-        ; test_case "dashboard projects incomplete reaction evidence" `Quick
-            test_dashboard_projects_incomplete_reaction_evidence
+        ; test_case "unattributed ledger damage does not block occurrences" `Quick
+            test_unattributed_ledger_damage_does_not_block_occurrences
+        ; test_case "dashboard keeps unattributed damage out of exact evidence" `Quick
+            test_dashboard_keeps_unattributed_damage_out_of_exact_evidence
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

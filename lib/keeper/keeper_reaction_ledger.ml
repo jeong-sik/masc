@@ -32,7 +32,7 @@ module Event_id_set = Set.Make (String)
 (* The storage namespace and row schema advance together.  A generation hard
    cut never scans or writes an older namespace, so retired data cannot remain
    on the exact-evidence hot path or become a second authority. *)
-let storage_generation = "v3"
+let storage_generation = "v4"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -296,9 +296,32 @@ let event_queue_transition_event_id
   Printf.sprintf "%s:source:%d" receipt.event_id source_index
 ;;
 
+type transition_source =
+  { stimulus_id : string
+  ; post_id : string
+  ; stimulus_kind : stimulus_kind
+  }
+
+let transition_source_of_stimulus stimulus =
+  { stimulus_id = stimulus_id_of_event_queue stimulus
+  ; post_id = stimulus.Keeper_event_queue.post_id
+  ; stimulus_kind = stimulus_kind_of_event_queue stimulus
+  }
+;;
+
+let transition_source_json source =
+  `Assoc
+    [ "stimulus_id", `String source.stimulus_id
+    ; "post_id", `String source.post_id
+    ; "stimulus_kind", `String (stimulus_kind_to_string source.stimulus_kind)
+    ]
+;;
+
 let event_queue_transition_reaction_json
       ~keeper_name
       ~source_index
+      ~source_count
+      ~transition_source
       (receipt : Keeper_event_queue_state.transition_receipt)
       stimulus
   =
@@ -321,6 +344,8 @@ let event_queue_transition_reaction_json
                , `String
                    (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus)) )
              ; "source_index", `Int source_index
+             ; "source_count", `Int source_count
+             ; "transition_source", transition_source_json transition_source
              ; "transition_id", `String receipt.transition_id
              ; ( "transition_receipt"
                , Keeper_event_queue_state.transition_receipt_to_yojson receipt )
@@ -328,32 +353,75 @@ let event_queue_transition_reaction_json
        ])
 ;;
 
-let record_event_queue_transition_reaction_result
+let append_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name
-      ~source_index
-      ~receipt
-      stimulus
+      (entry : Keeper_event_queue_state.outbox_entry)
   =
-  let event_id = event_queue_transition_event_id receipt source_index in
-  try
-    Dated_jsonl.append
-      (store_for_base_path ~base_path ~keeper_name)
-      (event_queue_transition_reaction_json
-         ~keeper_name
-         ~source_index
-         receipt
-         stimulus);
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
+  match entry.stimuli with
+  | [] ->
     Error
       (Printf.sprintf
-         "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+         "event queue settlement outbox has no sources keeper=%s transition_id=%s"
          keeper_name
-         event_id
-         (Printexc.to_string exn))
+         entry.receipt.transition_id)
+  | stimuli ->
+    let store = store_for_base_path ~base_path ~keeper_name in
+    let source_count = List.length stimuli in
+    let rec append_sources source_index = function
+      | [] -> Ok ()
+      | stimulus :: rest ->
+        let event_id = event_queue_transition_event_id entry.receipt source_index in
+        (try
+           Dated_jsonl.append
+             store
+             (event_queue_transition_reaction_json
+                ~keeper_name
+                ~source_index
+                ~source_count
+                ~transition_source:(transition_source_of_stimulus stimulus)
+                entry.receipt
+                stimulus);
+           append_sources (source_index + 1) rest
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Error
+             (Printf.sprintf
+                "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+                keeper_name
+                event_id
+                (Printexc.to_string exn)))
+    in
+    append_sources 0 stimuli
+;;
+
+let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
+  let ( let* ) = Result.bind in
+  let* outbox =
+    Keeper_event_queue_persistence.transition_outbox_result
+      ~base_path
+      ~keeper_name
+  in
+  match outbox with
+  | [] -> Ok ()
+  | [ entry ] ->
+    let* () =
+      append_event_queue_transition_outbox_result
+        ~base_path
+        ~keeper_name
+        entry
+    in
+    Keeper_event_queue_persistence.mark_transition_projected_result
+      ~base_path
+      ~keeper_name
+      ~transition_id:entry.receipt.transition_id
+  | entries ->
+    Error
+      (Printf.sprintf
+         "event queue transition outbox cardinality invalid keeper=%s count=%d"
+         keeper_name
+         (List.length entries))
 ;;
 
 let cursor_json { cursor_ts; post_id } =
@@ -461,15 +529,29 @@ type row_quarantine_reason =
   | Unknown_stimulus_kind
   | Missing_stimulus_source
   | Unknown_stimulus_source
+  | Missing_stimulus_post_id
+  | Missing_stimulus_urgency
+  | Unknown_stimulus_urgency
+  | Missing_stimulus_arrived_at
+  | Non_finite_stimulus_arrived_at
   | Missing_reaction
   | Missing_reaction_kind
   | Quarantine_unknown_reaction_kind
   | Missing_reaction_source
   | Unknown_reaction_source
   | Reaction_source_mismatch
+  | Missing_reaction_post_id
+  | Missing_reaction_stimulus_kind
+  | Unknown_reaction_stimulus_kind
   | Missing_transition_receipt
   | Invalid_transition_receipt
   | Missing_transition_source_index
+  | Missing_transition_source_count
+  | Invalid_transition_source_count
+  | Missing_transition_source
+  | Invalid_transition_source
+  | Transition_source_index_out_of_bounds
+  | Transition_source_identity_mismatch
   | Event_identity_mismatch
   | Transition_settlement_mismatch
   | Missing_cursor
@@ -498,15 +580,29 @@ let row_quarantine_reason_to_string = function
   | Unknown_stimulus_kind -> "unknown_stimulus_kind"
   | Missing_stimulus_source -> "missing_stimulus_source"
   | Unknown_stimulus_source -> "unknown_stimulus_source"
+  | Missing_stimulus_post_id -> "missing_stimulus_post_id"
+  | Missing_stimulus_urgency -> "missing_stimulus_urgency"
+  | Unknown_stimulus_urgency -> "unknown_stimulus_urgency"
+  | Missing_stimulus_arrived_at -> "missing_stimulus_arrived_at"
+  | Non_finite_stimulus_arrived_at -> "non_finite_stimulus_arrived_at"
   | Missing_reaction -> "missing_reaction"
   | Missing_reaction_kind -> "missing_reaction_kind"
   | Quarantine_unknown_reaction_kind -> "unknown_reaction_kind"
   | Missing_reaction_source -> "missing_reaction_source"
   | Unknown_reaction_source -> "unknown_reaction_source"
   | Reaction_source_mismatch -> "reaction_source_mismatch"
+  | Missing_reaction_post_id -> "missing_reaction_post_id"
+  | Missing_reaction_stimulus_kind -> "missing_reaction_stimulus_kind"
+  | Unknown_reaction_stimulus_kind -> "unknown_reaction_stimulus_kind"
   | Missing_transition_receipt -> "missing_transition_receipt"
   | Invalid_transition_receipt -> "invalid_transition_receipt"
   | Missing_transition_source_index -> "missing_transition_source_index"
+  | Missing_transition_source_count -> "missing_transition_source_count"
+  | Invalid_transition_source_count -> "invalid_transition_source_count"
+  | Missing_transition_source -> "missing_transition_source"
+  | Invalid_transition_source -> "invalid_transition_source"
+  | Transition_source_index_out_of_bounds -> "transition_source_index_out_of_bounds"
+  | Transition_source_identity_mismatch -> "transition_source_identity_mismatch"
   | Event_identity_mismatch -> "event_identity_mismatch"
   | Transition_settlement_mismatch -> "transition_settlement_mismatch"
   | Missing_cursor -> "missing_cursor"
@@ -573,12 +669,80 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     (Keeper_event_queue_state.Ack | Keeper_event_queue_state.Requeue _) -> false
 ;;
 
-let decode_transition_reaction ~event_id ~reaction_kind reaction =
+let decode_reaction_stimulus_reference reaction =
+  let ( let* ) = Result.bind in
+  let* post_id = require_string Missing_reaction_post_id "post_id" reaction in
+  let* raw_stimulus_kind =
+    require_string Missing_reaction_stimulus_kind "stimulus_kind" reaction
+  in
+  let* stimulus_kind =
+    match stimulus_kind_of_string raw_stimulus_kind with
+    | Some value -> Ok value
+    | None -> Error Unknown_reaction_stimulus_kind
+  in
+  Ok (post_id, stimulus_kind)
+;;
+
+let decode_transition_source = function
+  | `Assoc _ as json ->
+    let ( let* ) = Result.bind in
+    let* stimulus_id =
+      require_non_empty_string
+        ~missing:Invalid_transition_source
+        ~empty:Invalid_transition_source
+        "stimulus_id"
+        json
+    in
+    let* post_id = require_string Invalid_transition_source "post_id" json in
+    let* raw_stimulus_kind =
+      require_string Invalid_transition_source "stimulus_kind" json
+    in
+    let* stimulus_kind =
+      match stimulus_kind_of_string raw_stimulus_kind with
+      | Some value -> Ok value
+      | None -> Error Invalid_transition_source
+    in
+    Ok { stimulus_id; post_id; stimulus_kind }
+  | _ -> Error Invalid_transition_source
+;;
+
+let decode_transition_reaction
+      ~event_id
+      ~metadata
+      ~reaction_kind
+      ~reaction_post_id
+      ~reaction_stimulus_kind
+      reaction
+  =
   let ( let* ) = Result.bind in
   let* source_index =
     match int_field_opt "source_index" reaction with
     | Some value when value >= 0 -> Ok value
     | Some _ | None -> Error Missing_transition_source_index
+  in
+  let* source_count =
+    match int_field_opt "source_count" reaction with
+    | Some value when value > 0 -> Ok value
+    | Some _ -> Error Invalid_transition_source_count
+    | None -> Error Missing_transition_source_count
+  in
+  let* () =
+    if source_index < source_count
+    then Ok ()
+    else Error Transition_source_index_out_of_bounds
+  in
+  let* transition_source =
+    match assoc_field "transition_source" reaction with
+    | None -> Error Missing_transition_source
+    | Some json -> decode_transition_source json
+  in
+  let* () =
+    if
+      String.equal transition_source.stimulus_id metadata.stimulus_id
+      && String.equal transition_source.post_id reaction_post_id
+      && transition_source.stimulus_kind = reaction_stimulus_kind
+    then Ok ()
+    else Error Transition_source_identity_mismatch
   in
   let* receipt_json =
     match assoc_field "transition_receipt" reaction with
@@ -611,6 +775,9 @@ let decode_reaction_row ~event_id metadata reaction =
       Quarantine_unknown_reaction_kind)
   in
   let* source = require_string Missing_reaction_source "source" reaction in
+  let* reaction_post_id, reaction_stimulus_kind =
+    decode_reaction_stimulus_reference reaction
+  in
   match reaction_kind, source with
   | Turn_started, "keeper_event_queue" ->
     let expected_event_id = metadata.stimulus_id ^ ":reaction:turn_started" in
@@ -620,7 +787,13 @@ let decode_reaction_row ~event_id metadata reaction =
   | (Event_queue_ack | Event_queue_requeued | Event_queue_escalated),
     "keeper_event_queue_settlement" ->
     let* transition_receipt =
-      decode_transition_reaction ~event_id ~reaction_kind reaction
+      decode_transition_reaction
+        ~event_id
+        ~metadata
+        ~reaction_kind
+        ~reaction_post_id
+        ~reaction_stimulus_kind
+        reaction
     in
     Ok
       (Current_reaction
@@ -736,6 +909,19 @@ let decode_current_row ~keeper_name row =
       then Ok ()
       else Error Unknown_stimulus_source
     in
+    let* _post_id = require_string Missing_stimulus_post_id "post_id" stimulus in
+    let* raw_urgency = require_string Missing_stimulus_urgency "urgency" stimulus in
+    let* _urgency =
+      Keeper_event_queue.urgency_of_string raw_urgency
+      |> Result.map_error (fun _ -> Unknown_stimulus_urgency)
+    in
+    let* _arrived_at =
+      require_finite_float
+        ~missing:Missing_stimulus_arrived_at
+        ~non_finite:Non_finite_stimulus_arrived_at
+        "arrived_at_unix"
+        stimulus
+    in
     let* () =
       match stimulus_kind, float_field "board_updated_at_unix" stimulus with
       | Board_signal, Some value when not (Float.is_finite value) ->
@@ -773,14 +959,6 @@ type event_queue_reaction_evidence =
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
-  ; unattributed_syntax_error_count : int
-  ; unattributed_identity_quarantine_count : int
-  }
-
-type unattributed_syntax_error =
-  { path : string
-  ; line_number : int option
-  ; detail : string
   }
 
 type event_queue_reaction_evidence_outcome =
@@ -788,12 +966,6 @@ type event_queue_reaction_evidence_outcome =
   | Evidence_quarantined of
       { evidence : event_queue_reaction_evidence
       ; first_reason : row_quarantine_reason
-      }
-  | Evidence_incomplete of
-      { evidence : event_queue_reaction_evidence
-      ; first_syntax_error : unattributed_syntax_error option
-      ; first_identity_quarantine_reason : row_quarantine_reason option
-      ; first_matching_quarantine_reason : row_quarantine_reason option
       }
 
 type event_queue_reaction_evidence_error =
@@ -826,71 +998,71 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   let latest_recorded_at = ref None in
   let matched_record_count = ref 0 in
   let quarantined_record_count = ref 0 in
-  let unattributed_syntax_error_count = ref 0 in
-  let unattributed_identity_quarantine_count = ref 0 in
   let first_matching_quarantine_reason = ref None in
-  let first_syntax_error = ref None in
-  let first_identity_quarantine_reason = ref None in
+  let seen_event_ids = ref Event_id_set.empty in
   let remember_first slot value =
     match !slot with
     | Some _ -> ()
     | None -> slot := Some value
   in
   let note_matching_row row =
-    match decode_current_row ~keeper_name row with
-    | Error reason ->
-      incr quarantined_record_count;
-      remember_first first_matching_quarantine_reason reason
-    | Ok current_row ->
-      incr matched_record_count;
-      let metadata =
-        match current_row with
-        | Current_stimulus { metadata; _ }
-        | Current_reaction { metadata; _ }
-        | Current_cursor_ack { metadata; _ } -> metadata
-      in
-      let recorded_at = Some metadata.recorded_at in
-      latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
-      (match current_row with
-       | Current_stimulus _ ->
-         stimulus_seen := true;
-         stimulus_recorded_at := max_recorded_at !stimulus_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Turn_started; _ } ->
-         turn_started_seen := true;
-         turn_started_recorded_at
-           := max_recorded_at !turn_started_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-         event_queue_ack_seen := true;
-         event_queue_ack_recorded_at
-           := max_recorded_at !event_queue_ack_recorded_at recorded_at
-       | Current_reaction
-           { reaction_kind = Event_queue_requeued | Event_queue_escalated | Cursor_ack
-           ; _
-           }
-       | Current_cursor_ack _ -> ())
+    let is_replay =
+      match string_field "event_id" row with
+      | Some event_id
+        when not (String.equal event_id "")
+             && Event_id_set.mem event_id !seen_event_ids -> true
+      | Some event_id when not (String.equal event_id "") ->
+        seen_event_ids := Event_id_set.add event_id !seen_event_ids;
+        false
+      | Some _ | None -> false
+    in
+    if not is_replay
+    then
+      match decode_current_row ~keeper_name row with
+      | Error reason ->
+        incr quarantined_record_count;
+        remember_first first_matching_quarantine_reason reason
+      | Ok current_row ->
+        incr matched_record_count;
+        let metadata =
+          match current_row with
+          | Current_stimulus { metadata; _ }
+          | Current_reaction { metadata; _ }
+          | Current_cursor_ack { metadata; _ } -> metadata
+        in
+        let recorded_at = Some metadata.recorded_at in
+        latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
+        (match current_row with
+         | Current_stimulus _ ->
+           stimulus_seen := true;
+           stimulus_recorded_at
+             := max_recorded_at !stimulus_recorded_at recorded_at
+         | Current_reaction { reaction_kind = Turn_started; _ } ->
+           turn_started_seen := true;
+           turn_started_recorded_at
+             := max_recorded_at !turn_started_recorded_at recorded_at
+         | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+           event_queue_ack_seen := true;
+           event_queue_ack_recorded_at
+             := max_recorded_at !event_queue_ack_recorded_at recorded_at
+         | Current_reaction
+             { reaction_kind =
+                 Event_queue_requeued | Event_queue_escalated | Cursor_ack
+             ; _
+             }
+         | Current_cursor_ack _ -> ())
   in
   let note_parsed_row row =
-    let note_unattributed_identity () =
-      incr unattributed_identity_quarantine_count;
-      match decode_current_row ~keeper_name row with
-      | Error reason -> remember_first first_identity_quarantine_reason reason
-      | Ok _ -> ()
-    in
     match string_field "stimulus_id" row with
-    | Some row_stimulus_id ->
-      if String.equal row_stimulus_id ""
-      then note_unattributed_identity ()
-      else if String.equal row_stimulus_id stimulus_id
-      then note_matching_row row
-    | None -> note_unattributed_identity ()
+    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
+      note_matching_row row
+    | Some _ | None -> ()
   in
   let store = store_for_base_path ~base_path ~keeper_name in
   let iteration =
     Dated_jsonl.iter_all_entries_result store (function
       | Dated_jsonl.Parsed row -> note_parsed_row row
-      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-        incr unattributed_syntax_error_count;
-        remember_first first_syntax_error { path; line_number; detail })
+      | Dated_jsonl.Malformed_json _ -> ())
   in
   match iteration with
   | Error error -> Error (Evidence_read_error error)
@@ -907,29 +1079,12 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
       ; latest_recorded_at = !latest_recorded_at
       ; matched_record_count = !matched_record_count
       ; quarantined_record_count = !quarantined_record_count
-      ; unattributed_syntax_error_count = !unattributed_syntax_error_count
-      ; unattributed_identity_quarantine_count =
-          !unattributed_identity_quarantine_count
       }
     in
-    if
-      evidence.unattributed_syntax_error_count > 0
-      || evidence.unattributed_identity_quarantine_count > 0
-    then
-      Ok
-        (Evidence_incomplete
-           { evidence
-           ; first_syntax_error = !first_syntax_error
-           ; first_identity_quarantine_reason =
-               !first_identity_quarantine_reason
-           ; first_matching_quarantine_reason =
-               !first_matching_quarantine_reason
-           })
-    else
-      match !first_matching_quarantine_reason with
-      | Some first_reason ->
-        Ok (Evidence_quarantined { evidence; first_reason })
-      | None -> Ok (Evidence_complete evidence)
+    (match !first_matching_quarantine_reason with
+     | Some first_reason ->
+       Ok (Evidence_quarantined { evidence; first_reason })
+     | None -> Ok (Evidence_complete evidence))
   end
 ;;
 

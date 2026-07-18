@@ -7,6 +7,7 @@
 
 ### Removed
 - Removed the retired `Autonomous_bridge`/`Autonomous_state` modules (~540 lines) whose keeper wire-in was already deleted by #24765, plus a foreign `session_tracker` QA test targeting a PostgreSQL module that never existed in this repo. `Autonomous_phase` stays live via the autonomous routes. No replacement: the surfaces had no production consumers.
+- Removed 12 dead root modules with zero production consumers (`evidence_ref`, `exec_shell_adapter`, `retrieval_projection`, `masc_error_recovery`, `state_product`, `prompt_composer`, `team_context`, `tool_name_alias_axis`, `attribution_tagged`, `timeout_policy`, `runtime_deadline`, `runtime_provider_credentials`) — a 2,527-line public typed API cut across `masc`/`masc.runtime`/`masc.masc_core`. No replacement: every surface was self-consuming (tests only).
 - Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
 - Removed the per-turn prefix/string heuristic that rewrote unknown-looking
   prompt tokens. Keeper prompt prose now describes behaviour, while the active

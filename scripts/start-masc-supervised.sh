@@ -15,10 +15,16 @@
 #                                     (default: <repo-root>/logs/masc-supervisor.log)
 #   MASC_RESTART_COOLDOWN_SEC       — sleep between restart attempts
 #                                     (default: 5)
+#   MASC_RUNTIME_LKG_FILE           — health-verified artifact descriptor
+#                                     (default: <repo-root>/logs/masc-runtime-lkg.v1)
+#   MASC_SUPERVISOR_HEALTH_PROBE_SEC — observation cadence only; never a
+#                                     readiness timeout (default: 1)
 #
 # Restart contract:
 #   Every child exit is logged with its real exit status and uptime.
-#   Child failures never revoke the supervisor's restart responsibility.
+#   A PID-bound healthy runtime keeps continuous restart responsibility.
+#   A startup that never publishes a candidate or never reaches PID-bound
+#   health is terminal, so deterministic startup failures are not amplified.
 #   TERM, INT, and HUP remain explicit external stop signals: they are
 #   forwarded to the active child and terminate the supervisor.
 #
@@ -37,8 +43,15 @@ LOG_FILE="${MASC_SUPERVISOR_LOG:-$REPO_ROOT/logs/masc-supervisor.log}"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 COOLDOWN_SEC="${MASC_RESTART_COOLDOWN_SEC:-5}"
+HEALTH_PROBE_SEC="${MASC_SUPERVISOR_HEALTH_PROBE_SEC:-1}"
+ARTIFACT_CONTRACT="${MASC_RUNTIME_ARTIFACT_CONTRACT:-$REPO_ROOT/scripts/lib/runtime-artifact-contract.sh}"
+LKG_FILE="${MASC_RUNTIME_LKG_FILE:-$REPO_ROOT/logs/masc-runtime-lkg.v1}"
+ATTEMPT_DIR="$(dirname "$LKG_FILE")"
+CANDIDATE_FILE="$ATTEMPT_DIR/masc-runtime-candidate.$$.v1"
+PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.sha256"
 active_pid=""
 active_kind=""
+monitor_pid=""
 stop_signal=""
 stop_exit_code=0
 stop_forwarded_pid=""
@@ -46,6 +59,60 @@ stop_forwarded_pid=""
 log() {
   printf '[%s][supervisor] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" \
     | tee -a "$LOG_FILE" >&2
+}
+
+if [ ! -r "$ARTIFACT_CONTRACT" ]; then
+  log "ERROR: runtime artifact contract unavailable: $ARTIFACT_CONTRACT"
+  exit 78
+fi
+case "$HEALTH_PROBE_SEC" in
+  ''|*[!0-9]*)
+    log "ERROR: MASC_SUPERVISOR_HEALTH_PROBE_SEC must be a positive integer"
+    exit 78
+    ;;
+esac
+if [ "$HEALTH_PROBE_SEC" -lt 1 ]; then
+  log "ERROR: MASC_SUPERVISOR_HEALTH_PROBE_SEC must be at least 1"
+  exit 78
+fi
+for required_command in lsof curl; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    log "ERROR: required runtime health-proof command unavailable: $required_command"
+    exit 78
+  fi
+done
+# shellcheck source=/dev/null
+source "$ARTIFACT_CONTRACT"
+mkdir -p "$ATTEMPT_DIR"
+
+monitor_runtime_candidate() {
+  local child_pid="$1"
+  local listener_pid=""
+  local actual_hash=""
+
+  while kill -0 "$child_pid" 2>/dev/null; do
+    if masc_runtime_artifact_descriptor_read "$CANDIDATE_FILE"; then
+      listener_pid="$(lsof -ti "tcp:$MASC_ARTIFACT_PORT" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+      if [ "$listener_pid" = "$child_pid" ] \
+        && curl -fsS --max-time 1 \
+          "http://127.0.0.1:$MASC_ARTIFACT_PORT/health" >/dev/null 2>&1
+      then
+        actual_hash="$(masc_runtime_artifact_hash "$MASC_ARTIFACT_PATH")" || return
+        if [ "$actual_hash" != "$MASC_ARTIFACT_SHA256" ]; then
+          log "ERROR: healthy listener artifact changed before LKG promotion"
+          return
+        fi
+        if masc_runtime_artifact_promote "$CANDIDATE_FILE" "$LKG_FILE" "$REPO_ROOT"; then
+          printf '%s\n' "$actual_hash" >"$PROOF_FILE"
+          log "health-verified runtime artifact promoted sha256=$actual_hash pid=$child_pid"
+        else
+          log "ERROR: healthy runtime artifact failed exact LKG promotion"
+        fi
+        return
+      fi
+    fi
+    sleep "$HEALTH_PROBE_SEC"
+  done
 }
 
 forward_stop_to_active() {
@@ -86,9 +153,20 @@ run_active() {
   "$@" &
   active_pid=$!
   stop_forwarded_pid=""
+  monitor_pid=""
+  if [ "$kind" = "masc" ]; then
+    monitor_runtime_candidate "$active_pid" &
+    monitor_pid=$!
+  fi
   forward_stop_to_active
   wait "$active_pid"
   status=$?
+
+  if [ -n "$monitor_pid" ]; then
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+    monitor_pid=""
+  fi
 
   if [ -n "$stop_signal" ]; then
     wait "$active_pid" 2>/dev/null
@@ -125,13 +203,20 @@ fi
 
 while true; do
   stop_if_requested
+  rm -f "$CANDIDATE_FILE" "$PROOF_FILE"
   log "starting masc"
   start_epoch=$(date +%s)
 
   # No `set -e` is active, so a failing start-masc.sh does not abort this
   # loop; `|| true` here would make `$?` observe `true` and record every
   # exit — including SIGSEGV (139) and SIGTERM (143) — as code=0.
-  run_active "masc" "$REPO_ROOT/start-masc.sh" "$@"
+  run_active "masc" env \
+    MASC_RUNTIME_ARTIFACT_CONTRACT="$ARTIFACT_CONTRACT" \
+    MASC_RUNTIME_LKG_FILE="$LKG_FILE" \
+    MASC_RUNTIME_CANDIDATE_FILE="$CANDIDATE_FILE" \
+    MASC_RUNTIME_HEALTH_PROOF_FILE="$PROOF_FILE" \
+    MASC_ENABLE_VERIFIED_LKG_FALLBACK=1 \
+    "$REPO_ROOT/start-masc.sh" "$@"
   exit_code=$?
   end_epoch=$(date +%s)
   uptime_s=$((end_epoch - start_epoch))
@@ -146,6 +231,15 @@ while true; do
 
   log "masc exited code=${exit_code}${exit_detail} uptime=${uptime_s}s"
   stop_if_requested
+
+  if [ ! -f "$CANDIDATE_FILE" ]; then
+    log "terminal startup state: no runtime candidate was published; refusing restart amplification"
+    exit "$exit_code"
+  fi
+  if [ ! -f "$PROOF_FILE" ]; then
+    log "terminal startup state: runtime candidate never reached PID-bound health; refusing restart amplification"
+    exit "$exit_code"
+  fi
 
   log "restart in ${COOLDOWN_SEC}s"
   run_active "restart cooldown" sleep "$COOLDOWN_SEC"

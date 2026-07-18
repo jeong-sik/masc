@@ -125,7 +125,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
      serialization (loops already back off adaptively when slow). *)
   let compute () =
     Eio.Semaphore.acquire offload_slots;
-    Fun.protect
+    Eio_guard.protect
       ~finally:(fun () -> Eio.Semaphore.release offload_slots)
       (fun () -> Domain_pool_ref.submit_cpu_or_inline compute)
   in

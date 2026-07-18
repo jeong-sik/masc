@@ -106,16 +106,18 @@
   <div class="eyebrow">MASC 1.0 / Executable strategy</div>
   <h1>10 Keeper Mixed-Workload<br>Operation Goal Matrix</h1>
   <p class="lede">10개 Keeper가 Discord·Slack·Dashboard·Voice에서 동시에 대화하고, 서로 협업하며, 코드 작성·정보 수집·이미지 생성·장기 작업·메모리 기록·컴팩션을 수행하는 상황을 대상으로 한다. 목표는 평균 처리량이 아니라 <strong>직접 요청의 반응성, 영속 복구, lane 공정성, 자원 상한, 감사 가능한 상태 전이</strong>를 동시에 만족하는 것이다.</p>
-  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 19:46 KST · live runtime commit 3be51c2160 · base draft #25092 · stacked partition draft #25130</p>
+  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 19:52 KST · last live runtime commit 3be51c2160 · base draft #25092 · stacked partition draft #25130</p>
 
   <div class="banner">
-    <strong>현재 판정: 기능은 부분 사용 가능, 고객 제품은 No-Go.</strong> 16:28 KST에는 13개 bootable Keeper 중 실행 fiber가 0이고 16개 event queue가 모두 v2라 v3-only reader에서 거부됐다. 2026-07-18 19:46 KST의 fresh full snapshot은 target 자체가 6으로 축소된 상태에서 6 executable/effective, 3 running, 3 recovering을 보고하며 overall status는 degraded/operator action required다. durable event는 pending 608 + inflight 2로 줄었지만 oldest age는 약 68.21시간으로 악화됐다. 따라서 backlog 개수 감소와 축소된 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
+    <strong>현재 판정: canary outage, 고객 제품은 No-Go.</strong> 2026-07-18 19:46 KST의 마지막 fresh full snapshot은 target 자체가 6으로 축소된 상태에서 6 executable/effective, 3 running, 3 recovering을 보고했다. durable event는 pending 608 + inflight 2, oldest age 약 68.21시간이었다. 그러나 19:51 KST에는 8935 listener와 runtime process가 모두 사라졌고 supervisor와 v2 LKG도 존재하지 않아 자동 복구가 0회였다. backlog 개수 감소와 축소된 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
   </div>
+  <p class="small muted">Runtime adoption blocker: <a href="https://github.com/jeong-sik/masc/issues/25190">#25190</a>. #25160의 복구 코드는 병합됐지만 live launch path가 직접 executable이어서 AFK 복구 권한이 없었다.</p>
 
   <section>
     <h2>1. Live baseline</h2>
     <div class="cards">
-      <div class="card bad"><div class="label">Executable / effective</div><div class="value">6 / 6 · target 6</div><div>3 running, 3 recovering; release target 10에는 미달</div></div>
+      <div class="card bad"><div class="label">Current listener</div><div class="value">0</div><div>19:51 KST connection refused; supervisor/LKG 없음</div></div>
+      <div class="card bad"><div class="label">Last executable / effective</div><div class="value">6 / 6 · target 6</div><div>19:46 snapshot: 3 running, 3 recovering; release target 10에는 미달</div></div>
       <div class="card warn"><div class="label">Event queue read errors</div><div class="value">16 → 0</div><div>16/16 v3 변환 완료; backlog settlement는 별개</div></div>
       <div class="card bad"><div class="label">Durable event queue</div><div class="value">608 + 2</div><div>pending + inflight, oldest 약 68.21시간, read errors 0</div></div>
       <div class="card warn"><div class="label">Queue delta vs 13:22</div><div class="value">total -186</div><div>796 → 610, 그러나 oldest는 약 61.83h → 68.21h</div></div>
@@ -140,7 +142,7 @@
       <table>
         <thead><tr><th>제품 축</th><th>Weight</th><th>현재 관측</th><th>#25073 단독 효과</th><th>1.0 정량 gate</th></tr></thead>
         <tbody>
-          <tr><td>실행 가능성</td><td>25%</td><td>축소된 runtime target 6은 충족하지만 release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
+          <tr><td>실행 가능성</td><td>25%</td><td>현재 listener 0; 마지막 snapshot도 축소된 target 6뿐이며 release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
           <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event pending 608, oldest 68.21시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
           <tr><td>직접 요청 반응성</td><td>15%</td><td>owner lane이 ambient provider call에 30–50초 점유될 수 있고 direct-input p95 미측정 → 0점</td><td>55/57 calls 연속 점유를 1 call/admission으로 제한; call 자체의 점유는 남음</td><td>enqueue→turn-start p95 ≤ 2s, 접수 응답 p95 ≤ 5s</td></tr>
           <tr><td>채널·세션 연속성</td><td>15%</td><td>transport/presence 생존만 확인; Slack/Voice/원채널 terminal E2E 미검증 → 0점</td><td>영향 없음</td><td>Discord/Slack/Dashboard/Voice route accuracy 100%, restart replay 100%</td></tr>
@@ -149,7 +151,7 @@
         </tbody>
       </table>
     </div>
-    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. 따라서 fleet가 회복된 현재도 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
+    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. 현재 listener도 0이므로 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
     <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 회복됐다. 그러나 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. 608개 pending과 2개 inflight를 정상 처리·격리·실패 종결하고 target을 10으로 복구하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
     <p><strong>9.0 release floor:</strong> 위 6개 축의 가중 합 ≥ 9.0이고, 동시에 실행 가능성·terminal exactly-once·silent loss 세 hard gate가 모두 통과해야 한다. 평균 점수가 높아도 이 셋 중 하나가 0이면 출시 불가다.</p>
   </section>

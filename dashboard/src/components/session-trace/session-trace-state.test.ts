@@ -331,8 +331,10 @@ describe('loadSessionTrace source isolation', () => {
     await loadSessionTrace('keeper-a', true)
 
     expect(getTraceEvents('keeper-a').map(event => event.kind)).toEqual(
-      expect.arrayContaining(['broadcast', 'tool_call']),
+      expect.arrayContaining(['broadcast', 'lifecycle']),
     )
+    expect(getTraceEvents('keeper-a').find(event => event.kind === 'lifecycle')?.detail.observation_kind)
+      .toBe('provenance_gap')
     expect(getTraceError('keeper-a')).toBeNull()
     expect(getTraceObservationErrors('keeper-a')).toContain(
       'trajectory read failed: strict decode failed',
@@ -371,6 +373,67 @@ describe('buildTraceEvents', () => {
     expect(events.length).toBe(2)
     const kinds = events.map(e => e.kind).sort()
     expect(kinds).toEqual(['broadcast', 'tool_call'])
+  })
+
+  it('does not classify short broadcasts as heartbeats', () => {
+    const events = buildTraceEvents(
+      {
+        ...emptyTimeline('test'),
+        events: [{ type: 'broadcast', ts: '2026-07-18T00:00:00Z', detail: { content: 'ok' } }],
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('broadcast')
+  })
+
+  it('uses only the exact heartbeat event type for heartbeat rows', () => {
+    const events = buildTraceEvents(
+      {
+        ...emptyTimeline('test'),
+        events: [{ type: 'heartbeat', ts: '2026-07-18T00:00:00Z', detail: { content: 'alive' } }],
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('heartbeat')
+  })
+
+  it('preserves duplicate canonical identities as explicit conflicts', () => {
+    const duplicate = {
+      ts: 1712397700,
+      ts_iso: '2024-04-06T10:01:40Z',
+      turn: 1,
+      round: 1,
+      tool_name: 'keeper_fs_read',
+      args: { file_path: '/tmp/a' },
+      outcome: { status: 'succeeded' as const, output: 'a' },
+      duration_ms: 1,
+      execution_id: 'exec-duplicate',
+    }
+    const events = buildTraceEvents(
+      emptyTimeline('test'),
+      {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
+        keeper: 'test',
+        trace_id: 'trace-duplicate',
+        generation: 1,
+        total_entries: 2,
+        showing: 2,
+        entries: [duplicate, { ...duplicate, round: 2 }],
+      },
+    )
+    expect(events).toHaveLength(2)
+    expect(events.map(event => event.id)).toEqual([
+      'tj-exec-duplicate',
+      'tj-exec-duplicate#duplicate-1',
+    ])
+    expect(events[1]!.detail.observation_conflict).toEqual({
+      kind: 'duplicate_event_id',
+      event_id: 'tj-exec-duplicate',
+      occurrence: 1,
+    })
+    expect(events[1]!.error).toBe('duplicate trace event id: tj-exec-duplicate')
   })
 
   it('projects canonical thinking text while preserving structured blocks', () => {
@@ -437,7 +500,11 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.thinkingContent).toBeUndefined()
     expect(events[0]!.summary).toBe('[비공개 사고]')
     expect(events[0]!.detail.block).toEqual({ type: 'redacted_thinking', data: 'opaque-secret' })
-    expect(events[1]!.thinkingContent).toBe('detail-adetail-b')
+    expect(events[1]!.thinkingContent).toBeUndefined()
+    expect(events[1]!.thinkingBlock).toEqual({
+      type: 'reasoning_details',
+      details: [{ text: 'detail-a' }, { raw: { kind: 'opaque' } }, { text: 'detail-b' }],
+    })
     expect(events[1]!.detail.block_index).toBe(1)
     expect(events[2]!.thinkingContent).toBe('signed thought')
     expect(events[2]!.detail.block).toEqual({
@@ -447,7 +514,7 @@ describe('buildTraceEvents', () => {
     })
   })
 
-  it('maps timeline tool_call activity into tool_call traces', () => {
+  it('keeps unmatched timeline tool_call activity as a provenance gap', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -467,10 +534,14 @@ describe('buildTraceEvents', () => {
       null,
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.kind).toBe('tool_call')
-    expect(events[0]!.summary).toBe('keeper_fs_read')
-    expect(events[0]!.toolArgs).toBe('{"path":"/tmp/test.txt"}')
-    expect(events[0]!.toolResult).toBe('file preview')
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.summary).toBe('Tool provenance without canonical Trajectory: keeper_fs_read')
+    expect(events[0]!.detail.observation_kind).toBe('provenance_gap')
+    expect(events[0]!.detail.agent_timeline).toMatchObject({
+      tool_args_preview: '{"path":"/tmp/test.txt"}',
+      tool_output_preview: 'file preview',
+    })
+    expect(events[0]!.error).toBe('agent-timeline provenance has no canonical Trajectory execution row')
   })
 
   it('joins only exact execution IDs while preserving the full Trajectory payload', () => {
@@ -537,10 +608,13 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolResult).toBe('trajectory result')
     expect(toolEvents[0]!.duration_ms).toBe(50)
     expect(toolEvents[0]!.turn).toBe(1)
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
     expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
       lane: 'runtime_mcp',
       turn: 1,
+    })
+    expect(toolEvents[0]!.detail.agent_timeline).toMatchObject({
+      execution_id: 'exec-preserve-1',
     })
   })
 
@@ -599,14 +673,14 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolResult).toBeNull()
     expect(toolEvents[0]!.error).toBe('trajectory failed')
     expect(toolEvents[0]!.turn).toBe(1)
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
     expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
       lane: 'runtime_mcp',
       task_id: 'task-1',
     })
   })
 
-  it('creates synthetic tool_call rows from tool-call log when trajectory is missing', () => {
+  it('surfaces a provenance gap when tool-call log has no canonical trajectory row', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -636,11 +710,10 @@ describe('buildTraceEvents', () => {
       },
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.kind).toBe('tool_call')
-    expect(events[0]!.toolName).toBe('Execute')
-    expect(events[0]!.error).toBe('command exited 1')
-    expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
-    expect(events[0]!.detail.lane).toBe('runtime_mcp')
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.error).toBe('tool-call provenance has no canonical Trajectory execution row')
+    expect(events[0]!.detail.observation_kind).toBe('provenance_gap')
+    expect(events[0]!.detail.tool_call_log).toMatchObject({ lane: 'runtime_mcp' })
   })
 
   it('joins trajectory and tool-call log rows on execution_id despite divergent provenance', () => {
@@ -694,7 +767,7 @@ describe('buildTraceEvents', () => {
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]!.executionId).toBe('exec-1712397700000-002a')
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
     // Trace-relative T/R pair stays on the badge; absolute turn remains a detail attribute.
     expect(toolEvents[0]!.turn).toBe(0)
     expect(toolEvents[0]!.round).toBe(5)
@@ -754,7 +827,8 @@ describe('buildTraceEvents', () => {
       },
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
-    expect(toolEvents).toHaveLength(2)
+    expect(toolEvents).toHaveLength(1)
+    expect(events.filter(event => event.detail.observation_kind === 'provenance_gap')).toHaveLength(1)
   })
 
   it('does not infer a join for a tool-call log without execution_id', () => {
@@ -804,13 +878,12 @@ describe('buildTraceEvents', () => {
       },
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
-    expect(toolEvents).toHaveLength(2)
-    expect(toolEvents.map(event => event.detail.trace_origin)).toEqual(
-      expect.arrayContaining(['trajectory', 'tool_call_log']),
-    )
+    expect(toolEvents).toHaveLength(1)
+    expect(events.find(event => event.detail.observation_kind === 'provenance_gap')?.detail.tool_call_log)
+      .toMatchObject({ trace_id: 'trace-1' })
   })
 
-  it('uses execution_id as the stable synthetic row id when present', () => {
+  it('uses execution_id as the stable provenance-gap row id when present', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -840,7 +913,7 @@ describe('buildTraceEvents', () => {
       },
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.id).toBe('tc-exec-1712397700000-00ff')
+    expect(events[0]!.id).toBe('provenance-gap-tool-call-log-exec-1712397700000-00ff')
     expect(events[0]!.executionId).toBe('exec-1712397700000-00ff')
   })
 

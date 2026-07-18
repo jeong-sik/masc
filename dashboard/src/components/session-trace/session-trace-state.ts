@@ -73,6 +73,7 @@ export interface UnifiedTraceEvent {
   // thinking fields
   thinkingContent?: string
   thinkingRedacted?: boolean
+  thinkingBlock?: TrajectoryThinkingBlock
 }
 
 export interface TraceSummary {
@@ -371,10 +372,11 @@ export function setTraceSearchQuery(agent: string, searchQuery: string): void {
 
 // ── Converters ─────────────────────────────────────────
 
-function safeTimestamp(ts: string | undefined | null): number {
-  if (!ts) return Date.now()
-  const parsed = new Date(ts).getTime()
-  return Number.isNaN(parsed) ? Date.now() : parsed
+function timestampMs(ts: string): number {
+  // AgentTimelineResponse validates this as an ISO timestamp at the source
+  // boundary. Invalid source timestamps reject that source instead of being
+  // rewritten to the dashboard clock.
+  return new Date(ts).getTime()
 }
 
 function mergeTraceEvents(
@@ -383,11 +385,24 @@ function mergeTraceEvents(
 ): UnifiedTraceEvent[] {
   const merged = [...historical, ...live]
   merged.sort((a, b) => b.ts - a.ts)
-  const seen = new Set<string>()
-  return merged.filter(event => {
-    if (seen.has(event.id)) return false
-    seen.add(event.id)
-    return true
+  const seen = new Map<string, number>()
+  return merged.map(event => {
+    const occurrence = seen.get(event.id) ?? 0
+    seen.set(event.id, occurrence + 1)
+    if (occurrence === 0) return event
+    return {
+      ...event,
+      id: `${event.id}#duplicate-${occurrence}`,
+      detail: {
+        ...event.detail,
+        observation_conflict: {
+          kind: 'duplicate_event_id',
+          event_id: event.id,
+          occurrence,
+        },
+      },
+      error: event.error ?? `duplicate trace event id: ${event.id}`,
+    }
   })
 }
 
@@ -395,45 +410,15 @@ function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
-function numberField(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function reasoningDetailText(detail: unknown): string {
-  if (detail === null || typeof detail !== 'object' || Array.isArray(detail)) return ''
-  const text = (detail as Record<string, unknown>).text
-  return typeof text === 'string' ? text : ''
-}
-
 function thinkingBlockText(block: TrajectoryThinkingBlock): string | undefined {
   switch (block.type) {
     case 'thinking':
       return block.thinking
     case 'reasoning_details':
-      if (block.reasoning_content !== undefined && block.reasoning_content !== '') {
-        return block.reasoning_content
-      }
-      return block.details.map(reasoningDetailText).join('')
+      return block.reasoning_content === '' ? undefined : block.reasoning_content
     case 'redacted_thinking':
       return undefined
   }
-}
-
-function normalizeToolCallInput(input: unknown): Record<string, unknown> | string | undefined {
-  if (typeof input === 'string') return input
-  if (input != null && typeof input === 'object') return input as Record<string, unknown>
-  if (input == null) return undefined
-  try {
-    return JSON.stringify(input)
-  } catch {
-    return String(input)
-  }
-}
-
-function formatToolCallOutput(entry: ToolCallEntry): string {
-  if (typeof entry.output === 'string') return entry.output
-  const { sha256, bytes, mime, preview } = entry.output._blob
-  return `[masc:blob sha256=${sha256.slice(0, 12)}... bytes=${bytes} mime=${mime}]\n${preview}`
 }
 
 function toolCallProvenanceDetail(entry: ToolCallEntry): Record<string, unknown> {
@@ -447,10 +432,6 @@ function toolCallProvenanceDetail(entry: ToolCallEntry): Record<string, unknown>
   if (entry.model) detail.model = entry.model
   if (entry.execution_id) detail.execution_id = entry.execution_id
   return detail
-}
-
-function toolCallSourceDetail(entry: ToolCallEntry): Record<string, unknown> {
-  return { trace_origin: 'tool_call_log', ...toolCallProvenanceDetail(entry) }
 }
 
 function findExactToolCallEntryMatch(
@@ -477,73 +458,102 @@ function enrichToolCallTrace(
     sessionId: entry.session_id ?? event.sessionId ?? null,
     detail: {
       ...event.detail,
-      trace_origin: 'trajectory+tool_call_log',
       tool_call_log: toolCallProvenanceDetail(entry),
     },
   }
 }
 
-function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
-  const ts = entry.ts * 1000
-  const outputText = formatToolCallOutput(entry)
+function findExactTimelineProvenanceMatch(
+  events: UnifiedTraceEvent[],
+  event: UnifiedTraceEvent,
+  usedIndexes: Set<number>,
+): number | null {
+  if (event.kind !== 'tool_call' || !event.executionId) return null
+  for (let index = 0; index < events.length; index++) {
+    if (usedIndexes.has(index)) continue
+    const candidate = events[index]!
+    if (
+      candidate.detail.observation_kind === 'tool_call_provenance'
+      && candidate.executionId === event.executionId
+    ) return index
+  }
+  return null
+}
+
+function enrichTimelineProvenance(
+  event: UnifiedTraceEvent,
+  provenance: UnifiedTraceEvent,
+): UnifiedTraceEvent {
   return {
-    // execution_id is unique per physical execution and survives refetch.
-    // Unidentified log rows remain explicit source-local observations.
-    id: entry.execution_id
-      ? `tc-${entry.execution_id}`
-      : `tc-${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`,
-    ts,
-    ts_iso: new Date(ts).toISOString(),
-    kind: 'tool_call',
-    sourceLane: 'masc',
-    summary: entry.tool,
-    detail: toolCallSourceDetail(entry),
-    agentName: entry.keeper,
-    sessionId: entry.session_id ?? null,
-    toolName: entry.tool,
-    toolArgs: normalizeToolCallInput(entry.input),
-    toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms ?? undefined,
-    turn: entry.turn ?? entry.keeper_turn_id,
-    executionId: entry.execution_id,
-    error: entry.success ? null : outputText || 'tool call failed',
+    ...event,
+    detail: {
+      ...event.detail,
+      agent_timeline: provenance.detail.agent_timeline,
+    },
   }
 }
 
-function toolCallsShareExecutionId(
-  canonical: UnifiedTraceEvent,
-  timeline: UnifiedTraceEvent,
-): boolean {
-  if (canonical.kind !== 'tool_call' || timeline.kind !== 'tool_call') return false
-  return canonical.executionId !== undefined
-    && timeline.executionId !== undefined
-    && canonical.executionId === timeline.executionId
+function markTimelineProvenanceGap(event: UnifiedTraceEvent): UnifiedTraceEvent {
+  if (event.detail.observation_kind !== 'tool_call_provenance') return event
+  const toolName = stringField(event.detail.provenance_tool_name)
+  return {
+    ...event,
+    summary: toolName === undefined
+      ? 'Tool provenance without canonical Trajectory'
+      : `Tool provenance without canonical Trajectory: ${toolName}`,
+    error: 'agent-timeline provenance has no canonical Trajectory execution row',
+    detail: { ...event.detail, observation_kind: 'provenance_gap' },
+  }
+}
+
+function toolCallEntryToProvenanceGap(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
+  const ts = entry.ts * 1000
+  const identity = entry.execution_id
+    ?? `${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`
+  return {
+    id: `provenance-gap-tool-call-log-${identity}`,
+    ts,
+    ts_iso: new Date(ts).toISOString(),
+    kind: 'lifecycle',
+    sourceLane: 'masc',
+    summary: `Tool provenance without canonical Trajectory: ${entry.tool}`,
+    detail: {
+      observation_kind: 'provenance_gap',
+      source: 'tool_call_log',
+      tool_call_log: toolCallProvenanceDetail(entry),
+    },
+    agentName: entry.keeper,
+    sessionId: entry.session_id ?? null,
+    executionId: entry.execution_id,
+    error: 'tool-call provenance has no canonical Trajectory execution row',
+  }
 }
 
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
-  const ts = safeTimestamp(evt.ts)
+  const ts = timestampMs(evt.ts)
   const detail = evt.detail ?? {}
 
   if (evt.type === 'broadcast') {
     const content = typeof detail.content === 'string' ? detail.content : ''
-    if (content.length <= 20) {
-      return {
-        id: `tl-${ts}-hb-${index}`,
-        ts,
-        ts_iso: evt.ts ?? new Date(ts).toISOString(),
-        kind: 'heartbeat',
-        sourceLane: 'masc',
-        summary: content || 'heartbeat',
-        detail,
-      }
-    }
     return {
       id: `tl-${ts}-bc-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      ts_iso: evt.ts,
       kind: 'broadcast',
       sourceLane: 'masc',
       summary: content.slice(0, 120),
+      detail,
+    }
+  }
+
+  if (evt.type === 'heartbeat') {
+    return {
+      id: `tl-${ts}-hb-${index}`,
+      ts,
+      ts_iso: evt.ts,
+      kind: 'heartbeat',
+      sourceLane: 'masc',
+      summary: stringField(detail.content) ?? 'heartbeat',
       detail,
     }
   }
@@ -552,7 +562,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      ts_iso: evt.ts,
       kind: 'lifecycle',
       sourceLane: 'masc',
       summary: evt.type,
@@ -561,30 +571,24 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   }
 
   if (evt.type === 'tool_call') {
-    const toolName = stringField(detail.tool_name) ?? 'TOOL_CALL'
-    const durationMs = numberField(detail.duration_ms)
-    const toolArgsPreview = stringField(detail.tool_args_preview)
-    const toolOutputPreview = stringField(detail.tool_output_preview)
-    const explicitSuccess = typeof detail.success === 'boolean' ? detail.success : undefined
-    const errorText = stringField(detail.error)
+    const toolName = stringField(detail.tool_name)
     const executionId = stringField(detail.execution_id)
-    const success = explicitSuccess ?? (errorText == null)
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
-      kind: 'tool_call',
+      ts_iso: evt.ts,
+      kind: 'lifecycle',
       sourceLane: 'masc',
-      summary: toolName,
-      detail: { ...detail, type: evt.type, trace_origin: 'agent_timeline' },
+      summary: toolName === undefined ? 'Tool provenance' : `Tool provenance: ${toolName}`,
+      detail: {
+        observation_kind: 'tool_call_provenance',
+        source: 'agent_timeline',
+        ...(toolName === undefined ? {} : { provenance_tool_name: toolName }),
+        agent_timeline: { ...detail, type: evt.type },
+      },
       sessionId: stringField(detail.session_id) ?? null,
       operationId: stringField(detail.operation_id) ?? null,
-      toolName,
-      toolArgs: toolArgsPreview,
-      toolResult: success ? (toolOutputPreview ?? null) : null,
-      duration_ms: durationMs,
       executionId,
-      error: success ? null : (errorText ?? toolOutputPreview ?? 'tool call failed'),
     }
   }
 
@@ -593,7 +597,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   return {
     id: `tl-${ts}-${evt.type}-${index}`,
     ts,
-    ts_iso: evt.ts ?? new Date(ts).toISOString(),
+    ts_iso: evt.ts,
     kind: 'task',
     sourceLane: 'masc',
     summary: `${evt.type.replace('task_', '')} ${taskId} ${title}`.trim(),
@@ -607,24 +611,30 @@ function trajectoryEntryToTrace(
   traceId?: string,
 ): UnifiedTraceEvent {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
-  const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
+  const ts = entry.ts * 1000
   const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
     const redacted = entry.block.type === 'redacted_thinking'
     const content = thinkingBlockText(entry.block)
+    const summary = redacted
+      ? '[비공개 사고]'
+      : entry.block.type === 'reasoning_details' && content === undefined
+        ? `Reasoning details (${entry.block.details.length})`
+        : (content?.slice(0, 120) ?? '')
     return {
       id: `tj-${ts}-thinking-T${entry.turn}-B${entry.block_index}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
-      summary: redacted ? '[비공개 사고]' : (content?.slice(0, 120) ?? ''),
+      summary,
       detail: { ...detail, block_index: entry.block_index, block: entry.block },
       turn: entry.turn,
       thinkingContent: content,
       thinkingRedacted: redacted,
+      thinkingBlock: entry.block,
     }
   }
 
@@ -668,6 +678,7 @@ export function buildTraceEvents(
     : []
   const toolCallEntries = toolCalls?.entries ?? []
   const usedToolCallIndexes = new Set<number>()
+  const usedTimelineIndexes = new Set<number>()
 
   const mergedTrajectoryTraces = trajectoryTraces.map((event) => {
     if (event.kind !== 'tool_call') return event
@@ -676,28 +687,31 @@ export function buildTraceEvents(
       event,
       usedToolCallIndexes,
     )
-    if (matchedIndex == null) return event
-    usedToolCallIndexes.add(matchedIndex)
-    return enrichToolCallTrace(event, toolCallEntries[matchedIndex]!)
+    const withToolCallProvenance = matchedIndex == null
+      ? event
+      : (() => {
+          usedToolCallIndexes.add(matchedIndex)
+          return enrichToolCallTrace(event, toolCallEntries[matchedIndex]!)
+        })()
+    const timelineIndex = findExactTimelineProvenanceMatch(
+      timelineTraces,
+      withToolCallProvenance,
+      usedTimelineIndexes,
+    )
+    if (timelineIndex == null) return withToolCallProvenance
+    usedTimelineIndexes.add(timelineIndex)
+    return enrichTimelineProvenance(withToolCallProvenance, timelineTraces[timelineIndex]!)
   })
 
-  const syntheticToolCallTraces = toolCallEntries.flatMap((entry, index) =>
-    usedToolCallIndexes.has(index) ? [] : [toolCallEntryToSyntheticTrace(entry, index)],
+  const toolCallProvenanceGaps = toolCallEntries.flatMap((entry, index) =>
+    usedToolCallIndexes.has(index) ? [] : [toolCallEntryToProvenanceGap(entry, index)],
+  )
+  const timelineObservations = timelineTraces.flatMap((event, index) =>
+    usedTimelineIndexes.has(index) ? [] : [markTimelineProvenanceGap(event)],
   )
 
-  const richerToolCallTraces = [
-    ...mergedTrajectoryTraces.filter((event) => event.kind === 'tool_call'),
-    ...syntheticToolCallTraces,
-  ]
-  const filteredTimelineTraces = timelineTraces.filter((event) => {
-    if (event.kind !== 'tool_call') return true
-    return !richerToolCallTraces.some((canonical) =>
-      toolCallsShareExecutionId(canonical, event),
-    )
-  })
-
   return mergeTraceEvents(
-    [...filteredTimelineTraces, ...mergedTrajectoryTraces, ...syntheticToolCallTraces],
+    [...timelineObservations, ...mergedTrajectoryTraces, ...toolCallProvenanceGaps],
     [],
   )
 }

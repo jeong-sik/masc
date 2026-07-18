@@ -295,6 +295,22 @@ describe('SessionTraceEntry', () => {
     expect(thinkingMd).toBeDefined()
   })
 
+  it('renders ReasoningDetails as the canonical structured block', () => {
+    const details = [{ kind: 'summary', text: 'step one' }, { opaque: { value: 2 } }]
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleThinkingEvent({
+        thinkingContent: undefined,
+        thinkingBlock: { type: 'reasoning_details', details },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    const card = screen.getByTestId('json-viewer-card')
+    expect(card.getAttribute('data-title')).toBe('Reasoning details')
+    expect(JSON.parse(card.textContent ?? 'null')).toEqual(details)
+  })
+
   it('renders redacted ThinkingDetail with placeholder text', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleThinkingEvent({

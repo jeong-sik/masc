@@ -552,14 +552,29 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
 }
 
 function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
-  if (event.thinkingRedacted) {
+  const block = event.thinkingBlock
+  if (block?.type === 'redacted_thinking' || event.thinkingRedacted) {
     return html`
       <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel} text-xs ${TRACE_TONE.brassText} italic">
         이 사고 과정은 비공개 처리되었습니다.
       </div>
     `
   }
-  const content = event.thinkingContent ?? ''
+  if (block?.type === 'reasoning_details') {
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel} space-y-2">
+        ${block.reasoning_content ? html`
+          <div class="text-sm leading-relaxed text-[var(--color-fg-primary)]">
+            <${Markdown} text=${block.reasoning_content} />
+          </div>
+        ` : null}
+        <${JsonViewerCard} title="Reasoning details" data=${block.details} />
+      </div>
+    `
+  }
+  const content = block?.type === 'thinking'
+    ? block.thinking
+    : (event.thinkingContent ?? '')
   if (!content) return null
   return html`
     <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel}">

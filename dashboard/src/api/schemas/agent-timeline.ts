@@ -9,9 +9,11 @@
 
 import {
   array,
+  isoTimestamp,
   number,
   object,
   optional,
+  pipe,
   record,
   safeParse,
   string,
@@ -22,7 +24,7 @@ import {
 import { formatIssues } from './drift-error'
 
 const AgentTimelineEventSchema = object({
-  ts: string(),
+  ts: pipe(string(), isoTimestamp()),
   type: string(),
   detail: record(string(), unknown()),
 })

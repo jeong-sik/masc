@@ -81,8 +81,27 @@ val keeper_internal_history_path : Workspace.config -> string -> string
 (** Trim + lowercase a history-source label. *)
 val normalize_history_source : string -> string
 
+(** Canonical source label for the per-turn world-state prompt channel.
+    Single definition of the wire literal; call sites must reference this
+    value instead of re-spelling it. *)
+val world_state_prompt_history_source : string
+
 (** Whether [source] denotes the world-state prompt history channel. *)
 val is_prompt_history_source : string -> bool
+
+(** Message-metadata key carrying the history-source provenance of a
+    message this process injected (#25193). *)
+val history_source_metadata_key : string
+
+(** Stamp [source] provenance on [message]'s metadata, replacing any
+    previous value under {!history_source_metadata_key}. *)
+val tag_message_history_source :
+  source:string -> Agent_sdk.Types.message -> Agent_sdk.Types.message
+
+(** [true] iff [message] is a user message this process stamped as a
+    world-state prompt injection. Exact metadata equality only — message
+    content is never inspected. *)
+val message_is_world_state_prompt : Agent_sdk.Types.message -> bool
 
 (** Whether [source] denotes a turn-internal (non-user-facing) history
     channel. *)

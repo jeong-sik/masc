@@ -221,13 +221,53 @@ let keeper_internal_history_path config trace_id =
 let normalize_history_source (source : string) =
   source |> String.trim |> String.lowercase_ascii
 
+let world_state_prompt_history_source = "world_state_prompt"
+
 let is_prompt_history_source (source : string) =
-  String.equal (normalize_history_source source) "world_state_prompt"
+  String.equal (normalize_history_source source) world_state_prompt_history_source
 
 let is_internal_history_source (source : string) =
   match normalize_history_source source with
   | "world_state_prompt" | "internal_assistant" -> true
   | _ -> false
+
+(* Message-level provenance for per-turn injected prompts (#25193).
+
+   The world-state block is a turn-scoped observation, yet it is appended to
+   the persisted conversation every scheduler turn: a live checkpoint was
+   measured at 180 near-identical copies = 50.8% of its bytes. The history
+   jsonl replay path already drops [world_state_prompt] lines
+   ([classify_history_entry] -> [Drop_line]); tagging the live message lets
+   the in-context copy be superseded the same way. The tag is message
+   [metadata], which the OAS checkpoint codec round-trips and deliberately
+   never forwards to provider payloads. Identification is exact key/value
+   equality on metadata this process wrote — never content inspection. *)
+let history_source_metadata_key = "history_source"
+
+let tag_message_history_source ~(source : string)
+    (message : Agent_sdk.Types.message) : Agent_sdk.Types.message =
+  { message with
+    Agent_sdk.Types.metadata =
+      (history_source_metadata_key, `String source)
+      :: List.remove_assoc history_source_metadata_key
+           message.Agent_sdk.Types.metadata
+  }
+
+let message_is_world_state_prompt (message : Agent_sdk.Types.message) : bool =
+  match message.Agent_sdk.Types.role with
+  | Agent_sdk.Types.User ->
+    (match
+       List.assoc_opt history_source_metadata_key
+         message.Agent_sdk.Types.metadata
+     with
+     | Some (`String source) -> is_prompt_history_source source
+     | Some
+         (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _
+         | `Assoc _ | `Tuple _ | `Variant _)
+     | None -> false)
+  | Agent_sdk.Types.System
+  | Agent_sdk.Types.Assistant
+  | Agent_sdk.Types.Tool -> false
 
 let keeper_decision_log_path config name =
   Filename.concat

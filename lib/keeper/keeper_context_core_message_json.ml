@@ -92,7 +92,12 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
       tool_call_id =
         (Json_util.get_string json "tool_call_id"
          |> Option.map Inference_utils.sanitize_text_utf8);
-      metadata = [];
+      (* Round-trip metadata: the OAS checkpoint codec already preserves it,
+         and dropping it here silently discarded message provenance (e.g. the
+         world-state injection stamp, #25193) on every masc-side
+         re-serialization. [metadata_of_json] was defined for exactly this
+         and never wired in. *)
+      metadata = metadata_of_json json;
     }
 
 (** Extract human-readable text from a single history.jsonl line.

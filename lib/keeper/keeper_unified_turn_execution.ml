@@ -188,7 +188,8 @@ let run (ctx : ctx)
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~generation:run_generation
-                 ~history_user_source:"world_state_prompt"
+                 ~history_user_source:
+                   Keeper_types_support.world_state_prompt_history_source
                  ~history_assistant_source:"internal_assistant"
                  ~degraded_retry_applied:
                    (Option.is_some turn_state.degraded_retry_info)

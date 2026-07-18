@@ -111,10 +111,45 @@ let build_turn_context
       user_hash=%s dyn_length=%d dyn_hash=%s"
      meta.agent_name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
-  (* 6. Append user message and persist. *)
-  let user_msg = Agent_sdk.Types.user_msg user_message in
+  (* 6. Append user message and persist. A world-state prompt supersedes the
+     previous one instead of accumulating (#25193): the block is a turn-scoped
+     observation, and the jsonl replay path already drops this channel
+     ([classify_history_entry] -> [Drop_line]), so keeping every copy in the
+     live context was pure duplication — a live checkpoint measured 180
+     near-identical copies (50.8% of its bytes). The injected message is
+     stamped with typed metadata provenance, and prior stamped copies are
+     removed by exact metadata equality before the new one is appended;
+     message content is never inspected, so operator-authored text that
+     merely looks like a world-state block is untouched (as are legacy
+     pre-tag copies, which compaction owns). *)
+  let is_world_state_prompt_turn =
+    Keeper_types_support.is_prompt_history_source history_user_source
+  in
+  let user_msg =
+    let plain = Agent_sdk.Types.user_msg user_message in
+    if is_world_state_prompt_turn
+    then
+      Keeper_types_support.tag_message_history_source
+        ~source:Keeper_types_support.world_state_prompt_history_source plain
+    else plain
+  in
   let history_messages =
-    Keeper_context_runtime.messages_of_context ctx_work
+    let all = Keeper_context_runtime.messages_of_context ctx_work in
+    if is_world_state_prompt_turn
+    then
+      List.filter
+        (fun message ->
+          not (Keeper_types_support.message_is_world_state_prompt message))
+        all
+    else all
+  in
+  let ctx_work =
+    { ctx_work with
+      checkpoint =
+        { ctx_work.checkpoint with
+          Agent_sdk.Checkpoint.messages = history_messages
+        }
+    }
   in
   let ctx_work = Keeper_context_runtime.append ctx_work user_msg in
   if not is_retry

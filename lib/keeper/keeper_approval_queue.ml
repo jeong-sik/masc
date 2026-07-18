@@ -364,10 +364,11 @@ let pending_entry_of_yojson ~base_path json =
         when Int.equal version exact_request_context_version ->
         Ok (Some context)
       | Some _, (None | Some `Null) ->
-        (* Pre-version records contain the retired projection format. It is
-           intentionally not inspected or migrated: there is no exact causal
-           evidence to recover from a digest projection. *)
-        Ok None
+        Error
+          (Printf.sprintf
+             "%s.request_context requires request_context_version=%d"
+             surface
+             exact_request_context_version)
       | (None | Some `Null), Some (`Int version) ->
         Error
           (Printf.sprintf

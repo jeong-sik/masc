@@ -530,52 +530,111 @@ let test_causal_context_partitions_pending_identity_and_summary () =
        List.iter (reject_and_cleanup ~base_path) [ first; changed; missing ])
 ;;
 
-let test_unversioned_request_context_is_not_replayed_as_exact () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-legacy-context" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       let id =
-         submit_with_context
-           ~request_context:(`Assoc [ "history_digest", `String "retired-projection" ])
-           ~base_path
-           ~keeper_name
-           ~input:(`String "legacy")
-           ()
-       in
-       let snapshot = read_pending_snapshot ~base_path in
-       let unversioned =
-         match snapshot with
-         | `Assoc fields ->
-           let pending =
-             match List.assoc_opt "pending" fields with
-             | Some (`List entries) ->
-               `List
-                 (List.map
-                    (function
-                      | `Assoc entry_fields ->
-                        `Assoc (List.remove_assoc "request_context_version" entry_fields)
-                      | entry -> entry)
-                    entries)
-             | Some pending -> pending
-             | None -> `List []
-           in
-           `Assoc (("pending", pending) :: List.remove_assoc "pending" fields)
-         | other -> other
-       in
-       AQ.For_testing.reset_runtime_state ();
-       write_pending_snapshot ~base_path unversioned;
-       ignore (install_exn ~base_path);
-       (match AQ.get_pending_entry ~id with
-        | Some { request_context = None; _ } -> ()
-        | Some { request_context = Some _; _ } ->
-          Alcotest.fail "unversioned projected context was treated as exact evidence"
-        | None -> Alcotest.fail "legacy pending request was not restored");
-       reject_and_cleanup ~base_path id)
+let test_unversioned_summary_context_fails_closed () =
+  List.iter
+    (fun (label, judgment) ->
+       let base_path = temp_dir () in
+       let keeper_name = "queue-unversioned-summary-" ^ label in
+       Fun.protect
+         ~finally:(fun () ->
+           AQ.For_testing.reset_runtime_state ();
+           cleanup_dir base_path)
+         (fun () ->
+            AQ.For_testing.reset_runtime_state ();
+            let request_context =
+              `Assoc
+                [ "initial", `Assoc [ "user_message", `String "exact request" ]
+                ; "completed_tool_calls", `List []
+                ]
+            in
+            let id =
+              submit_with_context
+                ~request_context
+                ~base_path
+                ~keeper_name
+                ~input:(`String label)
+                ()
+            in
+            check_update "summary marked pending" true (AQ.mark_summary_pending ~id);
+            let summary : AQ.hitl_context_summary =
+              { summary_version = 2
+              ; generated_at = 1.0
+              ; model_run_id = "judge-" ^ label
+              ; context_summary = "Judgment bound to exact request context."
+              ; key_questions = []
+              ; judgment
+              ; rationale = "Only the captured causal context supports this judgment."
+              }
+            in
+            check_update "summary attached" true (AQ.attach_summary ~id summary);
+            let unversioned =
+              match read_pending_snapshot ~base_path with
+              | `Assoc fields ->
+                let pending =
+                  match List.assoc_opt "pending" fields with
+                  | Some (`List entries) ->
+                    `List
+                      (List.map
+                         (function
+                           | `Assoc entry_fields ->
+                             `Assoc
+                               (List.remove_assoc
+                                  "request_context_version"
+                                  entry_fields)
+                           | entry -> entry)
+                         entries)
+                  | Some pending -> pending
+                  | None -> `List []
+                in
+                `Assoc (("pending", pending) :: List.remove_assoc "pending" fields)
+              | other -> other
+            in
+            AQ.For_testing.reset_runtime_state ();
+            write_pending_snapshot ~base_path unversioned;
+            let path = AQ.For_testing.pending_store_path ~base_path in
+            let before =
+              Masc.Otel_metric_store.metric_value_or_zero
+                Masc.Otel_metric_store.metric_persistence_read_drops
+                ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+                ()
+            in
+            (match AQ.install_persistence ~base_path with
+             | Error
+                 (AQ.Install_storage_failed
+                    { path = actual_path
+                    ; reason =
+                        "gate_pending.pending[0]: \
+                         gate_pending.entry.request_context requires \
+                         request_context_version=1"
+                    }) ->
+               Alcotest.(check string) "typed storage path" path actual_path
+             | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+             | Ok _ -> Alcotest.fail "unversioned summary context was installed");
+            Alcotest.(check int) "no partial pending install" 0 (AQ.pending_count ());
+            Alcotest.(check bool)
+              "advisory judgment did not create a durable resolution"
+              true
+              (Option.is_none (durable_resolution_opt ~base_path ~keeper_name ~approval_id:id));
+            (match AQ.resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+             | Error (AQ.Not_found missing) ->
+               Alcotest.(check string) "uninstalled id cannot finalize" id missing
+             | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+             | Ok () -> Alcotest.fail "unversioned advisory judgment was finalized");
+            let after =
+              Masc.Otel_metric_store.metric_value_or_zero
+                Masc.Otel_metric_store.metric_persistence_read_drops
+                ~labels:[ "surface", "keeper_gate_pending"; "reason", "invalid_payload" ]
+                ()
+            in
+            Alcotest.(check bool)
+              "unversioned context rejection is observed"
+              true
+              (after -. before >= 1.0);
+            Alcotest.(check bool)
+              "invalid snapshot is not rewritten"
+              true
+              (Yojson.Safe.equal unversioned (read_pending_snapshot ~base_path))))
+    [ "approve", AQ.Approve; "deny", AQ.Deny ]
 ;;
 
 let test_monotonic_sequence_survives_restart () =
@@ -1749,9 +1808,9 @@ let () =
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated
         ; Alcotest.test_case
-            "unversioned context is never replayed as exact"
+            "unversioned summary context fails closed"
             `Quick
-            test_unversioned_request_context_is_not_replayed_as_exact
+            test_unversioned_summary_context_fails_closed
         ; Alcotest.test_case
             "causal context partitions pending identity and summary"
             `Quick

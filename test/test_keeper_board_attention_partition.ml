@@ -156,6 +156,19 @@ let claim ~base_path =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let ledger_lines path =
+  Fs_compat.load_file path
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal line ""))
+;;
+
+let append_ledger path content =
+  match Fs_compat.append_private_jsonl_durable_locked_result path content with
+  | Ok () -> ()
+  | Error error ->
+    Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error)
+;;
+
 let test_pending_candidates_form_singleton_roots () =
   with_temp_base "board-partition-root" @@ fun base_path ->
   let candidates = List.init 17 (fun index -> candidate (index + 1)) in
@@ -171,7 +184,10 @@ let test_pending_candidates_form_singleton_roots () =
     true
     (List.for_all (fun partition -> List.length partition.P.candidate_ids = 1) partitions);
   let second = ensure ~base_path candidates in
-  Alcotest.(check int) "idempotent ensure" 17 (List.length second)
+  Alcotest.(check int) "idempotent ensure appends no roots" 0 (List.length second);
+  (match P.load ~base_path ~keeper_name:"partition-keeper" with
+   | Ok persisted -> Alcotest.(check int) "all roots remain indexed" 17 (List.length persisted)
+   | Error detail -> Alcotest.fail detail)
 ;;
 
 let test_singleton_roots_preserve_context_identity () =
@@ -371,13 +387,8 @@ let test_removed_split_state_is_rejected () =
 
 let test_malformed_partition_ledger_is_health_read_error () =
   with_temp_base "board-partition-health-read-error" @@ fun base_path ->
-  let candidates = [ candidate 1 ] in
-  record_all ~base_path candidates;
-  ignore (ensure ~base_path candidates : P.t list);
   let path = P.For_testing.path ~base_path ~keeper_name:"partition-keeper" in
-  let channel = open_out_bin path in
-  output_string channel "not-json\n";
-  close_out channel;
+  append_ledger path "not-json\n";
   let health = P.fleet_summary_json ~base_path in
   Alcotest.(check string)
     "malformed ledger degrades health"
@@ -394,25 +405,110 @@ let test_malformed_partition_ledger_is_health_read_error () =
 ;;
 
 let test_partition_ledger_rejects_cross_keeper_identity () =
-  with_temp_base "board-partition-cross-keeper" @@ fun base_path ->
+  with_temp_base "board-partition-cross-keeper-source" @@ fun source_base ->
   let candidates = [ candidate 1 ] in
-  record_all ~base_path candidates;
-  let root = ensure ~base_path candidates |> List.hd in
-  let path = P.For_testing.path ~base_path ~keeper_name:"partition-keeper" in
-  let channel = open_out_bin path in
-  output_string
-    channel
-    (Yojson.Safe.to_string (P.to_yojson { root with keeper_name = "other-keeper" })
-     ^ "\n");
-  close_out channel;
-  (match P.load ~base_path ~keeper_name:"partition-keeper" with
+  let other_root =
+    match
+      P.ensure_roots
+        ~base_path:source_base
+        ~keeper_name:"other-keeper"
+        candidates
+    with
+    | Ok [ root ] -> root
+    | Ok _ -> Alcotest.fail "cross-Keeper source root was not created exactly once"
+    | Error detail -> Alcotest.fail detail
+  in
+  with_temp_base "board-partition-cross-keeper-target" @@ fun target_base ->
+  let target_path =
+    P.For_testing.path ~base_path:target_base ~keeper_name:"partition-keeper"
+  in
+  append_ledger target_path (Yojson.Safe.to_string (P.to_yojson other_root) ^ "\n");
+  (match P.load ~base_path:target_base ~keeper_name:"partition-keeper" with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "partition ledger crossed Keeper identity");
-  let health = P.fleet_summary_json ~base_path in
+  let health = P.fleet_summary_json ~base_path:target_base in
   Alcotest.(check int)
     "cross-Keeper partition is a health read error"
     1
     U.(health |> member "read_error_count" |> to_int)
+;;
+
+let test_partition_ledger_rejects_illegal_transition () =
+  with_temp_base "board-partition-illegal-transition" @@ fun base_path ->
+  let candidates = [ candidate 1 ] in
+  record_all ~base_path candidates;
+  let root = ensure ~base_path candidates |> List.hd in
+  let path = P.For_testing.path ~base_path ~keeper_name:"partition-keeper" in
+  let illegal = { root with state = P.Settled { settled_at = 101.0 } } in
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_result
+       path
+       (Yojson.Safe.to_string (P.to_yojson illegal) ^ "\n")
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error));
+  match P.load ~base_path ~keeper_name:"partition-keeper" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "Ready -> Settled ledger regression was accepted"
+;;
+
+let test_cold_replay_rejects_invalid_completed_payload () =
+  with_temp_base "board-partition-invalid-completed-source" @@ fun source_base ->
+  let candidates = [ candidate 1 ] in
+  record_all ~base_path:source_base candidates;
+  let root = ensure ~base_path:source_base candidates |> List.hd in
+  let item =
+    { P.candidate_id = List.hd root.P.candidate_ids; judgment = judgment 0 }
+  in
+  let invalid =
+    { root with
+      state = P.Completed { items = [ item; item ]; completed_at = 120.0 }
+    }
+  in
+  with_temp_base "board-partition-invalid-completed-target" @@ fun target_base ->
+  let target_path =
+    P.For_testing.path ~base_path:target_base ~keeper_name:"partition-keeper"
+  in
+  append_ledger target_path (Yojson.Safe.to_string (P.to_yojson invalid) ^ "\n");
+  match P.load ~base_path:target_base ~keeper_name:"partition-keeper" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cold replay accepted duplicate Completed candidates"
+;;
+
+let test_cold_replay_rejects_failure_state_inversion () =
+  with_temp_base "board-partition-failure-state-source" @@ fun source_base ->
+  let candidates = [ candidate 1 ] in
+  record_all ~base_path:source_base candidates;
+  let root = ensure ~base_path:source_base candidates |> List.hd in
+  let assert_rejected name invalid =
+    with_temp_base name @@ fun target_base ->
+    let target_path =
+      P.For_testing.path ~base_path:target_base ~keeper_name:"partition-keeper"
+    in
+    append_ledger target_path (Yojson.Safe.to_string (P.to_yojson invalid) ^ "\n");
+    match P.load ~base_path:target_base ~keeper_name:"partition-keeper" with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "cold replay accepted inverted failure state: %s" name
+  in
+  assert_rejected
+    "board-partition-terminal-deferred"
+    { root with
+      state =
+        P.Deferred
+          { failure = failure A.Durable_delivery_unavailable "durability lost"
+          ; deferred_at = 120.0
+          }
+    };
+  assert_rejected
+    "board-partition-retryable-blocked"
+    { root with
+      state =
+        P.Blocked
+          { failure = failure A.Provider_unavailable "provider unavailable"
+          ; blocked_at = 120.0
+          }
+    }
 ;;
 
 let test_provider_failure_defers_until_process_start_recovery () =
@@ -432,9 +528,22 @@ let test_provider_failure_defers_until_process_start_recovery () =
    | Ok (P.Partition_deferred { state = P.Deferred _; _ }) -> ()
    | Ok _ -> Alcotest.fail "provider failure did not defer"
    | Error detail -> Alcotest.fail detail);
-  (match P.claim_next ~now:121.0 ~worker_epoch ~base_path ~keeper_name:"partition-keeper" with
-   | Ok None -> ()
-   | Ok (Some _) -> Alcotest.fail "deferred partition retried without a signal"
+  let unrelated =
+    match P.claim_next ~now:121.0 ~worker_epoch ~base_path ~keeper_name:"partition-keeper" with
+    | Ok (Some unrelated) ->
+      Alcotest.(check bool)
+        "unrelated ready work continues"
+        false
+        (String.equal unrelated.P.partition_id root.partition_id);
+      unrelated
+    | Ok None -> Alcotest.fail "unrelated ready partition was blocked by deferred work"
+    | Error detail -> Alcotest.fail detail
+  in
+  (match
+     P.recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition:unrelated
+   with
+   | Ok (P.Claim_released _) -> ()
+   | Ok _ -> Alcotest.fail "unrelated fixture claim was not released"
    | Error detail -> Alcotest.fail detail);
   (match P.recover_for_process_start ~base_path ~keeper_name:"partition-keeper" with
    | Ok 1 -> ()
@@ -488,19 +597,27 @@ let test_completion_requires_exact_identity_then_settles () =
   let candidates = [ candidate 1 ] in
   record_all ~base_path candidates;
   ignore (ensure ~base_path candidates : P.t list);
+  let path = P.For_testing.path ~base_path ~keeper_name:"partition-keeper" in
+  let ready_bytes = Fs_compat.load_file path in
   let root = claim ~base_path in
   let items =
-    candidates
-    |> List.mapi (fun index candidate ->
-      { P.candidate_id = candidate.A.candidate_id; judgment = judgment index })
+    root.P.candidate_ids
+    |> List.mapi (fun index candidate_id ->
+      { P.candidate_id; judgment = judgment index })
   in
+  let running_bytes = Fs_compat.load_file path in
+  Alcotest.(check bool)
+    "claim appends without rewriting ready prefix"
+    true
+    (String.starts_with running_bytes ~prefix:ready_bytes);
+  Alcotest.(check int) "ready and running rows" 2 (List.length (ledger_lines path));
   (match
      P.complete
        ~now:120.0
        ~worker_epoch
        ~base_path
        ~partition:root
-       ~items:(List.tl items)
+       ~items:[]
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "partial completion was accepted");
@@ -521,6 +638,11 @@ let test_completion_requires_exact_identity_then_settles () =
     | Ok _ -> Alcotest.fail "expected completed partition"
     | Error detail -> Alcotest.fail detail
   in
+  let completed_bytes = Fs_compat.load_file path in
+  Alcotest.(check bool)
+    "completion appends without rewriting running prefix"
+    true
+    (String.starts_with completed_bytes ~prefix:running_bytes);
   (match
      P.settle_many
        ~now:130.0
@@ -531,6 +653,11 @@ let test_completion_requires_exact_identity_then_settles () =
    | Ok [ { state = P.Settled _; _ } ] -> ()
    | Ok _ -> Alcotest.fail "completed partition did not settle"
    | Error detail -> Alcotest.fail detail);
+  let settled_bytes = Fs_compat.load_file path in
+  Alcotest.(check bool)
+    "settlement appends without rewriting completed prefix"
+    true
+    (String.starts_with settled_bytes ~prefix:completed_bytes);
   (match
      P.settle_many
        ~now:131.0
@@ -540,7 +667,37 @@ let test_completion_requires_exact_identity_then_settles () =
    with
    | Ok [ { state = P.Settled _; _ } ] -> ()
    | Ok _ -> Alcotest.fail "settlement replay was not idempotent"
-   | Error detail -> Alcotest.fail detail)
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check string)
+    "settlement replay writes no duplicate row"
+    settled_bytes
+    (Fs_compat.load_file path);
+  Alcotest.(check int)
+    "runtime transitions append one latest row each"
+    4
+    (List.length (ledger_lines path));
+  (match P.recover_for_process_start ~base_path ~keeper_name:"partition-keeper" with
+   | Ok 0 -> ()
+   | Ok recovered -> Alcotest.failf "settled compaction recovered %d rows" recovered
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check int)
+    "process start compacts to one latest row"
+    1
+    (List.length (ledger_lines path));
+  let compacted_bytes = Fs_compat.load_file path in
+  (match P.load ~base_path ~keeper_name:"partition-keeper" with
+   | Ok [ { state = P.Settled _; _ } ] -> ()
+   | Ok _ -> Alcotest.fail "compaction did not preserve settled receipt"
+   | Error detail -> Alcotest.fail detail);
+  with_temp_base "board-partition-cold-compacted" @@ fun cold_base ->
+  let cold_path =
+    P.For_testing.path ~base_path:cold_base ~keeper_name:"partition-keeper"
+  in
+  append_ledger cold_path compacted_bytes;
+  match P.load ~base_path:cold_base ~keeper_name:"partition-keeper" with
+  | Ok [ { state = P.Settled _; _ } ] -> ()
+  | Ok _ -> Alcotest.fail "cold replay did not preserve compacted Settled receipt"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let () =
@@ -603,6 +760,18 @@ let () =
             "partition ledger rejects cross-Keeper identity"
             `Quick
             test_partition_ledger_rejects_cross_keeper_identity
+        ; Alcotest.test_case
+            "partition ledger rejects illegal transitions"
+            `Quick
+            test_partition_ledger_rejects_illegal_transition
+        ; Alcotest.test_case
+            "cold replay rejects invalid completed payload"
+            `Quick
+            test_cold_replay_rejects_invalid_completed_payload
+        ; Alcotest.test_case
+            "cold replay rejects failure state inversion"
+            `Quick
+            test_cold_replay_rejects_failure_state_inversion
         ] )
     ]
 ;;

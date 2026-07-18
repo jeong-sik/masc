@@ -501,6 +501,38 @@ let test_owner_drain_rejects_partial_delivery_success () =
     U.(health |> member "candidate_delivery_failure_count" |> to_int)
 ;;
 
+let test_injected_loader_cannot_cross_keeper_identity () =
+  with_temp_base "board-worker-loader-identity" @@ fun base_path ->
+  let keeper_name = "keeper-loader-owner" in
+  ignore
+    (record_candidate ~base_path (candidate ~keeper_name 1) : W.record_acceptance);
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       W.For_testing.start_with_judge
+         ~load_candidates:(fun ~base_path:_ ~keeper_name:_ ->
+           Ok [ candidate ~keeper_name:"other-keeper" 1 ])
+         ~sw
+         ~base_path
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~judge:(fun selected -> Ok (exact_map selected))
+         ());
+     within clock (fun () -> await_registered ~base_path);
+     let health = within clock (fun () -> await_lane_failure ~base_path) in
+     Alcotest.(check int)
+       "cross-Keeper loader failure is operator-visible"
+       1
+       U.(health |> member "lane_failure_count" |> to_int);
+     (match P.load ~base_path ~keeper_name with
+      | Ok [] -> ()
+      | Ok _ -> Alcotest.fail "cross-Keeper loader persisted a partition root"
+      | Error detail -> Alcotest.fail detail);
+     raise Test_done
+   with Test_done -> ())
+;;
+
 let test_lane_cancellation_is_visible_and_sibling_survives () =
   with_temp_base "board-worker-lane-failure" @@ fun base_path ->
   Eio_main.run @@ fun env ->
@@ -603,6 +635,127 @@ let test_candidate_signal_does_not_retry_deferred_partition () =
    with Test_done -> ())
 ;;
 
+let test_lane_cycle_builds_one_snapshot_and_continues_after_defer () =
+  with_temp_base "board-worker-single-snapshot" @@ fun base_path ->
+  let keeper_name = "keeper-snapshot" in
+  let candidates = List.init 17 (fun index -> candidate ~keeper_name (index + 1)) in
+  let first = List.hd candidates in
+  List.iter
+    (fun candidate ->
+       let acceptance = record_candidate ~base_path candidate in
+       Alcotest.(check bool)
+         "pre-start candidate remains durable without a worker"
+         true
+         (match acceptance.signal with
+          | W.Worker_not_registered -> true
+          | W.Signaled | W.Coalesced | W.No_signal_required -> false))
+    candidates;
+  let snapshot_count = Atomic.make 0 in
+  let judge_count = ref 0 in
+  let load_candidates ~base_path ~keeper_name =
+    ignore (Atomic.fetch_and_add snapshot_count 1 : int);
+    A.load_candidates ~base_path ~keeper_name
+  in
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       W.For_testing.start_with_judge
+         ~load_candidates
+         ~sw
+         ~base_path
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~judge:(fun selected ->
+           incr judge_count;
+           match selected with
+           | [ candidate ]
+             when String.equal candidate.A.candidate_id first.candidate_id ->
+             Error
+               { A.kind = A.Provider_unavailable
+               ; detail = "provider unavailable"
+               ; failed_at = 200.0
+               }
+           | _ -> Ok (exact_map selected))
+         ());
+     within clock (fun () -> await_registered ~base_path);
+     within clock (fun () ->
+       await_deferred_candidate
+         ~base_path
+         ~keeper_name
+         ~candidate_id:first.candidate_id);
+     ignore
+       (within clock (fun () ->
+          await_completed_count
+            ~base_path
+            ~keeper_name
+            ~expected:(List.length candidates - 1))
+        : P.t list);
+     Alcotest.(check int)
+       "one immutable candidate index per lane cycle"
+       1
+       (Atomic.get snapshot_count);
+     Alcotest.(check int)
+       "deferred root does not stop ready siblings"
+       (List.length candidates)
+       !judge_count;
+     raise Test_done
+   with Test_done -> ())
+;;
+
+let test_active_lane_candidate_owns_next_snapshot () =
+  with_temp_base "board-worker-next-snapshot" @@ fun base_path ->
+  let keeper_name = "keeper-next-snapshot" in
+  let first = candidate ~keeper_name 1 in
+  let second = candidate ~keeper_name 2 in
+  let load_count = Atomic.make 0 in
+  let load_candidates ~base_path ~keeper_name =
+    ignore (Atomic.fetch_and_add load_count 1 : int);
+    A.load_candidates ~base_path ~keeper_name
+  in
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let first_started, resolve_first_started = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       W.For_testing.start_with_judge
+         ~load_candidates
+         ~sw
+         ~base_path
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~judge:(fun selected ->
+           match selected with
+           | [ candidate ] when String.equal candidate.A.candidate_id first.candidate_id ->
+             Eio.Promise.resolve resolve_first_started ();
+             Eio.Promise.await release_first;
+             Ok (exact_map selected)
+           | _ -> Ok (exact_map selected))
+         ());
+     within clock (fun () -> await_registered ~base_path);
+     ignore (record_candidate ~base_path first : W.record_acceptance);
+     within clock (fun () -> Eio.Promise.await first_started);
+     let second_acceptance = record_candidate ~base_path second in
+     Alcotest.(check bool)
+       "active lane retains a pending durable signal"
+       true
+       (match second_acceptance.signal with
+        | W.Signaled | W.Coalesced -> true
+        | W.Worker_not_registered | W.No_signal_required -> false);
+     Eio.Promise.resolve resolve_release_first ();
+     ignore
+       (within clock (fun () ->
+          await_completed_count ~base_path ~keeper_name ~expected:2)
+        : P.t list);
+     Alcotest.(check int)
+       "candidate committed after snapshot starts a fresh cycle"
+       2
+       (Atomic.get load_count);
+     raise Test_done
+   with Test_done -> ())
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -632,6 +785,10 @@ let () =
             `Quick
             test_owner_drain_rejects_partial_delivery_success
         ; Alcotest.test_case
+            "injected loader cannot cross Keeper identity"
+            `Quick
+            test_injected_loader_cannot_cross_keeper_identity
+        ; Alcotest.test_case
             "lane cancellation is visible and sibling survives"
             `Quick
             test_lane_cancellation_is_visible_and_sibling_survives
@@ -639,6 +796,14 @@ let () =
             "candidate signal does not retry deferred partition"
             `Quick
             test_candidate_signal_does_not_retry_deferred_partition
+        ; Alcotest.test_case
+            "lane cycle uses one snapshot and continues after defer"
+            `Quick
+            test_lane_cycle_builds_one_snapshot_and_continues_after_defer
+        ; Alcotest.test_case
+            "active lane candidate owns the next snapshot"
+            `Quick
+            test_active_lane_candidate_owns_next_snapshot
         ; Alcotest.test_case
             "placeholder health shape matches live projection"
             `Quick

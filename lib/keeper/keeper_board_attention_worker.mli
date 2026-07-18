@@ -63,6 +63,10 @@ val start :
 
 module For_testing : sig
   val start_with_judge :
+    ?load_candidates:
+      (base_path:string ->
+       keeper_name:string ->
+       (Candidate.candidate list, string) result) ->
     sw:Eio.Switch.t ->
     base_path:string ->
     worker_epoch:Partition.Worker_epoch.t ->
@@ -71,6 +75,9 @@ module For_testing : sig
        (Candidate.judgment Candidate.Candidate_map.t, Candidate.retryable_failure) result) ->
     unit ->
     unit
+  (** The optional loader is a focused-test dependency injection point. It is
+      invoked inside a system thread and therefore must be blocking,
+      Eio-effect-free, and domain-safe. *)
 
   val registered : base_path:string -> bool
   val active_keeper_count : base_path:string -> int

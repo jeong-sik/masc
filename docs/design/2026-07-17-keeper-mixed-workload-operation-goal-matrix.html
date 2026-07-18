@@ -241,7 +241,7 @@
           <tr><td>Terminal state</td><td>Pending/Judged/Consumed</td><td>batch exact-ID failure evidence</td><td><code>Ready → Running → Completed → Settled</code>, 또는 <code>Deferred / Blocked</code></td><td>제거된 Split 상태는 strict parser가 거부; 자동 폐기·attempt budget 없음</td></tr>
           <tr><td>Claim recovery</td><td>candidate 재조회</td><td>Judged replay</td><td>process startup은 이전 process 종료 확정 후 모든 Running/Deferred를 Ready로 복구; live lane abort는 동일 worker epoch의 현재 Running claim만 cancellation-protected 경계에서 해제. Completed는 candidate apply 후에만 Settled</td><td>startup recovery와 same-epoch lane-abort recovery는 별도 typed authority; signal·시간·attempt는 복구 권한 아님</td></tr>
           <tr><td>Lane isolation</td><td>한 Keeper의 provider wait가 같은 owner lane을 막음</td><td>점유 횟수만 제한</td><td>Keeper별 actor; A provider가 block돼도 B가 완료</td><td>sibling progress 1/1, duplicate effect 0 fixture</td></tr>
-          <tr><td>Durable mutation cost</td><td>candidate별 whole-file transaction</td><td>candidate ledger만 cohort 단위 rewrite</td><td>partition storage stack은 rename되지 않는 sibling lock과 <code>(device, inode, end_offset)</code> cursor CAS를 제공; runtime latest-row append와 process-start canonical compaction으로 전환 중</td><td>동일 길이 atomic rewrite도 stale cursor가 거부. offset-only ABA와 orphan-inode append는 금지; immutable partition index 적용 전까지 scalability exit는 미충족</td></tr>
+          <tr><td>Durable mutation cost</td><td>candidate별 whole-file transaction</td><td>candidate ledger만 cohort 단위 rewrite</td><td>rename되지 않는 sibling lock + <code>(device, inode, end_offset)</code> cursor CAS; runtime은 latest row만 append하고 process-start만 partition당 최신 1행으로 canonical compaction</td><td>동일 길이 atomic rewrite도 stale cursor가 거부. immutable partition index와 lane-cycle candidate snapshot이 per-claim 전체 scan을 제거하며 Settled receipt는 보존. candidate ledger 자체의 whole-file mutation은 별도 scalability 경계로 남음</td></tr>
           <tr><td>Operator truth</td><td>partition 상태 없음</td><td>candidate failure만 파일에 존재</td><td>candidate Pending/Judged/Consumed, partition 6-state, worker registration, lane failure, read errors를 typed summary로 결합</td><td>Blocked/Deferred/Completed-delivery/read error/pending-without-worker/lane failure/candidate delivery failure ⇒ degraded + operator action</td></tr>
         </tbody>
       </table>
@@ -419,9 +419,10 @@ type job_state =
         <li>Completed wake를 startup에서 재생하고 stale candidate snapshot은 exact historical root와 idempotent하게 수렴시킨다.</li>
         <li>candidate storage unavailable과 membership corruption을 typed variant로 분리한다.</li>
         <li>full health에 candidate/partition/worker/read-error/Completed delivery/delivery failure 상태를 추가하며 partial delivery는 성공으로 반환하지 않는다.</li>
+        <li>runtime partition 전이는 cursor-CAS append만 사용하고, strict reducer와 immutable index가 illegal edge·membership mutation·duplicate live ownership을 거부한다. process-start만 deterministic latest-row compaction을 수행한다.</li>
       </ol>
       <p><strong>Correctness boundary:</strong> OAS #2667이 actual-wire overflow를 typed capacity/contract failure로 제공하기 전에는 oversized native Ollama request가 generic Provider failure로 남아 <code>Deferred</code>될 수 있다. 이를 문자열 매칭하거나 모든 provider failure split으로 우회하지 않는다. 전자는 불안정하고 후자는 장애를 2N−1 호출로 증폭한다. OAS #2667은 optimized multi-candidate packing의 blocker이며, immutable singleton scheduler의 correctness authority는 아니다.</p>
-      <p><strong>Merge-sequence blocker:</strong> current worker의 whole-file transition rewrite는 backlog N에 대해 O(N²)이다. #25183의 append/index stack이 historical ledger 크기와 독립적인 transition cost, stale-writer rejection, deterministic replay를 증명하기 전에는 #25130 stack을 제품 성능 개선으로 병합하지 않는다.</p>
+      <p><strong>Stack status:</strong> partition runtime transition은 append/index로 전환되어 historical ledger 크기와 독립적인 claim/update 경계를 갖는다. candidate ledger의 runtime whole-file mutation은 별도 scalability 경계이며 후속 append/index stack에서 제거한다.</p>
       <p><strong>Exit:</strong> focused tests green, server health link green, append/index transition proof green. OAS typed overflow와 native endpoint 반복 contract test는 이후 multi-candidate packing의 별도 exit다.</p>
     </div>
     <div class="panel phase">

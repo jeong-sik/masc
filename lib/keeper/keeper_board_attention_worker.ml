@@ -24,6 +24,11 @@ type judge =
        , Candidate.retryable_failure )
        result
 
+type candidate_loader =
+  base_path:string
+  -> keeper_name:string
+  -> (Candidate.candidate list, string) result
+
 type lane_signal =
   | Candidate_recorded
   | Startup_recovery
@@ -32,6 +37,7 @@ type instance =
   { base_path : string
   ; worker_epoch : Partition.Worker_epoch.t
   ; judge : judge
+  ; load_candidates : candidate_loader
   ; sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
   ; wakeup : unit Eio.Stream.t
@@ -180,59 +186,109 @@ let partition_failure kind detail : Candidate.retryable_failure =
   { kind; detail; failed_at = Time_compat.now () }
 ;;
 
-type candidate_selection_error =
+type snapshot_preparation_error =
   | Candidate_storage_unavailable of string
-  | Partition_membership_invalid of string
+  | Snapshot_membership_invalid of string
+  | Partition_prepare_failed of string
 
-let candidates_for_partition ~base_path (partition : Partition.t) =
-  let* candidates =
-    Candidate.load_candidates ~base_path ~keeper_name:partition.keeper_name
-    |> Result.map_error (fun detail -> Candidate_storage_unavailable detail)
-  in
-  let by_id =
+type candidate_selection_error = Partition_membership_invalid of string
+
+let snapshot_preparation_error_to_string = function
+  | Candidate_storage_unavailable detail ->
+    "candidate storage unavailable: " ^ detail
+  | Snapshot_membership_invalid detail ->
+    "candidate snapshot membership invalid: " ^ detail
+  | Partition_prepare_failed detail ->
+    "partition preparation failed: " ^ detail
+;;
+
+type candidate_snapshot =
+  { keeper_name : string
+  ; ordered : Candidate.candidate list
+  ; by_id : Candidate.candidate Candidate.Candidate_map.t
+  }
+
+let build_candidate_snapshot ~keeper_name candidates =
+  let* by_id =
     List.fold_left
-      (fun map candidate ->
-         Candidate.Candidate_map.add candidate.Candidate.candidate_id candidate map)
-      Candidate.Candidate_map.empty
+      (fun result candidate ->
+         let* by_id = result in
+         if not (String.equal candidate.Candidate.keeper_name keeper_name)
+         then
+           Error
+             (Snapshot_membership_invalid
+                (Printf.sprintf
+                   "candidate snapshot identity mismatch expected=%s observed=%s candidate=%s"
+                   keeper_name
+                   candidate.keeper_name
+                   candidate.candidate_id))
+         else if Candidate.Candidate_map.mem candidate.Candidate.candidate_id by_id
+         then
+           Error
+             (Snapshot_membership_invalid
+                (Printf.sprintf
+                   "candidate snapshot contains duplicate id %s"
+                   candidate.candidate_id))
+         else
+           Ok
+             (Candidate.Candidate_map.add
+                candidate.candidate_id
+                candidate
+                by_id))
+      (Ok Candidate.Candidate_map.empty)
       candidates
   in
-  List.fold_left
-    (fun result candidate_id ->
-       let* selected = result in
-       match Candidate.Candidate_map.find_opt candidate_id by_id with
-       | None ->
-         Error
-           (Partition_membership_invalid
-              (Printf.sprintf
-                 "partition %s candidate %s is absent from the candidate ledger"
-                 partition.partition_id
-                 candidate_id))
-       | Some candidate ->
-         (match candidate.status with
-          | Candidate.Judged _ | Candidate.Consumed _ ->
-            Error
-              (Partition_membership_invalid
-                 (Printf.sprintf
-                    "partition %s candidate %s is no longer Pending"
-                    partition.partition_id
-                    candidate_id))
-          | Candidate.Pending _ ->
-            let* context_key =
-              Candidate.keeper_context_key candidate
-              |> Result.map_error (fun detail -> Partition_membership_invalid detail)
-            in
-            if not (String.equal context_key partition.context_key)
-            then
+  Ok { keeper_name; ordered = candidates; by_id }
+;;
+
+let candidates_for_partition ~snapshot (partition : Partition.t) =
+  if not (String.equal snapshot.keeper_name partition.keeper_name)
+  then
+    Error
+      (Partition_membership_invalid
+         (Printf.sprintf
+            "partition %s belongs to Keeper %s, not candidate snapshot %s"
+            partition.partition_id
+            partition.keeper_name
+            snapshot.keeper_name))
+  else
+    List.fold_left
+      (fun result candidate_id ->
+         let* selected = result in
+         match Candidate.Candidate_map.find_opt candidate_id snapshot.by_id with
+         | None ->
+           Error
+             (Partition_membership_invalid
+                (Printf.sprintf
+                   "partition %s candidate %s is absent from the candidate ledger"
+                   partition.partition_id
+                   candidate_id))
+         | Some candidate ->
+           (match candidate.status with
+            | Candidate.Judged _ | Candidate.Consumed _ ->
               Error
                 (Partition_membership_invalid
                    (Printf.sprintf
-                      "partition %s candidate %s context changed"
+                      "partition %s candidate %s is no longer Pending"
                       partition.partition_id
                       candidate_id))
-            else Ok (candidate :: selected)))
-    (Ok [])
-    partition.candidate_ids
-  |> Result.map List.rev
+            | Candidate.Pending _ ->
+              let* context_key =
+                Candidate.keeper_context_key candidate
+                |> Result.map_error (fun detail -> Partition_membership_invalid detail)
+              in
+              if not (String.equal context_key partition.context_key)
+              then
+                Error
+                  (Partition_membership_invalid
+                     (Printf.sprintf
+                        "partition %s candidate %s context changed"
+                        partition.partition_id
+                        candidate_id))
+              else Ok (candidate :: selected)))
+      (Ok [])
+      partition.candidate_ids
+    |> Result.map List.rev
 ;;
 
 let completed_items_exact (partition : Partition.t) judgments =
@@ -297,18 +353,8 @@ let run_storage ~label operation =
   Eio_unix.run_in_systhread ~label operation
 ;;
 
-let process_claimed ~base_path ~worker_epoch ~judge partition =
-  match
-    run_storage ~label:"board-attention-load-partition-candidates" (fun () ->
-      candidates_for_partition ~base_path partition)
-  with
-  | Error (Candidate_storage_unavailable detail) ->
-    run_storage ~label:"board-attention-persist-storage-failure" (fun () ->
-      persist_failure
-        ~base_path
-        ~worker_epoch
-        partition
-        (partition_failure Candidate.Durable_candidate_storage_unavailable detail))
+let process_claimed ~base_path ~worker_epoch ~judge ~snapshot partition =
+  match candidates_for_partition ~snapshot partition with
   | Error (Partition_membership_invalid detail) ->
     run_storage ~label:"board-attention-persist-membership-failure" (fun () ->
       persist_failure
@@ -366,12 +412,13 @@ let recover_claim_after_lane_abort instance partition =
   recovery
 ;;
 
-let process_claimed_with_recovery instance partition =
+let process_claimed_with_recovery instance ~snapshot partition =
   match
     process_claimed
       ~base_path:instance.base_path
       ~worker_epoch:instance.worker_epoch
       ~judge:instance.judge
+      ~snapshot
       partition
   with
   | Ok transition -> Ok transition
@@ -399,14 +446,10 @@ let process_claimed_with_recovery instance partition =
        Printexc.raise_with_backtrace exn backtrace)
 ;;
 
-let rec drain_keeper instance keeper_name =
+let rec drain_ready instance keeper_name snapshot =
   let base_path = instance.base_path in
   let* claimed =
-    run_storage ~label:"board-attention-prepare-partition-claim" (fun () ->
-      let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
-      let* (_ : Partition.t list) =
-        Partition.ensure_roots ~base_path ~keeper_name candidates
-      in
+    run_storage ~label:"board-attention-claim-ready-partition" (fun () ->
       Partition.claim_next
         ~now:(Time_compat.now ())
         ~worker_epoch:instance.worker_epoch
@@ -416,16 +459,42 @@ let rec drain_keeper instance keeper_name =
   match claimed with
   | None -> Ok ()
   | Some partition ->
-    let* transition = process_claimed_with_recovery instance partition in
+    let* transition =
+      process_claimed_with_recovery instance ~snapshot partition
+    in
     (match transition with
      | Partition.Partition_completed _ ->
        ignore (wake_owner ~base_path keeper_name : Keeper_registry.wakeup_outcome);
        Eio.Fiber.yield ();
-       drain_keeper instance keeper_name
-     | Partition.Partition_blocked _ ->
+       drain_ready instance keeper_name snapshot
+     | Partition.Partition_blocked _ | Partition.Partition_deferred _ ->
        Eio.Fiber.yield ();
-       drain_keeper instance keeper_name
-     | Partition.Partition_deferred _ -> Ok ())
+       drain_ready instance keeper_name snapshot)
+;;
+
+let drain_keeper instance keeper_name =
+  let base_path = instance.base_path in
+  let snapshot =
+    run_storage ~label:"board-attention-prepare-candidate-snapshot" (fun () ->
+      let* candidates =
+        instance.load_candidates ~base_path ~keeper_name
+        |> Result.map_error (fun detail -> Candidate_storage_unavailable detail)
+      in
+      let* snapshot = build_candidate_snapshot ~keeper_name candidates in
+      let* (_ : Partition.t list) =
+        Partition.ensure_roots
+          ~base_path
+          ~keeper_name
+          snapshot.ordered
+        |> Result.map_error (fun detail -> Partition_prepare_failed detail)
+      in
+      Ok snapshot)
+  in
+  let* snapshot = Result.map_error snapshot_preparation_error_to_string snapshot in
+  (* A candidate recorded while this lane is active installs a durable pending
+     signal. It owns the next lane cycle and therefore the next immutable
+     candidate snapshot; the current cycle never mutates or rebuilds its map. *)
+  drain_ready instance keeper_name snapshot
 ;;
 
 let finish_lane instance keeper_name =
@@ -564,11 +633,12 @@ let close_instance instance =
   if notify then Eio.Stream.add instance.wakeup ()
 ;;
 
-let start_instance ~sw ~base_path ~worker_epoch ~judge =
+let start_instance ~sw ~base_path ~worker_epoch ~judge ~load_candidates =
   let instance =
     { base_path
     ; worker_epoch
     ; judge
+    ; load_candidates
     ; sw
     ; mutex = Stdlib.Mutex.create ()
     ; wakeup = Eio.Stream.create 1
@@ -607,7 +677,8 @@ let start ~sw ~base_path () =
       ~sw:worker_sw
       ~base_path
       ~worker_epoch:(Partition.Worker_epoch.generate ())
-      ~judge:(Candidate.judge_batch_exact ~base_path))
+      ~judge:(Candidate.judge_batch_exact ~base_path)
+      ~load_candidates:Candidate.load_candidates)
 ;;
 
 let drain_completed_on_owner_lane ~base_path ~keeper_name =
@@ -842,10 +913,22 @@ let health_json ~base_path =
 ;;
 
 module For_testing = struct
-  let start_with_judge ~sw ~base_path ~worker_epoch ~judge () =
+  let start_with_judge
+        ?(load_candidates = Candidate.load_candidates)
+        ~sw
+        ~base_path
+        ~worker_epoch
+        ~judge
+        ()
+    =
     Eio.Switch.check sw;
     Eio.Switch.run (fun worker_sw ->
-      start_instance ~sw:worker_sw ~base_path ~worker_epoch ~judge)
+      start_instance
+        ~sw:worker_sw
+        ~base_path
+        ~worker_epoch
+        ~judge
+        ~load_candidates)
   ;;
 
   let registered = registered

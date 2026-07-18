@@ -68,8 +68,10 @@ let register_record_pre_compact
 type compaction_rejection =
   | Runtime_identity_unavailable
   | Summarizer_unavailable
-  | Plan_unavailable_or_invalid
+  | Plan_provider_unavailable
+  | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
+  | No_eligible_history
   | Structurally_unchanged
   | Checkpoint_not_reduced
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
@@ -77,9 +79,11 @@ type compaction_rejection =
 let compaction_rejection_to_tag = function
   | Runtime_identity_unavailable -> "runtime_identity_unavailable"
   | Summarizer_unavailable -> "summarizer_unavailable"
-  | Plan_unavailable_or_invalid -> "plan_unavailable_or_invalid"
+  | Plan_provider_unavailable -> "plan_provider_unavailable"
+  | Invalid_compaction_plan -> "invalid_compaction_plan"
   | Invalid_structure error ->
     "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
+  | No_eligible_history -> "no_eligible_history"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
   | Invalid_structural_evidence _ -> "invalid_structural_evidence"
@@ -266,10 +270,10 @@ let selected_message_count units selected =
 let requested_messages (meta : keeper_meta) messages =
   match Keeper_compaction_unit.partition messages with
   | Error error -> Error (Invalid_structure error)
-  | Ok { closed_prefix = []; _ } -> Error Structurally_unchanged
+  | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
     if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
-    then Error Structurally_unchanged
+    then Error No_eligible_history
     else
       (match compaction_runtime_ids meta with
        | [] -> Error Runtime_identity_unavailable
@@ -283,8 +287,11 @@ let requested_messages (meta : keeper_meta) messages =
           | None -> Error Summarizer_unavailable
           | Some summarize ->
             (match summarize ~units with
-             | None -> Error Plan_unavailable_or_invalid
-             | Some plan ->
+             | Error Keeper_compaction_llm_summarizer.Provider_unavailable ->
+               Error Plan_provider_unavailable
+             | Error Keeper_compaction_llm_summarizer.Invalid_plan ->
+               Error Invalid_compaction_plan
+             | Ok plan ->
                if not (Keeper_compaction_llm_summarizer.has_changes plan)
                then Error Structurally_unchanged
                else

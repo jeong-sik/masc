@@ -25,6 +25,8 @@
 #   A PID-bound healthy runtime keeps continuous restart responsibility.
 #   A startup that never publishes a candidate or never reaches PID-bound
 #   health is terminal, so deterministic startup failures are not amplified.
+#   A zero child status without that proof is supervisor failure (EX_SOFTWARE),
+#   not evidence that a runnable service was installed.
 #   TERM, INT, and HUP remain explicit external stop signals: they are
 #   forwarded to the active child and terminate the supervisor.
 #
@@ -50,6 +52,7 @@ ATTEMPT_DIR="$(dirname "$LKG_FILE")"
 CANDIDATE_FILE="$ATTEMPT_DIR/masc-runtime-candidate.$$.v2"
 PROOF_FILE="$ATTEMPT_DIR/masc-runtime-health-proof.$$.v2"
 HEALTH_PROOF_SCHEMA="masc.runtime_health_proof.v2"
+readonly UNPROVEN_RUNTIME_EXIT_CODE=70
 active_pid=""
 active_kind=""
 active_nonce=""
@@ -63,6 +66,16 @@ stop_forwarded_pid=""
 log() {
   printf '[%s][supervisor] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" \
     | tee -a "$LOG_FILE" >&2
+}
+
+exit_terminal_unproven() {
+  local child_status="$1"
+
+  if [ "$child_status" -eq 0 ]; then
+    log "ERROR: child exited successfully without a health-verified runtime; reporting supervisor failure"
+    exit "$UNPROVEN_RUNTIME_EXIT_CODE"
+  fi
+  exit "$child_status"
 }
 
 if [ ! -r "$ARTIFACT_CONTRACT" ]; then
@@ -320,11 +333,11 @@ while true; do
 
   if [ ! -f "$CANDIDATE_FILE" ]; then
     log "terminal startup state: no runtime candidate was published; refusing restart amplification"
-    exit "$exit_code"
+    exit_terminal_unproven "$exit_code"
   fi
   if ! verify_health_proof "$completed_pid" "$completed_nonce"; then
     log "terminal startup state: runtime candidate lacks an exact PID-bound health proof; refusing restart amplification"
-    exit "$exit_code"
+    exit_terminal_unproven "$exit_code"
   fi
 
   log "restart in ${COOLDOWN_SEC}s"

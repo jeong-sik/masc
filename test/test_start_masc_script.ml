@@ -1410,6 +1410,69 @@ let test_supervisor_stops_on_startup_without_candidate () =
         (contains_substring stderr
            "terminal startup state: no runtime candidate was published"))
 
+let test_supervisor_zero_exit_without_health_proof_fails_closed () =
+  let run_case ~name ~publish_candidate ~terminal_message =
+    with_temp_dir name (fun repo_root ->
+        let scripts_dir = Filename.concat repo_root "scripts" in
+        let lib_dir = Filename.concat scripts_dir "lib" in
+        let fake_bin = Filename.concat repo_root "fake-bin" in
+        let supervisor_script =
+          Filename.concat scripts_dir "start-masc-supervised.sh"
+        in
+        let child_script = Filename.concat repo_root "start-masc.sh" in
+        let invocation_count = Filename.concat repo_root "invocation-count" in
+        let lkg_file = Filename.concat repo_root "last-known-good.v2" in
+        let log_file = Filename.concat repo_root "supervisor.log" in
+        mkdir_p lib_dir;
+        mkdir_p fake_bin;
+        copy_script (supervised_script_path ()) supervisor_script;
+        copy_script (runtime_artifact_contract_path ())
+          (Filename.concat lib_dir "runtime-artifact-contract.sh");
+        write_executable (Filename.concat fake_bin "lsof")
+          "#!/bin/sh\nexit 0\n";
+        write_executable (Filename.concat fake_bin "curl")
+          "#!/bin/sh\nexit 1\n";
+        let publish_candidate_script =
+          if publish_candidate then
+            {|
+hash="$(${MASC_RUNTIME_ARTIFACT_CONTRACT:?} hash "$0")"
+"$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 127.0.0.1 9999
+|}
+          else ""
+        in
+        write_executable child_script
+          (Printf.sprintf
+             "#!/bin/bash\nset -eu\nprintf '1\\n' > %s\n%s\nexit 0\n"
+             (quote invocation_count) publish_candidate_script);
+        let code, stdout, stderr =
+          run_script ~cwd:repo_root supervisor_script
+            ~env:
+              [
+                ("MASC_RUNTIME_LKG_FILE", lkg_file);
+                ("MASC_SUPERVISOR_LOG", log_file);
+                ("MASC_RESTART_COOLDOWN_SEC", "0");
+                ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+              ]
+            []
+        in
+        check int "unproven runtime cannot report supervisor success" 70 code;
+        check string "unproven startup is not amplified" "1\n"
+          (read_file invocation_count);
+        check string "supervisor writes no stdout" "" stdout;
+        check bool "terminal state is operator-visible" true
+          (contains_substring stderr terminal_message);
+        check bool "successful child is reclassified as supervisor failure" true
+          (contains_substring stderr
+             "child exited successfully without a health-verified runtime"))
+  in
+  run_case ~name:"start-masc-supervisor-zero-without-candidate"
+    ~publish_candidate:false
+    ~terminal_message:"no runtime candidate was published";
+  run_case ~name:"start-masc-supervisor-zero-without-proof"
+    ~publish_candidate:true
+    ~terminal_message:"lacks an exact PID-bound health proof"
+
 let test_supervisor_promotes_pid_bound_healthy_candidate () =
   with_temp_dir "start-masc-supervisor-lkg" (fun repo_root ->
       with_temp_dir "start-masc-supervisor-lkg-bin" (fun fake_bin ->
@@ -1709,6 +1772,8 @@ let () =
             test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
           test_case "supervisor stops on startup without candidate" `Quick
             test_supervisor_stops_on_startup_without_candidate;
+          test_case "supervisor zero exit without health proof fails closed"
+            `Quick test_supervisor_zero_exit_without_health_proof_fails_closed;
           test_case "supervisor promotes PID-bound healthy candidate" `Quick
             test_supervisor_promotes_pid_bound_healthy_candidate;
           test_case "supervisor rejects malformed health proof" `Quick

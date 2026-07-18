@@ -65,15 +65,7 @@ let test_grpc_backoff_range () =
   check bool "backoff <= 60.0" true (v <= 60.0)
 
 (* ── KeeperProactive config defaults ──────────────────── *)
-
-let test_proactive_max_attempts_default () =
-  check int "default proactive max attempts 3" 3
-    Cfg.KeeperProactive.max_attempts
-
-let test_proactive_max_attempts_range () =
-  let v = Cfg.KeeperProactive.max_attempts in
-  check bool "attempts >= 1" true (v >= 1);
-  check bool "attempts <= 10" true (v <= 10)
+(* max_attempts cases removed with the knob (masc#25123 dead-knob audit). *)
 
 let test_timing_ring_size_default () =
   check int "default timing ring size 100" 100
@@ -198,8 +190,6 @@ let () =
       test_case "backoff range" `Quick test_grpc_backoff_range;
     ];
     "proactive_config", [
-      test_case "max_attempts default" `Quick test_proactive_max_attempts_default;
-      test_case "max_attempts range" `Quick test_proactive_max_attempts_range;
       test_case "timing_ring default" `Quick test_timing_ring_size_default;
       test_case "timing_ring range" `Quick test_timing_ring_size_range;
     ];

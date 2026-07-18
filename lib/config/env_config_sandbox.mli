@@ -87,11 +87,6 @@ module Runtime : sig
       subprocess.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
 
-  val docker_playground_container_name : unit -> string
-  (** Docker container name for keeper playground execution.
-      Env: [MASC_KEEPER_DOCKER_CONTAINER].
-      Default: ["keeper-playground"]. *)
-
   val docker_playground_container_root : unit -> string
   (** Container-side root under which keeper playground bundles are
       mounted.  Host [<base_path>/.masc/playground/<keeper>/…] maps to

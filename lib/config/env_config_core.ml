@@ -569,8 +569,3 @@ let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
 
 (** {1 Keeper Defaults} *)
-
-(** Default sandbox profile for keepers. Default: "local".
-    Set to "docker" to default all keepers to containerized execution. *)
-let keeper_default_sandbox_profile_raw () =
-  get_string ~default:"local" "MASC_KEEPER_DEFAULT_SANDBOX_PROFILE"

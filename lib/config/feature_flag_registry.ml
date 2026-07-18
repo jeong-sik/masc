@@ -6,7 +6,7 @@
 
     1. Runtime enumeration: operators can query all flags and their values
     2. Consistency verification: CI lint compares registry defaults against actual get_bool calls
-    3. Lifecycle tracking: Active → Deprecated → Removed state machine
+    3. Lifecycle tracking for supported public flags
     4. Documentation: machine-readable flag catalog
 
     @since 2.162.0
@@ -14,7 +14,9 @@
 
 open Env_config_core
 
-(** Flag lifecycle state machine: Active → Deprecated → (removed from registry) *)
+(** Lifecycle for supported public flags. A setting proven to have no runtime
+    consumer is not a supported flag and is hard-deleted from its reader,
+    registry entry, and operator documentation in one change. *)
 type lifecycle =
   | Active
   | Deprecated of string  (** reason for deprecation *)
@@ -130,12 +132,6 @@ let all_flags : flag list = [
     description = "Serve stale operator snapshots while recomputing in the background";
     default = true; category = "dashboard";
     lifecycle = Active; since = "2.150.0" };
-
-  (* ── Inference & Chain ────────────────────────────────────── *)
-  { env_name = "MASC_INFERENCE_CACHE_ENABLED";
-    description = "L1+L2 inference response caching";
-    default = true; category = "inference";
-    lifecycle = Active; since = "2.110.0" };
 
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = Env_config_core.orchestrator_enabled_env_key;

@@ -626,12 +626,6 @@ end
 (** {1 Proactive Generation} *)
 
 module KeeperProactive = struct
-  (** Maximum proactive generation attempts before falling back.
-      Default: 3. Range: [1, 10]. *)
-  let max_attempts =
-    max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
-  ;;
-
   (** Stage timing ring buffer size for Phase 0 profiling.
       Default: 100. Range: [10, 1000]. *)
   let stage_timing_ring_size =
@@ -639,27 +633,12 @@ module KeeperProactive = struct
   ;;
 end
 
-(** {1 Context Ratio Hard Cap}
-
-    Absolute ceiling for compaction ratio_gate and handoff threshold after
-    multiplier adjustment.  Prevents runaway values from disabling
-    compaction/handoff.  Default: 0.95. Range: [0.80, 0.99]. *)
-
-let context_ratio_hard_cap =
-  Float.max 0.80 (Float.min 0.99 (get_float ~default:0.95 "MASC_CONTEXT_RATIO_HARD_CAP"))
-;;
-
 (** {1 Dashboard Health Thresholds}
 
     Thresholds used by the dashboard keeper health scorer and harness health
     panels.  Distinct from compaction triggers — these affect UI display only. *)
 
 module DashboardHealth = struct
-  let ctx_critical = get_float ~default:0.9 "MASC_DASHBOARD_HEALTH_CTX_CRITICAL"
-  let ctx_warn = get_float ~default:0.8 "MASC_DASHBOARD_HEALTH_CTX_WARN"
-  let penalty_critical = get_float ~default:20.0 "MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL"
-  let penalty_warn = get_float ~default:10.0 "MASC_DASHBOARD_HEALTH_PENALTY_WARN"
-
   let runtime_warning_ctx_ratio =
     get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
   ;;

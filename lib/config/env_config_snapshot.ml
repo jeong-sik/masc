@@ -114,20 +114,6 @@ let transport_entries =
        WebSocket session. 0 disables the per-session admission gate.";
   ]
 
-let inference_entries =
-  [
-    entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED"
-      "Enable inference result cache";
-    entry ~default:"48000" "MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS"
-      "Skip caching for prompts exceeding this character count";
-    entry ~default:"0.0" "MASC_INFERENCE_CACHE_MAX_TEMP"
-      "Cache only temperatures at or below this value (0.0=deterministic only)";
-    entry ~default:"300" "MASC_INFERENCE_CACHE_TTL_SEC"
-      "Default TTL for inference response cache (seconds)";
-    entry ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
-      "Spawn cache policy: off or safe_only";
-  ]
-
 let keeper_entries =
   [
     entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
@@ -201,14 +187,6 @@ let dashboard_entries =
       "Dashboard fixture name override";
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
       "Enable dashboard test fixtures";
-    entry ~default:"0.9" "MASC_DASHBOARD_HEALTH_CTX_CRITICAL"
-      "Health scoring: context ratio critical threshold";
-    entry ~default:"0.8" "MASC_DASHBOARD_HEALTH_CTX_WARN"
-      "Health scoring: context ratio warning threshold";
-    entry ~default:"20.0" "MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL"
-      "Health penalty for critical context ratio";
-    entry ~default:"10.0" "MASC_DASHBOARD_HEALTH_PENALTY_WARN"
-      "Health penalty for warning context ratio";
     entry ~default:"3600.0" "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
       "Keeper action-age threshold (seconds, 1 hour)";
     entry ~default:"25" "MASC_DASHBOARD_MISSION_TIMEOUT_SEC"
@@ -259,12 +237,6 @@ let cache_entries =
       "Maximum size of a single cache entry value in bytes (100KB)";
   ]
 
-let cancellation_entries =
-  [
-    entry ~default:"3600.0" "MASC_CANCELLATION_TOKEN_MAX_AGE_SEC"
-      "Token cleanup max age (seconds)";
-  ]
-
 let channel_gate_entries =
   [
     entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
@@ -277,12 +249,6 @@ let channel_gate_entries =
       "iMessage status stale threshold (seconds)";
   ]
 
-let compaction_entries =
-  [
-    entry ~default:"0.95" "MASC_CONTEXT_RATIO_HARD_CAP"
-      "Absolute ceiling for compaction ratio_gate (clamped 0.80-0.99)";
-  ]
-
 let decision_entries =
   [
     entry ~default:"50" "MASC_DECISION_AUDIT_RING_CAPACITY"
@@ -291,8 +257,6 @@ let decision_entries =
 
 let docker_playground_entries =
   [
-    entry ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
-      "Docker container name for keeper playground";
     entry ~default:"(none)" "MASC_KEEPER_DOCKER_PLAYGROUND"
       "Route Execute through Docker container (feature flag)";
   ]
@@ -368,13 +332,6 @@ let keeper_bootstrap_entries =
       "Keeper stale turn threshold (seconds)";
   ]
 
-let keeper_runtime_entries =
-  [
-    entry ~default:"enforce" "MASC_RUNTIME_ATTEMPT_LIVENESS"
-      "Runtime attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
-       Explicit values must be canonical; invalid values raise a config error.";
-  ]
-
 let keeper_grpc_entries =
   [
     entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
@@ -409,8 +366,6 @@ let keeper_health_entries =
 
 let keeper_proactive_entries =
   [
-    entry ~default:"3" "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"
-      "Max proactive generation attempts (clamped 1-10)";
     entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
       "Stage timing ring buffer size for profiling (clamped 10-1000)";
   ]
@@ -433,14 +388,6 @@ let local_runtime_entries =
   [
     entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
-  ]
-
-let lock_entries =
-  [
-    entry ~default:"300.0" "MASC_LOCK_EXPIRY_WARNING_SEC"
-      "Lock expiry warning threshold (seconds before expiry)";
-    entry ~default:"120.0" "MASC_LOCK_TIMEOUT_SEC"
-      "Default lock timeout (seconds, 2 min)";
   ]
 
 module Memory_os_defaults = Env_config_keeper.KeeperMemoryOs
@@ -514,10 +461,6 @@ let model_routing_entries =
       "Default model id; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
       "Default provider name; None when unset";
-    entry ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
-      "Goal dispatch runtime type";
-    entry ~default:"(none)" "MASC_ROUTING_RUNTIME"
-      "Routing runtime for team session routing";
   ]
 
 let oas_sse_entries =
@@ -566,8 +509,6 @@ let session_entries =
   [
     entry ~default:"3600.0" "MASC_SESSION_MAX_AGE_SEC"
       "Maximum session age before cleanup (seconds, 1 hour)";
-    entry ~default:"60.0" "MASC_SESSION_RATE_LIMIT_WINDOW_SEC"
-      "Rate limit window (seconds)";
     entry ~default:"300.0" "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
       "Grace period after SSE disconnect before reaping transport session (seconds, 5 min)";
   ]
@@ -620,14 +561,6 @@ let test_entries =
       "Allow explicit MASC_BASE_PATH override handling in test executables";
     entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
       "Allow explicit MASC_CONFIG_DIR and MASC_PERSONAS_DIR overrides in test executables";
-  ]
-
-let timeout_entries =
-  [
-    entry ~default:"100" "MASC_EVENT_BUFFER_SIZE"
-      "A2A event buffer size per subscription";
-    entry ~default:"30.0" "MASC_SSE_KEEPALIVE_SEC"
-      "SSE keepalive interval (seconds, floor 1)";
   ]
 
 let tool_entries =
@@ -687,12 +620,11 @@ let all_categories () =
     category "runtime"
       (runtime_entries
        @ message_gc_entries @ internal_timer_entries
-       @ timeout_entries @ sse_entries @ telemetry_entries
+       @ sse_entries @ telemetry_entries
        @ tool_entries);
     category "rate_limiting" rate_limiting_entries;
     category "inference"
-      (inference_entries @ model_routing_entries @ oas_sse_entries
-       @ local_runtime_entries);
+      (model_routing_entries @ oas_sse_entries @ local_runtime_entries);
     category "keeper"
       (keeper_entries @ keeper_bootstrap_entries
        @ keeper_keepalive_entries @ keeper_metrics_entries
@@ -700,8 +632,8 @@ let all_categories () =
        @ docker_playground_entries
        @ keeper_sandbox_entries);
     category "keeper_execution"
-      (keeper_execution_entries @ compaction_entries @ decision_entries
-       @ keeper_tool_entries @ keeper_runtime_entries
+      (keeper_execution_entries @ decision_entries
+       @ keeper_tool_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
     category "level2" level2_entries;
@@ -711,7 +643,7 @@ let all_categories () =
       (operator_entries @ orchestrator_entries);
     category "channel" channel_gate_entries;
     category "process"
-      (shutdown_entries @ cancellation_entries @ lock_entries);
+      shutdown_entries;
     category "worker" (worker_entries @ worker_runtime_entries);
     category "web_search" web_search_entries;
     category "session" (session_entries @ tempo_entries);

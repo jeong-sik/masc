@@ -301,16 +301,19 @@ let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
   let ( let* ) = Result.bind in
-  (* A run started outside a connector conversation has no route; the wake then
-     says so explicitly instead of inventing a destination. *)
   let* channel =
     match Fusion_wake_route.peek ~run_id with
     | Some channel -> Ok channel
     | None ->
       Ok (Keeper_continuation_channel.unrouted "no originating connector")
   in
+  let terminal =
+    if ok
+    then Keeper_event_queue.Fusion_succeeded resolved_answer
+    else Keeper_event_queue.Fusion_failed resolved_answer
+  in
   let fusion_completion =
-    Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id; channel }
+    Keeper_event_queue.{ run_id; terminal; board_post_id; channel }
   in
   let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
   let stimulus : Keeper_event_queue.stimulus =
@@ -335,13 +338,8 @@ let wake_keeper_on_fusion_completion
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
   | Ok () ->
-    (* RFC-0266: [take] removes the route now that its channel is durably committed above; the discarded value is exactly that already-committed channel, so this is pure route cleanup, not a dropped contract. *)
     ignore (Fusion_wake_route.take ~run_id);
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
-    (* Best-effort wake hint: the payload is already durable, so a withheld or
-       failed hint only defers pickup to the keeper's next turn. The typed outcome
-       remains observable; an exception is logged and does not roll back the
-       durable completion. *)
     (try
        match
          Keeper_registry.wakeup_running

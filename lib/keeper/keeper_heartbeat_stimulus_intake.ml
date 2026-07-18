@@ -165,11 +165,15 @@ let consume_single_heartbeat_stimulus
        Surface the resolved answer as a pending_board_event so this turn acts
        on it (a non-empty list, unlike Bootstrap which
        inject nothing — returning [] here would silently drop the result). *)
+    let terminal =
+      match c.terminal with
+      | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+      | Keeper_event_queue.Fusion_failed _ -> "failed"
+      | Keeper_event_queue.Fusion_cancelled -> "cancelled"
+    in
     Log.Keeper.info
-      "turn entry: fusion result delivered run_id=%s ok=%b (keeper=%s)"
-      c.run_id
-      c.ok
-      meta_after_triage.name;
+      "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
+      c.run_id terminal meta_after_triage.name;
     pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Bg_completed c ->
     (* RFC-0290: a background job finished and woke this keeper. Surface the

@@ -74,6 +74,7 @@ let benchmark_snapshot ~iterations ~warmup =
         (fun dir ->
           incr parent_sync_calls;
           sync_parent_directory dir)
+    ; inspect_rewritten = Unix.stat
     }
   in
   ignore (snapshot_or_fail ~io path);
@@ -94,6 +95,7 @@ let benchmark_append ~iterations ~warmup =
         (fun dir ->
           incr parent_sync_calls;
           sync_parent_directory dir)
+    ; inspect_rewritten = Unix.stat
     }
   in
   let cursor = ref (snapshot_or_fail ~io path).cursor in

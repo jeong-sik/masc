@@ -508,7 +508,9 @@ let test_private_jsonl_stable_lock_parent_sync_count () =
   with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
   let parent_sync_count = ref 0 in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing =
-    { sync_parent = (fun _dir -> incr parent_sync_count) }
+    { sync_parent = (fun _dir -> incr parent_sync_count)
+    ; inspect_rewritten = Unix.stat
+    }
   in
   let snapshot =
     match
@@ -555,7 +557,9 @@ let test_private_jsonl_stable_lock_interrupted_creation_recovers_once () =
   write_stable_lock_fixture path "";
   let parent_sync_count = ref 0 in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing =
-    { sync_parent = (fun _dir -> incr parent_sync_count) }
+    { sync_parent = (fun _dir -> incr parent_sync_count)
+    ; inspect_rewritten = Unix.stat
+    }
   in
   let read () =
     match
@@ -583,6 +587,7 @@ let test_private_jsonl_stable_lock_parent_sync_failure_stays_preparing () =
     { sync_parent =
         (fun dir ->
           raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    ; inspect_rewritten = Unix.stat
     }
   in
   (match
@@ -622,10 +627,24 @@ let test_private_jsonl_existing_stable_lock_permission_drift_fails_closed () =
     (fun contents ->
        with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
        write_stable_lock_fixture path contents;
-       Unix.chmod (Fs_compat.private_jsonl_lock_path path) 0o4600;
+       Unix.chmod (Fs_compat.private_jsonl_lock_path path) 0o640;
+       let canonical_lock_path =
+         Filename.concat
+           (Unix.realpath (Filename.dirname path))
+           (Filename.basename path ^ ".lock")
+       in
+       check int
+         "raw stable-lock fixture permissions"
+         0o640
+         ((Unix.lstat (Fs_compat.private_jsonl_lock_path path)).Unix.st_perm
+          land 0o7777);
+       check int
+         "canonical stable-lock fixture permissions"
+         0o640
+         ((Unix.lstat canonical_lock_path).Unix.st_perm land 0o7777);
        match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
        | Error (Fs_compat.Unexpected_stable_lock_permissions { actual }) ->
-         check int "observed stable-lock permissions" 0o4600 actual
+         check int "observed stable-lock permissions" 0o640 actual
        | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
        | Ok _ -> fail "existing stable lock with permission drift was accepted")
     [ ""; Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing ]
@@ -638,6 +657,166 @@ let test_private_jsonl_stable_lock_symlink_fails_closed () =
   | Error (Fs_compat.Unexpected_stable_lock_file_kind Unix.S_LNK) -> ()
   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
   | Ok _ -> fail "symbolic-link stable lock was accepted"
+;;
+
+let test_private_jsonl_stable_lock_hardlink_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture
+    path
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing;
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let alias_path = lock_path ^ ".alias" in
+  Unix.link lock_path alias_path;
+  Fun.protect
+    ~finally:(fun () -> remove_if_present alias_path)
+    (fun () ->
+       match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+       | Error (Fs_compat.Unexpected_stable_lock_link_count { actual = 2; _ }) -> ()
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "hard-linked stable lock was accepted")
+;;
+
+let test_private_jsonl_transaction_target_symlink_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let alias_path = path ^ ".symlink" in
+  Unix.symlink path alias_path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present alias_path;
+      remove_if_present (Fs_compat.private_jsonl_lock_path alias_path))
+    (fun () ->
+       match
+         Fs_compat.read_private_jsonl_durable_locked_result alias_path ~after:None
+       with
+       | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK) -> ()
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "symbolic-link transaction target was accepted")
+;;
+
+let test_private_jsonl_transaction_broken_symlink_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let alias_path = path ^ ".broken-symlink" in
+  Unix.symlink (path ^ ".missing") alias_path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present alias_path;
+      remove_if_present (Fs_compat.private_jsonl_lock_path alias_path))
+    (fun () ->
+       match
+         Fs_compat.read_private_jsonl_durable_locked_result alias_path ~after:None
+       with
+       | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK) -> ()
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "broken symbolic-link transaction target was treated as missing")
+;;
+
+let test_private_jsonl_transaction_target_hardlink_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let alias_path = path ^ ".hardlink" in
+  Unix.link path alias_path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present alias_path;
+      remove_if_present (Fs_compat.private_jsonl_lock_path alias_path))
+    (fun () ->
+       match
+         Fs_compat.read_private_jsonl_durable_locked_result alias_path ~after:None
+       with
+       | Error (Fs_compat.Unexpected_transaction_link_count { actual = 2; _ }) -> ()
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "hard-linked transaction target was accepted")
+;;
+
+let test_private_jsonl_rewrite_parent_sync_failure_preserves_effect () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture
+    path
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing;
+  let snapshot = transaction_snapshot path ~after:None in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { sync_parent =
+        (fun dir ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_rewrite_fsync", dir)))
+    ; inspect_rewritten = Unix.stat
+    }
+  in
+  (match
+     Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+       ~io
+       path
+       ~expected:snapshot.cursor
+       "{\"row\":2}\n"
+   with
+   | Error
+       (Fs_compat.Rewrite_effect_unsettled
+          { durability_failure =
+              Some { operation = Fs_compat.Sync_rewrite_parent; _ }
+          ; observed_cursor = Some _
+          ; observation_error = None
+          }) ->
+     ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite parent-sync failure was reported as settled");
+  check string
+    "renamed target effect remains observable"
+    "{\"row\":2}\n"
+    (Fs_compat.load_file path);
+  match
+    Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+      path
+      ~expected:snapshot.cursor
+      "{\"row\":3}\n"
+  with
+  | Error (Fs_compat.Cursor_mismatch _) -> ()
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "retry from the pre-effect cursor duplicated a rewrite"
+;;
+
+let test_private_jsonl_rewrite_observation_failure_preserves_effect () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture
+    path
+    Fs_compat.private_jsonl_stable_lock_ready_marker_for_testing;
+  let snapshot = transaction_snapshot path ~after:None in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { sync_parent = (fun _dir -> ())
+    ; inspect_rewritten =
+        (fun path ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_rewrite_stat", path)))
+    }
+  in
+  (match
+     Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+       ~io
+       path
+       ~expected:snapshot.cursor
+       "{\"row\":2}\n"
+   with
+   | Error
+       (Fs_compat.Rewrite_effect_unsettled
+          { durability_failure = None
+          ; observed_cursor = None
+          ; observation_error =
+              Some
+                (Fs_compat.Private_jsonl_operation_failed
+                   { operation = Fs_compat.Inspect_rewritten_data; _ })
+          }) ->
+     ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite observation failure was reported as settled");
+  check string
+    "durable renamed target remains observable"
+    "{\"row\":2}\n"
+    (Fs_compat.load_file path);
+  match
+    Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+      path
+      ~expected:snapshot.cursor
+      "{\"row\":3}\n"
+  with
+  | Error (Fs_compat.Cursor_mismatch _) -> ()
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "retry from an unobserved effect cursor duplicated a rewrite"
 ;;
 
 let test_private_jsonl_transaction_lock_contention_is_typed () =
@@ -806,6 +985,30 @@ let () =
             "private JSONL stable lock rejects symbolic links"
             `Quick
             test_private_jsonl_stable_lock_symlink_fails_closed
+        ; test_case
+            "private JSONL stable lock rejects hard links"
+            `Quick
+            test_private_jsonl_stable_lock_hardlink_fails_closed
+        ; test_case
+            "private JSONL transaction target rejects symbolic links"
+            `Quick
+            test_private_jsonl_transaction_target_symlink_fails_closed
+        ; test_case
+            "private JSONL transaction target rejects broken symbolic links"
+            `Quick
+            test_private_jsonl_transaction_broken_symlink_fails_closed
+        ; test_case
+            "private JSONL transaction target rejects hard links"
+            `Quick
+            test_private_jsonl_transaction_target_hardlink_fails_closed
+        ; test_case
+            "private JSONL rewrite parent sync failure preserves effect"
+            `Quick
+            test_private_jsonl_rewrite_parent_sync_failure_preserves_effect
+        ; test_case
+            "private JSONL rewrite observation failure preserves effect"
+            `Quick
+            test_private_jsonl_rewrite_observation_failure_preserves_effect
         ] )
     ]
 ;;

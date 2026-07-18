@@ -817,6 +817,10 @@ type private_jsonl_transaction_error =
   | Stable_lock_contended of { lock_path : string }
   | Unexpected_stable_lock_file_kind of Unix.file_kind
   | Stable_lock_identity_mismatch of { lock_path : string }
+  | Unexpected_stable_lock_link_count of
+      { lock_path : string
+      ; actual : int
+      }
   | Unexpected_stable_lock_permissions of { actual : int }
   | Invalid_stable_lock_state of
       { lock_path : string
@@ -827,6 +831,11 @@ type private_jsonl_transaction_error =
       ; actual : Private_jsonl_cursor.t
       }
   | Unexpected_transaction_file_kind of Unix.file_kind
+  | Transaction_target_identity_mismatch of { path : string }
+  | Unexpected_transaction_link_count of
+      { path : string
+      ; actual : int
+      }
   | Incomplete_transaction_tail of { end_offset : int }
   | Invalid_transaction_suffix
   | Private_jsonl_operation_failed of private_jsonl_operation_failure
@@ -834,7 +843,18 @@ type private_jsonl_transaction_error =
       { failure : private_jsonl_operation_failure
       ; cleanup_failures : private_jsonl_operation_failure list
       }
+  | Rewrite_effect_unsettled of
+      { durability_failure : private_jsonl_operation_failure option
+      ; observed_cursor : Private_jsonl_cursor.t option
+      ; observation_error : private_jsonl_transaction_error option
+      }
   | Transaction_append_failed of durable_append_error
+
+(** [Rewrite_effect_unsettled] means the atomic rename definitely succeeded,
+    but at least one post-rename settlement boundary failed. The optional
+    cursor is the exact replacement identity when it could still be observed.
+    Callers must reconcile this typed effect instead of blindly retrying from
+    the pre-rewrite cursor. *)
 
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
@@ -844,7 +864,10 @@ val private_jsonl_transaction_error_to_string :
     one-byte [Ready] commit marker is written only after the parent directory
     is synced. Transactions acquire the advisory lock and require [Ready]
     before touching data; every other payload fails closed. The lock must never
-    be renamed or removed while the store may be in use. *)
+    be renamed or removed while the store may be in use. The opened lock's
+    [(device, inode)] identity selects the in-process mutex, so relative and
+    parent-symlink aliases converge without a raw-path authority. Symbolic-link
+    and multi-link transaction targets fail closed. *)
 val private_jsonl_lock_path : string -> string
 
 (** Read a private JSONL store under its stable sibling lock. [after = None]
@@ -873,7 +896,9 @@ val append_private_jsonl_durable_locked_at_cursor_result :
 (** Atomically replace a complete private JSONL store iff [expected] still
     names the exact current store. The staged payload and parent directory are
     fsynced; no directory-fsync failure is suppressed. The stable sibling lock
-    remains the serialization authority across the inode replacement. *)
+    remains the serialization authority across the inode replacement. Once
+    rename succeeds, a later durability or cursor-observation failure returns
+    [Rewrite_effect_unsettled] with all available effect evidence. *)
 val rewrite_private_jsonl_durable_locked_at_cursor_result :
   string ->
   expected:Private_jsonl_cursor.t ->
@@ -881,7 +906,9 @@ val rewrite_private_jsonl_durable_locked_at_cursor_result :
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 type private_jsonl_transaction_io_for_testing =
-  { sync_parent : string -> unit }
+  { sync_parent : string -> unit
+  ; inspect_rewritten : string -> Unix.stats
+  }
 
 val private_jsonl_stable_lock_ready_marker_for_testing : string
 
@@ -892,6 +919,13 @@ val read_private_jsonl_durable_locked_with_io_for_testing :
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
 val append_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string ->
   expected:Private_jsonl_cursor.t ->

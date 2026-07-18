@@ -1899,7 +1899,7 @@ let private_jsonl_capture operation f =
   match f () with
   | value -> Ok value
   | exception (Eio.Cancel.Cancelled _ as cancellation) -> raise cancellation
-  | exception_ -> Error (private_jsonl_failure operation exception_)
+  | exception exception_ -> Error (private_jsonl_failure operation exception_)
 ;;
 
 let private_jsonl_lock_path path = path ^ ".lock"

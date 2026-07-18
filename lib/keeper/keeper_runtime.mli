@@ -164,19 +164,6 @@ val bootstrap_existing_keepers :
 (** Walk every bootable keeper and start/recover its keepalive fiber.
     Returns counts for the boot summary log line. *)
 
-val supervisor_sweeps : (string, Pulse.t) Hashtbl.t
-(** Per-keeper supervisor-sweep [Pulse] handle.  Mutated under
-    [supervisor_sweeps_mu]; readers use [with_sweeps_ro]. *)
-
-val supervisor_sweeps_mu : Eio.Mutex.t
-(** Lock guarding the [supervisor_sweeps] hashtable. *)
-
-val with_sweeps_ro : (unit -> 'a) -> 'a
-(** Run [f] with the sweeps lock held in read mode. *)
-
-val with_sweeps_rw : (unit -> 'a) -> 'a
-(** Run [f] with the sweeps lock held in write mode. *)
-
 val supervisor_sweep_running : string -> bool
 (** [true] when a supervisor sweep is currently registered for the
     keeper. *)
@@ -198,11 +185,6 @@ val supervisor_sweep_age_seconds : base_path:string -> float option
     [None] when no marker exists. *)
 
 (** {1 Keepalive bootstrap registry} *)
-
-val existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t
-(** Set of keeper names whose keepalive fiber has already been
-    bootstrapped during this process lifetime; prevents duplicate
-    spawns on hot-reload. *)
 
 val has_boot_entries : Workspace.config -> bool
 (** [true] when at least one configured keeper is a bootstrap candidate,

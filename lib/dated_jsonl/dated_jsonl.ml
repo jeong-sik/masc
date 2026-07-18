@@ -480,7 +480,7 @@ let open_regular_input_result path =
                         ; detail = "path identity changed while opening"
                         })
                  | None ->
-                   Ok (Unix.in_channel_of_descr descriptor)))))
+                   Ok (Unix.in_channel_of_descr descriptor))))))
 ;;
 
 (** Read the last [n] non-empty lines from an open file. Each byte is inspected

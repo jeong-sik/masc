@@ -29,10 +29,11 @@ type reaction_decode_error = Unknown_reaction_kind of string
 
 module Event_id_set = Set.Make (String)
 
-(* v3 is the sole live identity generation. Rows from v1/v2/pre-tag stores are
-   retained on disk but the closed decoder quarantines them before any current
-   stimulus/reaction aggregate can observe them. *)
-let schema = "keeper.reaction_ledger.v3"
+(* The storage namespace and row schema advance together.  A generation hard
+   cut never scans or writes an older namespace, so retired data cannot remain
+   on the exact-evidence hot path or become a second authority. *)
+let storage_generation = "v3"
+let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
@@ -133,8 +134,10 @@ let urgency_to_string = function
 
 let store_dir ~masc_root ~keeper_name =
   Filename.concat
-    (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
-    "reaction-ledger"
+    (Filename.concat
+       (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
+       "reaction-ledger")
+    storage_generation
 ;;
 
 let store_for_base_path ~base_path ~keeper_name =
@@ -441,7 +444,7 @@ let list_field name json =
 type row_quarantine_reason =
   | Malformed_json_row
   | Missing_schema
-  | Retired_schema
+  | Unexpected_schema
   | Missing_event_id
   | Empty_event_id
   | Missing_keeper_name
@@ -478,7 +481,7 @@ type row_quarantine_reason =
 let row_quarantine_reason_to_string = function
   | Malformed_json_row -> "malformed_json"
   | Missing_schema -> "missing_schema"
-  | Retired_schema -> "retired_schema"
+  | Unexpected_schema -> "unexpected_schema"
   | Missing_event_id -> "missing_event_id"
   | Empty_event_id -> "empty_event_id"
   | Missing_keeper_name -> "missing_keeper_name"
@@ -676,7 +679,9 @@ let decode_cursor_ack_row metadata row =
 let decode_current_row ~keeper_name row =
   let ( let* ) = Result.bind in
   let* row_schema = require_string Missing_schema "schema" row in
-  let* () = if String.equal row_schema schema then Ok () else Error Retired_schema in
+  let* () =
+    if String.equal row_schema schema then Ok () else Error Unexpected_schema
+  in
   let* event_id =
     require_non_empty_string
       ~missing:Missing_event_id

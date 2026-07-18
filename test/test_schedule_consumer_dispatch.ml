@@ -46,9 +46,11 @@ let write_file path content =
 let reaction_ledger_dir ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Common.keepers_runtime_dir_of_base ~base_path)
-       keeper_name)
-    "reaction-ledger"
+       (Filename.concat
+          (Common.keepers_runtime_dir_of_base ~base_path)
+          keeper_name)
+       "reaction-ledger")
+    "v3"
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -848,7 +850,9 @@ let test_keeper_wake_ledger_failure_is_retryable () =
       keeper_name
   in
   mkdir_p keeper_dir;
-  write_empty_file (Filename.concat keeper_dir "reaction-ledger");
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_dir);
+  write_empty_file ledger_dir;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);

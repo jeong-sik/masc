@@ -3,7 +3,9 @@
     This is the runtime mirror for the KeeperReactionLiveness L1/L5
     contract: queue-visible stimuli, queue settlement reactions, and board
     cursor acknowledgements are written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/YYYY-MM/DD.jsonl]. *)
+    [.masc/keepers/<keeper>/reaction-ledger/v3/YYYY-MM/DD.jsonl].  The
+    generation namespace is a hard boundary: older stores are neither read nor
+    written by this module. *)
 
 type cursor =
   { cursor_ts : float

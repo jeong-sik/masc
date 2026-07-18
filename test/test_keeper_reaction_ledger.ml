@@ -149,9 +149,11 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
 let reaction_ledger_dir ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-       keeper_name)
-    "reaction-ledger"
+       (Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+          keeper_name)
+       "reaction-ledger")
+    "v3"
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -1017,7 +1019,7 @@ let test_reaction_kind_string_roundtrip () =
   | Ok _ -> fail "unknown reaction string must not decode"
 ;;
 
-let test_retired_schema_rows_are_quarantined_without_double_counting () =
+let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base
   @@ fun base_path ->
   let keeper_name = "sangsu" in
@@ -1037,7 +1039,7 @@ let test_retired_schema_rows_are_quarantined_without_double_counting () =
   Dated_jsonl.append
     store
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v2"
+        [ "schema", `String "keeper.reaction_ledger.foreign"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String current_event_id
         ; "keeper_name", `String keeper_name
@@ -1053,7 +1055,7 @@ let test_retired_schema_rows_are_quarantined_without_double_counting () =
   Dated_jsonl.append
     store
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v2"
+        [ "schema", `String "keeper.reaction_ledger.foreign"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1073,20 +1075,25 @@ let test_retired_schema_rows_are_quarantined_without_double_counting () =
     "only the current generation contributes"
     1
     (summary |> member "stimulus_count" |> to_int);
-  check int "retired reaction contributes zero" 0
+  check int "unexpected reaction contributes zero" 0
     (summary |> member "reaction_count" |> to_int);
-  check int "retired reaction cannot clear current pending" 1
+  check int "unexpected reaction cannot clear current pending" 1
     (summary |> member "pending_stimulus_count" |> to_int);
   check
     int
-    "both retired rows are quarantined"
+    "both unexpected rows are quarantined"
     2
     (summary |> member "quarantined_row_count" |> to_int);
-  let retired_reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
-  check_member_string "retired schema reason is typed" "retired_schema" "reason"
-    retired_reason;
-  check int "retired schema reason count" 2
-    (retired_reason |> member "count" |> to_int);
+  let unexpected_reason =
+    summary |> member "quarantine_reason_counts" |> to_list |> List.hd
+  in
+  check_member_string
+    "unexpected schema reason is typed"
+    "unexpected_schema"
+    "reason"
+    unexpected_reason;
+  check int "unexpected schema reason count" 2
+    (unexpected_reason |> member "count" |> to_int);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
@@ -1277,9 +1284,9 @@ let () =
             `Quick
             test_event_queue_stimulus_and_turn_reaction
         ; test_case
-            "retired schema rows cannot double-count current occurrences"
+            "unexpected schema rows cannot double-count current occurrences"
             `Quick
-            test_retired_schema_rows_are_quarantined_without_double_counting
+            test_unexpected_schema_rows_are_quarantined_without_double_counting
         ; test_case
             "quarantine remains keeper-local"
             `Quick

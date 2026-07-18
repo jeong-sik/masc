@@ -795,8 +795,6 @@ let record_wake_payload_at
       ~role_counts
       ~tool_count
   =
-  (* Project World Building: Broadcast live Yjs telemetry *)
-  Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index;
   let event =
     { timestamp
     ; keeper_name

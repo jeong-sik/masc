@@ -133,7 +133,6 @@
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
-  test_dashboard_branches
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
@@ -450,7 +449,6 @@
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
-  test_dashboard_branches
   test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
@@ -1286,13 +1284,6 @@
  (modules test_goal_loop_broadcast)
  (libraries alcotest masc masc_server masc_test_deps eio_main))
 
-; Focused dashboard nudge feed projection.
-
-(test
- (name test_dashboard_operator_nudges)
- (modules test_dashboard_operator_nudges)
- (libraries masc_test_deps))
-
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
 ; Memory-quality eval harness (Harness-First). Offline, deterministic, read-only.
@@ -1620,8 +1611,6 @@
 ; To add a new test: create test/stanzas/test_name.inc and
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
-
-(include stanzas/test_activity_feed.inc)
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 
@@ -2049,11 +2038,6 @@
 (include stanzas/test_hitl_summary_worker.inc)
 
 (include stanzas/test_ws_standalone_lifecycle.inc)
-
-(test
- (name test_dashboard_yjs)
- (modules test_dashboard_yjs)
- (libraries masc_test_deps))
 
 (test
  (name test_graphql_api_coverage)

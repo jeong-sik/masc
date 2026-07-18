@@ -461,7 +461,13 @@ let save_json_durable_atomic_from_with
         ~before_stage
         Payload_encode
         (fun () ->
-           Executor_pool_ref.submit_or_inline (fun () -> encode (json_source ())))
+           (* [Domain_pool_ref] is the typed CPU-weight policy layer keeper
+              call sites prefer (#25158). Unlike [Executor_pool_ref], a job
+              exception re-raises here instead of being conflated with a
+              pool failure and re-run inline; [run_durable_write_stage]
+              turns it into a typed [Payload_encode] failure. *)
+           Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             encode (json_source ())))
     in
     save_bytes_durable_atomic_core
       ~before_stage

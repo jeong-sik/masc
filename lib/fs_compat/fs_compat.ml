@@ -1793,6 +1793,13 @@ type private_jsonl_snapshot =
   ; cursor : Private_jsonl_cursor.t
   }
 
+type private_jsonl_transaction_io_for_testing =
+  { sync_parent : string -> unit }
+
+let private_jsonl_transaction_unix_io =
+  { sync_parent = fsync_parent_directory }
+;;
+
 type private_jsonl_transaction_operation =
   | Create_parent_directory
   | Open_stable_lock
@@ -1926,7 +1933,7 @@ let rec try_lock_whole_file fd =
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> false
 ;;
 
-let with_private_jsonl_stable_lock path f =
+let with_private_jsonl_stable_lock ~io path f =
   let dir = Filename.dirname path in
   let lock_path = private_jsonl_lock_path path in
   run_blocking_private_file_transaction
@@ -1958,7 +1965,7 @@ let with_private_jsonl_stable_lock path f =
                    | Error failure -> Error (Private_jsonl_operation_failed failure)
                    | Ok () ->
                      (match private_jsonl_capture Sync_stable_lock_parent (fun () ->
-                        fsync_parent_directory dir)
+                        io.sync_parent dir)
                       with
                       | Error failure -> Error (Private_jsonl_operation_failed failure)
                       | Ok () ->
@@ -2035,8 +2042,8 @@ let private_jsonl_read_exact fd ~from ~end_offset =
   |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
 ;;
 
-let read_private_jsonl_durable_locked_result path ~after =
-  with_private_jsonl_stable_lock path @@ fun ~dir:_ ->
+let read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after =
+  with_private_jsonl_stable_lock ~io path @@ fun ~dir:_ ->
   match private_jsonl_open_existing path [ Unix.O_RDONLY ] with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
   | Ok None ->
@@ -2083,6 +2090,13 @@ let read_private_jsonl_durable_locked_result path ~after =
                       ~from
                       ~end_offset:stats.Unix.st_size
                     |> Result.map (fun bytes -> { bytes; cursor = actual })))))
+;;
+
+let read_private_jsonl_durable_locked_result path ~after =
+  read_private_jsonl_durable_locked_with_io_for_testing
+    ~io:private_jsonl_transaction_unix_io
+    path
+    ~after
 ;;
 
 let private_jsonl_current_cursor path =
@@ -2177,12 +2191,17 @@ let private_jsonl_replace_locked ~dir path content =
               | Ok stats -> private_jsonl_cursor_of_stats stats))))
 ;;
 
-let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
+let append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ~io
+      path
+      ~expected
+      suffix
+  =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
   else
-    with_private_jsonl_stable_lock path @@ fun ~dir ->
+    with_private_jsonl_stable_lock ~io path @@ fun ~dir ->
     match private_jsonl_open_existing path [ Unix.O_RDWR; Unix.O_APPEND ] with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
     | Ok None ->
@@ -2233,6 +2252,14 @@ let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
                              private_jsonl_cursor_of_stats committed_stats))))))
 ;;
 
+let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
+  append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+    ~io:private_jsonl_transaction_unix_io
+    path
+    ~expected
+    suffix
+;;
+
 let rewrite_private_jsonl_durable_locked_at_cursor_result
       path
       ~expected
@@ -2242,7 +2269,8 @@ let rewrite_private_jsonl_durable_locked_at_cursor_result
      && not (Char.equal content.[String.length content - 1] '\n')
   then Error Invalid_transaction_suffix
   else
-    with_private_jsonl_stable_lock path @@ fun ~dir ->
+    with_private_jsonl_stable_lock ~io:private_jsonl_transaction_unix_io path
+    @@ fun ~dir ->
     match private_jsonl_current_cursor path with
     | Error _ as error -> error
     | Ok actual ->

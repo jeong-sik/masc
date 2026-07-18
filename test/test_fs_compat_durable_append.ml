@@ -504,6 +504,44 @@ let test_private_jsonl_transaction_lock_is_private () =
   check int "stable lock permissions" 0o600 permissions
 ;;
 
+let test_private_jsonl_stable_lock_parent_sync_count () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let parent_sync_count = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { sync_parent = (fun _dir -> incr parent_sync_count) }
+  in
+  let snapshot =
+    match
+      Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+        ~io
+        path
+        ~after:None
+    with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  in
+  for _ = 1 to 3 do
+    match
+      Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+        ~io
+        path
+        ~after:(Some snapshot.cursor)
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  done;
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+       ~io
+       path
+       ~expected:snapshot.cursor
+       "{\"row\":2}\n"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  check int "parent syncs across five transactions" 5 !parent_sync_count
+;;
+
 let test_private_jsonl_transaction_lock_contention_is_typed () =
   with_transaction_jsonl None @@ fun path ->
   ignore (transaction_snapshot path ~after:None);
@@ -640,6 +678,10 @@ let () =
             "private JSONL stable lock is private"
             `Quick
             test_private_jsonl_transaction_lock_is_private
+        ; test_case
+            "private JSONL stable lock parent sync count is explicit"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_count
         ; test_case
             "private JSONL stable lock contention is typed"
             `Quick

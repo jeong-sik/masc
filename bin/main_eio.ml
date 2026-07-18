@@ -252,62 +252,6 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
   | `DELETE, "/mcp/operator" ->
       handle_delete_mcp
         ~profile:Server_mcp_transport_http.Operator_remote request reqd
-  | `GET, "/api/v1/board/flairs" ->
-      let flairs = List.map Board.flair_to_yojson Board.available_flairs in
-      let json = `Assoc [("flairs", `List flairs)] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
-      let json = `Assoc [
-        ("hearths", `List (List.map (fun (name, count) ->
-          `Assoc [("name", `String name); ("count", `Int count)]
-        ) hearths));
-      ] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/curation" ->
-      let json =
-        match Board_dispatch.latest_curation_snapshot () with
-        | None -> `Assoc [ ("snapshot", `Null) ]
-        | Some snap ->
-            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/karma/ledger" ->
-      let agent = query_param request "agent" in
-      let limit =
-        int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
-      in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals =
-        Board_dispatch.get_all_karma ()
-        |> List.sort (fun (_, a) (_, b) -> compare b a)
-      in
-      let json =
-        `Assoc
-          [
-            ("events", `List (List.map Board.karma_event_to_yojson events));
-            ("count", `Int (List.length events));
-            ("scoring_rule", `String "up=+1,down=0");
-            ( "totals",
-              `List
-                (List.map
-                   (fun (agent_name, k) ->
-                     `Assoc
-                       [ ("agent", `String agent_name); ("karma", `Int k) ])
-                   totals) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
   (* Board reads/reactions are owned by the typed route table: exact routes
      ([/api/v1/board/reactions], [/catalog]) win over the board prefix route,
      and the prefix route resolves the bearer-bound reaction actor itself. *)

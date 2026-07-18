@@ -1040,16 +1040,8 @@ export interface MetricsWindow {
   // -- Fallback rates --
   fallback_count?: number
   fallback_rate?: number
-  model_fallback_count?: number
-  model_fallback_rate?: number
-  model_fallback_numerator?: number
-  model_fallback_denominator?: number
   proactive_fallback_count?: number
   proactive_fallback_rate?: number
-  proactive_template_fallback_count?: number
-  proactive_template_fallback_rate?: number
-  proactive_template_fallback_numerator?: number
-  proactive_template_fallback_denominator?: number
 
   // -- Intervention --
   intervention_share?: number

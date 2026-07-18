@@ -853,8 +853,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
     {
       title: '폴백',
       rows: [
-        { label: '전체 폴백', value: formatPct1(mw?.fallback_rate) },
-        { label: '런타임 폴백', value: formatPct1(mw?.model_fallback_rate) },
+        { label: '런타임 폴백', value: formatPct1(mw?.fallback_rate) },
         { label: '프로액티브 폴백', value: formatPct1(mw?.proactive_fallback_rate) },
       ],
     },

@@ -302,7 +302,6 @@ describe('RuntimeSignals', () => {
       status: 'active',
       metrics_window: {
         fallback_rate: 0.12,
-        model_fallback_rate: 0.05,
         memory_pass_rate: 0.88,
         memory_avg_score: 0.73,
       },
@@ -311,14 +310,14 @@ describe('RuntimeSignals', () => {
     render(h(RuntimeSignals, { keeper }))
 
     // Before filtering: labels from multiple groups are visible.
-    expect(screen.getByText('전체 폴백')).toBeInTheDocument()
+    expect(screen.getByText('런타임 폴백')).toBeInTheDocument()
     expect(screen.getByText('메모리 통과율')).toBeInTheDocument()
 
     const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 메모리, 컴팩션)') as HTMLInputElement
     fireEvent.input(input, { target: { value: '메모리' } })
 
     // Non-matching labels are gone, matching ones remain.
-    expect(screen.queryByText('전체 폴백')).not.toBeInTheDocument()
+    expect(screen.queryByText('런타임 폴백')).not.toBeInTheDocument()
     expect(screen.getByText('메모리 통과율')).toBeInTheDocument()
     expect(screen.getByText('메모리 평균 점수')).toBeInTheDocument()
   })

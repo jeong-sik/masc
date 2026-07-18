@@ -542,16 +542,8 @@ let compute_metrics_window
     ("avg_compaction_saved_tokens", `Float avg_compaction_saved_tokens);
     ("fallback_count", `Int acc.ma_fallback_count);
     ("fallback_rate", `Float fallback_rate);
-    ("model_fallback_count", `Int acc.ma_fallback_count);
-    ("model_fallback_rate", `Float fallback_rate);
-    ("model_fallback_numerator", `Int acc.ma_fallback_count);
-    ("model_fallback_denominator", `Int interaction_points_int);
     ("proactive_fallback_count", `Int acc.ma_proactive_fallback_count);
     ("proactive_fallback_rate", `Float proactive_fallback_rate);
-    ("proactive_template_fallback_count", `Int acc.ma_proactive_fallback_count);
-    ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-    ("proactive_template_fallback_numerator", `Int acc.ma_proactive_fallback_count);
-    ("proactive_template_fallback_denominator", `Int proactive_points_int);
     ("intervention_share", `Float intervention_share);
     ("intervention_per_turn", `Float intervention_per_turn);
     ("drift_applied_count", `Int acc.ma_drift_applied_count);

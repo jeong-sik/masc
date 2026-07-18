@@ -177,10 +177,6 @@ let keeper_metrics_24h_json
            ("proactive_points", `Int b.proactive_points);
            ("proactive_fallback_count", `Int b.proactive_fallback_count);
            ("proactive_fallback_rate", `Float proactive_fallback_rate);
-           ("proactive_template_fallback_count", `Int b.proactive_fallback_count);
-           ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-           ("proactive_template_fallback_numerator", `Int b.proactive_fallback_count);
-           ("proactive_template_fallback_denominator", `Int b.proactive_points);
          ])
   in
   let bucket_count = List.length rows in
@@ -202,10 +198,6 @@ let keeper_metrics_24h_json
       ("proactive_points", `Int !proactive_points);
       ("proactive_fallback_count", `Int !proactive_fallback_count);
       ("proactive_fallback_rate", `Float proactive_fallback_rate);
-      ("proactive_template_fallback_count", `Int !proactive_fallback_count);
-      ("proactive_template_fallback_rate", `Float proactive_fallback_rate);
-      ("proactive_template_fallback_numerator", `Int !proactive_fallback_count);
-      ("proactive_template_fallback_denominator", `Int !proactive_points);
     ]
   in
   (`List rows, summary)

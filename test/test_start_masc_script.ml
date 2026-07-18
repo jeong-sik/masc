@@ -159,10 +159,10 @@ let artifact_hash ~cwd path =
       stderr;
   String.trim stdout
 
-let write_artifact_descriptor ~cwd ~file ~mode ~path ~sha256 ~port =
+let write_artifact_descriptor ~cwd ~file ~mode ~path ~sha256 ~bind_host ~port =
   let code, stdout, stderr =
     run_contract ~cwd
-      [ "write"; file; mode; path; sha256; string_of_int port ]
+      [ "write"; file; mode; path; sha256; bind_host; string_of_int port ]
   in
   if code <> 0 then
     failf "artifact descriptor write failed (%d)\nstdout:\n%s\nstderr:\n%s"
@@ -1005,8 +1005,8 @@ let test_build_tempfail_runs_only_hash_verified_lkg () =
           let script = Filename.concat dir "start-masc.sh" in
           let scripts_dir = Filename.concat dir "scripts" in
           let lkg_exe = Filename.concat dir "verified-lkg-main_eio.exe" in
-          let lkg_file = Filename.concat dir "last-known-good.v1" in
-          let candidate_file = Filename.concat dir "candidate.v1" in
+          let lkg_file = Filename.concat dir "last-known-good.v2" in
+          let candidate_file = Filename.concat dir "candidate.v2" in
           let capture = Filename.concat dir "captured-lkg.txt" in
           let source = Filename.concat dir "bin/main_eio.ml" in
           copy_script (script_path ()) script;
@@ -1025,7 +1025,7 @@ let test_build_tempfail_runs_only_hash_verified_lkg () =
           Unix.utimes source future future;
           let lkg_hash = artifact_hash ~cwd:dir lkg_exe in
           write_artifact_descriptor ~cwd:dir ~file:lkg_file ~mode:"http"
-            ~path:lkg_exe ~sha256:lkg_hash ~port:9972;
+            ~path:lkg_exe ~sha256:lkg_hash ~bind_host:"127.0.0.1" ~port:9972;
           let code, stdout, stderr =
             run_script ~cwd:dir script
               ~env:
@@ -1064,7 +1064,7 @@ let test_build_tempfail_rejects_lkg_hash_mismatch () =
           let script = Filename.concat dir "start-masc.sh" in
           let scripts_dir = Filename.concat dir "scripts" in
           let lkg_exe = Filename.concat dir "invalid-lkg-main_eio.exe" in
-          let lkg_file = Filename.concat dir "last-known-good.v1" in
+          let lkg_file = Filename.concat dir "last-known-good.v2" in
           let capture = Filename.concat dir "captured-invalid-lkg.txt" in
           let source = Filename.concat dir "bin/main_eio.ml" in
           copy_script (script_path ()) script;
@@ -1082,7 +1082,8 @@ let test_build_tempfail_rejects_lkg_hash_mismatch () =
           let future = Unix.time () +. 10.0 in
           Unix.utimes source future future;
           write_artifact_descriptor ~cwd:dir ~file:lkg_file ~mode:"http"
-            ~path:lkg_exe ~sha256:(String.make 64 '0') ~port:9972;
+            ~path:lkg_exe ~sha256:(String.make 64 '0')
+            ~bind_host:"127.0.0.1" ~port:9972;
           let code, _stdout, stderr =
             run_script ~cwd:dir script
               ~env:
@@ -1103,6 +1104,49 @@ let test_build_tempfail_rejects_lkg_hash_mismatch () =
           check bool "hash mismatch is operator-visible" true
             (contains_substring stderr
                "last-known-good artifact failed exact verification")))
+
+let test_promoted_dune_lkg_survives_build_tree_cleanup () =
+  with_temp_dir "start-masc-durable-lkg" (fun repo_root ->
+      let build_root = Filename.concat repo_root "_build" in
+      let source_exe =
+        Filename.concat build_root "default/bin/main_eio.exe"
+      in
+      let logs_dir = Filename.concat repo_root "logs" in
+      let candidate_file = Filename.concat logs_dir "candidate.v2" in
+      let lkg_file = Filename.concat logs_dir "last-known-good.v2" in
+      write_fake_eio_exe source_exe ~marker:"durable-source";
+      mkdir_p logs_dir;
+      let source_hash = artifact_hash ~cwd:repo_root source_exe in
+      write_artifact_descriptor ~cwd:repo_root ~file:candidate_file ~mode:"http"
+        ~path:source_exe ~sha256:source_hash ~bind_host:"127.0.0.1"
+        ~port:9972;
+      let code, stdout, stderr =
+        run_contract ~cwd:repo_root
+          [ "promote"; candidate_file; lkg_file; repo_root ]
+      in
+      if code <> 0 then
+        failf "LKG promotion failed (%d)\nstdout:\n%s\nstderr:\n%s" code
+          stdout stderr;
+      let descriptor_lines = String.split_on_char '\n' (read_file lkg_file) in
+      let promoted_path = List.nth descriptor_lines 2 in
+      check bool "promoted path is outside dune build tree" false
+        (contains_substring promoted_path "/_build/");
+      rm_rf build_root;
+      let verify_code, verify_stdout, verify_stderr =
+        run_contract ~cwd:repo_root [ "verify"; lkg_file ]
+      in
+      if verify_code <> 0 then
+        failf
+          "promoted LKG did not survive build tree cleanup (%d)\nstdout:\n%s\nstderr:\n%s"
+          verify_code verify_stdout verify_stderr)
+
+let test_log_tee_preserves_server_pid () =
+  let source = read_file (script_path ()) in
+  check bool "log tee uses PID-preserving process substitution" true
+    (contains_substring source
+       "exec \"$@\" > >(tee -a \"$MASC_LOG_FILE\") 2>&1");
+  check bool "log tee does not retain a pipeline wrapper" false
+    (contains_substring source "exec \"$@\" 2>&1 | tee")
 
 let test_default_build_lock_is_worktree_local () =
   let source = read_file (script_path ()) in
@@ -1366,6 +1410,69 @@ let test_supervisor_stops_on_startup_without_candidate () =
         (contains_substring stderr
            "terminal startup state: no runtime candidate was published"))
 
+let test_supervisor_zero_exit_without_health_proof_fails_closed () =
+  let run_case ~name ~publish_candidate ~terminal_message =
+    with_temp_dir name (fun repo_root ->
+        let scripts_dir = Filename.concat repo_root "scripts" in
+        let lib_dir = Filename.concat scripts_dir "lib" in
+        let fake_bin = Filename.concat repo_root "fake-bin" in
+        let supervisor_script =
+          Filename.concat scripts_dir "start-masc-supervised.sh"
+        in
+        let child_script = Filename.concat repo_root "start-masc.sh" in
+        let invocation_count = Filename.concat repo_root "invocation-count" in
+        let lkg_file = Filename.concat repo_root "last-known-good.v2" in
+        let log_file = Filename.concat repo_root "supervisor.log" in
+        mkdir_p lib_dir;
+        mkdir_p fake_bin;
+        copy_script (supervised_script_path ()) supervisor_script;
+        copy_script (runtime_artifact_contract_path ())
+          (Filename.concat lib_dir "runtime-artifact-contract.sh");
+        write_executable (Filename.concat fake_bin "lsof")
+          "#!/bin/sh\nexit 0\n";
+        write_executable (Filename.concat fake_bin "curl")
+          "#!/bin/sh\nexit 1\n";
+        let publish_candidate_script =
+          if publish_candidate then
+            {|
+hash="$(${MASC_RUNTIME_ARTIFACT_CONTRACT:?} hash "$0")"
+"$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 127.0.0.1 9999
+|}
+          else ""
+        in
+        write_executable child_script
+          (Printf.sprintf
+             "#!/bin/bash\nset -eu\nprintf '1\\n' > %s\n%s\nexit 0\n"
+             (quote invocation_count) publish_candidate_script);
+        let code, stdout, stderr =
+          run_script ~cwd:repo_root supervisor_script
+            ~env:
+              [
+                ("MASC_RUNTIME_LKG_FILE", lkg_file);
+                ("MASC_SUPERVISOR_LOG", log_file);
+                ("MASC_RESTART_COOLDOWN_SEC", "0");
+                ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+              ]
+            []
+        in
+        check int "unproven runtime cannot report supervisor success" 70 code;
+        check string "unproven startup is not amplified" "1\n"
+          (read_file invocation_count);
+        check string "supervisor writes no stdout" "" stdout;
+        check bool "terminal state is operator-visible" true
+          (contains_substring stderr terminal_message);
+        check bool "successful child is reclassified as supervisor failure" true
+          (contains_substring stderr
+             "child exited successfully without a health-verified runtime"))
+  in
+  run_case ~name:"start-masc-supervisor-zero-without-candidate"
+    ~publish_candidate:false
+    ~terminal_message:"no runtime candidate was published";
+  run_case ~name:"start-masc-supervisor-zero-without-proof"
+    ~publish_candidate:true
+    ~terminal_message:"lacks an exact PID-bound health proof"
+
 let test_supervisor_promotes_pid_bound_healthy_candidate () =
   with_temp_dir "start-masc-supervisor-lkg" (fun repo_root ->
       with_temp_dir "start-masc-supervisor-lkg-bin" (fun fake_bin ->
@@ -1376,7 +1483,8 @@ let test_supervisor_promotes_pid_bound_healthy_candidate () =
           in
           let child_script = Filename.concat repo_root "start-masc.sh" in
           let listener_pid_file = Filename.concat repo_root "listener-pid" in
-          let lkg_file = Filename.concat repo_root "last-known-good.v1" in
+          let curl_capture = Filename.concat repo_root "curl-capture" in
+          let lkg_file = Filename.concat repo_root "last-known-good.v2" in
           let log_file = Filename.concat repo_root "supervisor.log" in
           mkdir_p lib_dir;
           mkdir_p fake_bin;
@@ -1392,7 +1500,7 @@ if [ -f "${FAKE_LISTENER_PID_FILE:?}" ]; then
 fi
 |};
           write_executable (Filename.concat fake_bin "curl")
-            "#!/bin/sh\nexit 0\n";
+            "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$*\" > \"${FAKE_CURL_CAPTURE:?}\"\nexit 0\n";
           write_executable child_script
             (Printf.sprintf
                {|
@@ -1404,12 +1512,16 @@ fi
 printf '%%s\n' "$$" > %s
 hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
 "$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
-  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 192.0.2.10 9999
+attempts=0
 while ! grep -q "pid=$$" "${MASC_SUPERVISOR_LOG:?}" 2>/dev/null; do
+  attempts=$((attempts + 1))
+  [ "$attempts" -lt 250 ] || exit 71
   sleep 0.02
 done
 kill -TERM "$PPID"
-while true; do sleep 1; done
+sleep 2
+exit 72
 |}
                (quote listener_pid_file));
           let code, stdout, stderr =
@@ -1417,6 +1529,7 @@ while true; do sleep 1; done
               ~env:
                 [
                   ("FAKE_LISTENER_PID_FILE", listener_pid_file);
+                  ("FAKE_CURL_CAPTURE", curl_capture);
                   ("MASC_RUNTIME_LKG_FILE", lkg_file);
                   ("MASC_SUPERVISOR_LOG", log_file);
                   ("MASC_SUPERVISOR_HEALTH_PROBE_SEC", "1");
@@ -1431,6 +1544,9 @@ while true; do sleep 1; done
           let expected_hash = artifact_hash ~cwd:repo_root child_script in
           check bool "promoted descriptor retains exact artifact hash" true
             (contains_substring (read_file lkg_file) expected_hash);
+          check bool "configured bind host determines health probe" true
+            (contains_substring (read_file curl_capture)
+               "http://192.0.2.10:9999/health");
           check bool "promotion is operator-visible" true
             (contains_substring stderr
                "health-verified runtime artifact promoted")))
@@ -1445,7 +1561,7 @@ let test_supervisor_rejects_malformed_health_proof () =
           in
           let child_script = Filename.concat repo_root "start-masc.sh" in
           let invocation_count = Filename.concat repo_root "invocation-count" in
-          let lkg_file = Filename.concat repo_root "last-known-good.v1" in
+          let lkg_file = Filename.concat repo_root "last-known-good.v2" in
           let log_file = Filename.concat repo_root "supervisor.log" in
           mkdir_p lib_dir;
           mkdir_p fake_bin;
@@ -1464,8 +1580,10 @@ set -eu
 printf '1\n' > %s
 hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
 "$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
-  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
-: > "$(dirname "${MASC_RUNTIME_LKG_FILE:?}")/masc-runtime-health-proof.${PPID}.v1"
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 127.0.0.1 9999
+printf 'masc.runtime_health_proof.v2\n%%s\n%%s\n%%s\n' \
+  "$$" "$hash" "$(printf '0%%.0s' {1..64})" \
+  > "$(dirname "${MASC_RUNTIME_LKG_FILE:?}")/masc-runtime-health-proof.${PPID}.v2"
 exit 23
 |}
                (quote invocation_count));
@@ -1499,7 +1617,7 @@ let test_supervisor_restarts_without_exit_limit_and_preserves_status () =
           let child_script = Filename.concat repo_root "start-masc.sh" in
           let invocation_count = Filename.concat repo_root "invocation-count" in
           let listener_pid_file = Filename.concat repo_root "listener-pid" in
-          let lkg_file = Filename.concat repo_root "last-known-good.v1" in
+          let lkg_file = Filename.concat repo_root "last-known-good.v2" in
           let log_file = Filename.concat repo_root "supervisor.log" in
           mkdir_p lib_dir;
           mkdir_p fake_bin;
@@ -1529,15 +1647,17 @@ printf '%%s\n' "$count" > %s
 printf '%%s\n' "$$" > %s
 hash="$("${MASC_RUNTIME_ARTIFACT_CONTRACT:?}" hash "$0")"
 "$MASC_RUNTIME_ARTIFACT_CONTRACT" write \
-  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 9999
+  "${MASC_RUNTIME_CANDIDATE_FILE:?}" http "$0" "$hash" 127.0.0.1 9999
+attempts=0
 while ! grep -q "pid=$$" "${MASC_SUPERVISOR_LOG:?}" 2>/dev/null; do
+  attempts=$((attempts + 1))
+  [ "$attempts" -lt 250 ] || exit 71
   sleep 0.02
 done
 if [ "$count" -ge 6 ]; then
   kill -TERM "$PPID"
-  while true; do
-    sleep 1
-  done
+  sleep 2
+  exit 72
 fi
 exit 23
 |}
@@ -1621,6 +1741,10 @@ let () =
 	            test_build_tempfail_runs_only_hash_verified_lkg;
 	          test_case "build tempfail rejects LKG hash mismatch" `Quick
 	            test_build_tempfail_rejects_lkg_hash_mismatch;
+	          test_case "promoted dune LKG survives build tree cleanup" `Quick
+	            test_promoted_dune_lkg_survives_build_tree_cleanup;
+	          test_case "log tee preserves server PID" `Quick
+	            test_log_tee_preserves_server_pid;
 	          test_case "default build lock is worktree-local" `Quick
 	            test_default_build_lock_is_worktree_local;
 	          test_case "stdio entrypoint uses shared base path guard" `Quick
@@ -1648,6 +1772,8 @@ let () =
             test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
           test_case "supervisor stops on startup without candidate" `Quick
             test_supervisor_stops_on_startup_without_candidate;
+          test_case "supervisor zero exit without health proof fails closed"
+            `Quick test_supervisor_zero_exit_without_health_proof_fails_closed;
           test_case "supervisor promotes PID-bound healthy candidate" `Quick
             test_supervisor_promotes_pid_bound_healthy_candidate;
           test_case "supervisor rejects malformed health proof" `Quick

@@ -106,21 +106,21 @@
   <div class="eyebrow">MASC 1.0 / Executable strategy</div>
   <h1>10 Keeper Mixed-Workload<br>Operation Goal Matrix</h1>
   <p class="lede">10개 Keeper가 Discord·Slack·Dashboard·Voice에서 동시에 대화하고, 서로 협업하며, 코드 작성·정보 수집·이미지 생성·장기 작업·메모리 기록·컴팩션을 수행하는 상황을 대상으로 한다. 목표는 평균 처리량이 아니라 <strong>직접 요청의 반응성, 영속 복구, lane 공정성, 자원 상한, 감사 가능한 상태 전이</strong>를 동시에 만족하는 것이다.</p>
-  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 20:13 KST · live runtime commit 174f62c929 · base draft #25092 · stacked partition draft #25130</p>
+  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 23:37 KST · last observed runtime commit 174f62c929 · base draft #25092 · stacked partition draft #25130 · storage stacks #25185 / #25206</p>
 
   <div class="banner">
-    <strong>현재 판정: 제한 canary만 가능, 고객 제품은 No-Go.</strong> 19:51 KST의 runtime outage 뒤 19:54 KST에 다른 직접 기동 runtime이 올라와 20:13 KST 현재 listener는 다시 1이다. 그러나 supervisor 소유가 아니고 v2 LKG도 생성되지 않았다. fresh full snapshot은 target 자체가 6으로 축소된 상태에서 6 executable/effective, 4 running, 2 recovering을 보고하며 active task owner 2명(executor, taskmaster)은 executable fiber가 없어 fleet가 degraded다. durable event는 total 613(pending/inflight 순간값 610/3 또는 611/2), oldest age 약 68.69시간이다. 포트 재등장과 축소 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
+    <strong>현재 판정: 제한 canary도 지속성 보장 없이만 가능, 고객 제품은 No-Go.</strong> 21:52 KST 마지막 정상 응답은 target 6, executable/effective 6/6, 4 running, 2 recovering, durable queue pending 609 / inflight 0 / oldest 약 70.33시간을 보고했다. 23:37 KST 첫 probe는 HTTP <code>ok</code>이면서 overall <code>degraded</code>, operator action required였고 직후 8935 listener가 사라졌다. supervisor 소유와 v2 LKG가 없으므로 자동 복구 증거도 없다. 포트의 일시 생존과 축소 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
   </div>
   <p class="small muted">Runtime adoption blocker: <a href="https://github.com/jeong-sik/masc/issues/25190">#25190</a>. #25160의 복구 코드는 병합됐지만 live launch path가 직접 executable이어서 AFK 복구 권한이 없었다.</p>
 
   <section>
     <h2>1. Live baseline</h2>
     <div class="cards">
-      <div class="card warn"><div class="label">Current listener</div><div class="value">1</div><div>직접 기동 PID; supervisor/LKG 없음, AFK 복구 미증명</div></div>
-      <div class="card bad"><div class="label">Executable / effective</div><div class="value">6 / 6 · target 6</div><div>20:13 snapshot: 4 running, 2 recovering; release target 10에는 미달</div></div>
+      <div class="card bad"><div class="label">Current listener</div><div class="value">0</div><div>23:37 KST lsof 재확인; supervisor/LKG 없음</div></div>
+      <div class="card bad"><div class="label">Executable / effective</div><div class="value">last 6 / 6 · target 6</div><div>21:52 마지막 snapshot: 4 running, 2 recovering; 현재 endpoint unavailable</div></div>
       <div class="card warn"><div class="label">Event queue read errors</div><div class="value">16 → 0</div><div>16/16 v3 변환 완료; backlog settlement는 별개</div></div>
-      <div class="card bad"><div class="label">Durable event queue</div><div class="value">total 613</div><div>610/3 또는 611/2 pending/inflight, oldest 약 68.69시간, read errors 0</div></div>
-      <div class="card warn"><div class="label">Queue delta vs 13:22</div><div class="value">total -183</div><div>796 → 613, 그러나 oldest는 약 61.83h → 68.69h</div></div>
+      <div class="card bad"><div class="label">Durable event queue</div><div class="value">last pending 609</div><div>21:52 snapshot: inflight 0, oldest 약 70.33시간, read errors 0</div></div>
+      <div class="card warn"><div class="label">Queue delta vs 13:22</div><div class="value">pending -187</div><div>796 → 609, 그러나 oldest는 약 61.83h → 70.33h</div></div>
       <div class="card warn"><div class="label">Attention candidates</div><div class="value">3,644</div><div>520개 고유 signal이 평균 7.01배 증폭</div></div>
       <div class="card warn"><div class="label">Pending attention</div><div class="value">890</div><div>live runtime에는 partition ledger 0; stacked code는 아직 미배포</div></div>
       <div class="card warn"><div class="label">Candidate ledger</div><div class="value">39.71 MB</div><div>3,644 durable rows; candidate JSON 전체 실측</div></div>
@@ -128,7 +128,7 @@
       <div class="card"><div class="label">Health endpoint p50 / p95</div><div class="value">3.6 / 16.7 ms</div><div>20회 cache-hit 측정; 제품 실행 가능성 증거는 아님</div></div>
       <div class="card warn"><div class="label">Full health recompute</div><div class="value">4.2 s</div><div>snapshot refresh 자체 비용</div></div>
       <div class="card"><div class="label">Historical relevance</div><div class="value">48.1%</div><div>1,325 relevant / 2,754 consumed</div></div>
-      <div class="card"><div class="label">Full snapshot truth</div><div class="value">FRESH</div><div>snapshot age 11.7s, recompute 4.275s; overall은 degraded</div></div>
+      <div class="card bad"><div class="label">Full snapshot truth</div><div class="value">UNAVAILABLE</div><div>23:37 listener 소실; 마지막 응답도 overall degraded</div></div>
     </div>
     <p class="small muted">정확한 원본 수치: unique signals 520, candidate fan-out p50 6 / p95 14 / max 14, consumed irrelevant 1,429(51.9%), pending 890, batch request max 208,369 bytes. bytes를 token으로 임의 환산하지 않는다.</p>
   </section>
@@ -142,8 +142,8 @@
       <table>
         <thead><tr><th>제품 축</th><th>Weight</th><th>현재 관측</th><th>#25073 단독 효과</th><th>1.0 정량 gate</th></tr></thead>
         <tbody>
-          <tr><td>실행 가능성</td><td>25%</td><td>listener는 재등장했지만 unsupervised이며 축소 target 6뿐이다. release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
-          <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event total 613, oldest 68.69시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
+          <tr><td>실행 가능성</td><td>25%</td><td>23:37 listener 0. 마지막 runtime도 unsupervised이며 축소 target 6뿐이다. release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
+          <tr><td>End-to-end useful completion</td><td>25%</td><td>마지막 durable pending 609, oldest 70.33시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
           <tr><td>직접 요청 반응성</td><td>15%</td><td>owner lane이 ambient provider call에 30–50초 점유될 수 있고 direct-input p95 미측정 → 0점</td><td>55/57 calls 연속 점유를 1 call/admission으로 제한; call 자체의 점유는 남음</td><td>enqueue→turn-start p95 ≤ 2s, 접수 응답 p95 ≤ 5s</td></tr>
           <tr><td>채널·세션 연속성</td><td>15%</td><td>transport/presence 생존만 확인; Slack/Voice/원채널 terminal E2E 미검증 → 0점</td><td>영향 없음</td><td>Discord/Slack/Dashboard/Voice route accuracy 100%, restart replay 100%</td></tr>
           <tr><td>무유실·판정 정확성</td><td>10%</td><td>live main은 blind TTL + partial verdict 계약을 보유; follow-up 미병합 → 0점</td><td>후속 #25092에서 TTL 제거, exact ID coverage, context cohort로 개선</td><td>silent discard = 0, cross-context batch = 0, 모든 defer에 typed evidence</td></tr>
@@ -151,8 +151,8 @@
         </tbody>
       </table>
     </div>
-    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. listener 1이어도 supervisor·10-lane·8시간 gate가 실패/Unknown이므로 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
-    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 회복됐다. 그러나 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. total 613의 durable event를 정상 처리·격리·실패 종결하고 target을 10으로 복구하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
+    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. listener가 있었을 때도 supervisor·10-lane·8시간 gate가 실패/Unknown이었고 지금은 listener도 0이므로 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
+    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 있었지만 지속 실행은 보장되지 않았다. 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. 마지막 pending 609건을 정상 처리·격리·실패 종결하고 target을 10으로 복구하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
     <p><strong>9.0 release floor:</strong> 위 6개 축의 가중 합 ≥ 9.0이고, 동시에 실행 가능성·terminal exactly-once·silent loss 세 hard gate가 모두 통과해야 한다. 평균 점수가 높아도 이 셋 중 하나가 0이면 출시 불가다.</p>
   </section>
 
@@ -262,6 +262,43 @@ Keeper owner admission: apply Completed → idempotent event enqueue → Consume
     <p><strong>2026-07-18 적대적 code gate:</strong> 독립 fresh-context 리뷰가 stale Pending snapshot과 Settled root의 deterministic ID 충돌, Completed wake 유실, candidate storage I/O를 membership corruption으로 terminal block하는 오류, durable delivery 실패의 거짓-green, worker 관측시각 동률로 인한 FIFO 역전을 확인했다. 현재 patch는 exact historical root idempotency, startup Completed wake replay, typed storage Deferred, <code>recorded_at</code> claim order, remaining delivery의 Error 승격, Completed/delivery-failure health degradation으로 이를 막는다. focused test와 full CI가 통과하기 전 #25130은 merge-block 상태다.</p>
     <p><strong>Storage serialization boundary:</strong> 데이터 inode의 <code>lockf</code>는 atomic rename 뒤 대기 중인 writer를 old inode에 가둘 수 있으므로 partition transaction의 권한이 아니다. sibling <code>.lock</code> 파일을 먼저 nonblocking 획득하고, exact cursor CAS 뒤 append 또는 staged rewrite를 수행한다. contention·identity mismatch·incomplete tail·fsync 실패는 typed error이며 timeout·retry·backoff는 이 계층에 없다. process-start만 latest row 1개/partition의 deterministic compaction 권한을 가지며 <code>Settled</code> receipt도 보존한다.</p>
     <p><strong>현재 검증 경계:</strong> strict removed-state rejection, response failure no-split, exact settlement replay, owner nonblocking, sibling cancellation isolation, domain-safe wake stream, per-ledger startup recovery, cross-Keeper path collision, typed health projection을 focused target과 CI에서 검증한다. Candidate/partition JSONL parse·rewrite와 provider-free owner delivery는 systhread로 분리하되 OAS judge는 Eio lane fiber에 남긴다. 이 구현 단위 증거는 8-hour fleet와 direct-latency SLO를 대신하지 않는다.</p>
+  </section>
+
+  <section>
+    <h2>4.6 Stable-lock creation authority: #25206 → Draft #25224</h2>
+    <div class="banner">
+      <strong>목표:</strong> durability를 약화하지 않고 private JSONL read/append/rewrite의 existing-lock hot path에서 parent-directory fsync를 제거한다. 성능을 위해 fsync를 생략하는 것이 아니라, 최초 생성 책임을 typed state와 commit ordering으로 분리한다.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>축</th><th>AS-IS #25185</th><th>TO-BE #25224</th><th>정량 증거 / 적대 조건</th></tr></thead>
+        <tbody>
+          <tr><td>Creation authority</td><td><code>O_CREAT</code> 결과만 보유해 신규/기존을 구분하지 못함</td><td><code>O_CREAT|O_EXCL</code> 성공을 <code>Created</code>, typed <code>EEXIST</code> fallback을 <code>Existing</code>으로 보존</td><td>기존 락은 권한을 자동수리하지 않음. Created만 exact 0600으로 확정</td></tr>
+          <tr><td>Durable state</td><td>lock payload 계약 없음</td><td>empty = exact <code>Preparing</code>; parent sync 뒤 1-byte marker = exact <code>Ready</code></td><td>multi-byte 상태의 partial-write brick을 제거. 다른 길이/값은 <code>Invalid_stable_lock_state</code></td></tr>
+          <tr><td>Ordering</td><td>매 transaction마다 chmod → parent fsync → lock</td><td>lock 획득 → regular-file/identity/permission 검증 → lock fsync → parent fsync → Ready write → lock fsync → data operation</td><td>parent sync EIO 주입 시 Ready 미게시, typed <code>Sync_stable_lock_parent</code>, 다음 정상 시도에서 수렴</td></tr>
+          <tr><td>Existing hot path</td><td>snapshot/append/rewrite 모두 parent fsync 1회</td><td>Ready 검증 뒤 parent fsync 0</td><td>동일 5 transactions: <span class="bad-text">5</span> → <span class="ok">1</span>; 최초 initialization 1회만 유지</td></tr>
+          <tr><td>Crash recovery</td><td>생성 durability와 transaction이 결합되어 복구 상태가 없음</td><td>crash 전/중 parent sync는 empty Preparing, parent sync 후 marker는 Ready. 둘 외에는 진행 금지</td><td>empty fixture recovery 및 failed-parent-sync fixture 통과; timeout·retry·backoff 없음</td></tr>
+          <tr><td>Authority attack</td><td>기존 lock path/file-kind/identity payload 검증 없음</td><td><code>fstat+lstat</code> regular-file 및 device/inode equality, exact 0600, symlink 거부</td><td>permission drift, symlink, corruption, contention이 모두 typed fail-closed</td></tr>
+          <tr><td>Snapshot p50 / p95</td><td class="metric">52.791 / 76.625 µs</td><td class="metric">37.625 / 70.667 µs</td><td class="ok">−28.7% / −7.8%</td></tr>
+          <tr><td>Append p50 / p95</td><td class="metric">93.834 / 114.708 µs</td><td class="metric">73.583 / 88.708 µs</td><td class="ok">−21.6% / −22.7%</td></tr>
+          <tr><td>1,000 existing operations</td><td class="metric">parent sync 1,000</td><td class="metric">parent sync 0</td><td class="ok">−100%; deterministic injected-I/O count</td></tr>
+          <tr><td>제품 점수 영향</td><td>backlog scan이 directory durability syscall에 비례</td><td>partition/candidate scan의 불필요한 syscall 제거</td><td>latency·I/O headroom 개선이지 terminal receipt나 10×8h 증명은 아님; strict 제품 점수는 계속 0.0/10</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <pre class="flow">Created / Existing stable lock
+        │
+        ├─ acquire nonblocking advisory lock
+        ├─ verify regular file + exact path/fd identity + mode 0600
+        └─ parse payload
+             ├─ empty Preparing
+             │    ├─ fsync(lock)
+             │    ├─ fsync(parent) ── failure → typed Error, marker absent
+             │    ├─ write 1-byte Ready
+             │    └─ fsync(lock)
+             ├─ exact Ready ───────────────► data transaction, parent fsync 0
+             └─ anything else ─────────────► typed corruption, data untouched</pre>
+    <p class="small muted"><strong>측정 계약:</strong> 동일 benchmark executable, 각 path별 warmup 100회 뒤 1,000회 측정, monotonic clock, nearest-rank p50/p95. wall-time은 공유 host의 단일 run이므로 방향성 수치이며 threshold gate로 사용하지 않는다. 원인-결과 hard proof는 snapshot/append 각각 parent sync 1,000→0과 focused suite 28/28이다.</p>
   </section>
 
   <section>

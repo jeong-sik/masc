@@ -48,15 +48,30 @@ let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
     ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
 
-let read_bindings () = Store.read_bindings binding_store
+let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
-let save_bindings bindings = Store.save_bindings binding_store bindings
-let append_audit_event event = Store.append_audit_event binding_store event
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
+
+type binding_lookup_error =
+  | Binding_store_read_failed of Store.binding_store_error
+
+let pp_binding_lookup_error formatter = function
+  | Binding_store_read_failed detail ->
+    Format.fprintf
+      formatter
+      "Discord binding store read failed: %s"
+      (Store.binding_store_error_to_string detail)
+
+let binding_lookup_error_to_string error =
+  Format.asprintf "%a" pp_binding_lookup_error error
+
+let read_bindings_lookup_result () =
+  read_bindings_result ()
+  |> Result.map_error (fun detail -> Binding_store_read_failed detail)
 
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
-   Used by [resolve_keeper_for_channel] to resolve bindings for thread
+   Used by [resolve_keeper_for_channel_result] to resolve bindings for thread
    messages whose channel_id is the thread's snowflake, not the parent
    channel's. Module-level mutable state (same pattern as [last_ready]). *)
 
@@ -173,17 +188,24 @@ let status_json ?(audit_limit = 10) () =
   let audit_path = binding_audit_read_path () in
   let names_path = Names.names_read_path () in
   let name_map = Names.read () in
-  let configured_bindings = read_bindings () in
+  let configured_bindings_result = read_bindings_lookup_result () in
+  let configured_bindings = Result.value ~default:[] configured_bindings_result in
+  let binding_store_error =
+    match configured_bindings_result with
+    | Ok _ -> None
+    | Error error -> Some (binding_lookup_error_to_string error)
+  in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let channel = "discord" in
   let gateway_state = Discord_gateway_client.connection_state () in
   let token_present = Option.is_some (bot_token_opt ()) in
-  let available =
+  let transport_available =
     match gateway_state with
     | Disconnected -> token_present
     | Awaiting_hello | Identifying | Resuming | Connected _
     | Reconnect_pending _ | Failed _ -> true
   in
+  let available = transport_available && Result.is_ok configured_bindings_result in
   let connected =
     match gateway_state with
     | Connected _ -> true
@@ -194,13 +216,20 @@ let status_json ?(audit_limit = 10) () =
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  let error =
+  let gateway_error =
     match gateway_state with
     | Disconnected ->
       if token_present then "" else "DISCORD_BOT_TOKEN is unset or empty"
     | Failed msg -> msg
     | Awaiting_hello | Identifying | Resuming | Connected _
     | Reconnect_pending _ -> ""
+  in
+  let error =
+    [ (if String.equal gateway_error "" then None else Some gateway_error)
+    ; binding_store_error
+    ]
+    |> List.filter_map Fun.id
+    |> String.concat "; "
   in
   `Assoc
     [
@@ -242,6 +271,9 @@ let status_json ?(audit_limit = 10) () =
       ("gate_healthy", if connected then `Bool true else `Null);
       ("gate_health_checked_at", `String (if connected then updated_at else ""));
       ("binding_source", `String "persisted");
+      ("binding_store_read_ok", `Bool (Result.is_ok configured_bindings_result));
+      ( "binding_store_error",
+        `String (Option.value ~default:"" binding_store_error) );
       ("runtime_bindings_count", `Int (List.length configured_bindings));
       (* NDT-OK: pid is process identity telemetry for operators; availability
          and connection status come from the gateway state above. *)
@@ -373,10 +405,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("observed_channel", observed_channel);
     ]
 
-let rollback_bindings original_bindings =
-  try save_bindings original_bindings with
-  | Sys_error _ -> ()
-
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in
   let keeper_name = String.trim keeper_name in
@@ -385,87 +413,86 @@ let bind ~channel_id ~keeper_name ~actor_name =
   else if keeper_name = "" then
     Error "keeper_name is required"
   else
-    let original_bindings = read_bindings () in
-    let previous_keeper =
-      original_bindings
-      |> List.find_map (fun (binding : binding) ->
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+      let previous_keeper =
+        original_bindings
+        |> List.find_map (fun (binding : binding) ->
              if String.equal binding.channel_id channel_id then
                Some binding.keeper_name
-             else
-               None)
-      |> Option.value ~default:""
-    in
-    let updated_bindings =
-      (({ channel_id; keeper_name } : binding)
-       :: List.filter
-            (fun (binding : binding) ->
-              not (String.equal binding.channel_id channel_id))
-            original_bindings)
-      |> List.sort (fun (a : binding) (b : binding) ->
-             String.compare a.channel_id b.channel_id)
-    in
-    try
-      save_bindings updated_bindings;
-      let guild_id =
-        Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+             else None)
+        |> function
+        | Some keeper_name -> keeper_name
+        | None ->
+          (* DET-OK: the audit wire contract uses an empty string to represent
+             that this channel had no previous binding; it does not affect the
+             mutation decision. *)
+          ""
       in
-      append_audit_event
-        Store.{
-          timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
-          action = "bind";
-          guild_id = Some guild_id;
-          channel_id;
-          keeper_name;
-          actor_id = actor_name;
-          actor_name;
-          previous_keeper;
-        };
-      Ok (status_json ())
-    with
-    | Sys_error msg ->
-        rollback_bindings original_bindings;
-        Error msg
+      let updated_bindings =
+        (({ channel_id; keeper_name } : binding)
+         :: List.filter
+              (fun (binding : binding) ->
+                not (String.equal binding.channel_id channel_id))
+              original_bindings)
+        |> List.sort (fun (a : binding) (b : binding) ->
+             String.compare a.channel_id b.channel_id)
+      in
+      let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
+      Ok
+        ( updated_bindings
+        , Store.{
+            (* NDT-OK: wall-clock time is persisted as operator-facing audit
+               evidence only; mutation ordering comes from the durable lock. *)
+            timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
+            action = "bind";
+            guild_id;
+            channel_id;
+            keeper_name;
+            actor_id = actor_name;
+            actor_name;
+            previous_keeper;
+          }
+        , () ))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 let unbind ~channel_id ~actor_name =
   let channel_id = String.trim channel_id in
   if channel_id = "" then
     Error "channel_id is required"
   else
-    let original_bindings = read_bindings () in
-    match
-      original_bindings
-      |> List.find_opt (fun (binding : binding) ->
+    Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+      match
+        original_bindings
+        |> List.find_opt (fun (binding : binding) ->
              String.equal binding.channel_id channel_id)
-    with
-    | None -> Error "binding not found"
-    | Some (removed_binding : binding) ->
+      with
+      | None -> Error "binding not found"
+      | Some (removed_binding : binding) ->
         let updated_bindings =
           List.filter
             (fun (binding : binding) ->
               not (String.equal binding.channel_id channel_id))
             original_bindings
         in
-        try
-          save_bindings updated_bindings;
-          let guild_id =
-            Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
-          in
-          append_audit_event
-            Store.{
+        let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
+        Ok
+          ( updated_bindings
+          , Store.{
+              (* NDT-OK: wall-clock time is persisted as operator-facing audit
+                 evidence only; mutation ordering comes from the durable lock. *)
               timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id = Some guild_id;
+              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;
               actor_name;
               previous_keeper = removed_binding.keeper_name;
-            };
-          Ok (status_json ())
-        with
-        | Sys_error msg ->
-            rollback_bindings original_bindings;
-            Error msg
+            }
+          , () ))
+    |> Result.map_error Store.mutation_error_to_string
+    |> Result.map (fun () -> status_json ())
 
 (* ---------------------------------------------------------------- *)
 (* In-process gateway support — replaces sidecars/discord-bot/      *)
@@ -484,100 +511,72 @@ let binding_for_channel bindings ~channel_id =
       if String.equal b.channel_id channel_id then Some b else None)
     bindings
 
-let resolve_keeper_for_channel ~channel_id =
+let resolve_keeper_for_channel_result ~channel_id =
   let normalized = String.trim channel_id in
-  if String.equal normalized "" then None
+  if String.equal normalized "" then Ok None
   else
-    let candidates =
-      try read_bindings ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> []
-    in
-    match binding_for_channel candidates ~channel_id:normalized with
-    | Some b ->
-        Some
-          {
-            keeper_name = b.keeper_name;
-            incoming_channel_id = normalized;
-            bound_channel_id = b.channel_id;
-            via_parent = false;
-          }
-    | None -> (
-        (* Thread fallback: if this channel_id is a known Discord thread,
-           try resolving via its parent channel's binding. *)
-        match parent_channel_of_thread ~channel_id:normalized with
-        | Some parent_id when parent_id <> normalized ->
-            (match binding_for_channel candidates ~channel_id:parent_id with
-             | Some b ->
-                 Some
-                   {
-                     keeper_name = b.keeper_name;
-                     incoming_channel_id = normalized;
-                     bound_channel_id = b.channel_id;
-                     via_parent = true;
-                   }
-             | None -> (
-                 (* Final fallback: names file (legacy sidecar data). *)
-                 let names_parent =
-                   try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | _ -> None
-                 in
-                 match names_parent with
-                 | None -> None
-                 | Some names_parent ->
-                     let names_parent = String.trim names_parent in
-                     match binding_for_channel candidates ~channel_id:names_parent with
-                     | None -> None
-                     | Some b ->
-                         Some
-                           {
-                             keeper_name = b.keeper_name;
-                             incoming_channel_id = normalized;
-                             bound_channel_id = b.channel_id;
-                             via_parent = true;
-                           } ))
-        | _ -> (
-            (* No thread match — try names file (legacy sidecar data). *)
-            let parent_channel_id =
-              try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> None
-            in
-            match parent_channel_id with
-            | None -> None
-            | Some parent_channel_id -> (
-                let parent_channel_id = String.trim parent_channel_id in
-                match binding_for_channel candidates ~channel_id:parent_channel_id with
-                | None -> None
-                | Some b ->
-                    Some
-                      {
-                        keeper_name = b.keeper_name;
-                        incoming_channel_id = normalized;
-                        bound_channel_id = b.channel_id;
-                        via_parent = true;
-                      } )) )
+    match read_bindings_lookup_result () with
+    | Error _ as error -> error
+    | Ok candidates ->
+      (match binding_for_channel candidates ~channel_id:normalized with
+       | Some binding ->
+         Ok
+           (Some
+              { keeper_name = binding.keeper_name
+              ; incoming_channel_id = normalized
+              ; bound_channel_id = binding.channel_id
+              ; via_parent = false
+              })
+       | None ->
+         let parent_binding =
+           Option.bind
+             (parent_channel_of_thread ~channel_id:normalized)
+             (fun parent_channel_id ->
+                if String.equal parent_channel_id normalized
+                then None
+                else
+                  binding_for_channel candidates
+                    ~channel_id:parent_channel_id)
+         in
+         Ok
+           (Option.map
+              (fun (binding : binding) ->
+                 { keeper_name = binding.keeper_name
+                 ; incoming_channel_id = normalized
+                 ; bound_channel_id = binding.channel_id
+                 ; via_parent = true
+                 })
+              parent_binding))
 
-let keeper_for_channel ~channel_id =
-  match resolve_keeper_for_channel ~channel_id with
-  | None -> None
-  | Some resolution -> Some resolution.keeper_name
+let keeper_for_channel_result ~channel_id =
+  resolve_keeper_for_channel_result ~channel_id
+  |> Result.map
+       (Option.map (fun resolution -> resolution.keeper_name))
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)
 
-let bound_channels ~keeper_name =
+let bound_channels_result ~keeper_name =
   let normalized = String.trim keeper_name in
-  if String.equal normalized "" then []
+  if String.equal normalized "" then Ok []
   else
-    read_bindings ()
-    |> List.filter_map (fun (b : binding) ->
-           if String.equal b.keeper_name normalized then Some b.channel_id
-           else None)
+    read_bindings_lookup_result ()
+    |> Result.map (fun bindings ->
+         bindings
+         |> List.filter_map (fun (b : binding) ->
+              if String.equal b.keeper_name normalized
+              then Some b.channel_id
+              else None))
+
+let bound_channels ~keeper_name =
+  match bound_channels_result ~keeper_name with
+  | Ok channels -> channels
+  | Error detail ->
+    Log.Discord.error
+      "Discord binding presence read failed (keeper=%s): %s"
+      keeper_name
+      (binding_lookup_error_to_string detail);
+    []
 
 let connected () =
   (* The in-process gateway (RFC-0203) is the only Discord transport;

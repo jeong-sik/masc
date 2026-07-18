@@ -223,7 +223,7 @@ let bind ~channel_id ~keeper_name ~actor_name =
   else if String.equal keeper_name "" then Error "keeper_name is required"
   else
     match read_bindings_result () with
-    | Error msg -> Error msg
+    | Error error -> Error (Store.binding_store_error_to_string error)
     | Ok original_bindings ->
       let previous_keeper =
         match
@@ -268,7 +268,7 @@ let unbind ~channel_id ~actor_name =
   if String.equal channel_id "" then Error "channel_id is required"
   else
     match read_bindings_result () with
-    | Error msg -> Error msg
+    | Error error -> Error (Store.binding_store_error_to_string error)
     | Ok original_bindings -> (
       match
         original_bindings
@@ -324,7 +324,7 @@ let resolve_keeper_for_channel_result ~channel_id =
   if String.equal normalized "" then Ok None
   else
     match read_bindings_result () with
-    | Error msg -> Error msg
+    | Error error -> Error (Store.binding_store_error_to_string error)
     | Ok candidates -> (
       match binding_for_channel candidates ~channel_id:normalized with
       | Some b ->

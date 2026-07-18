@@ -412,18 +412,24 @@ let handle_surface_post_with_outcome
     fail
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
   else
-    let bound_discord_channels =
-      Channel_gate_discord_state.bound_channels ~keeper_name:meta.name
-    in
-    let bound_slack_channels =
-      Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
-    in
     match
-      Keeper_surface_post.resolve_target ~surface ~channel_id
-        ~bound_slack_channels ~bound_discord_channels ()
+      Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
     with
-    | Error message -> fail (Keeper_surface_post.error_json message)
-    | Ok Keeper_surface_post.To_dashboard ->
+    | Error detail ->
+      fail
+        ~class_:Tool_result.Runtime_failure
+        (Keeper_surface_post.error_json
+           (Channel_gate_discord_state.binding_lookup_error_to_string detail))
+    | Ok bound_discord_channels ->
+      let bound_slack_channels =
+        Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+      in
+      (match
+         Keeper_surface_post.resolve_target ~surface ~channel_id
+           ~bound_slack_channels ~bound_discord_channels ()
+       with
+      | Error message -> fail (Keeper_surface_post.error_json message)
+      | Ok Keeper_surface_post.To_dashboard ->
         Keeper_chat_store.append_assistant_message
           ~base_dir:config.Workspace.base_path
           ~keeper_name:meta.name
@@ -540,7 +546,7 @@ let handle_surface_post_with_outcome
                 ~source:"slack"
                 ~content:safe_content
                 ();
-              succeed (Keeper_surface_post.ok_json ~surface ())))
+              succeed (Keeper_surface_post.ok_json ~surface ()))))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

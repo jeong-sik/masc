@@ -135,10 +135,12 @@ let test_bound_channels_blank_keeper_is_empty () =
     [ ("98791450001", "surface-keeper") ]
     (fun () ->
       check (list string) "blank name" []
-        (Channel_gate_discord_state.bound_channels ~keeper_name:"  ");
+        (Channel_gate_discord_state.bound_channels_result ~keeper_name:"  "
+         |> Result.get_ok);
       check (list string) "bound name" [ "98791450001" ]
-        (Channel_gate_discord_state.bound_channels
-           ~keeper_name:"surface-keeper"))
+        (Channel_gate_discord_state.bound_channels_result
+           ~keeper_name:"surface-keeper"
+         |> Result.get_ok))
 
 let test_discord_not_connected_without_run_loop () =
   check bool "no gateway => not connected" false

@@ -10,7 +10,7 @@
     [string_member] / [int_member] / [bool_member] /
     [bool_option_member] yojson lookups, [stale_of_updated_at],
     [connector_state_label], [list_assoc_field],
-    [find_assoc_by_string_field], and [rollback_bindings]) are
+    [find_assoc_by_string_field], and binding transaction helpers) are
     hidden — only the {!Channel_gate_connector.S} surface is
     public. *)
 
@@ -63,11 +63,6 @@ val unbind :
     that replaces the deleted [sidecars/discord-bot/] Python
     connector. *)
 
-val keeper_for_channel : channel_id:string -> string option
-(** Look up the keeper bound to a Discord channel snowflake.
-    Returns [None] when no binding exists, when the channel id is
-    blank, or when the binding store is unreadable. *)
-
 type keeper_binding_resolution = {
   keeper_name : string;
   incoming_channel_id : string;
@@ -75,16 +70,34 @@ type keeper_binding_resolution = {
   via_parent : bool;
 }
 
-val resolve_keeper_for_channel :
-  channel_id:string -> keeper_binding_resolution option
-(** Resolve the keeper for [channel_id]. Exact bindings win. If no
-    exact binding exists and [channel_id] is a Discord thread known
-    in the names side-store, its parent channel binding is used. *)
+type binding_lookup_error =
+  | Binding_store_read_failed of Channel_gate_binding_store.binding_store_error
+
+val pp_binding_lookup_error : Format.formatter -> binding_lookup_error -> unit
+val binding_lookup_error_to_string : binding_lookup_error -> string
+
+val keeper_for_channel_result :
+  channel_id:string -> (string option, binding_lookup_error) result
+(** Typed keeper lookup. A binding-store read failure is distinct from an
+    unbound channel. *)
+
+val resolve_keeper_for_channel_result :
+  channel_id:string ->
+  (keeper_binding_resolution option, binding_lookup_error) result
+(** Resolve the keeper for [channel_id]. Exact bindings win. The only
+    parent fallback is an in-process thread-registry observation. *)
 
 val bound_channels : keeper_name:string -> string list
 (** Channel snowflakes bound to [keeper_name], freshly read from the
-    binding store on each call. Empty on blank name or unreadable
-    store. RFC-0223 P2 presence. *)
+    binding store on each call. The generic connector interface cannot carry
+    an error, so store failures are logged before returning an empty projection.
+    Callers that need control-flow authority must use
+    {!bound_channels_result}. RFC-0223 P2 presence. *)
+
+val bound_channels_result :
+  keeper_name:string -> (string list, binding_lookup_error) result
+(** Typed bound-channel lookup. Store failures use the same error contract as
+    single-channel lookup. *)
 
 val connected : unit -> bool
 (** Whether the in-process gateway's run loop currently reports
@@ -100,7 +113,7 @@ val record_ready : bot_user_id:string -> unit
 (** {2 Thread registry}
 
     Thread→parent channel mapping populated from THREAD_CREATE gateway
-    events. Used by {!resolve_keeper_for_channel} to resolve bindings
+    events. Used by {!resolve_keeper_for_channel_result} to resolve bindings
     for messages in Discord threads (whose [channel_id] is the thread's
     snowflake, distinct from the parent channel). *)
 

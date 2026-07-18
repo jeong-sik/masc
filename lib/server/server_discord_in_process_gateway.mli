@@ -8,7 +8,7 @@
        ({!Discord_gateway_client.run}).
     2. For each accepted [Message_create] event, looks up the
        channel→keeper binding
-       ({!Channel_gate_discord_state.keeper_for_channel}), runs the
+       ({!Channel_gate_discord_state.keeper_for_channel_result}), runs the
        keeper turn through {!Channel_gate.handle_inbound_streaming},
        projects redacted text snapshots by posting/editing one Discord
        reply, and falls back to

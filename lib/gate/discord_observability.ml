@@ -30,6 +30,7 @@ type inbound_outcome =
 
 type ambient_outcome =
   | Ambient_recorded
+  | Ambient_binding_store_error
   | Ambient_dropped_unbound
   | Ambient_dropped_empty
   | Ambient_dropped_too_long
@@ -61,6 +62,7 @@ let inbound_outcome_label = function
 
 let ambient_outcome_label = function
   | Ambient_recorded -> "recorded"
+  | Ambient_binding_store_error -> "binding_store_error"
   | Ambient_dropped_unbound -> "dropped_unbound"
   | Ambient_dropped_empty -> "dropped_empty"
   | Ambient_dropped_too_long -> "dropped_too_long"

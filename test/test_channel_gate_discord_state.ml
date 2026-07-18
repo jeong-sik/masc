@@ -3,7 +3,6 @@ open Alcotest
 module Discord_state = Channel_gate_discord_state
 module Discord_names = Channel_gate_discord_names
 module U = Yojson.Safe.Util
-
 module Registry_test_connector_a = struct
   let connector_id = "registry-test-connector"
   let display_name = "Registry Test A"
@@ -23,7 +22,6 @@ module Registry_test_connector_a = struct
   let bound_channels ~keeper_name:_ = []
   let connected () = false
 end
-
 module Registry_test_connector_b = struct
   include Registry_test_connector_a
 
@@ -38,7 +36,6 @@ module Registry_test_connector_b = struct
   let bind ~channel_id:_ ~keeper_name:_ ~actor_name:_ =
     Ok (`Assoc [ "variant", `String "b" ])
 end
-
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with
@@ -50,9 +47,7 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
-
 let temp_dir_counter = ref 0
-
 let with_temp_dir f =
   incr temp_dir_counter;
   let base =
@@ -129,6 +124,23 @@ let test_status_json_ignores_legacy_sidecar_status_file () =
       (json |> U.member "bot_user_name" |> U.to_string);
     check int "runtime bindings from persisted bindings" 0
       (json |> U.member "runtime_bindings_count" |> U.to_int)))
+
+let test_status_json_surfaces_binding_store_failure () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" (Some "token") (fun () ->
+    Fs_compat.save_file (Filename.concat dir "bindings.json") "{not-json";
+    let json = Discord_state.status_json () in
+    check bool "routing unavailable" false
+      (json |> U.member "available" |> U.to_bool);
+    check bool "binding store read failed" false
+      (json |> U.member "binding_store_read_ok" |> U.to_bool);
+    check bool "binding store error is explicit" true
+      (json |> U.member "binding_store_error" |> U.to_string |> String.length
+       |> fun length -> length > 0);
+    check bool "connector error includes binding failure" true
+      (json |> U.member "error" |> U.to_string |> String.length
+       |> fun length -> length > 0)))
 
 (* record_ready ordering: this test runs in the same process as the
    blank-identity assertions above, so it must come after them in the
@@ -377,9 +389,14 @@ let test_resolve_keeper_for_thread_parent_binding () =
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected parent binding to resolve"
-    | Some resolution ->
+    Discord_state.register_thread
+      ~thread_id:"thread-1"
+      ~parent_channel_id:"parent-1";
+    match
+      Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+    with
+    | Error _ | Ok None -> fail "expected registered parent binding to resolve"
+    | Ok (Some resolution) ->
         check string "keeper" "luna" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "parent-1" resolution.bound_channel_id;
@@ -402,13 +419,33 @@ let test_resolve_keeper_exact_binding_wins_over_parent () =
     ignore
       (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
          ~actor_name:"dashboard");
-    match Discord_state.resolve_keeper_for_channel ~channel_id:"thread-1" with
-    | None -> fail "expected exact binding to resolve"
-    | Some resolution ->
+    match
+      Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
+    with
+    | Error _ | Ok None -> fail "expected exact binding to resolve"
+    | Ok (Some resolution) ->
         check string "keeper" "sangsu" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "thread-1" resolution.bound_channel_id;
         check bool "not via parent" false resolution.via_parent)
+
+let test_binding_store_failures_are_not_empty_state () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+    Fs_compat.save_file (Filename.concat dir "bindings.json") "{not-json";
+    let expect_error label = function
+      | Error _ -> ()
+      | Ok _ -> fail label
+    in
+    Discord_state.resolve_keeper_for_channel_result ~channel_id:"channel-1"
+    |> expect_error "lookup reduced malformed store to unbound";
+    Discord_state.bind ~channel_id:"channel-1" ~keeper_name:"luna"
+      ~actor_name:"dashboard"
+    |> expect_error "bind overwrote malformed store";
+    Discord_state.unbind ~channel_id:"channel-1" ~actor_name:"dashboard"
+    |> expect_error "unbind overwrote malformed store";
+    Discord_state.bound_channels_result ~keeper_name:"luna"
+    |> expect_error "presence reduced malformed store to empty")
 
 let test_thread_registry_round_trip () =
   let suffix = Printf.sprintf "%d-%06d" (Unix.getpid ()) !temp_dir_counter in
@@ -451,12 +488,16 @@ let () =
             test_status_json_reports_in_process_gateway_status;
           test_case "ignores legacy sidecar status file" `Quick
             test_status_json_ignores_legacy_sidecar_status_file;
+          test_case "surfaces binding store failure" `Quick
+            test_status_json_surfaces_binding_store_failure;
           test_case "record_ready surfaces bot identity" `Quick
             test_record_ready_surfaces_bot_identity;
           test_case "bind persists binding and audit" `Quick
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick
             test_unbind_removes_existing_binding;
+          test_case "binding-store failures remain explicit" `Quick
+            test_binding_store_failures_are_not_empty_state;
           test_case "connectors json advertises connector descriptor" `Quick
             test_connectors_json_advertises_gate_connector_descriptor;
           test_case "registry register replaces and all snapshots" `Quick

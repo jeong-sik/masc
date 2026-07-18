@@ -1,4 +1,4 @@
-(* Keeper_turn_helpers — string matching, event reporting, trajectory/receipt
+(* Keeper_turn_helpers — event reporting, trajectory/receipt
    helpers, FSM guard post-actions, and local discovery readiness.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -13,12 +13,6 @@ open Keeper_context_runtime
 val default_turn_event_bus_drain_interval_sec : float
 
 val turn_event_bus_drain_interval_sec : unit -> float
-
-val string_contains_substring : needle:string -> string -> bool
-(** Delegates to [String_util.string_contains_substring]. *)
-
-val string_contains_substring_ci : needle:string -> string -> bool
-(** Delegates to [String_util.string_contains_substring_ci]. *)
 
 val report_keeper_cycle_side_effect_issue :
   config:Workspace.config ->

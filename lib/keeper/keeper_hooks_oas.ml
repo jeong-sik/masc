@@ -508,7 +508,7 @@ let make_hooks
            let trace_id = Trajectory.accumulator_trace_id acc in
            let masc_root = Trajectory.accumulator_masc_root acc in
            let trajectory_keeper = Trajectory.accumulator_keeper_name acc in
-           let turn = Trajectory.accumulator_turn acc in
+           let turn = Agent_sdk.Tool.Invocation.turn invocation in
            let safe_input =
              Observability_redact.redact_json_value input
            in

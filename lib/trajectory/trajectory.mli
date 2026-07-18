@@ -157,6 +157,20 @@ type trajectory_lines_read_result = {
   io_errors : trajectory_read_error list;
 }
 
+type trajectory_byte_cursor
+(** Opaque position in one immutable trajectory-file prefix.  A cursor binds
+    its byte offset to the opened file identity and snapshot size, so a later
+    page cannot silently continue in a replaced or truncated trace. *)
+
+type trajectory_lines_page = {
+  read : trajectory_lines_read_result;
+  next_cursor : trajectory_byte_cursor option;
+}
+
+val trajectory_byte_cursor_offset : trajectory_byte_cursor -> int64
+(** Byte boundary immediately before the oldest row observed by the page that
+    produced this cursor. *)
+
 type persistence_operation =
   | Append_tool_call
   | Flush_pending
@@ -244,11 +258,27 @@ val read_all_lines_result :
     observations. *)
 
 val read_recent_lines_result :
-  masc_root:string -> keeper_name:string -> trace_id:string -> max_lines:int ->
+  masc_root:string -> keeper_name:string -> trace_id:string -> max_entries:int ->
   trajectory_lines_read_result
-(** Read a bounded tail of entries (tool calls + thinking) from JSONL.
-    [lines] are chronological, oldest first; decode and I/O failures remain
-    explicit in the result. *)
+(** Read up to [max_entries] canonical entries (Tool calls + Thinking) from the
+    JSONL tail.  The bound counts decoded entries, not physical rows:
+    summaries and invalid rows are observed without consuming it.  [lines]
+    are chronological, oldest first; decode and I/O failures remain explicit
+    in the result. *)
+
+val read_recent_lines_page_result :
+  masc_root:string ->
+  keeper_name:string ->
+  trace_id:string ->
+  ?before:trajectory_byte_cursor ->
+  max_entries:int ->
+  unit ->
+  trajectory_lines_page
+(** Cursor-driven form of {!read_recent_lines_result}.  Reads backwards from
+    [before], or from a stable end-of-file snapshot when omitted, and stops at
+    exactly [max_entries] canonical rows or the beginning of that snapshot.
+    [next_cursor] is present only when older bytes remain.  A file replacement,
+    truncation, or storage failure is reported in [read.io_errors]. *)
 
 (** {1 Accumulator}
 
@@ -279,11 +309,12 @@ val create_accumulator :
 val accumulator_masc_root : accumulator -> string
 val accumulator_keeper_name : accumulator -> string
 val accumulator_trace_id : accumulator -> string
-val accumulator_turn : accumulator -> int
 val accumulator_entries : accumulator -> tool_call_entry list
 
-val increment_turn : accumulator -> unit
 val record_entry : accumulator -> tool_call_entry -> unit
+(** Queue an already validated Tool observation.  Its [turn] must come from the
+    exact execution occurrence (for OAS, {!Agent_sdk.Tool.Invocation.turn});
+    the accumulator has no ambient or independently incremented turn state. *)
 val record_thinking : accumulator -> thinking_entry -> unit
 val record_tool_call :
   masc_root:string -> keeper_name:string -> trace_id:string ->
@@ -342,5 +373,6 @@ val read_entries_since_result :
   masc_root:string -> keeper_name:string -> since:float ->
   entries_read_result
 (** Read entries from all trace files for a keeper with [ts >= since]. Results
-    are sorted chronologically. Malformed/unsupported rows and file failures
-    are observed separately and never stop other files or rows. *)
+    are sorted chronologically. Files are streamed row-by-row; malformed or
+    unsupported rows and file failures are observed separately and never stop
+    other files or rows. *)

@@ -220,6 +220,20 @@ type trajectory_lines_read_result = {
   io_errors : trajectory_read_error list;
 }
 
+type trajectory_byte_cursor = {
+  snapshot_device : int;
+  snapshot_inode : int;
+  snapshot_size : int64;
+  before_byte : int64;
+}
+
+type trajectory_lines_page = {
+  read : trajectory_lines_read_result;
+  next_cursor : trajectory_byte_cursor option;
+}
+
+let trajectory_byte_cursor_offset cursor = cursor.before_byte
+
 type persistence_operation =
   | Append_tool_call
   | Flush_pending
@@ -775,10 +789,14 @@ type pending_entry = {
   pe_json : Yojson.Safe.t;
 }
 
+module Turn_set = Set.Make (Int)
+
 type accumulator = {
-  mutable entries : tool_call_entry list;
-  mutable total_calls : int;
-  mutable turn : int;
+  mutable entries_rev : tool_call_entry list;
+  (** Exact distinct-turn projection derived only from queued canonical rows;
+      unlike the removed ambient counter, producers cannot advance it without
+      an observed Tool or Thinking entry. *)
+  mutable observed_turns : Turn_set.t;
   keeper_name : string;
   trace_id : string;
   generation : int;
@@ -840,9 +858,8 @@ let unregister_accumulator (acc : accumulator) =
 
 let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
   let acc = {
-    entries = [];
-    total_calls = 0;
-    turn = 0;
+    entries_rev = [];
+    observed_turns = Turn_set.empty;
     keeper_name;
     trace_id;
     generation;
@@ -862,19 +879,17 @@ let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~genera
 let accumulator_masc_root (acc : accumulator) = acc.masc_root
 let accumulator_keeper_name (acc : accumulator) = acc.keeper_name
 let accumulator_trace_id (acc : accumulator) = acc.trace_id
-let accumulator_turn (acc : accumulator) = acc.turn
-let accumulator_entries (acc : accumulator) = acc.entries
-
-let increment_turn (acc : accumulator) : unit =
-  acc.turn <- acc.turn + 1
+let accumulator_entries (acc : accumulator) =
+  Stdlib.Mutex.protect acc.pending_mu (fun () ->
+    List.rev acc.entries_rev)
 
 let record_entry (acc : accumulator) (entry : tool_call_entry) : unit =
   let json = entry_to_json entry in
   Stdlib.Mutex.protect acc.pending_mu (fun () ->
     if acc.finalized then
       invalid_arg "cannot record a trajectory entry after finalization";
-    acc.entries <- entry :: acc.entries;
-    acc.total_calls <- acc.total_calls + 1;
+    acc.entries_rev <- entry :: acc.entries_rev;
+    acc.observed_turns <- Turn_set.add entry.turn acc.observed_turns;
     Queue.push { pe_json = json } acc.pending_queue)
 
 let record_thinking (acc : accumulator) (entry : thinking_entry) : unit =
@@ -882,6 +897,7 @@ let record_thinking (acc : accumulator) (entry : thinking_entry) : unit =
   Stdlib.Mutex.protect acc.pending_mu (fun () ->
     if acc.finalized then
       invalid_arg "cannot record a Thinking entry after finalization";
+    acc.observed_turns <- Turn_set.add entry.turn acc.observed_turns;
     Queue.push { pe_json = json } acc.pending_queue)
 
 let active_accumulator ~masc_root ~keeper_name ~trace_id =
@@ -1020,15 +1036,16 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   let traj =
     Stdlib.Mutex.protect acc.pending_mu (fun () ->
     if acc.finalized then invalid_arg "trajectory accumulator already finalized";
+    let entries = List.rev acc.entries_rev in
     let traj = {
       keeper_name = acc.keeper_name;
       trace_id = acc.trace_id;
       generation = acc.generation;
       started_at = acc.started_at;
       ended_at = Time_compat.now ();
-      entries = List.rev acc.entries;
-      total_turns = acc.turn;
-      total_tool_calls = acc.total_calls;
+      entries;
+      total_turns = Turn_set.cardinal acc.observed_turns;
+      total_tool_calls = List.length entries;
       outcome;
     } in
     acc.finalized <- true;
@@ -1148,7 +1165,9 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
   ]
 
 (** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
-    Scans the keeper's trajectory directory for all trace files. *)
+    Scans the keeper's trajectory directory for all trace files one row at a
+    time; memory is bounded by the result set plus the largest physical row,
+    not by the aggregate trace-file size. *)
 let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
     ~(since : float) : entries_read_result =
   let dir = trajectories_dir masc_root keeper_name in
@@ -1186,35 +1205,59 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
                let record_io_error message =
                  io_errors := { path; message } :: !io_errors
                in
-               let decode_file content =
-                 String.split_on_char '\n' content
-                 |> List.iter (fun line ->
-                        if String.trim line <> "" then
-                          match Yojson.Safe.from_string line with
-                          | exception
-                              (Yojson.Json_error _
-                              | Yojson.Safe.Util.Type_error _) ->
-                              record_invalid_entry decode Malformed_json
-                          | json ->
-                              match tool_call_entry_of_json json with
-                              | Decoded_entry entry when entry.ts >= since ->
-                                  all_entries := entry :: !all_entries
-                              | Decoded_entry _ | Non_entry_row -> ()
-                              | Invalid_entry error
-                                when row_may_be_in_window json ->
-                                  record_invalid_entry decode error
-                              | Invalid_entry _ -> ())
+               let decode_line line =
+                 if String.trim line <> "" then
+                   match Yojson.Safe.from_string line with
+                   | exception
+                       (Yojson.Json_error _
+                       | Yojson.Safe.Util.Type_error _) ->
+                       record_invalid_entry decode Malformed_json
+                   | json ->
+                       match tool_call_entry_of_json json with
+                       | Decoded_entry entry when entry.ts >= since ->
+                           all_entries := entry :: !all_entries
+                       | Decoded_entry _ | Non_entry_row -> ()
+                       | Invalid_entry error when row_may_be_in_window json ->
+                           record_invalid_entry decode error
+                       | Invalid_entry _ -> ()
+               in
+               let stream_file () =
+                 match open_in_bin path with
+                 | exception Sys_error message -> record_io_error message
+                 | input ->
+                     let input_is_open = ref true in
+                     Fun.protect
+                       ~finally:(fun () ->
+                         if !input_is_open then
+                           match close_in input with
+                           | () -> ()
+                           | exception Sys_error message ->
+                               record_io_error message)
+                       (fun () ->
+                          let rec read () =
+                            match input_line input with
+                            | line ->
+                                decode_line line;
+                                read ()
+                            | exception End_of_file -> ()
+                            | exception Sys_error message ->
+                                record_io_error message
+                          in
+                          read ();
+                          let close_result =
+                            match close_in input with
+                            | () -> None
+                            | exception Sys_error message -> Some message
+                          in
+                          input_is_open := false;
+                          Option.iter record_io_error close_result)
                in
                match Fs_compat.exact_path_kind path with
                | exception Sys_error message -> record_io_error message
                | exception (Unix.Unix_error _ as exn) ->
                    record_io_error (Printexc.to_string exn)
                | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
-                   (match Fs_compat.load_file path with
-                    | content -> decode_file content
-                    | exception Sys_error message -> record_io_error message
-                    | exception (Unix.Unix_error _ as exn) ->
-                        record_io_error (Printexc.to_string exn))
+                   stream_file ()
                | Fs_compat.Exact_missing ->
                    record_io_error "trajectory file disappeared during read"
                | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
@@ -1437,47 +1480,310 @@ let read_all_lines_result ~(masc_root : string) ~(keeper_name : string)
       empty_result
         [{ path; message = "trajectory path is not a regular file" }]
 
+type backward_line_control =
+  | Continue_backward
+  | Stop_before of int64
+
+let trajectory_file_identity_matches
+    (left : Unix.LargeFile.stats)
+    (right : Unix.LargeFile.stats) =
+  left.st_dev = right.st_dev && left.st_ino = right.st_ino
+
+let unix_error_detail error function_name argument =
+  let operation =
+    if argument = "" then function_name
+    else Printf.sprintf "%s(%s)" function_name argument
+  in
+  Printf.sprintf "%s: %s" operation (Unix.error_message error)
+
+let read_exact_at descriptor ~position length =
+  let bytes = Bytes.create length in
+  match Unix.LargeFile.lseek descriptor position Unix.SEEK_SET with
+  | exception Unix.Unix_error (error, function_name, argument) ->
+      Error (unix_error_detail error function_name argument)
+  | actual_position
+    when actual_position <> position ->
+      Error "trajectory seek returned a different byte position"
+  | _ ->
+      let rec read offset =
+        if offset = length then Ok bytes
+        else
+          match Unix.read descriptor bytes offset (length - offset) with
+          | 0 ->
+              Error
+                "trajectory file became shorter while reading its snapshot"
+          | count -> read (offset + count)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read offset
+          | exception Unix.Unix_error (error, function_name, argument) ->
+              Error (unix_error_detail error function_name argument)
+      in
+      read 0
+
+let decode_backward_line decode_summary lines_rev entry_count
+    ~max_entries ~line_start line =
+  if String.trim line = "" then Continue_backward
+  else
+    let decoded =
+      match Yojson.Safe.from_string line with
+      | json -> trajectory_line_of_json json
+      | exception Yojson.Json_error _ -> Invalid_line Malformed_json
+      | exception Yojson.Safe.Util.Type_error _ ->
+          Invalid_line Malformed_json
+    in
+    match decoded with
+    | Parsed_line (Tool_call _ as parsed) ->
+        decode_summary.tool_call_count <- decode_summary.tool_call_count + 1;
+        lines_rev := parsed :: !lines_rev;
+        incr entry_count;
+        if !entry_count = max_entries then Stop_before line_start
+        else Continue_backward
+    | Parsed_line (Thinking _ as parsed) ->
+        decode_summary.thinking_count <- decode_summary.thinking_count + 1;
+        lines_rev := parsed :: !lines_rev;
+        incr entry_count;
+        if !entry_count = max_entries then Stop_before line_start
+        else Continue_backward
+    | Skipped_line ->
+        decode_summary.skipped_summary_count <-
+          decode_summary.skipped_summary_count + 1;
+        Continue_backward
+    | Invalid_line error ->
+        record_invalid_entry decode_summary.invalid error;
+        Continue_backward
+
+let scan_trajectory_snapshot_backward descriptor ~snapshot_device
+    ~snapshot_inode ~snapshot_size ~before_byte ~max_entries =
+  let decode_summary = create_line_decode_accumulator () in
+  let lines_rev = ref [] in
+  let entry_count = ref 0 in
+  let add_fragment bytes offset length fragments =
+    if length = 0 then fragments
+    else Bytes.sub_string bytes offset length :: fragments
+  in
+  let process_line ~line_start fragments =
+    decode_backward_line decode_summary lines_rev entry_count ~max_entries
+      ~line_start (String.concat "" fragments)
+  in
+  let rec scan_chunks position fragments =
+    if position = 0L then
+      match fragments with
+      | [] -> Ok None
+      | _ ->
+          (match process_line ~line_start:0L fragments with
+           | Continue_backward | Stop_before 0L -> Ok None
+           | Stop_before before -> Ok (Some before))
+    else
+      let read_length =
+        Int64.to_int
+          (Int64.min (Int64.of_int Sys.io_buffer_size) position)
+      in
+      let read_start = Int64.sub position (Int64.of_int read_length) in
+      match read_exact_at descriptor ~position:read_start read_length with
+      | Error _ as error -> error
+      | Ok bytes ->
+          let rec scan_chunk index segment_end fragments =
+            if index < 0 then
+              let fragments =
+                add_fragment bytes 0 segment_end fragments
+              in
+              scan_chunks read_start fragments
+            else if Bytes.get bytes index = '\n' then
+              let fragments =
+                add_fragment bytes (index + 1) (segment_end - index - 1)
+                  fragments
+              in
+              let line_start =
+                Int64.add read_start (Int64.of_int (index + 1))
+              in
+              (match process_line ~line_start fragments with
+               | Stop_before before -> Ok (Some before)
+               | Continue_backward -> scan_chunk (index - 1) index [])
+            else scan_chunk (index - 1) segment_end fragments
+          in
+          scan_chunk (read_length - 1) read_length fragments
+  in
+  match scan_chunks before_byte [] with
+  | Error _ as error -> error
+  | Ok next_before ->
+      let next_cursor =
+        Option.bind next_before (fun before ->
+          if before = 0L then None
+          else
+            Some
+              {
+                snapshot_device;
+                snapshot_inode;
+                snapshot_size;
+                before_byte = before;
+              })
+      in
+      Ok
+        {
+          read =
+            {
+              lines = !lines_rev;
+              line_decode = line_decode_accumulator_snapshot decode_summary;
+              io_errors = [];
+            };
+          next_cursor;
+        }
+
+let empty_trajectory_lines_page io_errors =
+  {
+    read =
+      {
+        lines = [];
+        line_decode = empty_trajectory_line_decode_summary;
+        io_errors;
+      };
+    next_cursor = None;
+  }
+
+let read_recent_lines_page_result
+      ~(masc_root : string)
+      ~(keeper_name : string)
+      ~(trace_id : string)
+      ?before
+      ~(max_entries : int)
+      ()
+  : trajectory_lines_page
+  =
+  let path = trajectory_path masc_root keeper_name trace_id in
+  let storage_error message =
+    empty_trajectory_lines_page [{ path; message }]
+  in
+  if max_entries <= 0 then empty_trajectory_lines_page []
+  else
+    match Unix.LargeFile.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+        empty_trajectory_lines_page []
+    | exception Unix.Unix_error (error, function_name, argument) ->
+        storage_error (unix_error_detail error function_name argument)
+    | initial_stats when initial_stats.st_kind <> Unix.S_REG ->
+        storage_error "trajectory path is not a regular file"
+    | initial_stats ->
+        (match
+           Unix.openfile
+             path
+             [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+             0
+         with
+         | exception Unix.Unix_error (error, function_name, argument) ->
+             storage_error (unix_error_detail error function_name argument)
+         | descriptor ->
+             let descriptor_is_open = ref true in
+             Fun.protect
+               ~finally:(fun () ->
+                 if !descriptor_is_open then
+                   match Unix.close descriptor with
+                   | () -> ()
+                   | exception
+                       Unix.Unix_error (error, function_name, argument) ->
+                       Log.Keeper.error
+                         "trajectory descriptor close failed for %s after an exception: %s"
+                         path
+                         (unix_error_detail error function_name argument))
+               (fun () ->
+             let read_result =
+               match Unix.LargeFile.fstat descriptor with
+               | exception
+                   Unix.Unix_error (error, function_name, argument) ->
+                   Error (unix_error_detail error function_name argument)
+               | opened_stats when opened_stats.st_kind <> Unix.S_REG ->
+                   Error "opened trajectory is not a regular file"
+               | opened_stats
+                 when not
+                        (trajectory_file_identity_matches
+                           initial_stats opened_stats) ->
+                   Error "trajectory path identity changed while opening"
+               | opened_stats ->
+                   let snapshot_size, before_byte, cursor_error =
+                     match before with
+                     | None -> opened_stats.st_size, opened_stats.st_size, None
+                     | Some cursor
+                       when cursor.snapshot_device <> opened_stats.st_dev
+                            || cursor.snapshot_inode <> opened_stats.st_ino ->
+                         cursor.snapshot_size,
+                         cursor.before_byte,
+                         Some "trajectory cursor belongs to a different file"
+                     | Some cursor when opened_stats.st_size < cursor.snapshot_size ->
+                         cursor.snapshot_size,
+                         cursor.before_byte,
+                         Some
+                           "trajectory cursor snapshot was truncated before pagination"
+                     | Some cursor
+                       when cursor.before_byte < 0L
+                            || cursor.before_byte > cursor.snapshot_size ->
+                         cursor.snapshot_size,
+                         cursor.before_byte,
+                         Some "trajectory cursor has an invalid byte boundary"
+                     | Some cursor ->
+                         cursor.snapshot_size, cursor.before_byte, None
+                   in
+                   (match cursor_error with
+                    | Some message -> Error message
+                    | None ->
+                        scan_trajectory_snapshot_backward descriptor
+                          ~snapshot_device:opened_stats.st_dev
+                          ~snapshot_inode:opened_stats.st_ino ~snapshot_size
+                          ~before_byte ~max_entries)
+             in
+             let verified_result =
+               match read_result with
+               | Error _ as error -> error
+               | Ok page ->
+                   (match Unix.LargeFile.fstat descriptor,
+                          Unix.LargeFile.lstat path with
+                    | opened_now, current_path
+                      when trajectory_file_identity_matches
+                             opened_now current_path
+                           && current_path.st_size
+                              >=
+                              (match before with
+                               | None -> initial_stats.st_size
+                               | Some cursor -> cursor.snapshot_size) ->
+                        Ok page
+                    | _ ->
+                        Error
+                          "trajectory path was replaced or truncated while reading"
+                    | exception
+                        Unix.Unix_error (error, function_name, argument) ->
+                        Error
+                          (unix_error_detail error function_name argument))
+             in
+             let close_error =
+               let result =
+                 match Unix.close descriptor with
+                 | () -> None
+                 | exception
+                     Unix.Unix_error (error, function_name, argument) ->
+                     Some (unix_error_detail error function_name argument)
+               in
+               descriptor_is_open := false;
+               result
+             in
+             match verified_result, close_error with
+             | Error message, None -> storage_error message
+             | Error message, Some close_message ->
+                 empty_trajectory_lines_page
+                   [{ path; message }; { path; message = close_message }]
+             | Ok page, None -> page
+             | Ok page, Some message ->
+                 {
+                   page with
+                   read =
+                     {
+                       page.read with
+                       io_errors = [{ path; message }];
+                     };
+                 }))
+
 let read_recent_lines_result
       ~(masc_root : string)
       ~(keeper_name : string)
       ~(trace_id : string)
-      ~(max_lines : int)
+      ~(max_entries : int)
   : trajectory_lines_read_result
   =
-  let path = trajectory_path masc_root keeper_name trace_id in
-  let empty_result io_errors =
-    {
-      lines = [];
-      line_decode = empty_trajectory_line_decode_summary;
-      io_errors;
-    }
-  in
-  match Fs_compat.exact_path_kind path with
-  | exception Sys_error message -> empty_result [{ path; message }]
-  | exception (Unix.Unix_error _ as exn) ->
-      empty_result [{ path; message = Printexc.to_string exn }]
-  | Fs_compat.Exact_missing -> empty_result []
-  | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
-    (match Dated_jsonl.load_tail_lines path ~max_lines with
-    | exception Sys_error message ->
-        empty_result [{ path; message }]
-    | exception (Unix.Unix_error _ as exn) ->
-        empty_result [{ path; message = Printexc.to_string exn }]
-    | lines ->
-        if lines <> [] then trajectory_lines_of_jsonl_lines lines
-        else
-          (match Fs_compat.exact_path_kind path with
-           | Fs_compat.Exact_kind kind when kind = Unix.S_REG ->
-               trajectory_lines_of_jsonl_lines lines
-           | Fs_compat.Exact_missing ->
-               empty_result
-                 [{ path; message = "trajectory file disappeared during read" }]
-           | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-               empty_result
-                 [{ path; message = "trajectory path changed during read" }]
-           | exception Sys_error message -> empty_result [{ path; message }]
-           | exception (Unix.Unix_error _ as exn) ->
-               empty_result [{ path; message = Printexc.to_string exn }]))
-  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-      empty_result
-        [{ path; message = "trajectory path is not a regular file" }]
+  (read_recent_lines_page_result ~masc_root ~keeper_name ~trace_id
+     ~max_entries ()).read

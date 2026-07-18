@@ -1866,7 +1866,7 @@ let handle_keeper_get_subroutes state req request reqd =
                let trajectory_read =
                  Trajectory.read_recent_lines_result ~masc_root
                    ~keeper_name:m.name
-                   ~trace_id ~max_lines:limit
+                   ~trace_id ~max_entries:limit
                in
                let lines = trajectory_read.Trajectory.lines in
                let total = List.length lines in
@@ -1877,7 +1877,7 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries", `Int total);
                  ("total_entries_scope", `String "tail");
                  ("total_entries_exact", `Bool false);
-                 ("tail_scan_lines", `Int limit);
+                 ("tail_scan_entries", `Int limit);
                  ("showing", `Int total);
                  ( "decode",
                    Trajectory.trajectory_line_decode_summary_to_json

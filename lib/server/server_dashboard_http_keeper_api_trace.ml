@@ -87,7 +87,7 @@ let chat_trace_block_by_turn_ref ~max_lines
       | None ->
         let trajectory_read =
           Trajectory.read_recent_lines_result ~masc_root ~keeper_name ~trace_id
-            ~max_lines
+            ~max_entries:max_lines
         in
         log_trajectory_read_observation ~trace_id trajectory_read;
         let lines = trajectory_read.lines in

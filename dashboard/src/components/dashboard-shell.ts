@@ -345,8 +345,8 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   return null
 }
 
-function ledgerCount(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+function ledgerCount(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function reactionLedgerHealthChip(
@@ -364,18 +364,34 @@ function reactionLedgerHealthChip(
   const escalated = ledgerCount(ledger.escalated_stimulus_count)
   const externalInput = ledgerCount(ledger.external_input_requested_stimulus_count)
   const orphanReactions = ledgerCount(ledger.orphan_reaction_stimulus_count)
+  const observedCounts = [
+    pending,
+    cursorSwept,
+    readErrors,
+    keeperDiscoveryErrors,
+    discoveryErrors,
+    cursorAck,
+    inProgress,
+    acked,
+    escalated,
+    externalInput,
+    orphanReactions,
+  ]
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
-  const countsIncomplete = ledger.counts_complete === false
+  const countsIncomplete =
+    ledger.counts_complete !== true || observedCounts.some(value => value == null)
+  const count = (value: number | null) => value ?? 0
   if (
     !requiresAction
     && !countsIncomplete
-    && pending === 0
-    && readErrors === 0
-    && discoveryErrors === 0
-    && escalated === 0
-    && externalInput === 0
-    && orphanReactions === 0
+    && count(pending) === 0
+    && count(readErrors) === 0
+    && count(keeperDiscoveryErrors) === 0
+    && count(discoveryErrors) === 0
+    && count(escalated) === 0
+    && count(externalInput) === 0
+    && count(orphanReactions) === 0
     && status !== 'degraded'
     && status !== 'unknown'
     && status !== 'unavailable'
@@ -383,41 +399,46 @@ function reactionLedgerHealthChip(
     return null
   }
   const tone: DashboardHealthChipTone =
-    readErrors > 0 || keeperDiscoveryErrors > 0 || discoveryErrors > 0 || countsIncomplete
+    count(readErrors) > 0
+      || count(keeperDiscoveryErrors) > 0
+      || count(discoveryErrors) > 0
+      || countsIncomplete
     ? 'bad'
     : requiresAction
-        || pending > 0
-        || escalated > 0
-        || externalInput > 0
-        || orphanReactions > 0
+        || count(pending) > 0
+        || count(escalated) > 0
+        || count(externalInput) > 0
+        || count(orphanReactions) > 0
         || status === 'degraded'
       ? 'warn'
       : 'ok'
-  const label = externalInput > 0
+  const label = count(externalInput) > 0
     ? `Reaction ledger external input ${externalInput}`
-    : escalated > 0
+    : count(escalated) > 0
       ? `Reaction ledger escalated ${escalated}`
-      : orphanReactions > 0
+      : count(orphanReactions) > 0
         ? `Reaction ledger orphan ${orphanReactions}`
-        : pending > 0
+        : count(pending) > 0
           ? `Reaction ledger pending ${pending}`
+          : countsIncomplete
+            ? 'Reaction ledger observation incomplete'
           : `Reaction ledger ${status}`
   return {
     key: 'reaction-ledger',
     label,
     detail: [
       `status=${status}`,
-      `pending=${pending}`,
-      `in_progress=${inProgress}`,
-      `acked=${acked}`,
-      `escalated=${escalated}`,
-      `external_input=${externalInput}`,
-      `orphan_reactions=${orphanReactions}`,
-      `cursor_swept=${cursorSwept}`,
-      `cursor_ack=${cursorAck}`,
-      `read_errors=${readErrors}`,
-      `keeper_discovery_errors=${keeperDiscoveryErrors}`,
-      `discovery_errors=${discoveryErrors}`,
+      `pending=${pending ?? 'unknown'}`,
+      `in_progress=${inProgress ?? 'unknown'}`,
+      `acked=${acked ?? 'unknown'}`,
+      `escalated=${escalated ?? 'unknown'}`,
+      `external_input=${externalInput ?? 'unknown'}`,
+      `orphan_reactions=${orphanReactions ?? 'unknown'}`,
+      `cursor_swept=${cursorSwept ?? 'unknown'}`,
+      `cursor_ack=${cursorAck ?? 'unknown'}`,
+      `read_errors=${readErrors ?? 'unknown'}`,
+      `keeper_discovery_errors=${keeperDiscoveryErrors ?? 'unknown'}`,
+      `discovery_errors=${discoveryErrors ?? 'unknown'}`,
       `counts_complete=${ledger.counts_complete ?? 'unknown'}`,
       `reasons=${(ledger.status_reasons ?? []).join('|') || 'none'}`,
     ].join(', '),

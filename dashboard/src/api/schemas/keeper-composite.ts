@@ -132,8 +132,8 @@ const KeeperTurnAttemptSchema = object({
   first_started_at: number(),
 })
 
-// Board consumption cursor (A-PR-2 G10): how far the keeper has consumed
-// the shared board. Always emitted; `ts=0` / `post_id=null` before any post.
+// Board consumption cursor (A-PR-2 G10), projected from SQLite. `ts=0` /
+// `post_id=null` means uninitialized only when `board_cursor_read_error=null`.
 const KeeperBoardCursorSchema = object({
   ts: number(),
   post_id: nullable(string()),
@@ -286,6 +286,7 @@ export const KeeperCompositeSnapshotSchema = object({
   last_skip: optional(nullable(KeeperLastSkipSchema)),
   turn_attempt: optional(nullable(KeeperTurnAttemptSchema)),
   board_cursor: optional(KeeperBoardCursorSchema),
+  board_cursor_read_error: optional(nullable(string())),
   board_wakeups: optional(number()),
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),

@@ -232,7 +232,7 @@ function selectDurableWakeSignals(
 ): DashboardScheduledAutomationSignal[] {
   const blockedIds = payloadBlockedScheduleIds(automation.requests ?? [])
   const supportedKinds = supportedPayloadKindSet(automation)
-  return [...(automation.signals ?? [])]
+  return [...automation.signals]
     .filter(signal =>
       !blockedIds.has(signal.schedule_id)
       && !durableSignalPayloadBlocksWake(signal, supportedKinds))
@@ -246,7 +246,7 @@ function durableWakeSignalContract(automation: DashboardScheduledAutomation): {
   visibleSignals: DashboardScheduledAutomationSignal[]
 } {
   const visibleSignals = selectDurableWakeSignals(automation)
-  const rawCount = automation.signals?.length ?? 0
+  const rawCount = automation.signals.length
   return {
     rawCount,
     visibleCount: visibleSignals.length,
@@ -1112,44 +1112,45 @@ function isUnknownPayloadRequest(request: DashboardScheduledAutomationRequest): 
   return request.payload_support === 'unknown'
 }
 
-function kindCountsFromRequests(
-  requests: readonly DashboardScheduledAutomationRequest[],
-): Array<{ kind: string; count: number }> {
-  const counts = new Map<string, number>()
-  for (const request of requests) {
-    const kind = request.payload_kind?.trim() || 'payload_kind 없음'
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  return [...counts.entries()]
-    .map(([kind, count]) => ({ kind, count }))
-    .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind))
-}
-
-interface PayloadSupportSummary {
-  unsupportedCount: number
-  unknownCount: number
+interface PayloadSupportSummaryCommon {
   unsupportedKinds: Array<{ kind: string; count: number }>
   unsupportedRequests: DashboardScheduledAutomationRequest[]
   unknownRequests: DashboardScheduledAutomationRequest[]
 }
 
+type PayloadSupportSummary = PayloadSupportSummaryCommon & (
+  | {
+      projectionStatus: 'known'
+      unsupportedCount: number
+      unknownCount: number
+    }
+  | {
+      projectionStatus: 'missing'
+      unsupportedCount: null
+      unknownCount: null
+    }
+)
+
 function payloadSupportSummary(automation: DashboardScheduledAutomation): PayloadSupportSummary {
   const requests = automation.requests ?? []
   const unsupportedRequests = requests.filter(isUnsupportedPayloadRequest)
   const unknownRequests = requests.filter(isUnknownPayloadRequest)
-  const unsupportedCount = Math.max(
-    automation.payload_support?.unsupported_request_count ?? 0,
-    unsupportedRequests.length,
-  )
-  const unknownCount = Math.max(
-    automation.payload_support?.unknown_request_count ?? 0,
-    unknownRequests.length,
-  )
-  const projectedKinds = automation.payload_support?.unsupported_kinds ?? []
+  const projection = automation.payload_support
+  if (!projection) {
+    return {
+      projectionStatus: 'missing',
+      unsupportedCount: null,
+      unknownCount: null,
+      unsupportedKinds: [],
+      unsupportedRequests,
+      unknownRequests,
+    }
+  }
   return {
-    unsupportedCount,
-    unknownCount,
-    unsupportedKinds: projectedKinds.length > 0 ? projectedKinds : kindCountsFromRequests(unsupportedRequests),
+    projectionStatus: 'known',
+    unsupportedCount: projection.unsupported_request_count,
+    unknownCount: projection.unknown_request_count,
+    unsupportedKinds: projection.unsupported_kinds,
     unsupportedRequests,
     unknownRequests,
   }
@@ -1177,8 +1178,40 @@ function SchPayloadSupportBanner({
   summary: PayloadSupportSummary
   onOpen: (scheduleId: string) => void
 }) {
-  if (summary.unsupportedCount === 0 && summary.unknownCount === 0) return null
   const affectedRows = [...summary.unsupportedRequests, ...summary.unknownRequests].slice(0, 6)
+  if (summary.projectionStatus === 'missing') {
+    return html`
+      <section
+        class="sch-banner payload warn"
+        data-schedule-payload-support="projection_contract_missing"
+      >
+        <span class="sch-banner-ico">!</span>
+        <div class="sch-banner-txt">
+          <div><b>payload support</b><span class="mono"> projection contract missing</span></div>
+          <div class="sch-banner-sub">
+            schedule store의 payload support 집계가 없어 지원 여부와 정확한 건수를 판단할 수 없습니다.
+          </div>
+          ${affectedRows.length > 0
+            ? html`
+                <div class="sch-payload-rows" aria-label="Visible affected schedule requests">
+                  ${affectedRows.map(request => html`
+                    <button
+                      type="button"
+                      class="sch-payload-row mono"
+                      data-schedule-payload-support-row=${request.schedule_id}
+                      onClick=${() => { onOpen(request.schedule_id) }}
+                    >
+                      ${request.schedule_id}
+                    </button>
+                  `)}
+                </div>
+              `
+            : null}
+        </div>
+      </section>
+    `
+  }
+  if (summary.unsupportedCount === 0 && summary.unknownCount === 0) return null
   const hasUnsupported = summary.unsupportedCount > 0
   return html`
     <section
@@ -1312,7 +1345,7 @@ function SchLiveSupportedEvidence({
   onOpen: (scheduleId: string) => void
 }) {
   if (!evidence) {
-    const requestCount = automation.request_count ?? automation.requests?.length ?? 0
+    const requestCount = automation.request_projection.total_count ?? 0
     return html`
       <section
         class="sch-banner payload warn"
@@ -1838,6 +1871,71 @@ function SchExecution({
   `
 }
 
+function knownCountLabel(value: number | null | undefined): string {
+  return value == null ? '알 수 없음' : value.toLocaleString()
+}
+
+export function ScheduleProjectionNotice({
+  automation,
+}: {
+  automation: DashboardScheduledAutomation
+}) {
+  const storeUnknown = automation.schedule_store_known === false
+  const signalErrors = automation.signal_errors
+  if (!storeUnknown && !automation.request_projection.truncated && signalErrors.length === 0) return null
+
+  return html`
+    <section
+      class=${`sch-banner payload ${storeUnknown || signalErrors.length > 0 ? 'bad' : 'warn'}`}
+      data-schedule-projection-notice="true"
+      data-schedule-store-known=${storeUnknown ? 'false' : 'true'}
+      data-schedule-projection-truncated=${automation.request_projection.truncated ? 'true' : 'false'}
+      data-schedule-signal-error-count=${signalErrors.length}
+    >
+      <span class="sch-banner-ico">!</span>
+      <div class="sch-banner-txt">
+        ${storeUnknown
+          ? html`
+              <div><b>schedule store 읽기 실패</b></div>
+              <div class="sch-banner-sub mono">
+                ${automation.schedule_store_read_error ?? 'schedule store 상태를 확인할 수 없습니다.'}
+              </div>
+            `
+          : null}
+        ${automation.request_projection.truncated
+          ? html`
+              <div>
+                <b>예약 목록 일부만 표시</b>
+                <span class="mono">
+                  ${automation.request_projection.returned_count.toLocaleString()} / ${knownCountLabel(automation.request_projection.total_count)}
+                </span>
+              </div>
+              <div class="sch-banner-sub">
+                전체 상태 카운트는 원본 schedule store 집계이며, 목록·캘린더·cadence 분류는 표시된
+                ${automation.request_projection.limit.toLocaleString()}개 행의 부분 projection이며, 큐 누락 KPI도 전체값을 알 수 없습니다.
+              </div>
+            `
+          : null}
+        ${signalErrors.length > 0
+          ? html`
+              <div>
+                <b>durable wake signal decode 실패</b>
+                <span class="mono">${signalErrors.length.toLocaleString()}</span>
+              </div>
+              <div class="sch-banner-sub">
+                ${signalErrors.map(error => html`
+                  <div class="mono" data-schedule-signal-error-ordinal=${error.ordinal}>
+                    #${error.ordinal.toLocaleString()} · ${error.error}
+                  </div>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+    </section>
+  `
+}
+
 function SchedulePrototypeSurface({
   automation,
   selectedScheduleId: controlledSelectedId,
@@ -1871,6 +1969,7 @@ function SchedulePrototypeSurface({
 
   return html`
     <div class="sch-panel">
+      <${ScheduleProjectionNotice} automation=${automation} />
       <${SchPayloadSupportBanner}
         summary=${payloadSummary}
         onOpen=${setSelectedScheduleId}
@@ -1898,9 +1997,20 @@ function SchedulePrototypeSurface({
 
       <div class="sch-tabs" role="tablist" aria-label="예약 필터">
         ${SCH_TABS.map(definition => {
-          const count = definition.statuses === null
+          const projectedCount = definition.statuses === null
+            ? automation.request_projection.total_count
+            : definition.statuses.reduce(
+                (total, status) => total + (automation.counts?.[status] ?? 0),
+                0,
+              )
+          const visibleCount = definition.statuses === null
             ? cadenceRows.length
             : cadenceRows.filter(request => schTabMatches(definition, request)).length
+          const count = automation.schedule_store_known === false
+            ? null
+            : automation.request_projection.truncated && cadenceFilter === null
+              ? projectedCount
+              : visibleCount
           const active = definition.key === tab
           return html`
             <button
@@ -1910,7 +2020,7 @@ function SchedulePrototypeSurface({
               class=${`sch-tab ${active ? 'on' : ''}`}
               data-schedule-filter=${definition.key}
               onClick=${() => { setTab(definition.key) }}
-            >${definition.label}<span class="sch-tab-n mono">${count.toLocaleString()}</span></button>
+            >${definition.label}<span class="sch-tab-n mono">${knownCountLabel(count)}</span></button>
           `
         })}
       </div>
@@ -1941,7 +2051,9 @@ function SchedulePrototypeSurface({
               <div class="sch-empty" data-stub="no durable runner signals">
                 ${durableSignalContract.hiddenByPayloadSupport > 0
                   ? `payload support로 ${durableSignalContract.hiddenByPayloadSupport.toLocaleString()} durable wake signal 숨김`
-                  : 'durable wake signal 없음'}
+                  : automation.signal_errors.length > 0
+                    ? `decode 실패 ${automation.signal_errors.length.toLocaleString()}건 — 표시 가능한 durable wake signal 없음`
+                    : 'durable wake signal 없음'}
               </div>
             `
           : html`
@@ -1995,7 +2107,11 @@ export function ScheduleAside({
   onOpen,
 }: {
   requests: readonly DashboardScheduledAutomationRequest[]
-  sum: { readonly scheduled: number; readonly dueRunning: number; readonly total: number }
+  sum: {
+    readonly scheduled: number | null
+    readonly dueRunning: number | null
+    readonly total: number | null
+  }
   onOpen: (scheduleId: string) => void
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
@@ -2011,10 +2127,10 @@ export function ScheduleAside({
   return html`
     <aside class="ov-aside" aria-label="예약 운영 상태" data-testid="schedule-aside">
       <section class="wka-sec">
-        <div class="wka-h">지금 상황 <span class="n mono">${sum.total.toLocaleString()} 예약</span></div>
+        <div class="wka-h">지금 상황 <span class="n mono">${knownCountLabel(sum.total)} 예약</span></div>
         <div class="wka-pulse">
-          <span class="wka-pulse-i"><b class="mono">${sum.scheduled}</b> 예약됨</span>
-          <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
+          <span class="wka-pulse-i"><b class="mono">${knownCountLabel(sum.scheduled)}</b> 예약됨</span>
+          <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning != null && sum.dueRunning > 0 ? 'volt' : ''}`}>${knownCountLabel(sum.dueRunning)}</b> due·실행</span>
         </div>
         ${payloadBlocked.length === 0 && failed.length === 0
           ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
@@ -2122,6 +2238,17 @@ export function ScheduledAutomationPanel({
     `
   }
 
+  if (automation.schedule_store_known === false) {
+    return html`
+      <div class="grid gap-3" data-schedule-store-unavailable="true">
+        <${ScheduleProjectionNotice} automation=${automation} />
+        <div class="rounded border border-[var(--color-status-bad)]/40 bg-[var(--color-bg-surface)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+          schedule store를 읽지 못해 예약 행·상태·실행 대기 여부를 판단할 수 없습니다.
+        </div>
+      </div>
+    `
+  }
+
   if (variant === 'v2') {
     return html`<${SchedulePrototypeSurface}
       automation=${automation}
@@ -2152,12 +2279,18 @@ export function ScheduledAutomationPanel({
       rows.filter(request => filterMatches(filter.key, request)).length,
     ]),
   )
-  const unsupportedPayloads = automation.payload_support?.unsupported_request_count ?? 0
-  const unknownPayloads = automation.payload_support?.unknown_request_count ?? 0
+  const unsupportedPayloads = automation.payload_support?.unsupported_request_count ?? null
+  const unknownPayloads = automation.payload_support?.unknown_request_count ?? null
   const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
+  const payloadSummary = payloadSupportSummary(automation)
 
   return html`
     <div class="grid gap-4">
+      <${ScheduleProjectionNotice} automation=${automation} />
+      <${SchPayloadSupportBanner}
+        summary=${payloadSummary}
+        onOpen=${setSelectedScheduleId}
+      />
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         <div class="flex items-center gap-2">
           <span class="text-[var(--color-fg-muted)]">FSM</span>
@@ -2166,15 +2299,15 @@ export function ScheduledAutomationPanel({
           <//>
         </div>
         <span class="text-[var(--color-fg-muted)]">
-          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
+          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${knownCountLabel(automation.fsm.active_count)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
+          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${knownCountLabel(automation.fsm.terminal_count)}</span>
         </span>
-        <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
-          unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
+        <span class=${unsupportedPayloads != null && unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
+          unsupported payload <span class="font-mono">${knownCountLabel(unsupportedPayloads)}</span>
         </span>
-        ${unknownPayloads > 0
+        ${unknownPayloads != null && unknownPayloads > 0
           ? html`
               <span class="text-[var(--color-warning-fg)]">
                 unknown payload <span class="font-mono">${unknownPayloads.toLocaleString()}</span>
@@ -2300,8 +2433,8 @@ export function ScheduledAutomationPanel({
                 </ul>
               </aside>
             </div>
-            ${automation.truncated
-              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${automation.request_count.toLocaleString()}건</div>`
+            ${automation.request_projection.truncated
+              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${automation.request_projection.returned_count.toLocaleString()} / 전체 ${knownCountLabel(automation.request_projection.total_count)}건</div>`
               : null}
           `
         : html`<div class="text-xs text-[var(--color-fg-muted)]">예약 요청 없음</div>`}

@@ -57,9 +57,14 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
 
 export interface DashboardScheduledAutomationFsm {
   state: string
-  active_count: number
-  terminal_count: number
+  active_count: number | null
+  terminal_count: number | null
   next_due_at?: string | null
+}
+
+export interface DashboardScheduledAutomationSignalError {
+  ordinal: number
+  error: string
 }
 
 export interface DashboardScheduledAutomationExecution {
@@ -200,6 +205,20 @@ export type DashboardScheduledAutomationKeeperReactionEvidence =
       }
   )
 
+export interface DashboardEventQueueSourceGeneration {
+  snapshot_present: boolean
+  snapshot_revision: string
+  observed_revision: string
+  settlement_wal_end_offset: number
+  settlement_wal_row_count: number
+}
+
+export interface DashboardEventQueueReadError {
+  kind: string
+  path: string | null
+  message: string
+}
+
 interface DashboardScheduledAutomationKeeperQueueEvidenceBase {
   source?: string
   queue?: string
@@ -213,6 +232,7 @@ interface DashboardScheduledAutomationKeeperQueueEvidenceBase {
   execution_payload_digest?: string
   pending_count?: number
   inflight_count?: number
+  source_generation?: DashboardEventQueueSourceGeneration | null
   matched_bucket?: string
   matched_post_id?: string
   matched_schedule_id?: string | null
@@ -223,7 +243,7 @@ interface DashboardScheduledAutomationKeeperQueueEvidenceBase {
   matched_due_at?: number | null
   matched_due_at_iso?: string | null
   matched_payload_digest?: string | null
-  read_errors?: Array<{ kind?: string; path?: string | null; message?: string }>
+  read_errors?: DashboardEventQueueReadError[]
   reason?: string
 }
 
@@ -299,10 +319,10 @@ export interface DashboardScheduledAutomationRequest {
 }
 
 export interface DashboardScheduledAutomationPayloadSupport {
-  supported_kinds?: string[]
-  unsupported_request_count?: number
-  unsupported_kinds?: Array<{ kind: string; count: number }>
-  unknown_request_count?: number
+  supported_kinds: string[]
+  unsupported_request_count: number
+  unsupported_kinds: Array<{ kind: string; count: number }>
+  unknown_request_count: number
 }
 
 export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
@@ -326,23 +346,65 @@ export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
   matched_schedule_id_limit?: number
 }
 
-export interface DashboardScheduledAutomation {
-  schema?: string
-  source?: string
-  generated_at?: string
-  request_count: number
-  request_limit: number
+export interface DashboardScheduledAutomationRequestProjectionKnown {
+  returned_count: number
+  total_count: number
+  limit: number
   truncated: boolean
-  signal_source?: string
-  signal_count?: number
-  signal_limit?: number
-  signals?: DashboardScheduledAutomationSignal[]
-  counts: Record<string, number>
-  payload_support?: DashboardScheduledAutomationPayloadSupport
-  live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
-  fsm: DashboardScheduledAutomationFsm
+}
+
+export interface DashboardScheduledAutomationRequestProjectionUnknown {
+  returned_count: 0
+  total_count: null
+  limit: number
+  truncated: false
+}
+
+interface DashboardScheduledAutomationCommon {
+  schema: string
+  source: string
+  generated_at: string
+  generated_at_unix: number
+  signal_source: string
+  signal_count: number
+  signal_error_count: number
+  signal_limit: number
+  signals: DashboardScheduledAutomationSignal[]
+  signal_errors: DashboardScheduledAutomationSignalError[]
   requests: DashboardScheduledAutomationRequest[]
 }
+
+export type DashboardScheduledAutomation = DashboardScheduledAutomationCommon &
+  (
+    | {
+        status: 'ok'
+        schedule_store_known: true
+        schedule_store_read_error: null
+        request_projection: DashboardScheduledAutomationRequestProjectionKnown
+        counts: Record<string, number>
+        payload_support: DashboardScheduledAutomationPayloadSupport | null
+        live_supported_non_terminal_evidence: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence | null
+        fsm: DashboardScheduledAutomationFsm & {
+          active_count: number
+          terminal_count: number
+        }
+      }
+    | {
+        status: 'unknown'
+        schedule_store_known: false
+        schedule_store_read_error: string
+        request_projection: DashboardScheduledAutomationRequestProjectionUnknown
+        counts: null
+        payload_support: null
+        live_supported_non_terminal_evidence: null
+        fsm: DashboardScheduledAutomationFsm & {
+          state: 'unknown'
+          active_count: null
+          terminal_count: null
+        }
+        requests: []
+      }
+  )
 
 export type DashboardKeeperWaitingSource =
   | 'event_queue_pending'
@@ -433,6 +495,7 @@ export interface DashboardKeeperWaitingInventory {
   schema?: string
   source?: string
   generated_at?: string
+  generated_at_unix?: number
   supported_states?: string[]
   keeper_count_known?: boolean
   keeper_count: number
@@ -444,6 +507,14 @@ export interface DashboardKeeperWaitingInventory {
   global_row_count?: number
   global_pending_confirm_count_known?: boolean
   global_pending_confirm_count?: number
+  event_queue_observation_count?: number
+  event_queue_observations?: Array<{
+    keeper_name: string
+    source_generation: DashboardEventQueueSourceGeneration | null
+    pending_count: number
+    inflight_count: number
+    read_errors: DashboardEventQueueReadError[]
+  }>
   source_counts?: Record<string, number>
   keepers: DashboardKeeperWaitingKeeper[]
   global_waiting_on?: DashboardKeeperWaitingRow[]

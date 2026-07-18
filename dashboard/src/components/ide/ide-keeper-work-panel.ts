@@ -325,6 +325,7 @@ function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
   const lastSkip = composite.last_skip ?? null
   const turnAttempt = composite.turn_attempt ?? null
   const boardCursor = composite.board_cursor ?? null
+  const boardCursorReadError = composite.board_cursor_read_error ?? null
   const toolCount = liveTurn?.active_tool_count
   const firstSkipReason = lastSkip?.reasons[0] ?? null
   return html`
@@ -333,7 +334,10 @@ function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
       ${WorkMetric('tools', toolCount != null ? String(toolCount) : '—')}
       ${WorkMetric('skip', firstSkipReason ?? 'none')}
       ${WorkMetric('attempts', turnAttempt ? String(turnAttempt.attempts) : 'none')}
-      ${WorkMetric('board', boardCursor?.post_id ?? 'none')}
+      ${WorkMetric(
+        'board',
+        boardCursorReadError ? `read error: ${boardCursorReadError}` : boardCursor?.post_id ?? 'none',
+      )}
     </div>
   `
 }

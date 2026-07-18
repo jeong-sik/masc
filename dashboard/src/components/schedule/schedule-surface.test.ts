@@ -40,12 +40,26 @@ import { ScheduleSurface } from './schedule-surface'
 function sampleAutomation(): DashboardScheduledAutomation {
   return {
     schema: 'masc.dashboard.scheduled_automation.v1',
-    source: 'schedule_runner_signals',
+    source: 'schedule_store',
     generated_at: '2026-06-21T00:00:00Z',
-    request_count: 1,
-    request_limit: 20,
-    truncated: false,
+    generated_at_unix: 1_782_000_000,
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
+    request_projection: {
+      returned_count: 1,
+      total_count: 1,
+      limit: 20,
+      truncated: false,
+    },
     counts: { scheduled: 3, due: 1, running: 1 },
+    payload_support: {
+      supported_kinds: [],
+      unsupported_request_count: 0,
+      unsupported_kinds: [],
+      unknown_request_count: 0,
+    },
+    live_supported_non_terminal_evidence: null,
     fsm: {
       state: 'due',
       active_count: 1,
@@ -53,6 +67,10 @@ function sampleAutomation(): DashboardScheduledAutomation {
       next_due_at: '2026-06-21T01:00:00Z',
     },
     signal_count: 1,
+    signal_error_count: 0,
+    signal_limit: 20,
+    signal_source: 'schedule_runner_signals',
+    signal_errors: [],
     signals: [
       {
         occurrence_id: 'sig-1',
@@ -266,7 +284,7 @@ describe('ScheduleSurface', () => {
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 
-  it('merges sparse backend counts with materialized scheduled statuses', async () => {
+  it('keeps backend counts authoritative and exposes row-envelope disagreement', async () => {
     const automation = sampleAutomation()
     automation.counts = { scheduled: 1 }
     automation.requests = [
@@ -292,7 +310,10 @@ describe('ScheduleSurface', () => {
 
     const scheduledKpi = Array.from(container.querySelectorAll('.ov-kpi'))
       .find(element => element.textContent?.includes('예약됨'))
-    expect(scheduledKpi?.textContent).toContain('2')
+    expect(scheduledKpi?.textContent).toContain('1')
+    expect(container.textContent).toContain('schedule projection integrity failure')
+    expect(container.textContent).toContain('returned_count=1 rows=2')
+    expect(container.textContent).toContain('status=scheduled projected=2 exact=1')
   })
 
   it('counts genuine queue-drain misses in the KPI (not_found queue AND not_found reaction)', async () => {
@@ -354,6 +375,90 @@ describe('ScheduleSurface', () => {
 
     expect(container.textContent).toContain('dashboard tools unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+  })
+
+  it('keeps exact store totals distinct from a truncated request projection', async () => {
+    const automation = sampleAutomation()
+    automation.request_projection = {
+      returned_count: 1,
+      total_count: 43,
+      limit: 20,
+      truncated: true,
+    }
+    automation.counts = { scheduled: 40, due: 2, running: 1 }
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const notice = container.querySelector('[data-schedule-projection-notice="true"]')
+    expect(notice?.getAttribute('data-schedule-projection-truncated')).toBe('true')
+    expect(notice?.textContent).toContain('예약 목록 일부만 표시')
+    expect(notice?.textContent).toContain('1 / 43')
+    const summary = container.querySelector('[aria-label="예약 요약"]')
+    const totalKpi = Array.from(summary?.querySelectorAll('.ov-kpi') ?? [])
+      .find(element => element.textContent?.includes('총 예약'))
+    expect(totalKpi?.textContent).toContain('43')
+    const scheduledKpi = Array.from(summary?.querySelectorAll('.ov-kpi') ?? [])
+      .find(element => element.textContent?.includes('예약됨'))
+    expect(scheduledKpi?.textContent).toContain('40')
+    const queueMissKpi = container.querySelector('[data-testid="schedule-kpi-queue-miss"]')
+    expect(queueMissKpi?.textContent).toContain('알 수 없음')
+    expect(queueMissKpi?.querySelector('.ov-kpi-v')?.className).not.toContain('ok')
+  })
+
+  it('renders unknown store counts and durable signal decode failures explicitly', async () => {
+    const automation: DashboardScheduledAutomation = {
+      ...sampleAutomation(),
+      status: 'unknown',
+      schedule_store_known: false,
+      schedule_store_read_error: 'schedule ledger checksum mismatch',
+      request_projection: {
+        returned_count: 0,
+        total_count: null,
+        limit: 20,
+        truncated: false,
+      },
+      counts: null,
+      payload_support: null,
+      live_supported_non_terminal_evidence: null,
+      fsm: {
+        state: 'unknown',
+        active_count: null,
+        terminal_count: null,
+        next_due_at: null,
+      },
+      requests: [],
+      signals: [],
+      signal_count: 0,
+      signal_error_count: 1,
+      signal_errors: [{ ordinal: 4, error: 'invalid occurrence envelope' }],
+    }
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const notice = container.querySelector('[data-schedule-projection-notice="true"]')
+    expect(notice?.getAttribute('data-schedule-store-known')).toBe('false')
+    expect(notice?.getAttribute('data-schedule-signal-error-count')).toBe('1')
+    expect(notice?.textContent).toContain('schedule ledger checksum mismatch')
+    expect(notice?.textContent).toContain('durable wake signal decode 실패')
+    expect(notice?.textContent).toContain('invalid occurrence envelope')
+    expect(container.querySelector('[aria-label="예약 요약"]')?.textContent)
+      .toContain('알 수 없음')
+    expect(container.querySelector('[data-schedule-store-unavailable="true"]')?.textContent)
+      .toContain('판단할 수 없습니다')
+    expect(container.textContent).not.toContain('예약 요청 없음')
+    expect(container.querySelector('[data-testid="schedule-viewbar"]')).toBeNull()
   })
 
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {

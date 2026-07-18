@@ -27,10 +27,25 @@ function automation(
     schema: 'masc.dashboard.scheduled_automation.v1',
     source: 'schedule_store',
     generated_at: '2026-06-21T00:00:00Z',
-    request_count: requests.length,
-    request_limit: 50,
-    truncated: false,
+    generated_at_unix: 1_782_000_000,
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
+    request_projection: {
+      returned_count: requests.length,
+      total_count: requests.length,
+      limit: 50,
+      truncated: false,
+    },
     counts: {},
+    payload_support: null,
+    live_supported_non_terminal_evidence: null,
+    signal_source: 'schedule_runner_signals',
+    signal_count: 0,
+    signal_error_count: 0,
+    signal_limit: 50,
+    signals: [],
+    signal_errors: [],
     fsm: { state: 'idle', active_count: requests.length, terminal_count: 0 },
     requests,
   }
@@ -252,9 +267,16 @@ function sampleAutomation(): DashboardScheduledAutomation {
     schema: 'masc.dashboard.scheduled_automation.v1',
     source: 'schedule_store',
     generated_at: '2026-06-21T00:00:00Z',
-    request_count: 2,
-    request_limit: 20,
-    truncated: false,
+    generated_at_unix: 1_782_000_000,
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
+    request_projection: {
+      returned_count: 2,
+      total_count: 2,
+      limit: 20,
+      truncated: false,
+    },
     counts: { scheduled: 1, due: 1 },
     payload_support: {
       supported_kinds: ['keeper.review', 'keeper.smoke'],
@@ -262,6 +284,13 @@ function sampleAutomation(): DashboardScheduledAutomation {
       unsupported_kinds: [],
       unknown_request_count: 0,
     },
+    live_supported_non_terminal_evidence: null,
+    signal_source: 'schedule_runner_signals',
+    signal_count: 0,
+    signal_error_count: 0,
+    signal_limit: 20,
+    signals: [],
+    signal_errors: [],
     fsm: {
       state: 'due',
       active_count: 2,
@@ -316,7 +345,12 @@ function sampleAutomation(): DashboardScheduledAutomation {
 
 function payloadSupportAutomation(): DashboardScheduledAutomation {
   const auto = sampleAutomation()
-  auto.request_count = 3
+  auto.request_projection = {
+    returned_count: 3,
+    total_count: 3,
+    limit: 20,
+    truncated: false,
+  }
   auto.counts = { failed: 1, scheduled: 1, expired: 1 }
   auto.payload_support = {
     supported_kinds: ['keeper.smoke'],
@@ -399,6 +433,38 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).not.toContain('운영자 조치')
     expect(container.textContent).not.toContain('승인 정책')
     expect(container.textContent).toContain('페이로드')
+  })
+
+  it('does not claim an empty schedule when the store read failed', () => {
+    const unavailable: DashboardScheduledAutomation = {
+      ...sampleAutomation(),
+      status: 'unknown',
+      schedule_store_known: false,
+      schedule_store_read_error: 'schedule database unreadable',
+      request_projection: {
+        returned_count: 0,
+        total_count: null,
+        limit: 20,
+        truncated: false,
+      },
+      counts: null,
+      payload_support: null,
+      live_supported_non_terminal_evidence: null,
+      fsm: {
+        state: 'unknown',
+        active_count: null,
+        terminal_count: null,
+        next_due_at: null,
+      },
+      requests: [],
+    }
+
+    render(html`<${ScheduledAutomationPanel} automation=${unavailable} />`, container)
+
+    expect(container.querySelector('[data-schedule-store-unavailable="true"]')).not.toBeNull()
+    expect(container.textContent).toContain('schedule database unreadable')
+    expect(container.textContent).not.toContain('예약 요청 없음')
+    expect(container.textContent).not.toContain('실행 대기 없음')
   })
 
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {
@@ -1081,8 +1147,11 @@ describe('ScheduledAutomationPanel', () => {
   })
 
   it('renders an explicit contract gap when live supported evidence is absent', () => {
-    const auto = { ...payloadSupportAutomation() }
-    delete auto.live_supported_non_terminal_evidence
+    const {
+      live_supported_non_terminal_evidence: _omittedEvidence,
+      ...malformedAutomation
+    } = payloadSupportAutomation()
+    const auto = malformedAutomation as unknown as DashboardScheduledAutomation
 
     for (const variant of [undefined, 'v2'] as const) {
       render(null, container)
@@ -1098,6 +1167,27 @@ describe('ScheduledAutomationPanel', () => {
       expect(evidence?.textContent).toContain('matched_supported_non_terminal')
       expect(evidence?.textContent).toContain('unproven')
       expect(evidence?.textContent).toContain('3')
+    }
+  })
+
+  it('does not synthesize payload support zeroes when the exact projection is absent', () => {
+    const {
+      payload_support: _omittedPayloadSupport,
+      ...malformedAutomation
+    } = payloadSupportAutomation()
+    const auto = malformedAutomation as unknown as DashboardScheduledAutomation
+
+    for (const variant of [undefined, 'v2'] as const) {
+      render(null, container)
+      render(html`<${ScheduledAutomationPanel} automation=${auto} variant=${variant} />`, container)
+
+      const gap = container.querySelector(
+        '[data-schedule-payload-support="projection_contract_missing"]',
+      )
+      expect(gap).not.toBeNull()
+      expect(gap?.textContent).toContain('projection contract missing')
+      expect(gap?.textContent).toContain('판단할 수 없습니다')
+      expect(gap?.textContent).not.toContain('0 unsupported')
     }
   })
 

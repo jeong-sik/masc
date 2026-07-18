@@ -79,6 +79,23 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).not.toContain('claude-live-model')
   })
 
+  it('does not present a Board cursor read failure as an empty cursor', () => {
+    keepers.value = [keeperFixture()]
+    fleetCompositeSnapshot.value = fleetFixture([
+      compositeFixture({
+        keeper: 'sangsu',
+        board_cursor: { ts: 0, post_id: null },
+        board_cursor_read_error: 'SQLite cursor projection unavailable',
+      }),
+    ])
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    expect(container.textContent).toContain(
+      'read error: SQLite cursor projection unavailable',
+    )
+  })
+
   it('matches keeper-agent task assignees to the canonical keeper name', () => {
     const summary = keeperWorkSummary(
       'sangsu',

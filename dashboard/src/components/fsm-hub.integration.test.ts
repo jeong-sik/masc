@@ -176,6 +176,18 @@ describe('FSM Hub integration — API response shape', () => {
       expect(parsed.phase).toBe('SomeNewPhase')
     })
 
+    it('preserves a Board cursor read error separately from the zero projection', () => {
+      const parsed = parseKeeperCompositeSnapshot({
+        ...REAL_COMPOSITE_PAYLOAD,
+        board_cursor: { ts: 0, post_id: null },
+        board_cursor_read_error: 'SQLite cursor projection unavailable',
+      })
+      expect(parsed.board_cursor).toEqual({ ts: 0, post_id: null })
+      expect(parsed.board_cursor_read_error).toBe(
+        'SQLite cursor projection unavailable',
+      )
+    })
+
     it('carries all 5 sub-FSM fields the FsmHub renders', () => {
       expect(REAL_COMPOSITE_SHAPE.phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.turn_phase).toBeDefined()

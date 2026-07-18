@@ -21,6 +21,7 @@ import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-pane
 import { KeeperBackgroundPanel } from '../tools/keeper-background-panel'
 import {
   ScheduleAside,
+  ScheduleProjectionNotice,
   ScheduledAutomationPanel,
   SchDetail,
   normalizedScheduleStatus,
@@ -42,6 +43,10 @@ function countLabel(count: number): string {
   return count.toLocaleString()
 }
 
+function exactCountLabel(count: number | null): string {
+  return count == null ? '알 수 없음' : countLabel(count)
+}
+
 // Narrow the projection handed to the list view so the cadence chip filters
 // both views consistently. Requests and their durable signals are narrowed
 // together (a signal for a filtered-out schedule would otherwise dangle).
@@ -49,24 +54,77 @@ function filterAutomationByCadence(
   automation: DashboardScheduledAutomation,
   cadence: Cadence | null,
 ): DashboardScheduledAutomation {
-  if (cadence === null) return automation
+  if (cadence === null || automation.schedule_store_known === false) return automation
   const requests = (automation.requests ?? []).filter(request => cadenceOfRequest(request) === cadence)
   const ids = new Set(requests.map(request => request.schedule_id))
-  const signals = automation.signals?.filter(signal => ids.has(signal.schedule_id))
+  const signals = automation.signals.filter(signal => ids.has(signal.schedule_id))
   return { ...automation, requests, signals }
 }
 
 function countByStatus(
   automation: DashboardScheduledAutomation | null,
   statuses: readonly string[],
-): number {
-  if (!automation) return 0
+): number | null {
+  if (!automation || automation.schedule_store_known === false) {
+    return null
+  }
   const normalizedStatuses = statuses.map(normalizedScheduleStatus)
-  const fromCounts = normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
-  const fromRequests = (automation.requests ?? [])
-    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.status)))
-    .length
-  return Math.max(fromCounts, fromRequests)
+  return normalizedStatuses.reduce((sum, status) => sum + (automation.counts[status] ?? 0), 0)
+}
+
+type ScheduleProjectionIntegrity =
+  | { status: 'valid' }
+  | { status: 'invalid'; errors: string[] }
+
+function scheduleProjectionIntegrity(
+  automation: DashboardScheduledAutomation | null,
+): ScheduleProjectionIntegrity {
+  if (!automation || automation.schedule_store_known === false) return { status: 'valid' }
+  const projection = automation.request_projection
+  const errors: string[] = []
+  if (projection.returned_count !== automation.requests.length) {
+    errors.push(`returned_count=${projection.returned_count} rows=${automation.requests.length}`)
+  }
+  if (projection.returned_count > projection.total_count) {
+    errors.push(`returned_count=${projection.returned_count} total_count=${projection.total_count}`)
+  }
+  if (projection.truncated !== (projection.returned_count < projection.total_count)) {
+    errors.push(
+      `truncated=${String(projection.truncated)} returned_count=${projection.returned_count} total_count=${projection.total_count}`,
+    )
+  }
+  const projectedCounts = new Map<string, number>()
+  for (const request of automation.requests) {
+    const status = normalizedScheduleStatus(request.status)
+    projectedCounts.set(status, (projectedCounts.get(status) ?? 0) + 1)
+  }
+  for (const [status, projectedCount] of projectedCounts) {
+    const exactCount = automation.counts[status] ?? 0
+    if (projectedCount > exactCount) {
+      errors.push(`status=${status} projected=${projectedCount} exact=${exactCount}`)
+    }
+  }
+  if (!automation.payload_support) {
+    errors.push('payload_support projection is missing')
+  } else {
+    const visibleUnsupported = automation.requests.filter(
+      request => request.payload_support === 'unsupported',
+    ).length
+    const visibleUnknown = automation.requests.filter(
+      request => request.payload_support === 'unknown',
+    ).length
+    if (visibleUnsupported > automation.payload_support.unsupported_request_count) {
+      errors.push(
+        `payload_support=unsupported projected=${visibleUnsupported} exact=${automation.payload_support.unsupported_request_count}`,
+      )
+    }
+    if (visibleUnknown > automation.payload_support.unknown_request_count) {
+      errors.push(
+        `payload_support=unknown projected=${visibleUnknown} exact=${automation.payload_support.unknown_request_count}`,
+      )
+    }
+  }
+  return errors.length === 0 ? { status: 'valid' } : { status: 'invalid', errors }
 }
 
 export function ScheduleSurface() {
@@ -79,13 +137,17 @@ export function ScheduleSurface() {
   const scheduledCount = countByStatus(automation, ['scheduled'])
   const dueCount = countByStatus(automation, ['due'])
   const runningCount = countByStatus(automation, ['running'])
-  const dueRunning = dueCount + runningCount
+  const dueRunning = dueCount == null || runningCount == null ? null : dueCount + runningCount
   const requests = automation?.requests ?? []
-  const totalCount = requests.length
+  const totalCount = automation?.request_projection.total_count ?? null
   const cadCounts = cadenceCounts(requests)
   // Scheduled keeper wakes that were dispatched but are in neither queue AND
   // never recorded as reacted — the drain-miss the calendar surfaces per row.
-  const queueMisses = countQueueDrainMisses(requests)
+  const queueMisses = automation?.schedule_store_known === false
+    || automation?.request_projection.truncated === true
+    ? null
+    : countQueueDrainMisses(requests)
+  const projectionIntegrity = scheduleProjectionIntegrity(automation)
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
@@ -163,30 +225,38 @@ export function ScheduleSurface() {
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
+        ${projectionIntegrity.status === 'invalid'
+          ? html`<${ErrorState}
+              message=${`schedule projection integrity failure: ${projectionIntegrity.errors.join('; ')}`}
+              class="mb-4"
+            />`
+          : null}
 
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">예약됨</div>
-            <div class=${`ov-kpi-v ${scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
+            <div class=${`ov-kpi-v ${scheduledCount != null && scheduledCount > 0 ? 'info' : ''}`}>${exactCountLabel(scheduledCount)}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">due · 실행</div>
-            <div class=${`ov-kpi-v ${dueRunning > 0 ? 'warn' : ''}`}>${countLabel(dueRunning)}</div>
+            <div class=${`ov-kpi-v ${dueRunning != null && dueRunning > 0 ? 'warn' : ''}`}>${exactCountLabel(dueRunning)}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">총 예약</div>
-            <div class="ov-kpi-v volt">${countLabel(totalCount)}</div>
+            <div class="ov-kpi-v volt">${exactCountLabel(totalCount)}</div>
           </div>
           <div class="ov-kpi" data-testid="schedule-kpi-queue-miss">
             <div class="ov-kpi-k">큐 누락</div>
             <div
-              class=${`ov-kpi-v ${queueMisses > 0 ? 'warn' : 'ok'}`}
-              title="dispatch됐으나 큐(pending·inflight)에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
-            >${countLabel(queueMisses)}</div>
+              class=${`ov-kpi-v ${queueMisses == null ? '' : queueMisses > 0 ? 'warn' : 'ok'}`}
+              title=${automation?.request_projection.truncated === true
+                ? '예약 행 projection이 일부이므로 전체 큐 누락 수는 알 수 없습니다.'
+                : 'dispatch됐으나 큐(pending·inflight)에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락'}
+            >${exactCountLabel(queueMisses)}</div>
           </div>
         </section>
 
-        <div class="sch-viewbar" data-testid="schedule-viewbar">
+        ${automation?.schedule_store_known === false ? null : html`<div class="sch-viewbar" data-testid="schedule-viewbar">
           <div class="sch-viewseg" role="tablist" aria-label="예약 뷰">
             <button
               type="button"
@@ -206,10 +276,23 @@ export function ScheduleSurface() {
             >≡ 목록</button>
           </div>
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
-        </div>
+        </div>`}
+
+        ${view === 'calendar' && automation
+          ? html`<${ScheduleProjectionNotice} automation=${automation} />`
+          : null}
 
         ${loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
+          : automation?.schedule_store_known === false
+            ? html`
+                <div
+                  class="rounded border border-[var(--color-status-bad)]/40 bg-[var(--color-bg-surface)] px-4 py-3 text-xs text-[var(--color-fg-muted)]"
+                  data-schedule-store-unavailable="true"
+                >
+                  schedule store를 읽지 못해 예약 행·상태·실행 대기 여부를 판단할 수 없습니다.
+                </div>
+              `
           : view === 'calendar'
             ? html`<${ScheduleCalendar}
                 requests=${requests}

@@ -696,11 +696,19 @@ describe('dashboardHealthChips', () => {
           keeper_fleet_safety: null,
           keeper_reaction_ledger: {
             status: 'degraded',
+            counts_complete: true,
             operator_action_required: true,
             cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
             pending_stimulus_count: 2,
+            in_progress_stimulus_count: 0,
+            acked_stimulus_count: 0,
+            escalated_stimulus_count: 0,
+            external_input_requested_stimulus_count: 0,
+            orphan_reaction_stimulus_count: 0,
             read_error_count: 0,
+            keeper_name_discovery_error_count: 0,
+            reaction_store_discovery_error_count: 0,
           },
         },
       } as any,
@@ -731,7 +739,13 @@ describe('dashboardHealthChips', () => {
             counts_complete: true,
             operator_action_required: false,
             pending_stimulus_count: 0,
+            in_progress_stimulus_count: 0,
+            acked_stimulus_count: 1,
+            escalated_stimulus_count: 0,
+            external_input_requested_stimulus_count: 0,
+            orphan_reaction_stimulus_count: 0,
             cursor_swept_stimulus_count: 7,
+            cursor_ack_count: 1,
             read_error_count: 0,
             reaction_store_discovery_error_count: 0,
             keeper_name_discovery_error_count: 0,
@@ -743,6 +757,36 @@ describe('dashboardHealthChips', () => {
     })
 
     expect(chips.some(chip => chip.key === 'reaction-ledger')).toBe(false)
+  })
+
+  it('does not collapse an incomplete reaction ledger observation to zero', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_reaction_ledger: {
+            status: 'ok',
+            counts_complete: null,
+            operator_action_required: false,
+            pending_stimulus_count: null,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    const chip = chips.find(candidate => candidate.key === 'reaction-ledger')
+    expect(chip).toEqual(expect.objectContaining({
+      label: 'Reaction ledger observation incomplete',
+      tone: 'bad',
+    }))
+    expect(chip?.detail).toContain('pending=unknown')
+    expect(chip?.detail).toContain('counts_complete=unknown')
   })
 
   it('attaches drill-down routes so HEALTH chips deep-link operators to the right view', () => {
@@ -831,10 +875,18 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_reaction_ledger: {
             status: 'degraded',
+            counts_complete: true,
             pending_stimulus_count: 2,
             cursor_swept_stimulus_count: 0,
             read_error_count: 0,
+            keeper_name_discovery_error_count: 0,
+            reaction_store_discovery_error_count: 0,
             cursor_ack_count: 5,
+            in_progress_stimulus_count: 0,
+            acked_stimulus_count: 0,
+            escalated_stimulus_count: 0,
+            external_input_requested_stimulus_count: 0,
+            orphan_reaction_stimulus_count: 0,
             operator_action_required: false,
           },
         },

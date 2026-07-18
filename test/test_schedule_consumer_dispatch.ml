@@ -31,34 +31,25 @@ let rec mkdir_p path =
     Unix.mkdir path 0o755)
 ;;
 
-let write_empty_file path =
-  let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> ())
+let reaction_ledger_path_exn ~base_path ~keeper_name =
+  match Keeper_reaction_store.database_path ~base_path ~keeper_name with
+  | Ok path -> path
+  | Error error ->
+    fail
+      ("reaction ledger path resolution failed: "
+       ^ Keeper_reaction_store.error_to_string error)
 ;;
 
-let write_file path content =
-  let output = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr output)
-    (fun () -> output_string output content)
+let replace_reaction_ledger_with_directory ~base_path ~keeper_name =
+  let path = reaction_ledger_path_exn ~base_path ~keeper_name in
+  rm_rf path;
+  mkdir_p path
 ;;
 
-let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Common.keepers_runtime_dir_of_base ~base_path)
-          keeper_name)
-       "reaction-ledger")
-    "v4"
-;;
-
-let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
-  let month_dir =
-    Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2026-01"
-  in
-  mkdir_p month_dir;
-  write_file (Filename.concat month_dir "01.jsonl") "not-json\n"
+let require_reaction_ledger_write label = function
+  | Ok _ -> ()
+  | Error error ->
+    fail (label ^ ": " ^ Keeper_reaction_ledger.ledger_error_to_string error)
 ;;
 
 let with_workspace f =
@@ -774,10 +765,11 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
         (inflight_evidence |> member "pending_count" |> to_int);
       check int "inflight count after lease" 1
         (inflight_evidence |> member "inflight_count" |> to_int);
-      Keeper_reaction_ledger.record_event_queue_turn_started
+      Keeper_reaction_ledger.record_event_queue_turn_started_result
         ~base_path:config.Workspace_utils.base_path
         ~keeper_name
-        leased;
+        leased
+      |> require_reaction_ledger_write "record scheduled wake turn start";
       let reacted_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
         |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
@@ -803,13 +795,10 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
        | Ok (Keeper_registry_event_queue.Settled _)
        | Ok (Keeper_registry_event_queue.Already_settled _) -> ()
        | Ok _ -> fail "scheduled wake settlement follow-up failed");
-      (match
-         Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-           ~base_path:config.Workspace_utils.base_path
-           ~keeper_name
-       with
-       | Ok () -> ()
-       | Error error -> fail ("scheduled wake reaction projection failed: " ^ error));
+      Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+      |> require_reaction_ledger_write "project scheduled wake transition";
       let acked_row =
         Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
         |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
@@ -837,15 +826,7 @@ let test_keeper_wake_ledger_failure_is_retryable () =
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
-  let keeper_dir =
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-      keeper_name
-  in
-  mkdir_p keeper_dir;
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname ledger_dir);
-  write_empty_file ledger_dir;
+  replace_reaction_ledger_with_directory ~base_path ~keeper_name;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
@@ -863,20 +844,18 @@ let test_keeper_wake_ledger_failure_is_retryable () =
    | None -> fail "ledger failure detail missing")
 ;;
 
-let test_unattributed_ledger_damage_does_not_block_occurrences () =
+let test_invalid_sqlite_store_is_keeper_local_and_retryable () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace_utils.base_path in
-  let damaged_keeper = "damaged-ledger-keeper" in
-  let healthy_keeper = "healthy-ledger-keeper" in
-  write_malformed_reaction_ledger_row
-    ~base_path
-    ~keeper_name:damaged_keeper;
-  let damaged =
+  let blocked_keeper = "invalid-sqlite-keeper" in
+  let healthy_keeper = "healthy-sqlite-keeper" in
+  replace_reaction_ledger_with_directory ~base_path ~keeper_name:blocked_keeper;
+  let blocked =
     create_named_keeper_wake_schedule
       config
-      ~schedule_id:"damaged-ledger-schedule"
-      ~keeper_name:damaged_keeper
+      ~schedule_id:"invalid-sqlite-schedule"
+      ~keeper_name:blocked_keeper
   in
   let healthy =
     create_named_keeper_wake_schedule
@@ -892,21 +871,35 @@ let test_unattributed_ledger_damage_does_not_block_occurrences () =
         String.equal item.schedule_id schedule_id)
       result.dispatches
   in
-  let damaged_dispatch = dispatch damaged.schedule_id in
+  let blocked_dispatch = dispatch blocked.schedule_id in
   let healthy_dispatch = dispatch healthy.schedule_id in
   check string
-    "unattributed damage cannot block a new occurrence"
-    "succeeded"
-    (Schedule_runner.dispatch_status_to_string damaged_dispatch.status);
+    "invalid SQLite occurrence remains retryable"
+    "failed"
+    (Schedule_runner.dispatch_status_to_string blocked_dispatch.status);
+  (match blocked_dispatch.error with
+   | Some detail ->
+     check bool
+       "typed SQLite write failure is explicit"
+       true
+       (String.trim detail <> "")
+   | None -> fail "invalid SQLite occurrence error missing");
   check string
     "other keeper lane continues"
     "succeeded"
     (Schedule_runner.dispatch_status_to_string healthy_dispatch.status);
+  (match Schedule_store.get_schedule config ~schedule_id:blocked.schedule_id with
+   | Some stored ->
+     check string
+       "blocked occurrence stays due"
+       "due"
+       (Schedule_domain.schedule_status_to_string stored.status)
+   | None -> fail "blocked schedule missing");
   check int
-    "damaged keeper still receives its identified occurrence"
-    1
+    "blocked occurrence was not enqueued"
+    0
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path damaged_keeper));
+       (Keeper_registry_event_queue.snapshot ~base_path blocked_keeper));
   check int
     "healthy keeper received its own occurrence"
     1
@@ -914,83 +907,71 @@ let test_unattributed_ledger_damage_does_not_block_occurrences () =
        (Keeper_registry_event_queue.snapshot ~base_path healthy_keeper))
 ;;
 
-let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
+let test_missing_sqlite_store_is_exact_empty_evidence () =
   with_workspace
   @@ fun config ->
-  let request = create_keeper_wake_schedule config in
-  let result = tick_ok config ~now:201.0 in
-  check string
-    "initial dispatch succeeds"
-    "succeeded"
-    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
-  write_malformed_reaction_ledger_row
-    ~base_path:config.Workspace_utils.base_path
-    ~keeper_name:"schedule-keeper";
+  let keeper_name = "empty-sqlite-keeper" in
+  let stimulus_id = "missing-sqlite-stimulus" in
   let evidence =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
-    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
-    |> Yojson.Safe.Util.member "keeper_reaction_evidence"
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path:config.Workspace_utils.base_path
+        ~keeper_name
+        ~stimulus_id
+    with
+    | Ok evidence -> evidence
+    | Error error ->
+      fail
+        ("absent reaction store read failed: "
+         ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+             error)
   in
-  let open Yojson.Safe.Util in
-  check string
-    "dashboard preserves exact occurrence evidence"
-    "matched_stimulus"
-    (evidence |> member "projection_status" |> to_string);
-  check int
-    "only the identified occurrence row is matched"
-    1
-    (evidence |> member "matched_record_count" |> to_int)
+  check string "evidence preserves keeper identity" keeper_name evidence.keeper_name;
+  check string "evidence preserves stimulus identity" stimulus_id evidence.stimulus_id;
+  check bool "absent store has no stimulus evidence" false evidence.stimulus_seen;
+  check bool "absent store has no turn evidence" false evidence.turn_started_seen;
+  check bool "absent store has no ack evidence" false evidence.event_queue_ack_seen;
+  check int "absent store has no matched records" 0 evidence.matched_record_count;
+  let database_path =
+    reaction_ledger_path_exn
+      ~base_path:config.Workspace_utils.base_path
+      ~keeper_name
+  in
+  check bool "read does not create the absent SQLite database" false
+    (Sys.file_exists database_path)
 ;;
 
-let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
+let test_dashboard_distinguishes_missing_and_unreadable_sqlite_evidence () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
-  let stimulus_id = single_occurrence_id result in
-  Dated_jsonl.append
-    (Dated_jsonl.create
-       ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
-       ())
-    (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v4"
-        ; "record_kind", `String "reaction"
-        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
-        ; "keeper_name", `String keeper_name
-        ; "recorded_at_unix", `Float 202.0
-        ; "stimulus_id", `String stimulus_id
-        ; ( "reaction"
-          , `Assoc
-              [ "kind", `String "unknown_custom"
-              ; "source", `String "keeper_event_queue"
-              ] )
-        ]);
+  let _stimulus_id = single_occurrence_id result in
   let evidence () =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
     |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
     |> Yojson.Safe.Util.member "keeper_reaction_evidence"
   in
   let open Yojson.Safe.Util in
-  let quarantined = evidence () in
+  let matched = evidence () in
   check string
-    "matching semantic-invalid row is quarantined"
-    "quarantined"
-    (quarantined |> member "projection_status" |> to_string);
-  check int
-    "dashboard matching quarantine count"
-    1
-    (quarantined |> member "quarantined_record_count" |> to_int);
+    "initial typed SQLite evidence matches stimulus"
+    "matched_stimulus"
+    (matched |> member "projection_status" |> to_string);
+  let database_path = reaction_ledger_path_exn ~base_path ~keeper_name in
+  rm_rf database_path;
+  let missing = evidence () in
   check string
-    "dashboard typed quarantine reason"
-    "unknown_reaction_kind"
-    (quarantined |> member "reason" |> to_string);
-  check bool "quarantined evidence has no reaction kind" true
-    (quarantined |> member "reaction_kind" = `Null);
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  rm_rf ledger_dir;
-  write_empty_file ledger_dir;
+    "missing SQLite database is exact empty evidence"
+    "not_found"
+    (missing |> member "projection_status" |> to_string);
+  check int "missing SQLite database has no matched rows" 0
+    (missing |> member "matched_record_count" |> to_int);
+  check bool "missing evidence has no reaction kind" true
+    (missing |> member "reaction_kind" = `Null);
+  mkdir_p database_path;
   let unreadable = evidence () in
   check string
     "storage failure is not projected as empty evidence"
@@ -1000,7 +981,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
     "storage failure reason is explicit"
     true
     (unreadable |> member "reason" |> to_string |> String.length > 0);
-  check bool "read failure has no reaction kind" true
+  check bool "typed read failure has no reaction kind" true
     (unreadable |> member "reaction_kind" = `Null)
 ;;
 
@@ -1063,13 +1044,13 @@ let () =
             test_keeper_wake_dashboard_tracks_runtime_inflight_lease
         ; test_case "keeper wake ledger failure is retryable" `Quick
             test_keeper_wake_ledger_failure_is_retryable
-        ; test_case "unattributed ledger damage does not block occurrences" `Quick
-            test_unattributed_ledger_damage_does_not_block_occurrences
-        ; test_case "dashboard keeps unattributed damage out of exact evidence" `Quick
-            test_dashboard_keeps_unattributed_damage_out_of_exact_evidence
-        ; test_case "dashboard projects quarantined and unreadable reaction evidence"
+        ; test_case "invalid SQLite store is keeper-local and retryable" `Quick
+            test_invalid_sqlite_store_is_keeper_local_and_retryable
+        ; test_case "missing SQLite store is exact empty evidence" `Quick
+            test_missing_sqlite_store_is_exact_empty_evidence
+        ; test_case "dashboard distinguishes missing and unreadable SQLite evidence"
             `Quick
-            test_dashboard_projects_quarantined_and_unreadable_reaction_evidence
+            test_dashboard_distinguishes_missing_and_unreadable_sqlite_evidence
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
         ] )

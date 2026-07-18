@@ -104,6 +104,14 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let require_reaction_ledger_write label = function
+  | Ok _ -> ()
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Keeper_reaction_ledger.ledger_error_to_string error)
+
 let canonical_path path =
   try Unix.realpath path with Unix.Unix_error _ -> path
 
@@ -1340,10 +1348,11 @@ let test_health_json_surfaces_durable_paused_keepers () =
                   }
             }
           in
-          Keeper_reaction_ledger.record_event_queue_stimulus
+          Keeper_reaction_ledger.record_event_queue_stimulus_result
             ~base_path:dir
             ~keeper_name:"durable-active"
-            ledger_stimulus;
+            ledger_stimulus
+          |> require_reaction_ledger_write "seed durable active reaction ledger";
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
@@ -3079,16 +3088,20 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           }
         in
         List.iter
-          (Keeper_reaction_ledger.record_event_queue_stimulus
-             ~base_path:dir
-             ~keeper_name:"cursor-swept")
+          (fun stimulus ->
+             Keeper_reaction_ledger.record_event_queue_stimulus_result
+               ~base_path:dir
+               ~keeper_name:"cursor-swept"
+               stimulus
+             |> require_reaction_ledger_write "record cursor-swept stimulus")
           [ stimulus "health-post-1" 10.0; stimulus "health-post-2" 20.0 ];
-        Keeper_reaction_ledger.record_board_cursor_ack
+        Keeper_reaction_ledger.record_board_cursor_ack_result
           ~base_path:dir
           ~keeper_name:"cursor-swept"
           ~cursor_ts:20.0
           ~post_id:(Some "health-post-2")
-          ();
+          ()
+        |> require_reaction_ledger_write "record cursor-swept cursor ack";
         let request = Httpun.Request.create `GET "/health" in
         let json = Server_routes_http_runtime.make_health_json request in
         let open Yojson.Safe.Util in

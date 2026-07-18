@@ -1007,18 +1007,21 @@ let test_transition_outbox_projects_with_stable_identity () =
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "active lease was duplicated");
     (match
-        Persistence.settle_result
-          ~base_path
-          ~keeper_name
-          ~settled_at:3.0
-          ~lease
-          ~settlement:State.Ack
-          ()
-        |> require_ok "settle projection source"
-      with
-      | Persistence.Settled _ -> ()
-      | _ ->
-        Alcotest.fail "first projection settlement was already settled");
+       Persistence.settle_result
+         ~base_path
+         ~keeper_name
+         ~settled_at:3.0
+         ~lease
+         ~settlement:State.Ack
+         ()
+       |> require_ok "settle projection source"
+     with
+     | Persistence.Settled _ -> ()
+     | _ -> Alcotest.fail "first projection settlement was already settled");
+    let unprojected_state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load unprojected state"
+    in
     (match
        Persistence.enqueue_stimulus_if_absent_result
          ~base_path ~keeper_name source
@@ -1036,8 +1039,11 @@ let test_transition_outbox_projects_with_stable_identity () =
       "projection retires outbox"
       0
       (List.length (State.transition_outbox state));
+    write_state
+      (Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json")
+      unprojected_state;
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "empty outbox projection is idempotent";
+    |> require_ok "replay committed transition after outbox retirement loss";
     let summary =
       Masc.Keeper_reaction_ledger.summary_for_keeper
         ~base_path
@@ -1049,7 +1055,16 @@ let test_transition_outbox_projects_with_stable_identity () =
       "stable event id deduplicates crash replay"
       1
       (summary |> member "event_queue_ack_count" |> to_int);
-    ())
+    let replayed_state =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load replayed projection state"
+    in
+    Alcotest.(check int)
+      "replayed projection retires restored outbox"
+      0
+      (List.length (State.transition_outbox replayed_state));
+    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
+    |> require_ok "empty outbox projection is idempotent")
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =

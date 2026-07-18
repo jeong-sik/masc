@@ -22,6 +22,7 @@ include Keeper_unified_turn_phase_plan
 type source_lease_disposition =
   | Follow_failure_route
   | Requeue_after_context_compaction
+  | Acknowledge_after_no_compaction of Keeper_post_turn.no_compaction
   | Acknowledge_after_in_turn_handling
 
 type turn_failure =
@@ -126,6 +127,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
 type provider_overflow_recovery =
   | Not_provider_overflow
   | Provider_overflow_applied of Keeper_context_runtime.compaction_recovery
+  | Provider_overflow_no_compaction of Keeper_post_turn.no_compaction
   | Provider_overflow_retry_without_checkpoint of
       { trigger : Compaction_trigger.t
       ; reason : string
@@ -172,16 +174,17 @@ let recover_provider_context_overflow_in_lane
           "compaction_failed"
           (Keeper_state_machine.Compaction_failed { reason })
       with
-      | Ok () -> ()
+      | Ok () -> Ok ()
       | Error detail ->
         Log.Keeper.error
           ~keeper_name:meta.name
           "provider overflow recovery could not release compaction lifecycle: %s"
-          detail
+          detail;
+        Error detail
     in
     let retry_after_started ?recovery reason =
       record_overflow_failure ~config ~meta ~reason;
-      release_failed_lifecycle reason;
+      ignore (release_failed_lifecycle reason);
       match recovery with
       | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
       | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery }
@@ -201,6 +204,12 @@ let recover_provider_context_overflow_in_lane
                  ~meta
                  ~trigger
              with
+             | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+               let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
+               record_overflow_failure ~config ~meta ~reason;
+               (match release_failed_lifecycle reason with
+                | Ok () -> Provider_overflow_no_compaction no_compaction
+                | Error _ -> Provider_overflow_retry_without_checkpoint { trigger; reason })
              | Error error ->
                retry_after_started
                  (Keeper_post_turn.compaction_recovery_error_to_string error)
@@ -227,7 +236,7 @@ let recover_provider_context_overflow_in_lane
            | Eio.Cancel.Cancelled _ as exn ->
              let backtrace = Printexc.get_raw_backtrace () in
              Eio.Cancel.protect (fun () ->
-               try release_failed_lifecycle "provider overflow compaction cancelled" with
+               try ignore (release_failed_lifecycle "provider overflow compaction cancelled") with
                | cleanup_exn ->
                  Log.Keeper.error
                    ~keeper_name:meta.name
@@ -288,6 +297,14 @@ let append_provider_overflow_manifest
   in
   match outcome with
   | Not_provider_overflow -> Follow_failure_route, turn_state
+  | Provider_overflow_no_compaction no_compaction ->
+    Log.Keeper.info
+      "provider overflow compaction reached typed terminal trace_id=%s generation=%d turn_count=%d reason=%s"
+      (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
+      no_compaction.source.generation
+      no_compaction.source.turn_count
+      (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+    Acknowledge_after_no_compaction no_compaction, turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
       append_recovery

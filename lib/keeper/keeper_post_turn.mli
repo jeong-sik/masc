@@ -35,14 +35,17 @@ type compaction_recovery =
   ; turn_generation : int
   } [@@warning "-69"]
 
+type no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : Keeper_event_queue_state.no_compaction_reason
+  }
+
 type compaction_recovery_error =
   | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
   | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
-  | Checkpoint_structure_invalid of Keeper_compaction_unit.structural_error
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
-  | Compaction_evidence_missing
-  | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
+  | No_compaction of no_compaction
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
 val compaction_recovery_error_to_string : compaction_recovery_error -> string

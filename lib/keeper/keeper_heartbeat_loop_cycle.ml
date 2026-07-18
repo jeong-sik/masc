@@ -55,6 +55,10 @@ type cycle_outcome =
       { meta : keeper_meta
       ; failure : Keeper_manual_compaction.failure
       }
+  | Manual_compaction_not_applied of
+      { meta : keeper_meta
+      ; no_compaction : Keeper_post_turn.no_compaction
+      }
   | Manual_compaction_applied of cycle_outcome
 
 and failure_judgment_terminal =
@@ -71,7 +75,8 @@ let rec meta = function
   | Failed { meta; _ }
   | Busy { meta; _ }
   | Judgment_settled { meta; _ }
-  | Manual_compaction_failed { meta; _ } ->
+  | Manual_compaction_failed { meta; _ }
+  | Manual_compaction_not_applied { meta; _ } ->
     meta
   | Manual_compaction_applied outcome -> meta outcome
 ;;
@@ -80,13 +85,15 @@ let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
   | Manual_compaction_applied outcome -> turn_failure outcome
   | Completed _ | Cancelled _ | Skipped _ | Busy _
-  | Judgment_settled _ | Manual_compaction_failed _ -> None
+  | Judgment_settled _ | Manual_compaction_failed _
+  | Manual_compaction_not_applied _ -> None
 ;;
 
 let manual_compaction_followup_failure = function
   | Manual_compaction_applied outcome -> turn_failure outcome
   | Completed _ | Cancelled _ | Skipped _ | Failed _ | Busy _
-  | Judgment_settled _ | Manual_compaction_failed _ -> None
+  | Judgment_settled _ | Manual_compaction_failed _
+  | Manual_compaction_not_applied _ -> None
 ;;
 
 let record_failure_judgment_outcome
@@ -400,5 +407,11 @@ let run_keeper_cycle
          "manual compaction failed in owner lane: %s"
          (Keeper_manual_compaction.failure_to_string failure);
        Manual_compaction_failed { meta = meta_after_triage; failure }
+     | `No_compaction no_compaction ->
+       Log.Keeper.info
+         ~keeper_name:meta_after_triage.name
+         "manual compaction reached typed terminal: %s"
+         (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+       Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
      | `Applied _success -> Manual_compaction_applied (run_standard_cycle ()))
 ;;

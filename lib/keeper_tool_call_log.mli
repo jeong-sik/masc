@@ -187,6 +187,25 @@ val read_recent :
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     optionally filtered by keeper name. Default [n=100]. *)
 
+val read_over_scan_factor : int
+(** Scan multiplier [read_recent] applies before its keeper filter: it
+    reads [n * read_over_scan_factor] fleet rows to find [n] matching
+    entries. Callers sharing one fleet read ({!read_recent_rows}) size
+    their window with this to reproduce [read_recent]'s coverage. *)
+
+val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
+(** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
+    with no keeper filter. One shared read serves every per-keeper
+    {!filter_rows_for_keeper} derivation, instead of each keeper
+    re-parsing the store. *)
+
+val filter_rows_for_keeper :
+  keeper_name:string -> n:int -> Yojson.Safe.t list -> Yojson.Safe.t list
+(** [filter_rows_for_keeper ~keeper_name ~n rows] is [read_recent]'s
+    keeper filter applied to an already-read row window: rows whose
+    ["keeper"] field equals [keeper_name], order preserved, truncated to
+    the last [n]. *)
+
 val read_window :
   ?keeper_name:string ->
   window_hours:float ->

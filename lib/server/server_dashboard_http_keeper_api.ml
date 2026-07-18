@@ -35,6 +35,10 @@ let compaction_snapshot_manifest_tail_max_lines =
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
 
+(* Maximum per-keeper entries for /tool-calls; also sizes the shared
+   fleet-row window that per-keeper responses derive from. *)
+let tool_calls_limit_max = 200
+
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
@@ -1287,6 +1291,13 @@ let handle_keeper_get_subroutes state req request reqd =
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      (* Reject before touching the cache: the cache key embeds the raw
+         name, so unvalidated garbage names would mint unbounded
+         process-global cache entries (the sibling /tool-calls route
+         already validates). *)
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
@@ -1482,19 +1493,40 @@ let handle_keeper_get_subroutes state req request reqd =
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
-        |> max 1 |> min 200
+        |> max 1 |> min tool_calls_limit_max
       in
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
-      (* [Keeper_tool_call_log.read_recent ~n:limit] Yojson-parses the
-         newest [limit * 5] rows of the fleet-wide dated store to filter
-         one keeper's entries (~3.6 s measured at limit=200), and it ran
-         inline on the main Eio domain for every keeper pane the
-         dashboard hydrates. Cache the built JSON and offload the
-         compute like the trajectory handler above. TTL-bounded
-         staleness also freezes the [latest_age_s] / [health] fields for
-         up to the TTL, which is well inside the freshness SLO this
-         surface reports on. *)
+      (* The per-keeper read Yojson-parsed the newest [limit * 5] rows of
+         the fleet-wide dated store just to filter one keeper (~3.6 s
+         measured at limit=200), inline on the main Eio domain for every
+         keeper pane the dashboard hydrates — a 16-keeper cold hydration
+         ran 16 identical fleet parses. Parse the fleet window once per
+         TTL on the CPU pool lane (the cost is JSON parsing, not
+         blocking IO) and derive each keeper's slice from it. The window
+         is sized to reproduce [read_recent]'s coverage at this
+         endpoint's maximum limit; deriving smaller limits from the
+         wider window can only widen per-keeper coverage, never narrow
+         it. TTL-bounded staleness also freezes the [latest_age_s] /
+         [health] fields for up to the TTL, which is well inside the
+         freshness SLO this surface reports on. *)
+      let fleet_rows =
+        match
+          Dashboard_cache.get_or_compute
+            (Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root)
+            ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+              Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                `List
+                  (Keeper_tool_call_log.read_recent_rows
+                     ~n:
+                       (tool_calls_limit_max
+                        * Keeper_tool_call_log.read_over_scan_factor)
+                     ())))
+        with
+        | `List rows -> rows
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+        | `Assoc _ -> []
+      in
       let cache_key =
         Printf.sprintf "keeper:tool-calls:%s:%s:%d" masc_root name limit
       in
@@ -1503,7 +1535,8 @@ let handle_keeper_get_subroutes state req request reqd =
           ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
             Domain_pool_ref.submit_io_or_inline (fun () ->
               let entries =
-                Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
+                Keeper_tool_call_log.filter_rows_for_keeper
+                  ~keeper_name:name ~n:limit fleet_rows
               in
               let latest_ts =
                 List.fold_left

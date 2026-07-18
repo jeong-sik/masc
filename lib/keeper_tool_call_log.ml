@@ -601,42 +601,67 @@ let log_call
       append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json }
 ;;
 
-let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
+(* Scan multiplier applied before the keeper filter: [read_recent] reads
+   [n * read_over_scan_factor] fleet rows to find [n] matching entries.
+   Named (rather than a literal 5) so callers sharing one fleet read can
+   size their window to reproduce [read_recent]'s coverage exactly. *)
+let read_over_scan_factor = 5
+
+let keeper_matches name json =
+  match Safe_ops.json_string_opt "keeper" json with
+  | Some k -> String.equal k name
+  | None -> false
+;;
+
+(* Single-pass ring buffer: keep the last [n] rows satisfying [keep],
+   preserving row order. *)
+let ring_keep_last ~n ~keep rows : Yojson.Safe.t list =
+  if n <= 0
+  then []
+  else (
+    let buf = Array.make n (`Null : Yojson.Safe.t) in
+    let pos = ref 0 in
+    let total = ref 0 in
+    List.iter
+      (fun json ->
+         if keep json
+         then (
+           buf.(!pos mod n) <- json;
+           incr pos;
+           incr total))
+      rows;
+    let count = min !total n in
+    if count = 0
+    then []
+    else (
+      let start = if !total <= n then 0 else !pos mod n in
+      List.init count (fun i -> buf.((start + i) mod n))))
+;;
+
+let read_recent_rows ~n () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
     match !store_ref with
     | None -> []
-    | Some store ->
-      let keeper_matches name json =
-        match Safe_ops.json_string_opt "keeper" json with
-        | Some k -> String.equal k name
-        | None -> false
-      in
-      (* Single-pass: read from store, filter, and collect last n in one traversal *)
-      let raw = Dated_jsonl.read_recent store (n * 5) in
-      let buf = Array.make n (`Null : Yojson.Safe.t) in
-      let pos = ref 0 in
-      let total = ref 0 in
-      List.iter
-        (fun json ->
-           let dominated =
-             match keeper_name with
-             | None -> true
-             | Some name -> keeper_matches name json
-           in
-           if dominated
-           then (
-             buf.(!pos mod n) <- json;
-             incr pos;
-             incr total))
-        raw;
-      let count = min !total n in
-      if count = 0
-      then []
-      else (
-        let start = if !total <= n then 0 else !pos mod n in
-        List.init count (fun i -> buf.((start + i) mod n))))
+    | Some store -> Dated_jsonl.read_recent store n)
+;;
+
+let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
+  ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows
+;;
+
+let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
+  if n <= 0
+  then []
+  else (
+    let raw = read_recent_rows ~n:(n * read_over_scan_factor) () in
+    let keep =
+      match keeper_name with
+      | None -> fun (_ : Yojson.Safe.t) -> true
+      | Some name -> keeper_matches name
+    in
+    ring_keep_last ~n ~keep raw)
 ;;
 
 let iso_date_of_unix ts =

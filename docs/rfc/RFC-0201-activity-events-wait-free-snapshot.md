@@ -122,28 +122,29 @@ type t = {
 }
 ```
 
-- `bootstrap ~config` and `refresh_loop` compute
-  `Activity_graph.json_response ~kinds:[] ~after_seq:0 ~limit:200 ()`
-  exactly the same way they compute `shell`/`tools` today.
-- HTTP `events_http_json` checks: if `kinds = []` and `after_seq = 0` and
-  `limit ∈ [50, 200]`, slice the snapshot's `activity_events_default`
+- `refresh_loop` is the only full-snapshot producer. It computes
+  `Activity_graph.json_response ~kinds:[] ~after_seq:0 ~limit:1000 ()`
+  together with the other published projections.
+- HTTP `events_http_json` checks: if `kinds = []` and `after_seq = 0`,
+  slice the snapshot's `activity_events_default`
   events list to the requested `limit` and return. This is the
   dashboard panel's actual query (no cursor, kind-less, limit 50).
-- Non-default queries (cursor, kinds filter, `since`) fall through to the
-  existing compute path. They are rare and operator-driven; paying
-  inline cost is acceptable.
+- Non-default queries (cursor or kinds filter) fall through to the
+  projection-specific compute path via `Domain_pool_ref.submit_io_or_inline`.
 
-The snapshot publishes every `refresh_interval_sec` (currently 2 s). So:
+The refresh loop publishes every `refresh_interval_sec` (currently 2 s).
+Before its first successful publish, a request computes only the projection
+it asked for; no request performs a synchronous full-snapshot bootstrap. So:
 
 - Worst-case staleness: 2 s + RTT.
 - Worst-case HTTP latency: one `Atomic.get` + JSON slice + Yojson
   serialisation (~30 KB payload). Sub-millisecond expectation, matching
   `namespace-truth` observed 57 ms.
 
-This handles `events_http_json` first. `graph_http_json` and
-`swimlane_http_json` follow the same pattern; their `limit` knobs are
-also bounded (50–2000 / 1–2000) so a single snapshot payload at the
-max-limit value satisfies all in-bound requests via slicing.
+`graph_http_json` and `swimlane_http_json` use the same publication slot,
+but their aggregated payloads cannot be sliced. They use a snapshot only
+for the exact dashboard-default query shape and compute other shapes through
+their projection-specific fallback.
 
 ### 4.2 Phase B — Incremental tail in `read_all_events` (optional, file-level)
 
@@ -164,7 +165,7 @@ constraint:
 
 2. **`collect_event_files` honours `since_ms`** at the file level: if
    `since_ms = Some now - 7d`, drop files whose `mtime` is older than
-   that boundary. This narrows the *first-bootstrap* cost and matches
+   that boundary. This narrows the *first refresh-cycle* cost and matches
    the `?since` query semantics already exposed by `/activity/graph`.
 
 This is a pure optimisation of an existing function. No new module, no
@@ -188,7 +189,7 @@ once per snapshot interval, not once per HTTP request.
 
 | Step | What | Acceptance | PR |
 |---|---|---|---|
-| 1 | Extend `Dashboard_snapshot.t` with `activity_events_default` field; bootstrap and refresh fiber populate it; `events_http_json` reads from snapshot when query is default-shaped; non-default queries fall through. | Live cold/warm `events_http_json?limit=50` < 100 ms. | TBD |
+| 1 | Extend `Dashboard_snapshot.t` with `activity_events_default`; the refresh fiber populates it; `events_http_json` reads it when the query is default-shaped and otherwise uses the projection-specific compute path. | Live cold/warm `events_http_json?limit=50` < 100 ms. | TBD |
 | 2 | Extend snapshot with `activity_graph_default` and wire `graph_http_json` (same default-detection logic). | Live cold/warm `graph_http_json?limit=500` < 100 ms. | TBD |
 | 3 | Extend snapshot with `activity_swimlane_default` and wire `swimlane_http_json`. | Live cold/warm `swimlane_http_json?limit=500` < 100 ms. | TBD |
 | 4 | Phase B incremental tail: `read_all_events` caches past-day parsed lists by `(path, mtime)`. Only current-day file is re-parsed every refresh. | Refresh fiber single-cycle wall time < 500 ms with 15 MB historic data. | TBD |
@@ -204,23 +205,22 @@ extend the same pattern. Step 4 is internal optimisation. Step 5 is cleanup.
 | Read latency p99 | < 100 ms (Atomic.get + slice) | 7–8 s (cold) every TTL expiry |
 | Compute frequency | 1 × every 2 s, one fiber | 1 × per cache miss × N clients |
 | Default-query staleness | ≤ 2 s + RTT | undefined (depends on TTL vs poll cadence) |
-| Non-default queries | Inline compute (unchanged) | Inline compute (unchanged) |
+| Non-default queries | Projection-specific offloaded compute | Projection-specific offloaded compute |
 | Code surface | Snapshot record + handler branch | Cache wrap (already in tree) |
 
 ### Risks
 
-1. **Refresh fiber takes 7–8 s on cold start.** During the first 7–8 s of
-   server life, `bootstrap` runs synchronously on the first request fiber.
-   This is identical to the current cold-start cost and not a regression.
-   Phase B mitigates the *steady-state* refresh cost (past-day file parses
-   become free on cache hit).
+1. **Refresh fiber takes 7–8 s on cold start.** Until its first successful
+   publish, a request falls back to the compute path for that projection
+   only. It does not synchronously build unrelated snapshot projections.
+   Phase B mitigates both the first refresh and steady-state refresh cost
+   (past-day file parses become free on cache hit).
 
-2. **`limit` mismatch between snapshot size and request.** Snapshot
-   computes at `limit:200` (the dashboard's max useful page). If a
-   request asks for `limit=500`, slicing returns only 200 — wrong answer.
-   Mitigation: snapshot publishes at `limit:1000` (the API ceiling) and
-   slicing trims down. Memory: ~120 KB per snapshot (1000 events × ~120 B).
-   Cheaper than the 7 s compute it replaces.
+2. **`limit` mismatch between snapshot size and request.** The events
+   snapshot publishes at `limit:1000`, the same ceiling enforced by the
+   HTTP handler, and slicing trims down. A future API-ceiling change must
+   update both contracts together; otherwise a larger request would receive
+   an incomplete page.
 
 3. **`after_seq` cursor requests bypass snapshot.** Cursor-bearing
    requests are rare (IDE replay, debug tooling) and re-running the

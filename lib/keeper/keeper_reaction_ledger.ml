@@ -32,7 +32,12 @@ type reaction_kind =
 
 module Event_id_set = Set.Make (String)
 
-let schema = "keeper.reaction_ledger.v1"
+(* v1 rows carry digest-format durable ids ("krl…"); #25018 switched the
+   identity to (receipt.event_id, source_index) without bumping the tag
+   (#25080). v2 marks the new identity generation. Reads never dispatch on
+   this tag (rows are consumed by record_kind/stimulus_id), so v1 rows keep
+   loading; the summary segregates them for observability instead. *)
+let schema = "keeper.reaction_ledger.v2"
 
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
@@ -880,6 +885,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let unsupported_stimulus_count = ref 0 in
   let payload_parse_error_count = ref 0 in
   let unknown_reaction_count = ref 0 in
+  let prior_schema_row_count = ref 0 in
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let completion_contract_result_counts = Hashtbl.create 8 in
@@ -1024,6 +1030,12 @@ let summarize_rows ~keeper_name ~limit rows =
   in
   List.iter
     (fun row ->
+      (match string_field "schema" row with
+       | Some tag when String.equal tag schema -> ()
+       | Some _ | None ->
+         (* v1 (digest identity) or pre-tag rows: still consumed below, but
+            counted so a mixed-generation window is visible in health. *)
+         incr prior_schema_row_count);
       (match float_field "recorded_at_unix" row with
        | Some value -> latest_recorded_at := Some value
        | None -> ());
@@ -1118,6 +1130,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "unsupported_stimulus_count", `Int !unsupported_stimulus_count
     ; "payload_parse_error_count", `Int !payload_parse_error_count
     ; "unknown_reaction_count", `Int !unknown_reaction_count
+    ; "prior_schema_row_count", `Int !prior_schema_row_count
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "legacy_cursor_swept_stimulus_count", `Int !legacy_cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
@@ -1156,6 +1169,7 @@ let error_summary ~keeper_name ~limit error =
     ; "unsupported_stimulus_count", `Int 0
     ; "payload_parse_error_count", `Int 0
     ; "unknown_reaction_count", `Int 0
+    ; "prior_schema_row_count", `Int 0
     ; "cursor_swept_stimulus_count", `Int 0
     ; "legacy_cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0

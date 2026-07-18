@@ -1973,7 +1973,8 @@ let private_jsonl_open_existing path flags =
   | fd -> Ok (Some fd)
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
   | exception (Eio.Cancel.Cancelled _ as cancellation) -> raise cancellation
-  | exception_ -> Error (private_jsonl_failure Open_transaction_data exception_)
+  | exception exception_ ->
+    Error (private_jsonl_failure Open_transaction_data exception_)
 ;;
 
 let rec private_jsonl_read_byte fd byte offset =

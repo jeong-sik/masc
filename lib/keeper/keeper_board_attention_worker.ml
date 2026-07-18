@@ -530,12 +530,26 @@ let run_lane_work instance keeper_name signal =
     match signal with
     | Candidate_recorded -> Ok ()
     | Startup_recovery ->
-      let* recovered =
+      let* compacted, recovered =
         run_storage ~label:"board-attention-recover-process-start" (fun () ->
-          Partition.recover_for_process_start
-            ~base_path:instance.base_path
-            ~keeper_name)
+          let* compacted =
+            Candidate.compact_for_process_start
+              ~base_path:instance.base_path
+              ~keeper_name
+          in
+          let* recovered =
+            Partition.recover_for_process_start
+              ~base_path:instance.base_path
+              ~keeper_name
+          in
+          Ok (compacted, recovered))
       in
+      if compacted.rewritten
+      then
+        Log.Keeper.info
+          "Board attention candidate compaction keeper=%s removed_rows=%d"
+          keeper_name
+          compacted.removed_rows;
       if recovered > 0
       then
         Log.Keeper.info

@@ -189,40 +189,9 @@ let test_contexts_form_separate_roots () =
      |> List.sort Int.compare)
 ;;
 
-let test_response_failure_bisects_deterministically () =
-  with_temp_base "board-partition-split" @@ fun base_path ->
+let test_response_failure_defers_without_split () =
+  with_temp_base "board-partition-response-defer" @@ fun base_path ->
   let candidates = List.init 17 (fun index -> candidate (index + 1)) in
-  record_all ~base_path candidates;
-  ignore (ensure ~base_path candidates : P.t list);
-  let root = claim ~base_path in
-  let left, right =
-    match
-      P.fail
-        ~now:120.0
-        ~worker_epoch:"worker-epoch-1"
-        ~base_path
-        ~partition:root
-        (failure A.Response_contract_unavailable "exact id set mismatch")
-    with
-    | Ok (P.Partition_split { left; right; _ }) -> left, right
-    | Ok _ -> Alcotest.fail "expected deterministic split"
-    | Error detail -> Alcotest.fail detail
-  in
-  Alcotest.(check int) "left floor half" 8 (List.length left.candidate_ids);
-  Alcotest.(check int) "right remainder" 9 (List.length right.candidate_ids);
-  Alcotest.(check (list string))
-    "split preserves member order"
-    root.candidate_ids
-    (left.candidate_ids @ right.candidate_ids);
-  Alcotest.(check bool)
-    "child identities differ"
-    true
-    (not (String.equal left.partition_id right.partition_id))
-;;
-
-let test_singleton_response_failure_blocks () =
-  with_temp_base "board-partition-block" @@ fun base_path ->
-  let candidates = [ candidate 1 ] in
   record_all ~base_path candidates;
   ignore (ensure ~base_path candidates : P.t list);
   let root = claim ~base_path in
@@ -232,24 +201,48 @@ let test_singleton_response_failure_blocks () =
       ~worker_epoch:"worker-epoch-1"
       ~base_path
       ~partition:root
-      (failure A.Response_contract_unavailable "singleton contract failure")
+      (failure A.Response_contract_unavailable "exact id set mismatch")
   with
-  | Ok (P.Partition_blocked { state = P.Blocked _; _ }) -> ()
-  | Ok _ -> Alcotest.fail "singleton did not become blocked"
+  | Ok (P.Partition_deferred { state = P.Deferred _; candidate_ids; _ }) ->
+    Alcotest.(check (list string))
+      "same membership remains deferred"
+      root.candidate_ids
+      candidate_ids
+  | Ok _ -> Alcotest.fail "response failure did not defer the same partition"
   | Error detail -> Alcotest.fail detail);
   let health = P.fleet_summary_json ~base_path in
   Alcotest.(check string)
-    "blocked partition degrades health"
+    "deferred response failure degrades health"
     "degraded"
     U.(health |> member "status" |> to_string);
   Alcotest.(check bool)
-    "blocked partition requires operator action"
+    "deferred response failure requires operator action"
     true
-    U.(health |> member "operator_action_required" |> to_bool);
-  Alcotest.(check int)
-    "blocked count"
-    1
-    U.(health |> member "blocked_count" |> to_int)
+    U.(health |> member "operator_action_required" |> to_bool)
+;;
+
+let test_removed_split_state_is_rejected () =
+  with_temp_base "board-partition-removed-split" @@ fun base_path ->
+  let candidates = [ candidate 1; candidate 2 ] in
+  record_all ~base_path candidates;
+  let root = ensure ~base_path candidates |> List.hd in
+  let removed_state =
+    `Assoc
+      [ "kind", `String "split"
+      ; "failure", A.retryable_failure_to_yojson (failure A.Provider_unavailable "x")
+      ; "left_partition_id", `String "left"
+      ; "right_partition_id", `String "right"
+      ; "split_at", `Float 120.0
+      ]
+  in
+  let removed_row =
+    match P.to_yojson root with
+    | `Assoc fields -> `Assoc (("state", removed_state) :: List.remove_assoc "state" fields)
+    | _ -> Alcotest.fail "partition fixture did not encode as an object"
+  in
+  match P.of_yojson removed_row with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "removed Split state was accepted by the durable schema"
 ;;
 
 let test_malformed_partition_ledger_is_health_read_error () =
@@ -412,13 +405,13 @@ let () =
             `Quick
             test_contexts_form_separate_roots
         ; Alcotest.test_case
-            "response failure bisects deterministically"
+            "response failure defers without split"
             `Quick
-            test_response_failure_bisects_deterministically
+            test_response_failure_defers_without_split
         ; Alcotest.test_case
-            "singleton response failure blocks"
+            "removed split state is rejected"
             `Quick
-            test_singleton_response_failure_blocks
+            test_removed_split_state_is_rejected
         ; Alcotest.test_case
             "provider failure waits for signal recovery"
             `Quick

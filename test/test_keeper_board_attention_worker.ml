@@ -217,9 +217,18 @@ let test_blocked_keeper_does_not_block_sibling () =
    with Test_done -> ())
 ;;
 
-let test_startup_scan_recovers_preexisting_candidate () =
+let test_startup_scan_isolates_malformed_ledger () =
   with_temp_base "board-worker-startup" @@ fun base_path ->
   let acceptance = record_candidate ~base_path (candidate ~keeper_name:"keeper-boot" 1) in
+  let ledger_dir =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "board_attention_candidates"
+  in
+  let malformed_path = Filename.concat ledger_dir "malformed.jsonl" in
+  let channel = open_out_bin malformed_path in
+  output_string channel "not-json\n";
+  close_out channel;
   Alcotest.(check bool)
     "pre-start durable record has no live worker"
     true
@@ -251,11 +260,16 @@ let test_startup_scan_recovers_preexisting_candidate () =
        (within clock (fun () ->
           await_completed ~base_path ~keeper_name:"keeper-boot")
         : P.t list);
+     let health = W.health_json ~base_path in
+     Alcotest.(check int)
+       "malformed ledger remains operator-visible"
+       1
+       U.(health |> member "candidate_ledger_discovery_error_count" |> to_int);
      raise Test_done
    with Test_done -> ())
 ;;
 
-let test_lane_exception_is_visible_and_sibling_survives () =
+let test_lane_cancellation_is_visible_and_sibling_survives () =
   with_temp_base "board-worker-lane-failure" @@ fun base_path ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -269,7 +283,7 @@ let test_lane_exception_is_visible_and_sibling_survives () =
          ~judge:(fun candidates ->
            match candidates with
            | first :: _ when String.equal first.A.keeper_name "keeper-a" ->
-             failwith "injected lane crash"
+             raise (Eio.Cancel.Cancelled Exit)
            | _ -> Ok (exact_map candidates))
          ());
      within clock (fun () -> await_registered ~base_path);
@@ -305,13 +319,13 @@ let () =
             `Quick
             test_blocked_keeper_does_not_block_sibling
         ; Alcotest.test_case
-            "startup scan recovers preexisting candidate"
+            "startup scan isolates malformed ledger"
             `Quick
-            test_startup_scan_recovers_preexisting_candidate
+            test_startup_scan_isolates_malformed_ledger
         ; Alcotest.test_case
-            "lane exception is visible and sibling survives"
+            "lane cancellation is visible and sibling survives"
             `Quick
-            test_lane_exception_is_visible_and_sibling_survives
+            test_lane_cancellation_is_visible_and_sibling_survives
         ] )
     ]
 ;;

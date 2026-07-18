@@ -35,9 +35,10 @@ val record_and_notify :
 
 val drain_completed_on_owner_lane :
   base_path:string -> keeper_name:string -> (Candidate.drain_report, string) result
-(** Apply completed durable partition results and legacy [Judged] rows. This
-    path never calls a provider. A partition is marked [Settled] only after all
-    candidate deliveries are durably [Consumed]. *)
+(** Apply completed durable partition results and resume current-schema
+    crash-recovered [Judged] rows. This path never calls a provider. A
+    partition is marked [Settled] only after all candidate deliveries are
+    durably [Consumed]. *)
 
 val health_json : base_path:string -> Yojson.Safe.t
 (** Combine exact durable partition state with process worker registration.

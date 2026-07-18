@@ -235,11 +235,11 @@
         <tbody>
           <tr><td>Provider ownership</td><td>Keeper owner admission 안에서 judge 호출</td><td>admission당 1 batch</td><td>process-owned per-Keeper actor; owner는 completed delivery만 수행</td><td>owner-blocking test: provider promise 대기 중 owner attempted=0, consumed=0</td></tr>
           <tr><td>Cohort size</td><td><code>batch_max_candidates = 8</code></td><td>고정 8 유지</td><td>동일 canonical context의 미할당 Pending 전체가 root; 개수·bytes·시간 cap 없음</td><td>17 candidates → root 1개, members 17</td></tr>
-          <tr><td>Capacity failure</td><td>8이 실제 wire capacity의 대리값</td><td>동일</td><td>typed response-contract failure만 stable midpoint split</td><td>17 → 8/9; provider/runtime 실패는 증폭 없이 Deferred. actual-wire overflow typing은 OAS #2667 blocker</td></tr>
-          <tr><td>Terminal state</td><td>Pending/Judged/Consumed</td><td>batch exact-ID failure evidence</td><td><code>Ready → Running → Completed → Settled</code>, 또는 <code>Split / Deferred / Blocked</code></td><td>singleton contract failure는 Blocked; 자동 폐기·attempt budget 없음</td></tr>
+          <tr><td>Capacity failure</td><td>8이 실제 wire capacity의 대리값</td><td>동일</td><td>response-contract failure는 동일 partition에 Deferred</td><td>malformed/missing/duplicate output은 capacity 증거가 아니므로 split 금지. actual-wire overflow typing은 OAS #2667 blocker</td></tr>
+          <tr><td>Terminal state</td><td>Pending/Judged/Consumed</td><td>batch exact-ID failure evidence</td><td><code>Ready → Running → Completed → Settled</code>, 또는 <code>Deferred / Blocked</code></td><td>제거된 Split 상태는 strict parser가 거부; 자동 폐기·attempt budget 없음</td></tr>
           <tr><td>Crash recovery</td><td>candidate 재조회</td><td>Judged replay</td><td>Running은 process claim; actor 시작 시 Ready로 복구. Completed는 candidate apply 후에만 Settled</td><td>running recovery 1/1, settlement replay idempotent</td></tr>
           <tr><td>Lane isolation</td><td>한 Keeper의 provider wait가 같은 owner lane을 막음</td><td>점유 횟수만 제한</td><td>Keeper별 actor; A provider가 block돼도 B가 완료</td><td>sibling progress 1/1, duplicate effect 0 fixture</td></tr>
-          <tr><td>Operator truth</td><td>partition 상태 없음</td><td>candidate failure만 파일에 존재</td><td>candidate Pending/Judged/Consumed, partition 7-state, worker registration, lane failure, read errors를 full health에 결합</td><td>Blocked/Deferred/read error/pending-without-worker/lane failure ⇒ degraded + operator action</td></tr>
+          <tr><td>Operator truth</td><td>partition 상태 없음</td><td>candidate failure만 파일에 존재</td><td>candidate Pending/Judged/Consumed, partition 6-state, worker registration, lane failure, read errors를 typed summary로 결합</td><td>Blocked/Deferred/read error/pending-without-worker/lane failure ⇒ degraded + operator action</td></tr>
         </tbody>
       </table>
     </div>
@@ -251,13 +251,12 @@
                  ├─ claim Ready → Running
                  ├─ exact-ID structured judge
                  ├─ success → Completed ───────┐
-                 ├─ response contract → Split │
-                 ├─ provider/runtime → Deferred│
-                 └─ singleton/membership → Blocked
+                 ├─ response/provider/runtime → Deferred
+                 └─ membership/delivery invariant → Blocked
                                                ▼
 Keeper owner admission: apply Completed → idempotent event enqueue → Consumed → Settled</pre>
     <p><strong>Crash matrix:</strong> candidate commit 전 crash는 작업 미접수로 끝나고, commit 후 wake 전 crash는 startup scan이 복구한다. Running 중 crash는 다음 worker epoch가 Ready로 회수한다. Completed 후 candidate apply 전 crash는 Completed replay, event enqueue 후 Consumed commit 전 crash는 candidate ID 기반 enqueue replay, Consumed 후 Settled 전 crash는 exact judgment replay 후 Settled로 수렴한다. 서로 다른 durable file을 하나의 atomic transaction으로 가장하지 않는다.</p>
-    <p><strong>현재 검증치:</strong> candidate 23, partition 9, worker 4개, 총 36개 집중 테스트와 server health library link가 통과했다. 여기에는 17-member root, 8/9 split, exact settlement replay, owner nonblocking, sibling isolation, startup recovery, cross-Keeper path collision, lane exception health 노출이 포함된다. 따라서 구현 단위 검증은 green이지만, 이 문서의 상태는 “production SLO proven”이 아니다.</p>
+    <p><strong>현재 검증 경계:</strong> strict removed-state rejection, response failure no-split, exact settlement replay, owner nonblocking, sibling cancellation isolation, per-ledger startup recovery, cross-Keeper path collision, typed health projection을 focused target과 CI에서 검증한다. 이 구현 단위 증거는 8-hour fleet와 direct-latency SLO를 대신하지 않는다.</p>
   </section>
 
   <section>
@@ -274,7 +273,7 @@ Keeper owner admission: apply Completed → idempotent event enqueue → Consume
                                │                       │
                                ├─ persisted partitions │
                                ├─ exact context cohort │
-                               ├─ typed failure split  │
+                               ├─ typed deferred state │
                                └─ durable judgments    │
                                                        ▼
                                           Per-Keeper Event Queue v3
@@ -317,10 +316,9 @@ type mode_source =
         <h3>Capacity is observed through typed contracts</h3>
         <pre>Ready → Running
   ├─ exact response IDs → Completed
-  ├─ typed response/capacity contract failure
-  │      └─ stable midpoint Split
-  ├─ provider/runtime unavailable → Deferred
-  └─ singleton contract failure → Blocked</pre>
+  ├─ response/provider/runtime unavailable → Deferred
+  ├─ membership/delivery invariant violation → Blocked
+  └─ future typed actual-wire overflow → split authority not implemented yet</pre>
         <ul>
           <li>candidate 개수 8, bytes/4, prose error 문자열을 안전 근거로 사용하지 않는다.</li>
           <li>partition membership와 요청/응답 ID 집합은 exact equality로 검증한다.</li>
@@ -401,14 +399,14 @@ type job_state =
       </ol>
       <p><strong>Live state:</strong> #25073은 2026-07-17 16:31 KST에 merge됐다. 아래 수정은 merge된 TTL·batch 경로를 되돌리는 것이 아니라 최신 main 위 후속 draft PR로 제출한다.</p>
       <p><strong>Exit:</strong> Build/Test green + mixed context + direct preemption + 439/451 backlog simulation.</p>
-      <p><strong>Exact-fit dependency, adversarial update:</strong> OAS v0.216.1의 provider-owned input count는 Anthropic wire만 지원하고 현재 judge는 Ollama-native다. <a href="https://github.com/ollama/ollama/blob/main/docs/api.md">Ollama 공식 API</a>는 <code>/api/chat</code> 성공 응답의 <code>prompt_eval_count</code>만 제공하며 public tokenize/preflight endpoint를 정의하지 않는다. 또한 native chat은 context 초과를 client-visible typed overflow로 보장하지 않고 입력을 truncate할 수 있다. Cloud 400의 <code>error</code> 문자열을 파싱하는 방식은 금지한다. 따라서 OAS <a href="https://github.com/jeong-sik/oas/issues/2667">#2667</a>을 가짜 exact-fit 계약으로 구현하지 않는다. fixed <code>batch_max_candidates = 8</code> 제거의 선행 설계는 persisted partition scheduler다: response candidate-id 집합이 정확히 일치한 partition만 commit하고, contract failure partition은 결정론적으로 분할하며, 각 attempt는 owner admission 밖의 judgment plane에서 실행한다.</p>
+      <p><strong>Exact-fit dependency, adversarial update:</strong> OAS v0.216.1의 provider-owned input count는 Anthropic wire만 지원하고 현재 judge는 Ollama-native다. <a href="https://github.com/ollama/ollama/blob/main/docs/api.md">Ollama 공식 API</a>는 <code>/api/chat</code> 성공 응답의 <code>prompt_eval_count</code>만 제공하며 public tokenize/preflight endpoint를 정의하지 않는다. 또한 native chat은 context 초과를 client-visible typed overflow로 보장하지 않고 입력을 truncate할 수 있다. Cloud 400의 <code>error</code> 문자열을 파싱하는 방식은 금지한다. 따라서 OAS <a href="https://github.com/jeong-sik/oas/issues/2667">#2667</a>을 가짜 exact-fit 계약으로 구현하지 않는다. persisted partition scheduler는 exact response ID 집합만 commit하고 일반 response/provider failure는 동일 partition에 Deferred로 남긴다. 실제 split은 actual-wire typed overflow authority가 생긴 뒤 별도 상태로 도입한다.</p>
       <p><strong>Structured-output contract:</strong> 현재 Ollama 공식 API는 <code>format</code> JSON schema 기반 structured output을 문서화한다. 그러나 설정된 Cloud 모델·endpoint가 동일 계약을 반복 가능하게 지킨다는 증거는 별개다. 동일 endpoint contract test와 typed startup rejection이 없으면 고객 환경에 따라 구조화 판정이 prose 또는 partial ID 응답으로 퇴행할 수 있다.</p>
     </div>
     <div class="panel phase">
       <h3>PR-2 — Persisted partition scheduler (stacked implementation)</h3>
       <ol>
         <li>fixed 8-cap과 owner-lane production judge entrypoint를 제거한다.</li>
-        <li>exact-context root, deterministic split, Deferred, Blocked, Completed/Settled FSM을 durable JSONL로 저장한다.</li>
+        <li>exact-context root와 Deferred, Blocked, Completed/Settled FSM을 durable JSONL로 저장하며 근거 없는 Split 상태는 두지 않는다.</li>
         <li>Keeper별 process-owned actor로 provider wait를 owner admission과 sibling Keeper에서 격리한다.</li>
         <li>startup scan은 sanitized filename이 아니라 row의 exact Keeper identity를 읽고 identity collision을 거부한다.</li>
         <li>full health에 candidate/partition/worker/read-error 상태를 추가한다.</li>

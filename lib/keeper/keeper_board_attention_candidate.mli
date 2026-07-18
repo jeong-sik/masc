@@ -109,10 +109,20 @@ val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
-val discover_keeper_names : base_path:string -> (string list, string) result
+type ledger_read_error =
+  { ledger_path : string
+  ; detail : string
+  }
+
+type discovery =
+  { keeper_names : string list
+  ; read_errors : ledger_read_error list
+  }
+
+val discover_keeper_names : base_path:string -> discovery
 (** Discover exact durable Keeper identities by parsing candidate rows, not by
-    reversing sanitized filenames. A malformed ledger or a filename collision
-    containing multiple identities is an error. *)
+    reversing sanitized filenames. Malformed or identity-conflicting ledgers
+    are returned as per-ledger errors while healthy ledgers remain available. *)
 
 val record : base_path:string -> candidate -> record_result
 
@@ -156,10 +166,10 @@ val apply_completed_judgments :
     further rewrite. Replays require an exactly equal persisted judgment;
     conflicting results fail without overwriting either value. *)
 
-val consume_judged_on_owner_lane :
+val resume_judged_on_owner_lane :
   base_path:string -> keeper_name:string -> (drain_report, string) result
-(** Deliver and consume legacy or crash-recovered [Judged] rows without any
-    provider call. *)
+(** Resume current-schema [Judged] rows after a crash between judgment commit
+    and durable delivery. Never calls a provider. *)
 
 module For_testing : sig
   val set_ledger_rewrite_observer : (unit -> unit) -> unit

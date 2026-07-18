@@ -329,9 +329,15 @@ let test_malformed_ledger_is_explicit_and_not_overwritten () =
   (match A.load_candidates ~base_path ~keeper_name with
    | Error detail -> Alcotest.(check bool) "error detail" true (String.length detail > 0)
    | Ok _ -> Alcotest.fail "malformed ledger was silently skipped");
-  (match A.discover_keeper_names ~base_path with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "startup discovery silently skipped a malformed ledger");
+  let discovery = A.discover_keeper_names ~base_path in
+  Alcotest.(check int)
+    "malformed ledger is reported"
+    1
+    (List.length discovery.read_errors);
+  Alcotest.(check (list string))
+    "malformed ledger does not invent an identity"
+    []
+    discovery.keeper_names;
   (match A.record ~base_path (candidate ~keeper_name ()) with
    | A.Record_error _ -> ()
    | A.Recorded _ | A.Duplicate _ -> Alcotest.fail "malformed ledger was overwritten");
@@ -358,9 +364,15 @@ let test_candidate_ledger_rejects_cross_keeper_identity () =
   (match A.load_candidates ~base_path ~keeper_name:expected_keeper with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "candidate ledger crossed Keeper identity");
-  match A.discover_keeper_names ~base_path with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "startup discovery crossed Keeper path identity"
+  let discovery = A.discover_keeper_names ~base_path in
+  Alcotest.(check int)
+    "cross-Keeper ledger is reported"
+    1
+    (List.length discovery.read_errors);
+  Alcotest.(check (list string))
+    "cross-Keeper ledger is not started"
+    []
+    discovery.keeper_names
 ;;
 
 let test_strict_judgment_contract_rejects_extra_fields () =

@@ -707,13 +707,30 @@ let load_candidates ~base_path ~keeper_name =
   validate_keeper_identity ~keeper_name candidates
 ;;
 
+type ledger_read_error =
+  { ledger_path : string
+  ; detail : string
+  }
+
+type discovery =
+  { keeper_names : string list
+  ; read_errors : ledger_read_error list
+  }
+
 let discover_keeper_names ~base_path =
   let directory = candidate_dir base_path in
   try
     if not (Sys.file_exists directory)
-    then Ok []
+    then { keeper_names = []; read_errors = [] }
     else if not (Sys.is_directory directory)
-    then Error ("Board attention candidate ledger root is not a directory: " ^ directory)
+    then
+      { keeper_names = []
+      ; read_errors =
+          [ { ledger_path = directory
+            ; detail = "Board attention candidate ledger root is not a directory"
+            }
+          ]
+      }
     else
       let paths =
         Sys.readdir directory
@@ -723,51 +740,71 @@ let discover_keeper_names ~base_path =
         |> List.map (Filename.concat directory)
       in
       List.fold_left
-        (fun result path ->
-           let* names = result in
-           let* candidates = load_candidates_path path in
-           let ledger_segment =
-             path
-             |> Filename.basename
-             |> fun name -> Filename.chop_suffix name ".jsonl"
-           in
-           let ledger_names =
-             candidates
-             |> List.map (fun candidate -> candidate.keeper_name)
-             |> List.sort_uniq String.compare
-           in
-           match ledger_names with
-           | [] -> Ok names
-           | [ keeper_name ] ->
-             let expected_segment =
-               Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+        (fun discovery path ->
+           match load_candidates_path path with
+           | Error detail ->
+             { discovery with
+               read_errors = { ledger_path = path; detail } :: discovery.read_errors
+             }
+           | Ok candidates ->
+             let ledger_segment =
+               path
+               |> Filename.basename
+               |> fun name -> Filename.chop_suffix name ".jsonl"
              in
-             if String.equal ledger_segment expected_segment
-             then Ok (keeper_name :: names)
-             else
-               Error
-                 (Printf.sprintf
-                    "Board attention candidate ledger path identity mismatch path=%s keeper=%s expected_segment=%s"
-                    path
-                    keeper_name
-                    expected_segment)
-           | _ ->
-             Error
-               (Printf.sprintf
-                  "Board attention candidate ledger identity collision path=%s keepers=[%s]"
-                  path
-                  (String.concat "," ledger_names)))
-        (Ok [])
+             let ledger_names =
+               candidates
+               |> List.map (fun candidate -> candidate.keeper_name)
+               |> List.sort_uniq String.compare
+             in
+             (match ledger_names with
+              | [] -> discovery
+              | [ keeper_name ] ->
+                let expected_segment =
+                  Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+                in
+                if String.equal ledger_segment expected_segment
+                then
+                  { discovery with keeper_names = keeper_name :: discovery.keeper_names }
+                else
+                  { discovery with
+                    read_errors =
+                      { ledger_path = path
+                      ; detail =
+                          Printf.sprintf
+                            "Board attention candidate ledger path identity mismatch keeper=%s expected_segment=%s"
+                            keeper_name
+                            expected_segment
+                      }
+                      :: discovery.read_errors
+                  }
+              | _ ->
+                { discovery with
+                  read_errors =
+                    { ledger_path = path
+                    ; detail =
+                        Printf.sprintf
+                          "Board attention candidate ledger identity collision keepers=[%s]"
+                          (String.concat "," ledger_names)
+                    }
+                    :: discovery.read_errors
+                }))
+        { keeper_names = []; read_errors = [] }
         paths
-      |> Result.map (List.sort_uniq String.compare)
+      |> fun discovery ->
+      { keeper_names = List.sort_uniq String.compare discovery.keeper_names
+      ; read_errors = List.rev discovery.read_errors
+      }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Error
-      (Printf.sprintf
-         "Board attention candidate discovery failed directory=%s: %s"
-         directory
-         (Printexc.to_string exn))
+    { keeper_names = []
+    ; read_errors =
+        [ { ledger_path = directory
+          ; detail = "Board attention candidate discovery failed: " ^ Printexc.to_string exn
+          }
+        ]
+    }
 ;;
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
@@ -1520,7 +1557,7 @@ let apply_completed_judgments ~base_path ~keeper_name completed =
     Ok { attempted = List.length completed; consumed; remaining }
 ;;
 
-let consume_judged_on_owner_lane ~base_path ~keeper_name =
+let resume_judged_on_owner_lane ~base_path ~keeper_name =
   let* candidates = load_candidates ~base_path ~keeper_name in
   let judged =
     List.filter

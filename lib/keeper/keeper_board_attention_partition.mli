@@ -8,7 +8,6 @@
 
     {v
       Ready -> Running -> Completed -> Settled
-                         -> Split (two Ready children)
                          -> Deferred
                          -> Blocked
     v}
@@ -35,12 +34,6 @@ type state =
       { failure : Candidate.retryable_failure
       ; deferred_at : float
       }
-  | Split of
-      { failure : Candidate.retryable_failure
-      ; left_partition_id : string
-      ; right_partition_id : string
-      ; split_at : float
-      }
   | Completed of
       { items : completed_item list
       ; completed_at : float
@@ -53,7 +46,6 @@ type state =
 
 type t =
   { partition_id : string
-  ; parent_partition_id : string option
   ; keeper_name : string
   ; context_key : string
   ; candidate_ids : string list
@@ -63,11 +55,6 @@ type t =
 
 type transition =
   | Partition_completed of t
-  | Partition_split of
-      { parent : t
-      ; left : t
-      ; right : t
-      }
   | Partition_deferred of t
   | Partition_blocked of t
 
@@ -117,10 +104,10 @@ val fail :
   partition:t ->
   Candidate.retryable_failure ->
   (transition, string) result
-(** A response-contract failure deterministically bisects a non-singleton
-    partition by stable member order. A singleton response failure and any
-    membership conflict become [Blocked]. Runtime, prompt, and provider
-    failures become [Deferred] without timers or attempt counters. *)
+(** Runtime, prompt, provider, and response-contract failures become
+    [Deferred] without timers or attempt counters. A response failure is not
+    evidence of provider capacity and never authorizes partition splitting.
+    Membership conflicts and impossible delivery failures become [Blocked]. *)
 
 val completed :
   base_path:string -> keeper_name:string -> (t list, string) result
@@ -134,6 +121,16 @@ val settle_many :
 (** Mark completed partitions [Settled] after candidate results have been
     durably applied. A replay of already-settled rows is accepted. *)
 
+type fleet_summary
+
+val fleet_summary : base_path:string -> fleet_summary
+val pending_candidate_count : fleet_summary -> int
+val status_reasons : fleet_summary -> string list
+val operator_action_required : fleet_summary -> bool
+val fleet_summary_schema : string
+val fleet_summary_detail_fields : fleet_summary -> (string * Yojson.Safe.t) list
+val fleet_summary_fields : fleet_summary -> (string * Yojson.Safe.t) list
+val fleet_summary_to_yojson : fleet_summary -> Yojson.Safe.t
 val fleet_summary_json : base_path:string -> Yojson.Safe.t
 (** Exact on-disk partition state for operators. [Blocked], [Deferred], and
     ledger read failures require operator action and make the component

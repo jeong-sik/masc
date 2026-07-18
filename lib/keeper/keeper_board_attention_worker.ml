@@ -38,7 +38,6 @@ type instance =
   }
 
 exception Worker_registration_conflict of string
-exception Worker_startup_scan_failed of string
 
 let ( let* ) = Result.bind
 let instances_mutex = Stdlib.Mutex.create ()
@@ -298,7 +297,6 @@ let rec drain_keeper instance keeper_name =
     in
     (match transition with
      | Partition.Partition_completed _ -> wake_owner ~base_path keeper_name
-     | Partition.Partition_split _
      | Partition.Partition_deferred _
      | Partition.Partition_blocked _ ->
        ());
@@ -351,7 +349,16 @@ let run_lane instance keeper_name =
              keeper_name
              detail))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    (match Eio.Switch.get_error instance.sw with
+     | Some _ -> raise exn
+     | None ->
+       let detail = Printexc.to_string exn in
+       record_lane_failure instance keeper_name detail;
+       Log.Keeper.error
+         "Board attention partition lane cancelled independently keeper=%s: %s"
+         keeper_name
+         detail)
   | exn ->
     let detail = Printexc.to_string exn in
     record_lane_failure instance keeper_name detail;
@@ -383,8 +390,8 @@ let rec run_dispatcher instance =
   match Eio.Condition.loop_no_mutex instance.condition (fun () -> take_startable instance) with
   | `Closed -> ()
   | `Keeper keeper_name ->
-    (match Eio.Fiber.fork ~sw:instance.sw (fun () -> run_lane instance keeper_name) with
-     | () -> ()
+    (match Eio.Fiber.fork_promise ~sw:instance.sw (fun () -> run_lane instance keeper_name) with
+     | _lane_result -> ()
      | exception exn ->
        finish_lane instance keeper_name;
        raise exn);
@@ -428,13 +435,20 @@ let start_instance ~sw ~base_path ~worker_epoch ~judge =
   if not (register_instance instance)
   then raise (Worker_registration_conflict base_path);
   Eio.Switch.on_release sw (fun () -> close_instance instance);
-  let boot_names =
+  let discovery =
     Eio_unix.run_in_systhread ~label:"board-attention-worker-boot-scan" (fun () ->
-      match Candidate.discover_keeper_names ~base_path with
-      | Ok names -> names
-      | Error detail -> raise (Worker_startup_scan_failed detail))
+      Candidate.discover_keeper_names ~base_path)
   in
-  List.iter (fun keeper_name -> ignore (signal_instance instance keeper_name : wake_result)) boot_names;
+  List.iter
+    (fun error ->
+       Log.Keeper.error
+         "Board attention startup skipped unreadable candidate ledger path=%s: %s"
+         error.Candidate.ledger_path
+         error.detail)
+    discovery.read_errors;
+  List.iter
+    (fun keeper_name -> ignore (signal_instance instance keeper_name : wake_result))
+    discovery.keeper_names;
   run_dispatcher instance
 ;;
 
@@ -449,10 +463,10 @@ let start ~sw ~base_path () =
 ;;
 
 let drain_completed_on_owner_lane ~base_path ~keeper_name =
-  let* legacy = Candidate.consume_judged_on_owner_lane ~base_path ~keeper_name in
+  let* resumed = Candidate.resume_judged_on_owner_lane ~base_path ~keeper_name in
   let* completed = Partition.completed ~base_path ~keeper_name in
   match completed with
-  | [] -> Ok legacy
+  | [] -> Ok resumed
   | _ :: _ ->
     let partition_ids = List.map (fun partition -> partition.Partition.partition_id) completed in
     let completed_items =
@@ -464,7 +478,6 @@ let drain_completed_on_owner_lane ~base_path ~keeper_name =
            | Partition.Ready
            | Partition.Running _
            | Partition.Deferred _
-           | Partition.Split _
            | Partition.Settled _
            | Partition.Blocked _ ->
              [])
@@ -490,145 +503,93 @@ let drain_completed_on_owner_lane ~base_path ~keeper_name =
         Ok ()
     in
     Ok
-      { Candidate.attempted = legacy.attempted + applied.attempted
-      ; consumed = legacy.consumed + applied.consumed
-      ; remaining = legacy.remaining + applied.remaining
+      { Candidate.attempted = resumed.attempted + applied.attempted
+      ; consumed = resumed.consumed + applied.consumed
+      ; remaining = resumed.remaining + applied.remaining
       }
 ;;
 
 let health_json ~base_path =
-  match Partition.fleet_summary_json ~base_path with
-  | `Assoc fields ->
-    let int_field name =
-      match List.assoc_opt name fields with
-      | Some (`Int value) -> value
-      | _ -> 0
-    in
-    let bool_field name =
-      match List.assoc_opt name fields with
-      | Some (`Bool value) -> value
-      | _ -> false
-    in
-    let string_list_field name =
-      match List.assoc_opt name fields with
-      | Some (`List values) ->
-        List.filter_map (function `String value -> Some value | _ -> None) values
-      | _ -> []
-    in
-    let replace name value fields =
-      (name, value) :: List.remove_assoc name fields
-    in
-    let worker_registered = registered ~base_path in
-    let lane_failures = lane_failures ~base_path in
-    let lane_failure_count = List.length lane_failures in
-    let pending_candidate_count = int_field "pending_candidate_count" in
-    let ( candidate_keeper_names
-        , candidate_discovery_error
-        , candidate_pending_count
-        , candidate_judged_count
-        , candidate_consumed_count
-        , candidate_read_errors ) =
-      match Candidate.discover_keeper_names ~base_path with
-      | Error detail -> [], Some detail, 0, 0, 0, []
-      | Ok names ->
-        List.fold_left
-          (fun (pending, judged, consumed, errors) keeper_name ->
-             match Candidate.load_candidates ~base_path ~keeper_name with
-             | Error detail ->
-               ( pending
-               , judged
-               , consumed
-               , `Assoc
-                   [ "keeper_name", `String keeper_name
-                   ; "error", `String detail
-                   ]
-                 :: errors )
-             | Ok candidates ->
-               List.fold_left
-                 (fun (pending, judged, consumed, errors) candidate ->
-                    match candidate.Candidate.status with
-                    | Candidate.Pending _ -> pending + 1, judged, consumed, errors
-                    | Candidate.Judged _ -> pending, judged + 1, consumed, errors
-                    | Candidate.Consumed _ -> pending, judged, consumed + 1, errors)
-                 (pending, judged, consumed, errors)
-                 candidates)
-          (0, 0, 0, [])
-          names
-        |> fun (pending, judged, consumed, errors) ->
-        names, None, pending, judged, consumed, List.rev errors
-    in
-    let worker_missing =
-      (pending_candidate_count > 0 || candidate_pending_count > 0)
-      && not worker_registered
-    in
-    let candidate_read_error_count = List.length candidate_read_errors in
-    let operator_action_required =
-      bool_field "operator_action_required"
-      || worker_missing
-      || lane_failure_count > 0
-      || Option.is_some candidate_discovery_error
-      || candidate_read_error_count > 0
-    in
-    let status_reasons =
-      let reasons = string_list_field "status_reasons" in
-      let reasons =
-        if worker_missing && not (List.mem "worker_not_registered" reasons)
-        then reasons @ [ "worker_not_registered" ]
-        else reasons
-      in
-      let reasons =
-        if lane_failure_count > 0 && not (List.mem "lane_failures" reasons)
-        then reasons @ [ "lane_failures" ]
-        else reasons
-      in
-      let reasons =
-        if
-          Option.is_some candidate_discovery_error
-          && not (List.mem "candidate_ledger_discovery_error" reasons)
-        then reasons @ [ "candidate_ledger_discovery_error" ]
-        else reasons
-      in
-      if
-        candidate_read_error_count > 0
-        && not (List.mem "candidate_ledger_read_errors" reasons)
-      then reasons @ [ "candidate_ledger_read_errors" ]
-      else reasons
-    in
-    fields
-    |> replace "status" (`String (if operator_action_required then "degraded" else "ok"))
-    |> replace "operator_action_required" (`Bool operator_action_required)
-    |> replace
-         "status_reasons"
-         (`List (List.map (fun reason -> `String reason) status_reasons))
-    |> replace "worker_registered" (`Bool worker_registered)
-    |> replace "active_keeper_count" (`Int (active_keeper_count ~base_path))
-    |> replace "lane_failure_count" (`Int lane_failure_count)
-    |> replace
-         "lane_failures"
-         (`List
-            (List.map
-               (fun (keeper_name, detail) ->
-                  `Assoc
-                    [ "keeper_name", `String keeper_name
-                    ; "error", `String detail
-                    ])
-               lane_failures))
-    |> replace "candidate_ledger_keeper_count" (`Int (List.length candidate_keeper_names))
-    |> replace
-         "candidate_ledger_keeper_names"
-         (`List (List.map (fun name -> `String name) candidate_keeper_names))
-    |> replace
-         "candidate_ledger_discovery_error"
-         (match candidate_discovery_error with
-          | Some detail -> `String detail
-          | None -> `Null)
-    |> replace "candidate_pending_count" (`Int candidate_pending_count)
-    |> replace "candidate_judged_count" (`Int candidate_judged_count)
-    |> replace "candidate_consumed_count" (`Int candidate_consumed_count)
-    |> replace "candidate_ledger_read_error_count" (`Int candidate_read_error_count)
-    |> replace "candidate_ledger_read_errors" (`List candidate_read_errors)
-    |> fun fields -> `Assoc fields
-  | json -> json
+  let durable = Partition.fleet_summary ~base_path in
+  let worker_registered = registered ~base_path in
+  let lane_failures = lane_failures ~base_path in
+  let lane_failure_count = List.length lane_failures in
+  let discovery = Candidate.discover_keeper_names ~base_path in
+  let candidate_keeper_names = discovery.keeper_names in
+  let ( candidate_pending_count
+      , candidate_judged_count
+      , candidate_consumed_count
+      , candidate_read_errors ) =
+    List.fold_left
+      (fun (pending, judged, consumed, errors) keeper_name ->
+         match Candidate.load_candidates ~base_path ~keeper_name with
+         | Error detail -> pending, judged, consumed, (keeper_name, detail) :: errors
+         | Ok candidates ->
+           List.fold_left
+             (fun (pending, judged, consumed, errors) candidate ->
+                match candidate.Candidate.status with
+                | Candidate.Pending _ -> pending + 1, judged, consumed, errors
+                | Candidate.Judged _ -> pending, judged + 1, consumed, errors
+                | Candidate.Consumed _ -> pending, judged, consumed + 1, errors)
+             (pending, judged, consumed, errors)
+             candidates)
+      (0, 0, 0, [])
+      candidate_keeper_names
+    |> fun (pending, judged, consumed, errors) ->
+    pending, judged, consumed, List.rev errors
+  in
+  let worker_missing =
+    (Partition.pending_candidate_count durable > 0 || candidate_pending_count > 0)
+    && not worker_registered
+  in
+  let status_reasons =
+    Partition.status_reasons durable
+    @ (if worker_missing then [ "worker_not_registered" ] else [])
+    @ (if lane_failure_count > 0 then [ "lane_failures" ] else [])
+    @ (if discovery.read_errors <> [] then [ "candidate_ledger_discovery_errors" ] else [])
+    @ (if candidate_read_errors <> [] then [ "candidate_ledger_read_errors" ] else [])
+  in
+  let operator_action_required =
+    Partition.operator_action_required durable
+    || worker_missing
+    || lane_failure_count > 0
+    || discovery.read_errors <> []
+    || candidate_read_errors <> []
+  in
+  let ledger_error_json error =
+    `Assoc
+      [ "ledger_path", `String error.Candidate.ledger_path
+      ; "error", `String error.detail
+      ]
+  in
+  let keeper_error_json (keeper_name, detail) =
+    `Assoc
+      [ "keeper_name", `String keeper_name
+      ; "error", `String detail
+      ]
+  in
+  `Assoc
+    ([ "schema", `String Partition.fleet_summary_schema
+     ; "status", `String (if operator_action_required then "degraded" else "ok")
+     ; "operator_action_required", `Bool operator_action_required
+     ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
+     ; "worker_registered", `Bool worker_registered
+     ; "active_keeper_count", `Int (active_keeper_count ~base_path)
+     ; "lane_failure_count", `Int lane_failure_count
+     ; "lane_failures", `List (List.map keeper_error_json lane_failures)
+     ; "candidate_ledger_keeper_count", `Int (List.length candidate_keeper_names)
+     ; ( "candidate_ledger_keeper_names"
+       , `List (List.map (fun name -> `String name) candidate_keeper_names) )
+     ; "candidate_ledger_discovery_error_count", `Int (List.length discovery.read_errors)
+     ; ( "candidate_ledger_discovery_errors"
+       , `List (List.map ledger_error_json discovery.read_errors) )
+     ; "candidate_pending_count", `Int candidate_pending_count
+     ; "candidate_judged_count", `Int candidate_judged_count
+     ; "candidate_consumed_count", `Int candidate_consumed_count
+     ; "candidate_ledger_read_error_count", `Int (List.length candidate_read_errors)
+     ; "candidate_ledger_read_errors", `List (List.map keeper_error_json candidate_read_errors)
+     ]
+     @ Partition.fleet_summary_detail_fields durable)
 ;;
 
 module For_testing = struct

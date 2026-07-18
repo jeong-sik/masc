@@ -20,12 +20,6 @@ type state =
       { failure : Candidate.retryable_failure
       ; deferred_at : float
       }
-  | Split of
-      { failure : Candidate.retryable_failure
-      ; left_partition_id : string
-      ; right_partition_id : string
-      ; split_at : float
-      }
   | Completed of
       { items : completed_item list
       ; completed_at : float
@@ -38,7 +32,6 @@ type state =
 
 type t =
   { partition_id : string
-  ; parent_partition_id : string option
   ; keeper_name : string
   ; context_key : string
   ; candidate_ids : string list
@@ -48,11 +41,6 @@ type t =
 
 type transition =
   | Partition_completed of t
-  | Partition_split of
-      { parent : t
-      ; left : t
-      ; right : t
-      }
   | Partition_deferred of t
   | Partition_blocked of t
 
@@ -62,15 +50,9 @@ let state_to_string = function
   | Ready -> "ready"
   | Running _ -> "running"
   | Deferred _ -> "deferred"
-  | Split _ -> "split"
   | Completed _ -> "completed"
   | Settled _ -> "settled"
   | Blocked _ -> "blocked"
-;;
-
-let option_json f = function
-  | Some value -> f value
-  | None -> `Null
 ;;
 
 let string_list_to_yojson values =
@@ -98,19 +80,6 @@ let state_to_yojson = function
       ; "failure", Candidate.retryable_failure_to_yojson failure
       ; "deferred_at", `Float deferred_at
       ]
-  | Split
-      { failure
-      ; left_partition_id
-      ; right_partition_id
-      ; split_at
-      } ->
-    `Assoc
-      [ "kind", `String "split"
-      ; "failure", Candidate.retryable_failure_to_yojson failure
-      ; "left_partition_id", `String left_partition_id
-      ; "right_partition_id", `String right_partition_id
-      ; "split_at", `Float split_at
-      ]
   | Completed { items; completed_at } ->
     `Assoc
       [ "kind", `String "completed"
@@ -133,8 +102,6 @@ let state_to_yojson = function
 let to_yojson partition =
   `Assoc
     [ "partition_id", `String partition.partition_id
-    ; ( "parent_partition_id"
-      , option_json (fun value -> `String value) partition.parent_partition_id )
     ; "keeper_name", `String partition.keeper_name
     ; "context_key", `String partition.context_key
     ; "candidate_ids", string_list_to_yojson partition.candidate_ids
@@ -178,11 +145,6 @@ let float_json ~context = function
   | `Float value -> Ok value
   | `Int value -> Ok (float_of_int value)
   | _ -> Error (context ^ " must be a number")
-;;
-
-let optional_string_json ~context = function
-  | `Null -> Ok None
-  | value -> Result.map (fun parsed -> Some parsed) (string_json ~context value)
 ;;
 
 let string_list_json ~context = function
@@ -245,27 +207,6 @@ let state_of_yojson json =
     let* deferred_at_json = field ~context "deferred_at" fields in
     let* deferred_at = float_json ~context:(context ^ ".deferred_at") deferred_at_json in
     Ok (Deferred { failure; deferred_at })
-  | "split" ->
-    let* () =
-      exact_fields
-        ~context
-        [ "kind"
-        ; "failure"
-        ; "left_partition_id"
-        ; "right_partition_id"
-        ; "split_at"
-        ]
-        fields
-    in
-    let* failure_json = field ~context "failure" fields in
-    let* failure = Candidate.retryable_failure_of_yojson failure_json in
-    let* left_json = field ~context "left_partition_id" fields in
-    let* left_partition_id = string_json ~context:(context ^ ".left_partition_id") left_json in
-    let* right_json = field ~context "right_partition_id" fields in
-    let* right_partition_id = string_json ~context:(context ^ ".right_partition_id") right_json in
-    let* split_at_json = field ~context "split_at" fields in
-    let* split_at = float_json ~context:(context ^ ".split_at") split_at_json in
-    Ok (Split { failure; left_partition_id; right_partition_id; split_at })
   | "completed" ->
     let* () = exact_fields ~context [ "kind"; "items"; "completed_at" ] fields in
     let* items_json = field ~context "items" fields in
@@ -310,7 +251,6 @@ let of_yojson json =
     exact_fields
       ~context
       [ "partition_id"
-      ; "parent_partition_id"
       ; "keeper_name"
       ; "context_key"
       ; "candidate_ids"
@@ -321,8 +261,6 @@ let of_yojson json =
   in
   let* partition_id_json = field ~context "partition_id" fields in
   let* partition_id = string_json ~context:(context ^ ".partition_id") partition_id_json in
-  let* parent_json = field ~context "parent_partition_id" fields in
-  let* parent_partition_id = optional_string_json ~context:(context ^ ".parent_partition_id") parent_json in
   let* keeper_name_json = field ~context "keeper_name" fields in
   let* keeper_name = string_json ~context:(context ^ ".keeper_name") keeper_name_json in
   let* context_key_json = field ~context "context_key" fields in
@@ -336,7 +274,6 @@ let of_yojson json =
   let* state = state_of_yojson state_json in
   Ok
     { partition_id
-    ; parent_partition_id
     ; keeper_name
     ; context_key
     ; candidate_ids
@@ -473,13 +410,9 @@ let root_id ~keeper_name ~context_key candidate_ids =
   digest_id "ba-root-" ("root" :: keeper_name :: context_key :: candidate_ids)
 ;;
 
-let child_id ~parent_partition_id candidate_ids =
-  digest_id "ba-part-" ("child" :: parent_partition_id :: candidate_ids)
-;;
-
 let is_live_leaf = function
   | Ready | Running _ | Deferred _ | Completed _ | Blocked _ -> true
-  | Split _ | Settled _ -> false
+  | Settled _ -> false
 ;;
 
 let validate_live_membership partitions =
@@ -559,7 +492,6 @@ let ensure_roots ~now ~base_path ~keeper_name candidates =
               else
                 Ok
                   ({ partition_id
-                   ; parent_partition_id = None
                    ; keeper_name
                    ; context_key
                    ; candidate_ids
@@ -585,7 +517,7 @@ let recover_and_resume ~base_path ~keeper_name =
            match partition.state with
            | Running _ | Deferred _ ->
              recovered + 1, true, { partition with state = Ready } :: updated
-           | Ready | Split _ | Completed _ | Settled _ | Blocked _ ->
+           | Ready | Completed _ | Settled _ | Blocked _ ->
              recovered, changed, partition :: updated)
         (0, false, [])
         current
@@ -683,7 +615,7 @@ let with_running_partition ~worker_epoch ~partition current f =
             "partition %s is claimed by worker epoch %s"
             partition.partition_id
             running.worker_epoch)
-     | Ready | Deferred _ | Split _ | Completed _ | Settled _ | Blocked _ ->
+     | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
        Error
          (Printf.sprintf
             "partition %s must be running, got %s"
@@ -708,91 +640,22 @@ let complete ~now ~worker_epoch ~base_path ~partition ~items =
       Ok (true, replace_partition current completed, Partition_completed completed)))
 ;;
 
-let split_at_midpoint values =
-  let midpoint = List.length values / 2 in
-  let rec loop index left = function
-    | rest when index = midpoint -> List.rev left, rest
-    | value :: rest -> loop (index + 1) (value :: left) rest
-    | [] -> List.rev left, []
-  in
-  loop 0 [] values
-;;
-
 let fail ~now ~worker_epoch ~base_path ~partition failure =
   update ~base_path ~keeper_name:partition.keeper_name (fun current ->
     with_running_partition ~worker_epoch ~partition current (fun persisted ->
-      match failure.Candidate.kind, persisted.candidate_ids with
-      | Candidate.Response_contract_unavailable, _ :: _ :: _ ->
-        let left_ids, right_ids = split_at_midpoint persisted.candidate_ids in
-        let left_partition_id =
-          child_id ~parent_partition_id:persisted.partition_id left_ids
-        in
-        let right_partition_id =
-          child_id ~parent_partition_id:persisted.partition_id right_ids
-        in
-        let known =
-          List.fold_left
-            (fun ids value -> Id_set.add value.partition_id ids)
-            Id_set.empty
-            current
-        in
-        if Id_set.mem left_partition_id known || Id_set.mem right_partition_id known
-        then Error ("partition split child identity collision for " ^ persisted.partition_id)
-        else
-          let left =
-            { partition_id = left_partition_id
-            ; parent_partition_id = Some persisted.partition_id
-            ; keeper_name = persisted.keeper_name
-            ; context_key = persisted.context_key
-            ; candidate_ids = left_ids
-            ; created_at = now
-            ; state = Ready
-            }
-          in
-          let right =
-            { partition_id = right_partition_id
-            ; parent_partition_id = Some persisted.partition_id
-            ; keeper_name = persisted.keeper_name
-            ; context_key = persisted.context_key
-            ; candidate_ids = right_ids
-            ; created_at = now
-            ; state = Ready
-            }
-          in
-          let parent =
-            { persisted with
-              state =
-                Split
-                  { failure
-                  ; left_partition_id
-                  ; right_partition_id
-                  ; split_at = now
-                  }
-            }
-          in
-          let updated = replace_partition current parent @ [ left; right ] in
-          Ok
-            ( true
-            , updated
-            , Partition_split { parent; left; right } )
-      | Candidate.Response_contract_unavailable, [ _ ]
-      | Candidate.Partition_membership_conflict, _ ->
+      match failure.Candidate.kind with
+      | Candidate.Partition_membership_conflict
+      | Candidate.Durable_delivery_unavailable ->
         let blocked = { persisted with state = Blocked { failure; blocked_at = now } } in
         Ok (true, replace_partition current blocked, Partition_blocked blocked)
-      | ( Candidate.Runtime_configuration_unavailable
+      | Candidate.Runtime_configuration_unavailable
         | Candidate.Prompt_contract_unavailable
-        | Candidate.Provider_unavailable )
-        , _ ->
+        | Candidate.Provider_unavailable
+        | Candidate.Response_contract_unavailable ->
         let deferred =
           { persisted with state = Deferred { failure; deferred_at = now } }
         in
-        Ok (true, replace_partition current deferred, Partition_deferred deferred)
-      | ( Candidate.Durable_delivery_unavailable
-        | Candidate.Lifecycle_policy_migrated )
-        , _
-      | Candidate.Response_contract_unavailable, [] ->
-        let blocked = { persisted with state = Blocked { failure; blocked_at = now } } in
-        Ok (true, replace_partition current blocked, Partition_blocked blocked)))
+        Ok (true, replace_partition current deferred, Partition_deferred deferred)))
 ;;
 
 let completed ~base_path ~keeper_name =
@@ -802,7 +665,7 @@ let completed ~base_path ~keeper_name =
      |> List.filter (fun partition ->
        match partition.state with
        | Completed _ -> true
-       | Ready | Running _ | Deferred _ | Split _ | Settled _ | Blocked _ -> false)
+       | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> false)
      |> List.sort compare_partition)
 ;;
 
@@ -848,7 +711,7 @@ let settle_many ~now ~base_path ~keeper_name ~partition_ids =
              match partition.state with
              | Completed _ -> { partition with state = Settled { settled_at = now } }
              | Settled _ -> partition
-             | Ready | Running _ | Deferred _ | Split _ | Blocked _ -> partition
+             | Ready | Running _ | Deferred _ | Blocked _ -> partition
            else partition)
         current
     in
@@ -871,7 +734,7 @@ let settle_many ~now ~base_path ~keeper_name ~partition_ids =
            Id_set.mem partition.partition_id requested
            && match partition.state with
               | Completed _ -> true
-              | Ready | Running _ | Deferred _ | Split _ | Settled _ | Blocked _ -> false)
+              | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> false)
         current
     in
     Ok (changed, updated, settled))
@@ -889,7 +752,18 @@ let failure_detail_json partition failure timestamp_name timestamp =
     ]
 ;;
 
-let fleet_summary_json ~base_path =
+type ledger_read_error =
+  { ledger_path : string
+  ; detail : string
+  }
+
+type fleet_summary =
+  { ledger_count : int
+  ; partitions : t list
+  ; read_errors : ledger_read_error list
+  }
+
+let fleet_summary ~base_path =
   let directory = partition_dir base_path in
   let ledger_paths, discovery_errors =
     try
@@ -898,10 +772,9 @@ let fleet_summary_json ~base_path =
       else if not (Sys.is_directory directory)
       then
         ( []
-        , [ `Assoc
-              [ "ledger", `String directory
-              ; "error", `String "partition ledger root is not a directory"
-              ]
+        , [ { ledger_path = directory
+            ; detail = "partition ledger root is not a directory"
+            }
           ] )
       else
         ( Sys.readdir directory
@@ -913,10 +786,9 @@ let fleet_summary_json ~base_path =
     with
     | (Sys_error _ | Unix.Unix_error _) as exn ->
       ( []
-      , [ `Assoc
-            [ "ledger", `String directory
-            ; "error", `String (Printexc.to_string exn)
-            ]
+      , [ { ledger_path = directory
+          ; detail = Printexc.to_string exn
+          }
         ] )
   in
   let partitions, read_errors =
@@ -942,51 +814,85 @@ let fleet_summary_json ~base_path =
             | None -> List.rev_append rows partitions, errors
             | Some partition ->
               ( partitions
-              , `Assoc
-                  [ "ledger", `String ledger_path
-                  ; ( "error"
-                    , `String
-                        (Printf.sprintf
-                           "partition path identity mismatch keeper=%s partition=%s"
-                           partition.keeper_name
-                           partition.partition_id) )
-                  ]
+              , { ledger_path
+                ; detail =
+                    Printf.sprintf
+                      "partition path identity mismatch keeper=%s partition=%s"
+                      partition.keeper_name
+                      partition.partition_id
+                }
                 :: errors ))
          | Error detail ->
            ( partitions
-           , `Assoc
-               [ "ledger", `String ledger_path
-               ; "error", `String detail
-               ]
+           , { ledger_path; detail }
              :: errors ))
       ([], discovery_errors)
       ledger_paths
   in
-  let partitions = List.rev partitions in
-  let read_errors = List.rev read_errors in
+  { ledger_count = List.length ledger_paths
+  ; partitions = List.rev partitions
+  ; read_errors = List.rev read_errors
+  }
+;;
+
+let count_state summary predicate =
+  List.fold_left
+    (fun count partition -> if predicate partition.state then count + 1 else count)
+    0
+    summary.partitions
+;;
+
+let pending_candidate_count summary =
+  List.fold_left
+    (fun count partition ->
+       match partition.state with
+       | Ready | Running _ | Deferred _ | Completed _ | Blocked _ ->
+         count + List.length partition.candidate_ids
+       | Settled _ -> count)
+    0
+    summary.partitions
+;;
+
+let status_reasons summary =
+  []
+  |> (fun reasons ->
+    if count_state summary (function Blocked _ -> true | _ -> false) > 0
+    then "blocked_partitions" :: reasons
+    else reasons)
+  |> (fun reasons ->
+    if count_state summary (function Deferred _ -> true | _ -> false) > 0
+    then "deferred_partitions" :: reasons
+    else reasons)
+  |> (fun reasons ->
+    if summary.read_errors <> [] then "partition_ledger_read_errors" :: reasons else reasons)
+  |> List.rev
+;;
+
+let operator_action_required summary = status_reasons summary <> []
+
+let ledger_read_error_to_yojson error =
+  `Assoc
+    [ "ledger", `String error.ledger_path
+    ; "error", `String error.detail
+    ]
+;;
+
+let fleet_summary_schema = "masc.keeper_board_attention_partitions.fleet_summary.v1"
+
+let fleet_summary_detail_fields summary =
   let count_state predicate =
     List.fold_left
       (fun count partition -> if predicate partition.state then count + 1 else count)
       0
-      partitions
+      summary.partitions
   in
   let ready_count = count_state (function Ready -> true | _ -> false) in
   let running_count = count_state (function Running _ -> true | _ -> false) in
   let deferred_count = count_state (function Deferred _ -> true | _ -> false) in
-  let split_count = count_state (function Split _ -> true | _ -> false) in
   let completed_count = count_state (function Completed _ -> true | _ -> false) in
   let settled_count = count_state (function Settled _ -> true | _ -> false) in
   let blocked_count = count_state (function Blocked _ -> true | _ -> false) in
-  let pending_candidate_count =
-    List.fold_left
-      (fun count partition ->
-         match partition.state with
-         | Ready | Running _ | Deferred _ | Completed _ | Blocked _ ->
-           count + List.length partition.candidate_ids
-         | Split _ | Settled _ -> count)
-      0
-      partitions
-  in
+  let pending_candidate_count = pending_candidate_count summary in
   let blocked, deferred =
     List.fold_left
       (fun (blocked, deferred) partition ->
@@ -997,61 +903,49 @@ let fleet_summary_json ~base_path =
          | Deferred { failure; deferred_at } ->
            blocked,
            failure_detail_json partition failure "deferred_at" deferred_at :: deferred
-         | Ready | Running _ | Split _ | Completed _ | Settled _ -> blocked, deferred)
+         | Ready | Running _ | Completed _ | Settled _ -> blocked, deferred)
       ([], [])
-      partitions
+      summary.partitions
   in
-  let read_error_count = List.length read_errors in
-  let status_reasons =
-    []
-    |> (fun reasons ->
-      if blocked_count > 0 then "blocked_partitions" :: reasons else reasons)
-    |> (fun reasons ->
-      if deferred_count > 0 then "deferred_partitions" :: reasons else reasons)
-    |> (fun reasons ->
-      if read_error_count > 0 then "partition_ledger_read_errors" :: reasons else reasons)
-    |> List.rev
-  in
-  let operator_action_required = status_reasons <> [] in
+  let read_error_count = List.length summary.read_errors in
   let keeper_names =
-    partitions
+    summary.partitions
     |> List.map (fun partition -> partition.keeper_name)
     |> List.sort_uniq String.compare
   in
-  `Assoc
-    [ "schema", `String "masc.keeper_board_attention_partitions.fleet_summary.v1"
-    ; "status", `String (if operator_action_required then "degraded" else "ok")
-    ; "operator_action_required", `Bool operator_action_required
-    ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
-    ; "worker_registered", `Null
-    ; "active_keeper_count", `Null
-    ; "lane_failure_count", `Null
-    ; "lane_failures", `List []
-    ; "candidate_ledger_keeper_count", `Null
-    ; "candidate_ledger_keeper_names", `List []
-    ; "candidate_ledger_discovery_error", `Null
-    ; "candidate_pending_count", `Null
-    ; "candidate_judged_count", `Null
-    ; "candidate_consumed_count", `Null
-    ; "candidate_ledger_read_error_count", `Null
-    ; "candidate_ledger_read_errors", `List []
-    ; "keeper_count", `Int (List.length keeper_names)
+  [ "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", string_list_to_yojson keeper_names
-    ; "ledger_count", `Int (List.length ledger_paths)
-    ; "partition_count", `Int (List.length partitions)
+    ; "ledger_count", `Int summary.ledger_count
+    ; "partition_count", `Int (List.length summary.partitions)
     ; "pending_candidate_count", `Int pending_candidate_count
     ; "ready_count", `Int ready_count
     ; "running_count", `Int running_count
     ; "deferred_count", `Int deferred_count
-    ; "split_count", `Int split_count
     ; "completed_count", `Int completed_count
     ; "settled_count", `Int settled_count
     ; "blocked_count", `Int blocked_count
     ; "read_error_count", `Int read_error_count
-    ; "read_errors", `List read_errors
+    ; "read_errors", `List (List.map ledger_read_error_to_yojson summary.read_errors)
     ; "blocked", `List (List.rev blocked)
     ; "deferred", `List (List.rev deferred)
-    ]
+  ]
+;;
+
+let fleet_summary_fields summary =
+  let operator_action_required = operator_action_required summary in
+  [ "schema", `String fleet_summary_schema
+  ; "status", `String (if operator_action_required then "degraded" else "ok")
+  ; "operator_action_required", `Bool operator_action_required
+  ; ( "status_reasons"
+    , `List (List.map (fun reason -> `String reason) (status_reasons summary)) )
+  ]
+  @ fleet_summary_detail_fields summary
+;;
+
+let fleet_summary_to_yojson summary = `Assoc (fleet_summary_fields summary)
+
+let fleet_summary_json ~base_path =
+  fleet_summary ~base_path |> fleet_summary_to_yojson
 ;;
 
 module For_testing = struct

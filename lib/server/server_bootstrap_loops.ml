@@ -1329,6 +1329,14 @@ let start_keeper_loops_owned
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
+  (* Durable Board-attention relevance judgment has its own process-owned
+     plane. Start it before Keeper autoboot so startup recovery can claim
+     persisted partitions without occupying any Keeper turn admission. *)
+  fork_subsystem "board_attention_partition_worker" (fun () ->
+    Keeper_board_attention_worker.start
+      ~sw
+      ~base_path:config.base_path
+      ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —

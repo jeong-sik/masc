@@ -146,6 +146,45 @@ let keeper_event_queue_health_json () =
     in
     Keeper_event_queue_persistence.fleet_summary_json ~now ~base_path
 
+let keeper_board_attention_partition_health_json () =
+  match runtime_base_path_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "masc.keeper_board_attention_partitions.fleet_summary.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "status_reasons", `List []
+      ; "worker_registered", `Bool false
+      ; "active_keeper_count", `Int 0
+      ; "lane_failure_count", `Int 0
+      ; "lane_failures", `List []
+      ; "candidate_ledger_keeper_count", `Int 0
+      ; "candidate_ledger_keeper_names", `List []
+      ; "candidate_ledger_discovery_error", `Null
+      ; "candidate_pending_count", `Int 0
+      ; "candidate_judged_count", `Int 0
+      ; "candidate_consumed_count", `Int 0
+      ; "candidate_ledger_read_error_count", `Int 0
+      ; "candidate_ledger_read_errors", `List []
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "ledger_count", `Int 0
+      ; "partition_count", `Int 0
+      ; "pending_candidate_count", `Int 0
+      ; "ready_count", `Int 0
+      ; "running_count", `Int 0
+      ; "deferred_count", `Int 0
+      ; "split_count", `Int 0
+      ; "completed_count", `Int 0
+      ; "settled_count", `Int 0
+      ; "blocked_count", `Int 0
+      ; "read_error_count", `Int 0
+      ; "read_errors", `List []
+      ; "blocked", `List []
+      ; "deferred", `List []
+      ]
+  | Some base_path -> Keeper_board_attention_worker.health_json ~base_path
+
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
     ?(include_reaction_ledger = true)

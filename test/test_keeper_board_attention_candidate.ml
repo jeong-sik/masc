@@ -2,7 +2,8 @@ module A = Masc.Keeper_board_attention_candidate
 module J = Masc.Keeper_board_attention_judgment
 module Event_queue = Keeper_event_queue
 module Event_queue_persistence = Keeper_event_queue_persistence
-module Registry = Masc.Keeper_registry
+
+let cohort_size = 17
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -184,71 +185,6 @@ let test_record_dedupes_exact_candidate_identity () =
   ignore (only_loaded ~base_path ~keeper_name:first.keeper_name : A.candidate)
 ;;
 
-let test_worker_record_wakes_then_owner_lane_drains () =
-  with_temp_base "keeper-board-attention-owner-lane" @@ fun base_path ->
-  let pending = candidate () in
-  let entry =
-    Registry.register
-      ~base_path
-      pending.keeper_name
-      (meta pending.keeper_name)
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Registry.unregister ~base_path pending.keeper_name)
-    (fun () ->
-       let accepted =
-         Domain.spawn (fun () -> A.record_and_wake ~base_path pending)
-         |> Domain.join
-       in
-       (match accepted with
-        | Ok
-            { A.candidate = persisted
-            ; persistence = A.Candidate_recorded
-            ; wake = A.Wake_requested Registry.Signaled
-            } ->
-          (match persisted.status with
-           | A.Pending { last_failure = None } -> ()
-           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
-             Alcotest.fail "worker-side record invoked or mutated the judgment")
-        | Ok _ -> Alcotest.fail "worker-side record returned the wrong typed acceptance"
-        | Error detail -> Alcotest.failf "worker-side record failed: %s" detail);
-       Alcotest.(check bool)
-         "worker producer signaled the registered owner lane"
-         true
-         (Atomic.get entry.fiber_wakeup);
-       Atomic.set entry.fiber_wakeup false;
-       let report =
-         match
-           A.For_testing.drain_pending_with_judge
-             ~base_path
-             ~keeper_name:pending.keeper_name
-             ~judge:(fun _ -> Ok (judgment J.Relevant))
-         with
-         | Ok report -> report
-         | Error detail -> Alcotest.failf "owner-lane drain failed: %s" detail
-       in
-       Alcotest.(check int) "one candidate attempted" 1 report.attempted;
-       Alcotest.(check int) "one candidate consumed" 1 report.consumed;
-       Alcotest.(check int) "no candidate remains" 0 report.remaining;
-       Alcotest.(check bool)
-         "durable delivery signaled the owner lane"
-         true
-         (Atomic.get entry.fiber_wakeup);
-       match
-         Event_queue_persistence.load
-           ~base_path
-           ~keeper_name:pending.keeper_name
-         |> Event_queue.to_list
-       with
-       | [ { payload = Event_queue.Board_attention attention; _ } ] ->
-         Alcotest.(check string)
-           "owner drain delivered the exact candidate"
-           pending.candidate_id
-           attention.candidate_id
-       | _ -> Alcotest.fail "owner drain did not commit one Board_attention event")
-;;
-
 let test_retryable_judge_failure_remains_pending () =
   with_temp_base "keeper-board-attention-retry" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
@@ -393,6 +329,9 @@ let test_malformed_ledger_is_explicit_and_not_overwritten () =
   (match A.load_candidates ~base_path ~keeper_name with
    | Error detail -> Alcotest.(check bool) "error detail" true (String.length detail > 0)
    | Ok _ -> Alcotest.fail "malformed ledger was silently skipped");
+  (match A.discover_keeper_names ~base_path with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "startup discovery silently skipped a malformed ledger");
   (match A.record ~base_path (candidate ~keeper_name ()) with
    | A.Record_error _ -> ()
    | A.Recorded _ | A.Duplicate _ -> Alcotest.fail "malformed ledger was overwritten");
@@ -400,6 +339,28 @@ let test_malformed_ledger_is_explicit_and_not_overwritten () =
   let preserved = really_input_string ic (in_channel_length ic) in
   close_in ic;
   Alcotest.(check string) "malformed bytes preserved" malformed preserved
+;;
+
+let test_candidate_ledger_rejects_cross_keeper_identity () =
+  with_temp_base "keeper-board-attention-cross-keeper" @@ fun base_path ->
+  let expected_keeper = "sangsu" in
+  let observed = candidate ~keeper_name:"other-keeper" () in
+  let dir =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      "board_attention_candidates"
+  in
+  Fs_compat.mkdir_p dir;
+  let path = Filename.concat dir (expected_keeper ^ ".jsonl") in
+  let channel = open_out_bin path in
+  output_string channel (Yojson.Safe.to_string (A.candidate_to_json observed) ^ "\n");
+  close_out channel;
+  (match A.load_candidates ~base_path ~keeper_name:expected_keeper with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "candidate ledger crossed Keeper identity");
+  match A.discover_keeper_names ~base_path with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "startup discovery crossed Keeper path identity"
 ;;
 
 let test_strict_judgment_contract_rejects_extra_fields () =
@@ -727,7 +688,7 @@ let test_batch_failure_aborts_round_and_records_evidence () =
          record_or_fail
            ~base_path
            (candidate ~keeper_name ~signal:(signal ~post_id ()) ()))
-      (List.init (A.batch_max_candidates + 1) (fun index -> index + 1))
+      (List.init cohort_size (fun index -> index + 1))
   in
   let failure : A.retryable_failure =
     { kind = A.Provider_unavailable; detail = "429 too many concurrent"; failed_at = 100.0 }
@@ -743,13 +704,13 @@ let test_batch_failure_aborts_round_and_records_evidence () =
     | Error detail -> Alcotest.failf "abort drain failed: %s" detail
   in
   Alcotest.(check int)
-    "only the first batch was attempted"
-    A.batch_max_candidates
+    "the whole exact-context cohort was attempted"
+    cohort_size
     report.attempted;
   Alcotest.(check int) "nothing consumed" 0 report.consumed;
   Alcotest.(check int)
-    "failed batch and deferred batch remain"
-    (A.batch_max_candidates + 1)
+    "failed cohort remains"
+    cohort_size
     report.remaining;
   match A.load_candidates ~base_path ~keeper_name with
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
@@ -759,8 +720,6 @@ let test_batch_failure_aborts_round_and_records_evidence () =
         (fun (c : A.candidate) -> String.equal c.candidate_id target.candidate_id)
         candidates
     in
-    let attempted = List.filteri (fun index _ -> index < A.batch_max_candidates) recorded in
-    let deferred = List.nth recorded A.batch_max_candidates in
     List.iter
       (fun (target : A.candidate) ->
          match by_id target with
@@ -771,11 +730,7 @@ let test_batch_failure_aborts_round_and_records_evidence () =
              observed.detail
          | Some _ -> Alcotest.fail "attempted candidate lost the failure evidence"
          | None -> Alcotest.fail "attempted candidate vanished")
-      attempted;
-    (match by_id deferred with
-     | Some { status = A.Pending { last_failure = None }; _ } -> ()
-     | Some _ -> Alcotest.fail "deferred batch gained failure evidence"
-     | None -> Alcotest.fail "deferred candidate vanished")
+      recorded
 ;;
 
 let test_batch_failure_evidence_write_error_propagates () =
@@ -799,8 +754,8 @@ let test_batch_failure_evidence_write_error_propagates () =
   | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted"
 ;;
 
-let test_successful_drain_runs_one_provider_batch_per_admission () =
-  with_temp_base "board-attention-one-quantum" @@ fun base_path ->
+let test_successful_drain_uses_one_unbounded_exact_context_cohort () =
+  with_temp_base "board-attention-unbounded-cohort" @@ fun base_path ->
   let keeper_name = "sangsu" in
   List.iter
     (fun index ->
@@ -809,7 +764,7 @@ let test_successful_drain_runs_one_provider_batch_per_admission () =
          (record_or_fail
             ~base_path
             (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
-    (List.init (A.batch_max_candidates + 1) (fun index -> index + 1));
+    (List.init cohort_size (fun index -> index + 1));
   let calls = ref 0 in
   let report =
     match
@@ -824,9 +779,9 @@ let test_successful_drain_runs_one_provider_batch_per_admission () =
     | Error detail -> Alcotest.failf "one-quantum drain failed: %s" detail
   in
   Alcotest.(check int) "one provider call" 1 !calls;
-  Alcotest.(check int) "one batch attempted" A.batch_max_candidates report.attempted;
-  Alcotest.(check int) "one batch consumed" A.batch_max_candidates report.consumed;
-  Alcotest.(check int) "next admission owns remainder" 1 report.remaining
+  Alcotest.(check int) "whole cohort attempted" cohort_size report.attempted;
+  Alcotest.(check int) "whole cohort consumed" cohort_size report.consumed;
+  Alcotest.(check int) "nothing remains" 0 report.remaining
 ;;
 
 let test_successful_batch_uses_two_candidate_ledger_rewrites () =
@@ -839,7 +794,7 @@ let test_successful_batch_uses_two_candidate_ledger_rewrites () =
          (record_or_fail
             ~base_path
             (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
-    (List.init A.batch_max_candidates (fun index -> index + 1));
+    (List.init cohort_size (fun index -> index + 1));
   let rewrites = ref 0 in
   A.For_testing.set_ledger_rewrite_observer (fun () -> incr rewrites);
   Fun.protect
@@ -855,7 +810,7 @@ let test_successful_batch_uses_two_candidate_ledger_rewrites () =
          | Ok report -> report
          | Error detail -> Alcotest.failf "atomic batch drain failed: %s" detail
        in
-       Alcotest.(check int) "whole batch consumed" A.batch_max_candidates report.consumed;
+       Alcotest.(check int) "whole batch consumed" cohort_size report.consumed;
        Alcotest.(check int)
          "one judgment commit plus one consumed commit"
          2
@@ -866,7 +821,7 @@ let test_successful_batch_uses_two_candidate_ledger_rewrites () =
        in
        Alcotest.(check int)
          "every relevant verdict has one durable event"
-         A.batch_max_candidates
+         cohort_size
          queued)
 ;;
 
@@ -1035,10 +990,6 @@ let () =
             `Quick
             test_record_dedupes_exact_candidate_identity
         ; Alcotest.test_case
-            "worker record wakes and owner lane drains"
-            `Quick
-            test_worker_record_wakes_then_owner_lane_drains
-        ; Alcotest.test_case
             "retryable judge failure remains Pending"
             `Quick
             test_retryable_judge_failure_remains_pending
@@ -1058,6 +1009,10 @@ let () =
             "malformed ledger is explicit and preserved"
             `Quick
             test_malformed_ledger_is_explicit_and_not_overwritten
+        ; Alcotest.test_case
+            "candidate ledger rejects cross-Keeper identity"
+            `Quick
+            test_candidate_ledger_rejects_cross_keeper_identity
         ; Alcotest.test_case
             "strict judgment rejects undeclared score"
             `Quick
@@ -1099,9 +1054,9 @@ let () =
             `Quick
             test_batch_failure_evidence_write_error_propagates
         ; Alcotest.test_case
-            "successful drain runs one provider batch per admission"
+            "successful drain uses one unbounded exact-context cohort"
             `Quick
-            test_successful_drain_runs_one_provider_batch_per_admission
+            test_successful_drain_uses_one_unbounded_exact_context_cohort
         ; Alcotest.test_case
             "successful batch uses two candidate-ledger rewrites"
             `Quick

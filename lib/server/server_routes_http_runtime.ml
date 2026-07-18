@@ -382,7 +382,8 @@ let max_health_status = Health_status.max_string
 let full_health_operator_summary ~keeper_fleet_safety
     ~keeper_identity_drift_json ~publication_recovery_activation_json
     ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
-    ~keeper_event_queue_json ~runtime_startup_degradation_json
+    ~keeper_event_queue_json ~board_attention_partition_json
+    ~runtime_startup_degradation_json
     ~keeper_config_schema_status ~keeper_config_schema_blocking
     ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
     ~lazy_task_boot_guard_fires_total =
@@ -435,6 +436,7 @@ let full_health_operator_summary ~keeper_fleet_safety
   note_status "keeper_turn_admission" turn_admission_json None;
   note_status "keeper_board_event_collection" board_event_collection_json None;
   note_status "keeper_event_queue" keeper_event_queue_json None;
+  note_status "keeper_board_attention_partitions" board_attention_partition_json None;
   note_status "runtime_startup_degradation" runtime_startup_degradation_json
     (assoc_string_opt "terminal_reason" runtime_startup_degradation_json);
   status := max_health_status !status keeper_config_schema_status;
@@ -573,6 +575,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_event_queue" ?section_timings_ref
       keeper_event_queue_health_json
   in
+  let board_attention_partition_json =
+    compute_section ~name:"keeper_board_attention_partitions" ?section_timings_ref
+      keeper_board_attention_partition_health_json
+  in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
@@ -620,6 +626,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       ~turn_admission_json
       ~board_event_collection_json
       ~keeper_event_queue_json
+      ~board_attention_partition_json
       ~runtime_startup_degradation_json
       ~keeper_config_schema_status:
         (if keeper_config_schema_blocking then "blocked" else "ok")
@@ -675,6 +682,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_turn_admission", turn_admission_json);
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
+    ("keeper_board_attention_partitions", board_attention_partition_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns and may no longer have a live registry entry. Operators still
        need a durable count and the typed pause cause. *)
@@ -781,6 +789,7 @@ let full_health_cached_field_names =
     "keeper_turn_admission";
     "keeper_board_event_collection";
     "keeper_event_queue";
+    "keeper_board_attention_partitions";
     "paused_keepers";
     "keeper_config_error_count";
     "keeper_config_errors";
@@ -872,6 +881,42 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("read_error_count", `Int 0)
         ; ("read_errors", `List [])
         ; ("keepers", `List [])
+        ; ("component_timed_out", `Bool component_timed_out)
+        ] );
+    ( "keeper_board_attention_partitions",
+      `Assoc
+        [ ("schema", `String "masc.keeper_board_attention_partitions.fleet_summary.v1")
+        ; ("status", `String status)
+        ; ("operator_action_required", `Bool false)
+        ; ("status_reasons", `List [])
+        ; ("worker_registered", `Bool false)
+        ; ("active_keeper_count", `Int 0)
+        ; ("lane_failure_count", `Int 0)
+        ; ("lane_failures", `List [])
+        ; ("candidate_ledger_keeper_count", `Int 0)
+        ; ("candidate_ledger_keeper_names", `List [])
+        ; ("candidate_ledger_discovery_error", `Null)
+        ; ("candidate_pending_count", `Int 0)
+        ; ("candidate_judged_count", `Int 0)
+        ; ("candidate_consumed_count", `Int 0)
+        ; ("candidate_ledger_read_error_count", `Int 0)
+        ; ("candidate_ledger_read_errors", `List [])
+        ; ("keeper_count", `Int 0)
+        ; ("keeper_names", `List [])
+        ; ("ledger_count", `Int 0)
+        ; ("partition_count", `Int 0)
+        ; ("pending_candidate_count", `Int 0)
+        ; ("ready_count", `Int 0)
+        ; ("running_count", `Int 0)
+        ; ("deferred_count", `Int 0)
+        ; ("split_count", `Int 0)
+        ; ("completed_count", `Int 0)
+        ; ("settled_count", `Int 0)
+        ; ("blocked_count", `Int 0)
+        ; ("read_error_count", `Int 0)
+        ; ("read_errors", `List [])
+        ; ("blocked", `List [])
+        ; ("deferred", `List [])
         ; ("component_timed_out", `Bool component_timed_out)
         ] );
     ( "paused_keepers",

@@ -186,6 +186,8 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
+  test_keeper_board_attention_partition
+  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -494,6 +496,8 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
+  test_keeper_board_attention_partition
+  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -864,7 +868,7 @@
 
 (tests
  (names
-  test_keeper_busy_connector_deferred
+ test_keeper_busy_connector_deferred
   test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
   test_keeper_chat_consumer_delivery

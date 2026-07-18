@@ -9,6 +9,7 @@ type retryable_failure_kind =
   | Prompt_contract_unavailable
   | Provider_unavailable
   | Response_contract_unavailable
+  | Partition_membership_conflict
   | Durable_delivery_unavailable
 
 type retryable_failure =
@@ -63,16 +64,6 @@ type persistence =
   | Candidate_recorded
   | Candidate_already_present
 
-type wake_decision =
-  | Wake_requested of Keeper_registry.wakeup_outcome
-  | Wake_not_required
-
-type record_acceptance =
-  { candidate : candidate
-  ; persistence : persistence
-  ; wake : wake_decision
-  }
-
 type drain_report =
   { attempted : int
   ; consumed : int
@@ -86,6 +77,7 @@ let retryable_failure_kind_to_string = function
   | Prompt_contract_unavailable -> "prompt_contract_unavailable"
   | Provider_unavailable -> "provider_unavailable"
   | Response_contract_unavailable -> "response_contract_unavailable"
+  | Partition_membership_conflict -> "partition_membership_conflict"
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
 ;;
 
@@ -94,6 +86,7 @@ let retryable_failure_kind_of_string = function
   | "prompt_contract_unavailable" -> Some Prompt_contract_unavailable
   | "provider_unavailable" -> Some Provider_unavailable
   | "response_contract_unavailable" -> Some Response_contract_unavailable
+  | "partition_membership_conflict" -> Some Partition_membership_conflict
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
   | _ -> None
 ;;
@@ -666,8 +659,7 @@ let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
    state; the critical sections are Hashtbl lookups with no yield. *)
 let candidate_read_memo_mutex = Stdlib.Mutex.create ()
 
-let load_candidates ~base_path ~keeper_name =
-  let path = candidate_path ~base_path ~keeper_name in
+let load_candidates_path path =
   let before = ledger_stat_key_opt path in
   let cached =
     match before with
@@ -691,6 +683,91 @@ let load_candidates ~base_path ~keeper_name =
          Hashtbl.replace candidate_read_memo path (key_before, candidates))
      | Some _, (Some _ | None) | None, (Some _ | None) -> ());
     Ok candidates
+;;
+
+let validate_keeper_identity ~keeper_name candidates =
+  match
+    List.find_opt
+      (fun candidate -> not (String.equal candidate.keeper_name keeper_name))
+      candidates
+  with
+  | None -> Ok candidates
+  | Some candidate ->
+    Error
+      (Printf.sprintf
+         "Board attention candidate ledger identity mismatch expected=%s observed=%s candidate=%s"
+         keeper_name
+         candidate.keeper_name
+         candidate.candidate_id)
+;;
+
+let load_candidates ~base_path ~keeper_name =
+  let path = candidate_path ~base_path ~keeper_name in
+  let* candidates = load_candidates_path path in
+  validate_keeper_identity ~keeper_name candidates
+;;
+
+let discover_keeper_names ~base_path =
+  let directory = candidate_dir base_path in
+  try
+    if not (Sys.file_exists directory)
+    then Ok []
+    else if not (Sys.is_directory directory)
+    then Error ("Board attention candidate ledger root is not a directory: " ^ directory)
+    else
+      let paths =
+        Sys.readdir directory
+        |> Array.to_list
+        |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+        |> List.sort String.compare
+        |> List.map (Filename.concat directory)
+      in
+      List.fold_left
+        (fun result path ->
+           let* names = result in
+           let* candidates = load_candidates_path path in
+           let ledger_segment =
+             path
+             |> Filename.basename
+             |> fun name -> Filename.chop_suffix name ".jsonl"
+           in
+           let ledger_names =
+             candidates
+             |> List.map (fun candidate -> candidate.keeper_name)
+             |> List.sort_uniq String.compare
+           in
+           match ledger_names with
+           | [] -> Ok names
+           | [ keeper_name ] ->
+             let expected_segment =
+               Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
+             in
+             if String.equal ledger_segment expected_segment
+             then Ok (keeper_name :: names)
+             else
+               Error
+                 (Printf.sprintf
+                    "Board attention candidate ledger path identity mismatch path=%s keeper=%s expected_segment=%s"
+                    path
+                    keeper_name
+                    expected_segment)
+           | _ ->
+             Error
+               (Printf.sprintf
+                  "Board attention candidate ledger identity collision path=%s keepers=[%s]"
+                  path
+                  (String.concat "," ledger_names)))
+        (Ok [])
+        paths
+      |> Result.map (List.sort_uniq String.compare)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Error
+      (Printf.sprintf
+         "Board attention candidate discovery failed directory=%s: %s"
+         directory
+         (Printexc.to_string exn))
 ;;
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
@@ -719,12 +796,15 @@ let update_ledger_many ~base_path ~keeper_name decide =
         match load_candidates_from_content content with
         | Error detail -> None, Error detail
         | Ok candidates ->
+          (match validate_keeper_identity ~keeper_name candidates with
+           | Error _ as error -> None, error
+           | Ok candidates ->
           (match decide candidates with
            | Error _ as error -> None, error
            | Ok (None, result) -> None, Ok result
            | Ok (Some updated, result) ->
              let compacted = latest_candidates (candidates @ updated) in
-             Some (serialize_candidates compacted), Ok result))
+             Some (serialize_candidates compacted), Ok result)))
     with
     | Error error -> Error error
     | Ok result -> result
@@ -780,7 +860,7 @@ let update_candidate ~base_path candidate_id keeper_name transition =
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
-let update_candidate_batch ~base_path ~keeper_name candidates transition =
+let update_candidate_batch_result ~base_path ~keeper_name candidates transition =
   let requested =
     List.fold_left
       (fun result candidate ->
@@ -793,17 +873,19 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
   in
   let* requested = requested in
   update_ledger_many ~base_path ~keeper_name (fun current_rows ->
-    let found, updated_rows, selected =
+    let* found, updated_rows, selected =
       List.fold_left
-        (fun (found, updated_rows, selected) current ->
+        (fun result current ->
+           let* found, updated_rows, selected = result in
            if not (Id_set.mem current.candidate_id requested)
-           then found, updated_rows, selected
+           then Ok (found, updated_rows, selected)
            else
-             let next = transition current in
-             ( Id_set.add current.candidate_id found
-             , (if next = current then updated_rows else next :: updated_rows)
-             , Candidate_map.add current.candidate_id next selected ))
-        (Id_set.empty, [], Candidate_map.empty)
+             let* next = transition current in
+             Ok
+               ( Id_set.add current.candidate_id found
+               , (if next = current then updated_rows else next :: updated_rows)
+               , Candidate_map.add current.candidate_id next selected ))
+        (Ok (Id_set.empty, [], Candidate_map.empty))
         current_rows
     in
     if not (Id_set.equal requested found)
@@ -831,6 +913,14 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
            | [] -> None
            | _ :: _ -> Some (List.rev updated_rows))
         , selected_in_request_order ))
+;;
+
+let update_candidate_batch ~base_path ~keeper_name candidates transition =
+  update_candidate_batch_result
+    ~base_path
+    ~keeper_name
+    candidates
+    (fun current -> Ok (transition current))
 ;;
 
 let same_failure left right =
@@ -1006,32 +1096,9 @@ let rec process_with_judge ~base_path ~judge candidate =
        process_with_judge ~base_path ~judge current)
 ;;
 
-let record_and_wake ~base_path candidate =
-  match record ~base_path candidate with
-  | Record_error detail -> Error detail
-  | Recorded persisted ->
-    let wake =
-      Wake_requested (request_owner_wake ~site:"recorded" ~base_path persisted)
-    in
-    Ok { candidate = persisted; persistence = Candidate_recorded; wake }
-  | Duplicate persisted ->
-    let wake =
-      match persisted.status with
-      | Pending _ | Judged _ ->
-        Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
-      | Consumed _ -> Wake_not_required
-    in
-    Ok
-      { candidate = persisted
-      ; persistence = Candidate_already_present
-      ; wake
-      }
-;;
-
 (* ── Batch judgment ───────────────────────────────────── *)
 
 let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
-let batch_max_candidates = 8
 
 let rec canonical_json = function
   | `Assoc fields ->
@@ -1053,31 +1120,22 @@ let keeper_context_key candidate =
   | _ -> Error "judgment request is not an object"
 ;;
 
-let select_context_batch candidates =
+let select_context_cohort candidates =
   match candidates with
   | [] -> [], []
   | first :: rest ->
     (match keeper_context_key first with
      | Error _ -> [ first ], rest
      | Ok first_key ->
-       let rec loop selected deferred selected_count = function
+       let rec loop selected deferred = function
          | [] -> List.rev selected, List.rev deferred
          | candidate :: tail ->
-           if selected_count < batch_max_candidates
-           then
-             (match keeper_context_key candidate with
-              | Ok key when String.equal first_key key ->
-                loop
-                  (candidate :: selected)
-                  deferred
-                  (selected_count + 1)
-                  tail
-              | Ok _ | Error _ ->
-                loop selected (candidate :: deferred) selected_count tail)
-           else
-             loop selected (candidate :: deferred) selected_count tail
+           (match keeper_context_key candidate with
+            | Ok key when String.equal first_key key ->
+              loop (candidate :: selected) deferred tail
+            | Ok _ | Error _ -> loop selected (candidate :: deferred) tail)
        in
-       loop [ first ] [] 1 rest)
+       loop [ first ] [] rest)
 ;;
 
 let batch_request_json candidates =
@@ -1397,6 +1455,85 @@ let validate_batch_coverage batch judgments =
             (String.concat "," unknown)))
 ;;
 
+let judge_batch_exact ~base_path batch =
+  let* judgments = run_judge_batch ~base_path batch in
+  let* () = validate_batch_coverage batch judgments in
+  Ok judgments
+;;
+
+let apply_completed_judgments ~base_path ~keeper_name completed =
+  match completed with
+  | [] -> Ok { attempted = 0; consumed = 0; remaining = 0 }
+  | _ :: _ ->
+    let* expected =
+      List.fold_left
+        (fun result (candidate_id, judgment) ->
+           let* expected = result in
+           if Candidate_map.mem candidate_id expected
+           then Error ("duplicate completed candidate judgment: " ^ candidate_id)
+           else Ok (Candidate_map.add candidate_id judgment expected))
+        (Ok Candidate_map.empty)
+        completed
+    in
+    let* current = load_candidates ~base_path ~keeper_name in
+    let* targets =
+      List.fold_left
+        (fun result (candidate_id, _) ->
+           let* targets = result in
+           match find_candidate current candidate_id with
+           | Some candidate -> Ok (candidate :: targets)
+           | None -> Error ("completed partition candidate not found: " ^ candidate_id))
+        (Ok [])
+        completed
+      |> Result.map List.rev
+    in
+    let* judged =
+      update_candidate_batch_result
+        ~base_path
+        ~keeper_name
+        targets
+        (fun candidate ->
+           match Candidate_map.find_opt candidate.candidate_id expected with
+           | None -> Error ("completed judgment lookup failed: " ^ candidate.candidate_id)
+           | Some expected_judgment ->
+             (match candidate.status with
+              | Pending _ ->
+                Ok
+                  { candidate with
+                    status =
+                      Judged
+                        { judgment = expected_judgment
+                        ; last_failure = None
+                        }
+                  }
+              | Judged { judgment; _ } when judgment = expected_judgment ->
+                Ok candidate
+              | Consumed { judgment; _ } when judgment = expected_judgment ->
+                Ok candidate
+              | Judged _ | Consumed _ ->
+                Error
+                  (Printf.sprintf
+                     "partition judgment conflicts with persisted candidate %s"
+                     candidate.candidate_id)))
+    in
+    let* consumed, remaining = consume_judged_batch ~base_path judged in
+    Ok { attempted = List.length completed; consumed; remaining }
+;;
+
+let consume_judged_on_owner_lane ~base_path ~keeper_name =
+  let* candidates = load_candidates ~base_path ~keeper_name in
+  let judged =
+    List.filter
+      (fun candidate ->
+         match candidate.status with
+         | Judged _ -> true
+         | Pending _ | Consumed _ -> false)
+      candidates
+  in
+  let* consumed, remaining = consume_judged_batch ~base_path judged in
+  Ok { attempted = List.length judged; consumed; remaining }
+;;
+
 let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   let* candidates = load_candidates ~base_path ~keeper_name in
   let judged_ready, pending =
@@ -1414,10 +1551,10 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   let* judged_consumed, judged_remaining =
     consume_judged_batch ~base_path judged_candidates
   in
-  (* A single owner admission performs at most one provider call, and that
-     call contains one exact persisted Keeper context. Other contexts and
-     capacity overflow remain durable for a later admission. *)
-  let batch, deferred = select_context_batch (List.rev pending) in
+  (* The test adapter performs one provider call for the entire first exact
+     persisted Keeper context. No candidate-count or size estimate truncates
+     the cohort. Other contexts remain durable for a later call. *)
+  let batch, deferred = select_context_cohort (List.rev pending) in
   let* batch_report =
     match batch with
     | [] -> Ok { attempted = 0; consumed = 0; remaining = 0 }
@@ -1453,13 +1590,6 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
     ; consumed = batch_report.consumed + judged_consumed
     ; remaining = batch_report.remaining + judged_remaining
     }
-;;
-
-let drain_pending_on_owner_lane ~base_path ~keeper_name =
-  drain_pending_with_judge_batch
-    ~base_path
-    ~keeper_name
-    ~judge_batch:(run_judge_batch ~base_path)
 ;;
 
 module For_testing = struct

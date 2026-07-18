@@ -18,10 +18,11 @@ val enqueue_goal_assigned_wakes :
   old_ids:string list ->
   new_ids:string list ->
   unit ->
-  string list
+  (string list, string) result
 (** Enqueue one [Goal_assigned] stimulus per added goal (title resolved from
     Goal_store at enqueue time; a goal deleted between validation and
     enqueue falls back to its id as the label). The durable queue append
     precedes the Running-lane wake hint; inactive, paused, and dead-tombstone
     lanes retain the queued entry without receiving the hint. Returns the added
-    goal ids. *)
+    goal ids only after every durable admission succeeds; a partial commit is
+    explicit and retry-safe through event identity deduplication. *)

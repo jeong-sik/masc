@@ -144,6 +144,7 @@ type read_observation =
 
 type path_operation =
   | Inspect_parent
+  | Inspect_retired_epoch
   | Prepare_parent
   | Inspect_database
   | Inspect_sidecar
@@ -172,6 +173,7 @@ type error =
   | Invalid_event_identity of { field : string }
   | Invalid_timestamp of { field : string; value : float }
   | Invalid_transition of string
+  | Retired_epoch_residue of { path : string }
   | Lock_failure of File_lock_eio.durable_lock_error
   | Path_failure of
       { operation : path_operation
@@ -223,6 +225,7 @@ let database_schema = "keeper.reaction_ledger.sqlite.v4"
 let database_user_version = 4L
 let database_application_id = 0x4d43524cL
 let database_file = Common.keeper_reaction_database_filename
+let retired_ledger_directory = "reaction-ledger"
 let microseconds_per_second = 1_000_000.
 
 let stimulus_kind_to_string = function
@@ -303,6 +306,7 @@ let reaction_kind_of_settlement = function
 
 let path_operation_to_string = function
   | Inspect_parent -> "inspect_parent"
+  | Inspect_retired_epoch -> "inspect_retired_epoch"
   | Prepare_parent -> "prepare_parent"
   | Inspect_database -> "inspect_database"
   | Inspect_sidecar -> "inspect_sidecar"
@@ -334,6 +338,8 @@ let rec error_to_string = function
   | Invalid_timestamp { field; value } ->
     Printf.sprintf "invalid reaction timestamp %s=%g" field value
   | Invalid_transition detail -> "invalid reaction transition: " ^ detail
+  | Retired_epoch_residue { path } ->
+    "retired reaction-ledger epoch residue requires operator action: " ^ path
   | Lock_failure error ->
     "reaction database lock failure: "
     ^ File_lock_eio.durable_lock_error_to_string error
@@ -701,6 +707,23 @@ let inspect_database_paths ~ownership_root path =
      | Path_absent, [] | Regular_path _, _ -> Ok database)
 ;;
 
+let retired_epoch_path keeper_path =
+  Filename.concat keeper_path retired_ledger_directory
+;;
+
+let inspect_retired_epoch_presence path =
+  match Unix.lstat path with
+  | _ -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception exn ->
+    Error
+      (Path_failure
+         { operation = Inspect_retired_epoch
+         ; path
+         ; detail = Printexc.to_string exn
+         })
+;;
+
 let discover_keeper_names ~base_path =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   Eio_guard.run_in_systhread (fun () ->
@@ -744,26 +767,37 @@ let discover_keeper_names ~base_path =
                    :: errors )
                | { Unix.st_kind = Unix.S_REG; _ } -> names, errors
                | { Unix.st_kind = Unix.S_DIR; _ } ->
-                 let path = Filename.concat keeper_path database_file in
+                 let database_path = Filename.concat keeper_path database_file in
+                 let retired_path = retired_epoch_path keeper_path in
+                 let current_present, errors =
+                   match
+                     inspect_database_paths
+                       ~ownership_root:base_path
+                       database_path
+                   with
+                   | Ok Path_absent -> false, errors
+                   | Ok (Regular_path _) -> true, errors
+                   | Error error -> false, error :: errors
+                 in
+                 let retired_present, errors =
+                   match inspect_retired_epoch_presence retired_path with
+                   | Ok false -> false, errors
+                   | Ok true ->
+                     ( true
+                     , Retired_epoch_residue { path = retired_path } :: errors )
+                   | Error error -> false, error :: errors
+                 in
+                 let has_epoch_evidence = current_present || retired_present in
                  (match Keeper_id.Keeper_name.of_string entry with
                   | Error detail ->
-                    (match Unix.lstat path with
-                     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> names, errors
-                     | exception exn ->
-                       ( names
-                       , Path_failure
-                           { operation = Inspect_database
-                           ; path
-                           ; detail = Printexc.to_string exn
-                           }
-                         :: errors )
-                     | _ -> names, Invalid_keeper_name detail :: errors)
+                    if has_epoch_evidence
+                    then names, Invalid_keeper_name detail :: errors
+                    else names, errors
                   | Ok keeper_name ->
-                    (match inspect_database_paths ~ownership_root:base_path path with
-                     | Ok Path_absent -> names, errors
-                     | Ok (Regular_path _) ->
-                       Keeper_id.Keeper_name.to_string keeper_name :: names, errors
-                     | Error error -> names, error :: errors))
+                    if has_epoch_evidence
+                    then
+                      Keeper_id.Keeper_name.to_string keeper_name :: names, errors
+                    else names, errors)
                | _ ->
                  ( names
                  , Path_failure
@@ -1226,7 +1260,7 @@ let validate_database db ~keeper_name =
       else
         let* objects = read_schema_objects db in
         if objects <> expected_schema_objects
-        then Error (Schema_mismatch "schema objects do not match v3 exactly")
+        then Error (Schema_mismatch "schema objects do not match v4 exactly")
         else Ok stamp
 ;;
 
@@ -2686,6 +2720,7 @@ let with_read_transaction db body =
 
 type read_capability_entry =
   { mutex : Stdlib.Mutex.t
+  ; retired : bool Atomic.t
   ; path : string
   ; ownership_root : string
   ; keeper_name : string
@@ -2716,6 +2751,7 @@ let read_capability_entry ~ownership_root ~path ~keeper_name =
     | None ->
       let entry =
         { mutex = Stdlib.Mutex.create ()
+        ; retired = Atomic.make false
         ; path
         ; ownership_root
         ; keeper_name
@@ -2812,51 +2848,92 @@ let read_with_capability_entry entry body =
 
 let with_validated_read_capability ~base_path ~keeper_name body =
   let* path = database_path ~base_path ~keeper_name in
-  Eio_guard.run_in_systhread (fun () ->
-    let entry =
-      read_capability_entry
-        ~ownership_root:base_path
-        ~path
-        ~keeper_name
-    in
-    Stdlib.Mutex.protect entry.mutex (fun () ->
-      try read_with_capability_entry entry body with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (sqlite_failure Open_database (Printexc.to_string exn))))
+  let* read_lock =
+    Eio_guard.run_in_systhread (fun () ->
+      let* observed = inspect_database_before_lock ~ownership_root:base_path path in
+      match observed with
+      | Prelock_database_absent -> Ok None
+      | Prelock_database_ready | Prelock_interrupted_publish ->
+        let read_lock = lock_path path in
+        let* _ = prepare_private_file ~operation:Prepare_lock read_lock in
+        Ok (Some read_lock))
+  in
+  match read_lock with
+  | None -> Ok None
+  | Some read_lock ->
+    (match
+       File_lock_eio.with_durable_lock ~lock_path:read_lock (fun () ->
+         Eio_guard.run_in_systhread (fun () ->
+           let* () = recover_interrupted_publish ~ownership_root:base_path ~path in
+           let rec read_current_entry () =
+             let entry =
+               read_capability_entry
+                 ~ownership_root:base_path
+                 ~path
+                 ~keeper_name
+             in
+             match
+               Stdlib.Mutex.protect entry.mutex (fun () ->
+                 if Atomic.get entry.retired
+                 then `Retry
+                 else
+                   `Result
+                     (try read_with_capability_entry entry body with
+                      | Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | exn ->
+                        Error
+                          (sqlite_failure Open_database (Printexc.to_string exn))))
+             with
+             | `Retry -> read_current_entry ()
+             | `Result result -> result
+           in
+           read_current_entry ()))
+     with
+     | Ok result -> result
+     | Error error -> Error (Lock_failure error))
 ;;
 
 let close_all_read_capabilities () =
-  Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
-    let entries =
-      Hashtbl.fold (fun key entry entries -> (key, entry) :: entries) read_capability_pool []
-    in
-    entries
-    |> List.fold_left
-         (fun errors (key, entry) ->
-            match
-              Stdlib.Mutex.protect entry.mutex (fun () ->
-                close_read_capability_entry entry)
-            with
-            | Ok () ->
-              Hashtbl.remove read_capability_pool key;
-              errors
-            | Error error -> error :: errors)
-         []
-    |> List.rev)
+  let entries =
+    Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
+      let entries =
+        Hashtbl.fold (fun _ entry entries -> entry :: entries) read_capability_pool []
+      in
+      Hashtbl.clear read_capability_pool;
+      List.iter (fun entry -> Atomic.set entry.retired true) entries;
+      entries)
+  in
+  entries
+  |> List.fold_left
+       (fun errors entry ->
+          match
+            Stdlib.Mutex.protect entry.mutex (fun () ->
+              close_read_capability_entry entry)
+          with
+          | Ok () -> errors
+          | Error error -> error :: errors)
+       []
+  |> List.rev
 ;;
 
 let release_read_capability ~base_path ~keeper_name =
   let* path = database_path ~base_path ~keeper_name in
   Eio_guard.run_in_systhread (fun () ->
-    Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
+    let entry =
+      Stdlib.Mutex.protect read_capability_pool_mutex (fun () ->
       let key = base_path, path, keeper_name in
       match Hashtbl.find_opt read_capability_pool key with
-      | None -> Ok ()
+      | None -> None
       | Some entry ->
-        Stdlib.Mutex.protect entry.mutex (fun () ->
-          let* () = close_read_capability_entry entry in
-          Hashtbl.remove read_capability_pool key;
-          Ok ())))
+        Hashtbl.remove read_capability_pool key;
+        Atomic.set entry.retired true;
+        Some entry)
+    in
+    match entry with
+    | None -> Ok ()
+    | Some entry ->
+      Stdlib.Mutex.protect entry.mutex (fun () ->
+        close_read_capability_entry entry))
 ;;
 
 let () =

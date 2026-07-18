@@ -4,6 +4,18 @@ module Event_queue = Keeper_event_queue
 module Event_queue_persistence = Keeper_event_queue_persistence
 module Registry = Masc.Keeper_registry
 
+let attempt_count value =
+  match A.Attempt_count.of_string value with
+  | Ok count -> count
+  | Error detail -> Alcotest.failf "attempt_count fixture invalid: %s" detail
+;;
+
+let load_event_queue_or_fail ~base_path ~keeper_name =
+  match Event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error detail -> Alcotest.failf "event queue load failed: %s" detail
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -136,7 +148,7 @@ let test_roundtrip_preserves_full_evidence_and_pending_state () =
   let candidate = candidate () in
   (match candidate.status with
    | A.Pending { last_failure = None } -> ()
-   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+   | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
      Alcotest.fail "new candidate was not clean Pending");
   let request_fields =
     match candidate.judgment_request with
@@ -204,7 +216,7 @@ let test_worker_record_wakes_then_owner_lane_drains () =
             } ->
           (match persisted.status with
            | A.Pending { last_failure = None } -> ()
-           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+           | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
              Alcotest.fail "worker-side record invoked or mutated the judgment")
         | Ok _ -> Alcotest.fail "worker-side record returned the wrong typed acceptance"
         | Error detail -> Alcotest.failf "worker-side record failed: %s" detail);
@@ -218,7 +230,6 @@ let test_worker_record_wakes_then_owner_lane_drains () =
            A.For_testing.drain_pending_with_judge
              ~base_path
              ~keeper_name:pending.keeper_name
-             ~now:100.0
              ~judge:(fun _ -> Ok (judgment J.Relevant))
          with
          | Ok report -> report
@@ -232,7 +243,7 @@ let test_worker_record_wakes_then_owner_lane_drains () =
          true
          (Atomic.get entry.fiber_wakeup);
        match
-         Event_queue_persistence.load
+         load_event_queue_or_fail
            ~base_path
            ~keeper_name:pending.keeper_name
          |> Event_queue.to_list
@@ -251,6 +262,8 @@ let test_retryable_judge_failure_remains_pending () =
   let failure : A.retryable_failure =
     { kind = A.Provider_unavailable
     ; detail = "provider unavailable"
+    ; attempt_count = A.Attempt_count.one
+    ; first_failed_at = 102.0
     ; failed_at = 102.0
     }
   in
@@ -270,7 +283,7 @@ let test_retryable_judge_failure_remains_pending () =
       "typed failure preserved"
       "provider_unavailable"
       (A.retryable_failure_kind_to_string observed.kind)
-  | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+  | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
     Alcotest.fail "retryable judge failure consumed the candidate"
 ;;
 
@@ -289,10 +302,10 @@ let test_not_relevant_transitions_directly_to_consumed () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ ->
      Alcotest.fail "not-relevant verdict did not reach Consumed");
   let queue =
-    Keeper_event_queue_persistence.load
+    load_event_queue_or_fail
       ~base_path
       ~keeper_name:current.keeper_name
   in
@@ -317,10 +330,10 @@ let test_relevant_consumes_only_after_exact_durable_enqueue () =
   in
   (match current.status with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
-   | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
+   | A.Consumed _ | A.Pending _ | A.Judged _ ->
      Alcotest.fail "relevant verdict consumed before durable delivery");
   let queue =
-    Keeper_event_queue_persistence.load
+    load_event_queue_or_fail
       ~base_path
       ~keeper_name:current.keeper_name
     |> Keeper_event_queue.to_list
@@ -368,11 +381,11 @@ let test_delivery_storage_error_retains_judged_state () =
   | A.Judged
       { last_failure = Some { kind = A.Durable_delivery_unavailable; _ }; _ } ->
     ()
-  | A.Judged _ | A.Pending _ | A.Consumed _ | A.Expired _ ->
+  | A.Judged _ | A.Pending _ | A.Consumed _ ->
     Alcotest.fail "durable delivery storage error did not retain Judged"
 ;;
 
-let test_malformed_ledger_is_explicit_and_not_overwritten () =
+let test_retired_epoch_is_quarantined_and_current_corruption_is_explicit () =
   with_temp_base "keeper-board-attention-malformed" @@ fun base_path ->
   let keeper_name = "sangsu" in
   let dir =
@@ -381,21 +394,45 @@ let test_malformed_ledger_is_explicit_and_not_overwritten () =
       "board_attention_candidates"
   in
   Fs_compat.mkdir_p dir;
-  let path = Filename.concat dir (keeper_name ^ ".jsonl") in
+  let retired_path = Filename.concat dir (keeper_name ^ ".jsonl") in
   let malformed = "{not-json\n" in
-  let oc = open_out_bin path in
+  let oc = open_out_bin retired_path in
+  output_string oc malformed;
+  close_out oc;
+  (match A.load_candidates ~base_path ~keeper_name with
+   | Ok [] -> ()
+   | Ok _ -> Alcotest.fail "retired candidate bytes entered current authority"
+   | Error detail -> Alcotest.failf "retired residue blocked current authority: %s" detail);
+  (match A.retired_epoch_residue ~base_path ~keeper_name with
+   | Ok (Some observed) ->
+     Alcotest.(check string) "retired path observed exactly" retired_path observed
+   | Ok None -> Alcotest.fail "retired residue was not observed"
+   | Error detail -> Alcotest.failf "retired residue inspection failed: %s" detail);
+  (match A.record ~base_path (candidate ~keeper_name ()) with
+   | A.Recorded _ -> ()
+   | A.Duplicate _ | A.Record_error _ ->
+     Alcotest.fail "retired bytes blocked a current candidate record");
+  let ic = open_in_bin retired_path in
+  let preserved = really_input_string ic (in_channel_length ic) in
+  close_in ic;
+  Alcotest.(check string) "retired malformed bytes preserved" malformed preserved;
+  let current_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates_v2")
+      (keeper_name ^ ".jsonl")
+  in
+  let oc = open_out_bin current_path in
   output_string oc malformed;
   close_out oc;
   (match A.load_candidates ~base_path ~keeper_name with
    | Error detail -> Alcotest.(check bool) "error detail" true (String.length detail > 0)
-   | Ok _ -> Alcotest.fail "malformed ledger was silently skipped");
+   | Ok _ -> Alcotest.fail "malformed current ledger was silently skipped");
   (match A.record ~base_path (candidate ~keeper_name ()) with
    | A.Record_error _ -> ()
-   | A.Recorded _ | A.Duplicate _ -> Alcotest.fail "malformed ledger was overwritten");
-  let ic = open_in_bin path in
-  let preserved = really_input_string ic (in_channel_length ic) in
-  close_in ic;
-  Alcotest.(check string) "malformed bytes preserved" malformed preserved
+   | A.Recorded _ | A.Duplicate _ ->
+     Alcotest.fail "malformed current ledger was overwritten")
 ;;
 
 let test_strict_judgment_contract_rejects_extra_fields () =
@@ -415,7 +452,7 @@ let count_ledger_lines base_path =
   let dir =
     Filename.concat
       (Filename.concat base_path ".masc")
-      "board_attention_candidates"
+      "board_attention_candidates_v2"
   in
   Sys.readdir dir
   |> Array.to_list
@@ -449,6 +486,8 @@ let test_update_ledger_compacts_to_distinct () =
          let failure : A.retryable_failure =
            { kind = A.Provider_unavailable
            ; detail = Printf.sprintf "provider unavailable %d" index
+           ; attempt_count = A.Attempt_count.one
+           ; first_failed_at = 102.0 +. float_of_int index
            ; failed_at = 102.0 +. float_of_int index
            }
          in
@@ -469,12 +508,100 @@ let test_update_ledger_compacts_to_distinct () =
        Alcotest.(check string)
          "latest failure wins after compaction"
          "provider unavailable 5"
-         observed.detail
-     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ | A.Expired _ ->
+         observed.detail;
+       Alcotest.(check string)
+         "every retry attempt remains observable"
+         (string_of_int transitions)
+         (A.Attempt_count.to_string observed.attempt_count)
+     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
        Alcotest.fail "compaction dropped the latest pending failure")
   | Ok candidates ->
     Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
   | Error detail -> Alcotest.failf "load after compaction failed: %s" detail
+;;
+
+let test_retry_occurrence_rejects_aggregated_counter_input () =
+  with_temp_base "keeper-board-attention-invalid-retry-counter" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let invalid : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "caller supplied aggregated evidence"
+    ; attempt_count = attempt_count "2"
+    ; first_failed_at = 102.0
+    ; failed_at = 102.0
+    }
+  in
+  match A.record_retryable_failure ~base_path pending invalid with
+  | Ok _ -> Alcotest.fail "aggregated retry evidence was accepted as one occurrence"
+  | Error detail ->
+    Alcotest.(check string)
+      "invalid occurrence is explicit"
+      "Board attention retry occurrence must enter the durable boundary with attempt_count=1"
+      detail
+;;
+
+let test_retry_counter_is_arbitrary_precision_observation () =
+  let previous_digits = String.make 128 '9' in
+  let maxed_failure : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "large retry evidence"
+    ; attempt_count = attempt_count previous_digits
+    ; first_failed_at = 101.0
+    ; failed_at = 102.0
+    }
+  in
+  let occurrence : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "next retry evidence"
+    ; attempt_count = A.Attempt_count.one
+    ; first_failed_at = 103.0
+    ; failed_at = 103.0
+    }
+  in
+  match A.For_testing.next_retryable_failure ~previous:(Some maxed_failure) occurrence with
+  | Error detail -> Alcotest.failf "arbitrary-precision retry increment failed: %s" detail
+  | Ok observed ->
+    Alcotest.(check string)
+      "retry observation has no machine-integer behavior limit"
+      ("1" ^ String.make 128 '0')
+      (A.Attempt_count.to_string observed.attempt_count)
+;;
+
+let test_record_rejects_non_initial_or_non_finite_candidate () =
+  with_temp_base "keeper-board-attention-invalid-admission" @@ fun base_path ->
+  let initial = candidate () in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "must not enter through initial admission"
+    ; attempt_count = A.Attempt_count.one
+    ; first_failed_at = 102.0
+    ; failed_at = 102.0
+    }
+  in
+  (match
+     A.record
+       ~base_path
+       { initial with status = A.Pending { last_failure = Some failure } }
+   with
+   | A.Record_error detail ->
+     Alcotest.(check string)
+       "non-initial lifecycle is explicit"
+       "Board attention admission requires Pending status without retry evidence"
+       detail
+   | A.Recorded _ | A.Duplicate _ ->
+     Alcotest.fail "non-initial candidate entered through admission");
+  (match A.record ~base_path { initial with recorded_at = Float.nan } with
+   | A.Record_error detail ->
+     Alcotest.(check string)
+       "non-finite timestamp is explicit"
+       "invalid Board attention candidate: board attention candidate.recorded_at must be finite"
+       detail
+   | A.Recorded _ | A.Duplicate _ ->
+     Alcotest.fail "candidate with non-finite timestamp entered durable state");
+  match A.load_candidates ~base_path ~keeper_name:initial.keeper_name with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "invalid admission wrote durable candidate bytes"
+  | Error detail -> Alcotest.failf "invalid admission poisoned current epoch: %s" detail
 ;;
 
 (* --- read-side stat memo (#25003) -------------------------------------
@@ -531,6 +658,17 @@ let ledger_path_or_fail ~base_path ~keeper_name =
   match find_file_named ~name:(keeper_name ^ ".jsonl") base_path with
   | Some path -> path
   | None -> Alcotest.failf "ledger file for %s not found under %s" keeper_name base_path
+;;
+
+let copy_file_exact source target =
+  let source_channel = open_in_bin source in
+  let bytes = really_input_string source_channel (in_channel_length source_channel) in
+  close_in source_channel;
+  Fs_compat.mkdir_p (Filename.dirname target);
+  let target_channel = open_out_bin target in
+  output_string target_channel bytes;
+  close_out target_channel;
+  bytes
 ;;
 
 let flip_candidate_id_in_place path =
@@ -606,6 +744,43 @@ let test_load_memo_invalidated_by_atomic_rewrite () =
     then Alcotest.fail "second candidate missing after atomic rewrite")
 ;;
 
+let test_current_epoch_rejects_cross_keeper_and_cross_base_copy () =
+  with_temp_base "attention-owner-fence" (fun base_path ->
+    let keeper_name = "sangsu" in
+    ignore (record_or_fail ~base_path (candidate ~keeper_name ()) : A.candidate);
+    let source = ledger_path_or_fail ~base_path ~keeper_name in
+    let current_dir = Filename.dirname source in
+    let foreign_keeper_path = Filename.concat current_dir "idealist.jsonl" in
+    let foreign_keeper_bytes = copy_file_exact source foreign_keeper_path in
+    (match A.load_candidates ~base_path ~keeper_name:"idealist" with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "cross-Keeper candidate epoch copy was accepted");
+    let preserved =
+      let channel = open_in_bin foreign_keeper_path in
+      let bytes = really_input_string channel (in_channel_length channel) in
+      close_in channel;
+      bytes
+    in
+    Alcotest.(check string)
+      "cross-Keeper rejected bytes remain untouched"
+      foreign_keeper_bytes
+      preserved;
+    let foreign_base_path = Filename.concat base_path "foreign-base" in
+    Fs_compat.mkdir_p foreign_base_path;
+    let foreign_base_current_dir =
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path:foreign_base_path)
+        "board_attention_candidates_v2"
+    in
+    let foreign_base_path_file =
+      Filename.concat foreign_base_current_dir (keeper_name ^ ".jsonl")
+    in
+    ignore (copy_file_exact source foreign_base_path_file : string);
+    match A.load_candidates ~base_path:foreign_base_path ~keeper_name with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "cross-BasePath candidate epoch copy was accepted")
+;;
+
 let all_not_relevant candidates =
   Ok
     (List.fold_left
@@ -615,55 +790,39 @@ let all_not_relevant candidates =
        candidates)
 ;;
 
-let test_drain_expires_stale_pending_without_model_call () =
-  with_temp_base "board-attention-ttl" @@ fun base_path ->
+let test_old_pending_remains_actionable_until_judged () =
+  with_temp_base "board-attention-no-time-gate" @@ fun base_path ->
   let keeper_name = "sangsu" in
-  let _ = record_or_fail ~base_path (candidate ~keeper_name ()) in
+  let old = { (candidate ~keeper_name ()) with recorded_at = -1_000_000.0 } in
+  let persisted = record_or_fail ~base_path old in
   let report =
     match
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:(100.0 +. A.candidate_ttl_sec +. 1.0)
-        ~judge_batch:(fun _ ->
-          Alcotest.fail "stale candidate reached the model judge")
+        ~judge_batch:(fun candidates ->
+          match candidates with
+          | [ candidate ] ->
+            Alcotest.(check string)
+              "exact old pending candidate"
+              persisted.candidate_id
+              candidate.candidate_id;
+            all_not_relevant candidates
+          | _ -> Alcotest.fail "owner lane did not submit exactly one pending candidate")
     with
     | Ok report -> report
-    | Error detail -> Alcotest.failf "ttl drain failed: %s" detail
+    | Error detail -> Alcotest.failf "old pending drain failed: %s" detail
   in
-  Alcotest.(check int) "no model attempt for stale rows" 0 report.attempted;
-  Alcotest.(check int) "stale row counted as consumed" 1 report.consumed;
+  Alcotest.(check int) "old row reaches the judge" 1 report.attempted;
+  Alcotest.(check int) "old row consumes after judgment" 1 report.consumed;
   Alcotest.(check int) "nothing remains" 0 report.remaining;
   match (only_loaded ~base_path ~keeper_name).status with
-  | A.Expired _ -> ()
-  | A.Pending _ | A.Judged _ | A.Consumed _ ->
-    Alcotest.fail "stale candidate was not expired"
-;;
-
-let test_drain_fresh_pending_is_not_expired () =
-  with_temp_base "board-attention-fresh" @@ fun base_path ->
-  let keeper_name = "sangsu" in
-  let _ = record_or_fail ~base_path (candidate ~keeper_name ()) in
-  let report =
-    match
-      A.For_testing.drain_pending_with_judge_batch
-        ~base_path
-        ~keeper_name
-        ~now:100.0
-        ~judge_batch:all_not_relevant
-    with
-    | Ok report -> report
-    | Error detail -> Alcotest.failf "fresh drain failed: %s" detail
-  in
-  Alcotest.(check int) "fresh row attempted" 1 report.attempted;
-  Alcotest.(check int) "fresh row consumed" 1 report.consumed;
-  match (only_loaded ~base_path ~keeper_name).status with
   | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-  | A.Consumed _ | A.Pending _ | A.Judged _ | A.Expired _ ->
-    Alcotest.fail "fresh candidate did not consume as not_relevant"
+  | A.Consumed _ | A.Pending _ | A.Judged _ ->
+    Alcotest.fail "old candidate did not consume from its typed judgment"
 ;;
 
-let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
+let test_batch_verdict_omission_records_contract_failure_without_partial_apply () =
   with_temp_base "board-attention-partial" @@ fun base_path ->
   let keeper_name = "sangsu" in
   let first = record_or_fail ~base_path (candidate ~keeper_name ()) in
@@ -677,7 +836,6 @@ let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:100.0
         ~judge_batch:(fun _ ->
           Ok
             (A.Candidate_map.add
@@ -689,23 +847,34 @@ let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
     | Error detail -> Alcotest.failf "partial drain failed: %s" detail
   in
   Alcotest.(check int) "both attempted" 2 report.attempted;
-  Alcotest.(check int) "one consumed" 1 report.consumed;
-  Alcotest.(check int) "one remains" 1 report.remaining;
+  Alcotest.(check int) "partial verdict is not applied" 0 report.consumed;
+  Alcotest.(check int) "complete request remains" 2 report.remaining;
+  let expected_detail =
+    Printf.sprintf
+      "batch verdict omits requested candidate_ids [%S]"
+      second.candidate_id
+  in
   match A.load_candidates ~base_path ~keeper_name with
   | Ok candidates ->
-    (match
-       List.find_opt
-         (fun (c : A.candidate) -> String.equal c.candidate_id second.candidate_id)
-         candidates
-     with
-     | Some { status = A.Pending { last_failure = None }; _ } -> ()
-     | Some _ -> Alcotest.fail "unjudged candidate gained failure evidence"
-     | None -> Alcotest.fail "unjudged candidate vanished from the ledger")
+    List.iter
+      (fun (candidate : A.candidate) ->
+         match candidate.status with
+         | A.Pending
+             { last_failure =
+                 Some { kind = A.Response_contract_unavailable; detail; _ }
+             } ->
+           Alcotest.(check string)
+             "exact omission evidence is shared by the requested set"
+             expected_detail
+             detail
+         | A.Pending _ | A.Judged _ | A.Consumed _ ->
+           Alcotest.fail "contract-invalid batch did not remain Pending with evidence")
+      candidates
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
-let test_batch_failure_aborts_round_and_records_evidence () =
-  with_temp_base "board-attention-abort" @@ fun base_path ->
+let test_owner_lane_submits_complete_pending_set_once_and_records_failure () =
+  with_temp_base "board-attention-complete-batch" @@ fun base_path ->
   let keeper_name = "sangsu" in
   let recorded =
     List.map
@@ -714,30 +883,39 @@ let test_batch_failure_aborts_round_and_records_evidence () =
          record_or_fail
            ~base_path
            (candidate ~keeper_name ~signal:(signal ~post_id ()) ()))
-      (List.init (A.batch_max_candidates + 1) (fun index -> index + 1))
+      (List.init 3 (fun index -> index + 1))
   in
   let failure : A.retryable_failure =
-    { kind = A.Provider_unavailable; detail = "429 too many concurrent"; failed_at = 100.0 }
+    { kind = A.Provider_unavailable
+    ; detail = "429 too many concurrent"
+    ; attempt_count = A.Attempt_count.one
+    ; first_failed_at = 100.0
+    ; failed_at = 100.0
+    }
   in
+  let judge_calls = ref 0 in
   let report =
     match
       A.For_testing.drain_pending_with_judge_batch
         ~base_path
         ~keeper_name
-        ~now:100.0
-        ~judge_batch:(fun _ -> Error failure)
+        ~judge_batch:(fun candidates ->
+          incr judge_calls;
+          Alcotest.(check int)
+            "one request owns the complete pending set"
+            (List.length recorded)
+            (List.length candidates);
+          Error failure)
     with
     | Ok report -> report
     | Error detail -> Alcotest.failf "abort drain failed: %s" detail
   in
-  Alcotest.(check int)
-    "only the first batch was attempted"
-    A.batch_max_candidates
-    report.attempted;
+  Alcotest.(check int) "one model call" 1 !judge_calls;
+  Alcotest.(check int) "complete set attempted" (List.length recorded) report.attempted;
   Alcotest.(check int) "nothing consumed" 0 report.consumed;
   Alcotest.(check int)
-    "failed batch and deferred batch remain"
-    (A.batch_max_candidates + 1)
+    "complete failed set remains"
+    (List.length recorded)
     report.remaining;
   match A.load_candidates ~base_path ~keeper_name with
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
@@ -747,35 +925,17 @@ let test_batch_failure_aborts_round_and_records_evidence () =
         (fun (c : A.candidate) -> String.equal c.candidate_id target.candidate_id)
         candidates
     in
-    let attempted = List.filteri (fun index _ -> index < A.batch_max_candidates) recorded in
-    let deferred = List.nth recorded A.batch_max_candidates in
     List.iter
       (fun (target : A.candidate) ->
          match by_id target with
          | Some { status = A.Pending { last_failure = Some observed }; _ } ->
            Alcotest.(check string)
-             "attempted candidate keeps the failure evidence"
+             "every requested candidate keeps the failure evidence"
              "429 too many concurrent"
              observed.detail
-         | Some _ -> Alcotest.fail "attempted candidate lost the failure evidence"
-         | None -> Alcotest.fail "attempted candidate vanished")
-      attempted;
-    (match by_id deferred with
-     | Some { status = A.Pending { last_failure = None }; _ } -> ()
-     | Some _ -> Alcotest.fail "deferred batch gained failure evidence"
-     | None -> Alcotest.fail "deferred candidate vanished")
-;;
-
-let test_expired_status_codec_roundtrip () =
-  let fixture = candidate () in
-  let expired = { fixture with status = A.Expired { expired_at = 123.5 } } in
-  match A.candidate_of_json (A.candidate_to_json expired) with
-  | Ok decoded ->
-    (match decoded.status with
-     | A.Expired { expired_at } -> Alcotest.(check (float 0.001)) "expired_at" 123.5 expired_at
-     | A.Pending _ | A.Judged _ | A.Consumed _ ->
-       Alcotest.fail "expired status did not roundtrip")
-  | Error detail -> Alcotest.failf "expired codec failed: %s" detail
+         | Some _ -> Alcotest.fail "requested candidate lost the failure evidence"
+         | None -> Alcotest.fail "requested candidate vanished")
+      recorded
 ;;
 
 let test_batch_verdict_codec_roundtrip () =
@@ -863,9 +1023,9 @@ let () =
             `Quick
             test_delivery_storage_error_retains_judged_state
         ; Alcotest.test_case
-            "malformed ledger is explicit and preserved"
+            "retired epoch is quarantined; current corruption is explicit"
             `Quick
-            test_malformed_ledger_is_explicit_and_not_overwritten
+            test_retired_epoch_is_quarantined_and_current_corruption_is_explicit
         ; Alcotest.test_case
             "strict judgment rejects undeclared score"
             `Quick
@@ -874,6 +1034,18 @@ let () =
             "update ledger compacts to distinct candidate count"
             `Quick
             test_update_ledger_compacts_to_distinct
+        ; Alcotest.test_case
+            "retry occurrence rejects aggregated counter input"
+            `Quick
+            test_retry_occurrence_rejects_aggregated_counter_input
+        ; Alcotest.test_case
+            "retry counter is arbitrary-precision observation"
+            `Quick
+            test_retry_counter_is_arbitrary_precision_observation
+        ; Alcotest.test_case
+            "record rejects non-initial or non-finite candidate"
+            `Quick
+            test_record_rejects_non_initial_or_non_finite_candidate
         ] )
     ; ( "read memo"
       , [ Alcotest.test_case
@@ -884,28 +1056,24 @@ let () =
             "atomic rewrite invalidates memo"
             `Quick
             test_load_memo_invalidated_by_atomic_rewrite
+        ; Alcotest.test_case
+            "current epoch rejects cross-owner copies"
+            `Quick
+            test_current_epoch_rejects_cross_keeper_and_cross_base_copy
         ] )
     ; ( "batch drain"
       , [ Alcotest.test_case
-            "stale pending expires without model call"
+            "old pending remains actionable until judged"
             `Quick
-            test_drain_expires_stale_pending_without_model_call
+            test_old_pending_remains_actionable_until_judged
         ; Alcotest.test_case
-            "fresh pending is not expired"
+            "missing verdict records failure without partial apply"
             `Quick
-            test_drain_fresh_pending_is_not_expired
+            test_batch_verdict_omission_records_contract_failure_without_partial_apply
         ; Alcotest.test_case
-            "missing verdict keeps candidate pending"
+            "complete pending set is submitted once"
             `Quick
-            test_batch_verdict_missing_candidate_stays_pending_without_failure
-        ; Alcotest.test_case
-            "batch failure aborts round with evidence"
-            `Quick
-            test_batch_failure_aborts_round_and_records_evidence
-        ; Alcotest.test_case
-            "expired status codec roundtrip"
-            `Quick
-            test_expired_status_codec_roundtrip
+            test_owner_lane_submits_complete_pending_set_once_and_records_failure
         ; Alcotest.test_case
             "batch verdict codec roundtrip"
             `Quick

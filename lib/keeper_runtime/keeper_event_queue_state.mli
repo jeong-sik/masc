@@ -144,8 +144,15 @@ val settlement_to_yojson : settlement -> Yojson.Safe.t
     [settlement] value. *)
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
-val to_yojson : t -> Yojson.Safe.t
-val of_yojson : Yojson.Safe.t -> (t, string) result
+val to_yojson : owner_base_path:string -> keeper_name:string -> t -> Yojson.Safe.t
+
+val of_yojson :
+  expected_owner_base_path:string ->
+  expected_keeper_name:string ->
+  Yojson.Safe.t ->
+  (t, string) result
+(** The snapshot envelope is bound to its canonical Keeper owner. Decoding a
+    valid snapshot under another lane is an explicit owner mismatch. *)
 
 val schema : string
 (** ["keeper.event_queue.state.v4"]. *)

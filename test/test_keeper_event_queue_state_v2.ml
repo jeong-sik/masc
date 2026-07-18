@@ -2,6 +2,21 @@ module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
 
+let codec_keeper_name = "event_queue_state_test_keeper"
+let codec_owner_base_path = "/event-queue-state-test"
+
+let state_to_yojson =
+  State.to_yojson
+    ~owner_base_path:codec_owner_base_path
+    ~keeper_name:codec_keeper_name
+;;
+
+let state_of_yojson =
+  State.of_yojson
+    ~expected_owner_base_path:codec_owner_base_path
+    ~expected_keeper_name:codec_keeper_name
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error message -> Alcotest.failf "%s: %s" label message
@@ -27,6 +42,26 @@ let claim_head state =
   |> require_ok "claim head"
 ;;
 
+let test_snapshot_codec_rejects_cross_owner_copy () =
+  let json = state_to_yojson State.empty in
+  (match
+     State.of_yojson
+       ~expected_owner_base_path:"/different-base"
+       ~expected_keeper_name:codec_keeper_name
+       json
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "cross-BasePath queue snapshot was accepted");
+  match
+    State.of_yojson
+      ~expected_owner_base_path:codec_owner_base_path
+      ~expected_keeper_name:"different-keeper"
+      json
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cross-Keeper queue snapshot was accepted"
+;;
+
 let test_claim_codec_ack_idempotency () =
   let first = stimulus "first" 1.0 in
   let state = State.with_pending (queue [ first ]) State.empty in
@@ -37,7 +72,7 @@ let test_claim_codec_ack_idempotency () =
   Alcotest.(check int) "pending drained" 0 (Queue.length (State.pending state));
   Alcotest.(check int64) "next sequence" 2L (State.next_lease_sequence state);
   let state =
-    State.to_yojson state |> State.of_yojson |> require_ok "v2 codec roundtrip"
+    state_to_yojson state |> state_of_yojson |> require_ok "v4 codec roundtrip"
   in
   let state, result =
     State.settle ~settled_at:11.0 ~lease ~settlement:State.Ack state
@@ -127,16 +162,16 @@ let test_canonical_receipt_replay () =
   in
   Alcotest.(check string)
     "replay reconstructs exact state"
-    (State.to_yojson settled |> Yojson.Safe.to_string)
-    (State.to_yojson replayed |> Yojson.Safe.to_string);
+    (state_to_yojson settled |> Yojson.Safe.to_string)
+    (state_to_yojson replayed |> Yojson.Safe.to_string);
   let repeated =
     State.replay_transition_receipt decoded replayed
     |> require_ok "replay canonical receipt idempotently"
   in
   Alcotest.(check string)
     "idempotent replay preserves state"
-    (State.to_yojson replayed |> Yojson.Safe.to_string)
-    (State.to_yojson repeated |> Yojson.Safe.to_string);
+    (state_to_yojson replayed |> Yojson.Safe.to_string)
+    (state_to_yojson repeated |> Yojson.Safe.to_string);
   let conflicting = { decoded with event_id = "wrong-event-id" } in
   match State.replay_transition_receipt conflicting claimed with
   | Error _ -> ()
@@ -356,7 +391,7 @@ let test_requeue_and_escalation_are_total () =
     (List.length (State.transition_outbox state));
   let open Yojson.Safe.Util in
   let boundary_failure_settlement =
-    State.to_yojson state
+    state_to_yojson state
     |> member "transition_outbox"
     |> to_list
     |> List.rev
@@ -431,8 +466,8 @@ let test_judgment_terminal_evidence_is_durable () =
     |> require_ok "external-input judgment settlement"
   in
   let restored =
-    State.to_yojson state
-    |> State.of_yojson
+    state_to_yojson state
+    |> state_of_yojson
     |> require_ok "external-input judgment evidence roundtrip"
   in
   (match State.transition_outbox restored with
@@ -459,7 +494,7 @@ let test_judgment_terminal_evidence_is_durable () =
    | _ -> Alcotest.fail "external-input judgment evidence changed during roundtrip");
   let open Yojson.Safe.Util in
   let settlement_json =
-    State.to_yojson state
+    state_to_yojson state
     |> member "transition_outbox"
     |> to_list
     |> List.hd
@@ -733,9 +768,17 @@ let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
 ;;
 
-let write_state path state =
+let write_state ~base_path ~keeper_name path state =
   Fs_compat.mkdir_p (Filename.dirname path);
-  State.to_yojson state
+  let owner_base_path =
+    Config_dir_resolver.canonical_base_path base_path
+    |> function
+    | Ok base_path -> base_path
+    | Error error ->
+      Alcotest.fail
+        (Config_dir_resolver.canonical_base_path_error_to_string error)
+  in
+  State.to_yojson ~owner_base_path ~keeper_name state
   |> Yojson.Safe.pretty_to_string
   |> Fs_compat.save_file_atomic path
   |> require_ok ("write fixture " ^ path)
@@ -1204,6 +1247,8 @@ let test_transition_outbox_projects_with_stable_identity () =
       0
       (List.length (State.transition_outbox state));
     write_state
+      ~base_path
+      ~keeper_name
       (Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue-v4.json")
       unprojected_state;
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
@@ -1337,18 +1382,26 @@ let test_failed_owner_write_does_not_block_peer_lane () =
     Alcotest.(check (list string))
       "failed claim left durable pending unchanged"
       [ "broken-pending" ]
-      (Persistence.load_pending ~base_path ~keeper_name:broken |> post_ids);
+      (Persistence.load_pending_result ~base_path ~keeper_name:broken
+       |> require_ok "load failed-owner pending queue"
+       |> post_ids);
     Alcotest.(check (list string))
       "peer committed independently"
       [ "peer-pending" ]
-      (Persistence.load_pending ~base_path ~keeper_name:peer |> post_ids))
+      (Persistence.load_pending_result ~base_path ~keeper_name:peer
+       |> require_ok "load peer pending queue"
+       |> post_ids))
 ;;
 
 let () =
   Alcotest.run
-    "keeper event queue v2"
+    "keeper event queue v4"
     [ ( "state"
       , [ Alcotest.test_case "claim codec ack idempotency" `Quick test_claim_codec_ack_idempotency
+        ; Alcotest.test_case
+            "snapshot codec rejects cross-owner copy"
+            `Quick
+            test_snapshot_codec_rejects_cross_owner_copy
         ; Alcotest.test_case
             "canonical receipt replay"
             `Quick

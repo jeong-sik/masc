@@ -1,10 +1,8 @@
 (** Per-keeper event-queue access.
 
-    SSOT for enqueueing / draining the per-keeper stimulus queue.
-    The MASC-owned v4 state envelope is authoritative. Mutations commit that one
-    durable state first, then publish its pending projection into the
-    entry-owned [event_queue : Keeper_event_queue.t Atomic.t].  No central
-    registry Atomic is touched. *)
+    SSOT for enqueueing / draining the per-keeper stimulus queue. The
+    MASC-owned v4 state envelope is the sole behavior and observation
+    authority; registry entries carry no mutable queue projection. *)
 
 type lease = Keeper_event_queue_persistence.lease
 
@@ -44,7 +42,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Already_settled of transition_receipt
   | Committed_followup_failed of
       { receipt : transition_receipt
-      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; stage : [ `Checkpoint | `Wal_compaction ]
       ; detail : string
       }
 
@@ -79,23 +77,14 @@ val settle_result :
   settlement:settlement ->
   (settle_result, string) result
 
-(** Enqueue a stimulus on the keeper's event queue. When the keeper is not
-    registered yet, persist the stimulus to the durable snapshot so later
-    registration can replay it instead of dropping the wake at the
-    restart/register boundary. *)
-val enqueue : base_path:string -> string -> Keeper_event_queue.stimulus -> unit
-
 val enqueue_durable_result :
   base_path:string
   -> string
   -> Keeper_event_queue.stimulus
   -> (unit, string) result
-(** Identity-deduplicated enqueue with an explicit durable-commit result.
-    Unlike {!enqueue}, this first commits the pending snapshot and only then
-    updates the live queue. Use it when the stimulus is the sole carrier of an
-    external decision and the caller must not acknowledge delivery on a failed
-    write. An existing identical [post_id] is idempotent; the same [post_id]
-    with a different typed payload is an explicit conflict. *)
+(** Identity-deduplicated enqueue with an explicit durable-commit result. An
+    existing identical [post_id] is idempotent; the same [post_id] with a
+    different typed payload is an explicit conflict. *)
 
 type enqueue_if_missing_durable_result =
   | Enqueued
@@ -160,9 +149,9 @@ val enqueue_hitl_resolution_durable_result :
     nonblocking-approval tests; callers may signal a live fiber only after this
     function returns [Ok ()]. *)
 
-(** Read-only snapshot of the keeper's queue. If the keeper is not registered,
-    read the durable snapshot so diagnostics still expose pending replay. *)
-val snapshot : base_path:string -> string -> Keeper_event_queue.t
+val snapshot_result :
+  base_path:string -> string -> (Keeper_event_queue.t, string) result
+(** Result-returning exact durable pending projection. *)
 
 val drop_by_post_id :
   base_path:string

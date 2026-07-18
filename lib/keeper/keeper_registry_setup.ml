@@ -463,7 +463,7 @@ let register_with_state_result
       ()
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok _ ->
   let entry =
     { base_path
     ; name
@@ -472,7 +472,6 @@ let register_with_state_result
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; lane = Keeper_lane.create ()
@@ -657,8 +656,8 @@ let register_restarting ~base_path name meta
   let phase = Keeper_state_machine.derive_phase conditions in
   (* Build fresh entry once — its per-fiber atomics are independent of the
      registry contents, so a CAS retry can re-use the same record without
-     re-allocating. Pending Event Layer stimuli are restored from the durable
-     queue snapshot instead of being reset across restart. *)
+     re-allocating. Registration recovery commits abandoned leases back to the
+     sole durable queue authority before this entry becomes visible. *)
   let done_p, done_r = Eio.Promise.create () in
   match
     Keeper_event_queue_persistence.prepare_registration_result
@@ -668,7 +667,7 @@ let register_restarting ~base_path name meta
       ()
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
-  | Ok initial_event_queue ->
+  | Ok _ ->
   let new_entry =
     { base_path
     ; name
@@ -677,7 +676,6 @@ let register_restarting ~base_path name meta
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; lane = Keeper_lane.create ()

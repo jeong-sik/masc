@@ -483,6 +483,18 @@ let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
   | _ -> Error (Printf.sprintf "%s must be a JSON object" context)
 
+let exact_fields ~context ~expected fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+      if not (List.exists (String.equal name) expected)
+      then Error (Printf.sprintf "%s contains unknown field %s" context name)
+      else if List.exists (String.equal name) seen
+      then Error (Printf.sprintf "%s contains duplicate field %s" context name)
+      else loop (name :: seen) rest
+  in
+  loop [] fields
+
 let required_field ~context name fields =
   match List.assoc_opt name fields with
   | Some value -> Ok value
@@ -820,7 +832,7 @@ let payload_of_yojson json =
   let context = "stimulus.payload" in
   let* fields = assoc_fields ~context json in
   let* kind = string_field ~context "kind" fields in
-  let parse_board_stimulus () =
+  let parse_board_stimulus ~additional_fields () =
     let* board_kind = string_field ~context "board_kind" fields in
     let* kind =
       match board_kind with
@@ -833,6 +845,40 @@ let payload_of_yojson json =
         let* reacted = bool_field ~context "reaction_active" fields in
         Ok (Reaction_changed { target_type; target_id; user_id; emoji; reacted })
       | _ -> board_stimulus_kind_of_string board_kind
+    in
+    let board_fields =
+      [ "kind"
+      ; "board_kind"
+      ; "author"
+      ; "title"
+      ; "content"
+      ; "preview"
+      ; "hearth"
+      ; "post_kind"
+      ; "updated_at_unix"
+      ; "explicit_mention"
+      ; "matched_targets"
+      ; "self_commented"
+      ; "new_external_since"
+      ; "latest_external"
+      ]
+    in
+    let reaction_fields =
+      match kind with
+      | Post_created | Comment_added -> []
+      | Reaction_changed _ ->
+        [ "reaction_target_type"
+        ; "reaction_target_id"
+        ; "reaction_user_id"
+        ; "reaction_emoji"
+        ; "reaction_active"
+        ]
+    in
+    let* () =
+      exact_fields
+        ~context
+        ~expected:(board_fields @ additional_fields @ reaction_fields)
+        fields
     in
     let* author = string_field ~context "author" fields in
     let* title = string_field ~context "title" fields in
@@ -852,6 +898,12 @@ let payload_of_yojson json =
       | `Null -> Ok None
       | `Assoc latest_fields ->
         let latest_context = context ^ ".latest_external" in
+        let* () =
+          exact_fields
+            ~context:latest_context
+            ~expected:[ "author"; "preview" ]
+            latest_fields
+        in
         let* latest_author = string_field ~context:latest_context "author" latest_fields in
         let* latest_preview = string_field ~context:latest_context "preview" latest_fields in
         Ok (Some { latest_author; latest_preview })
@@ -879,17 +931,25 @@ let payload_of_yojson json =
   in
   match kind with
   | "board_signal" ->
-    let* signal = parse_board_stimulus () in
+    let* signal = parse_board_stimulus ~additional_fields:[] () in
     Ok (Board_signal signal)
   | "board_attention" ->
     let* candidate_id = string_field ~context "candidate_id" fields in
     if String.equal candidate_id ""
     then Error "stimulus.payload.candidate_id must not be empty"
     else
-      let* signal = parse_board_stimulus () in
+      let* signal = parse_board_stimulus ~additional_fields:[ "candidate_id" ] () in
       Ok (Board_attention { candidate_id; signal })
-  | "bootstrap" -> Ok Bootstrap
+  | "bootstrap" ->
+    let* () = exact_fields ~context ~expected:[ "kind" ] fields in
+    Ok Bootstrap
   | "fusion_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "run_id"; "ok"; "resolved_answer"; "board_post_id"; "channel" ]
+        fields
+    in
     let* run_id = string_field ~context "run_id" fields in
     let* ok = bool_field ~context "ok" fields in
     let* resolved_answer = string_field ~context "resolved_answer" fields in
@@ -897,6 +957,12 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id; channel })
   | "bg_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "run_id"; "job_kind"; "ok"; "payload"; "board_post_id" ]
+        fields
+    in
     let* run_id = string_field ~context "run_id" fields in
     let* job_kind_s = string_field ~context "job_kind" fields in
     let* bg_kind = bg_job_kind_of_string job_kind_s in
@@ -908,6 +974,12 @@ let payload_of_yojson json =
       (Bg_completed
          { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
   | "schedule_due" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "schedule_id"; "due_at_unix"; "payload_digest"; "title"; "message" ]
+        fields
+    in
     let* schedule_id = string_field ~context "schedule_id" fields in
     let* due_at = float_field ~context "due_at_unix" fields in
     let* payload_digest = string_field ~context "payload_digest" fields in
@@ -915,6 +987,9 @@ let payload_of_yojson json =
     let* message = string_field ~context "message" fields in
     Ok (Schedule_due { schedule_id; due_at; payload_digest; title; message })
   | "connector_attention" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "event_id"; "channel" ] fields
+    in
     let* event_id = string_field ~context "event_id" fields in
     let* channel = continuation_channel_field fields in
     Ok (Connector_attention { event_id; channel })
@@ -923,11 +998,30 @@ let payload_of_yojson json =
     let* decision_s = string_field ~context "decision" fields in
     let* decision =
       match decision_s with
-      | "approve" -> Ok Hitl_approved
+      | "approve" ->
+        let* () =
+          exact_fields
+            ~context
+            ~expected:[ "kind"; "approval_id"; "decision"; "channel" ]
+            fields
+        in
+        Ok Hitl_approved
       | "reject" ->
+        let* () =
+          exact_fields
+            ~context
+            ~expected:[ "kind"; "approval_id"; "decision"; "channel"; "rationale" ]
+            fields
+        in
         let* rationale = string_field ~context "rationale" fields in
         Ok (Hitl_rejected rationale)
       | "edit" ->
+        let* () =
+          exact_fields
+            ~context
+            ~expected:[ "kind"; "approval_id"; "decision"; "channel"; "edited_input" ]
+            fields
+        in
         let* input = required_field ~context "edited_input" fields in
         Ok (Hitl_edited input)
       | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
@@ -935,6 +1029,12 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "failure_judgment" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "runtime_id"; "judgment_class"; "provenance"; "detail" ]
+        fields
+    in
     let* runtime_id = string_field ~context "runtime_id" fields in
     let* judgment_label = string_field ~context "judgment_class" fields in
     let* judgment =
@@ -945,12 +1045,27 @@ let payload_of_yojson json =
     in
     let* provenance =
       match List.assoc_opt "provenance" fields with
-      | Some json -> Keeper_runtime_failure_route.judgment_provenance_of_yojson json
-      | None ->
-        (* Explicit migration state for pre-provenance durable envelopes. New
-           producers never emit it, but old queues remain replayable without
-           inventing an execution boundary. *)
-        Ok Keeper_runtime_failure_route.Legacy_unattributed
+      | Some json ->
+        let* provenance =
+          Keeper_runtime_failure_route.judgment_provenance_of_yojson json
+        in
+        (match provenance with
+         | Keeper_runtime_failure_route.Legacy_unattributed ->
+           Error
+             "stimulus.payload.provenance legacy_unattributed is outside the v4 queue authority"
+         | Keeper_runtime_failure_route.Oas_api_error
+         | Keeper_runtime_failure_route.Oas_provider_error
+         | Keeper_runtime_failure_route.Oas_agent_error
+         | Keeper_runtime_failure_route.Oas_mcp_error
+         | Keeper_runtime_failure_route.Oas_config_error
+         | Keeper_runtime_failure_route.Oas_serialization_error
+         | Keeper_runtime_failure_route.Oas_io_error
+         | Keeper_runtime_failure_route.Oas_orchestration_error
+         | Keeper_runtime_failure_route.Oas_internal_error
+         | Keeper_runtime_failure_route.Masc_internal_error
+         | Keeper_runtime_failure_route.Completion_contract ->
+           Ok provenance)
+      | None -> Error "stimulus.payload missing required field provenance"
     in
     let* detail = string_field ~context "detail" fields in
     Ok
@@ -960,8 +1075,16 @@ let payload_of_yojson json =
          ; fj_provenance = provenance
          ; fj_detail = detail
          })
-  | "manual_compaction_requested" -> Ok Manual_compaction_requested
+  | "manual_compaction_requested" ->
+    let* () = exact_fields ~context ~expected:[ "kind" ] fields in
+    Ok Manual_compaction_requested
   | "goal_assigned" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "goal_id"; "goal_title"; "assigned_by" ]
+        fields
+    in
     let* goal_id = string_field ~context "goal_id" fields in
     let* goal_title = string_field ~context "goal_title" fields in
     let* assigned_by = string_field ~context "assigned_by" fields in
@@ -1001,6 +1124,12 @@ let stimulus_to_yojson (stimulus : stimulus) =
 let stimulus_of_yojson json =
   let context = "stimulus" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:[ "post_id"; "urgency"; "arrived_at_unix"; "payload" ]
+      fields
+  in
   let* post_id = string_field ~context "post_id" fields in
   let* urgency_s = string_field ~context "urgency" fields in
   let* urgency = urgency_of_string urgency_s in
@@ -1011,7 +1140,7 @@ let stimulus_of_yojson json =
   let* () = validate_stimulus stimulus in
   Ok stimulus
 
-let schema = "keeper.event_queue.v3"
+let schema = "keeper.event_queue.v4"
 
 let queue_to_yojson queue =
   `Assoc
@@ -1034,10 +1163,21 @@ let list_of_json ~context f = function
 let queue_of_yojson json =
   let context = "keeper event queue snapshot" in
   let* fields = assoc_fields ~context json in
+  let* () = exact_fields ~context ~expected:[ "schema"; "length"; "items" ] fields in
   let* schema_value = string_field ~context "schema" fields in
   if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue schema: %s" schema_value)
   else (
+    let* declared_length = int_field ~context "length" fields in
     let* items_json = required_field ~context "items" fields in
     let* items = list_of_json ~context:"keeper event queue snapshot.items" stimulus_of_yojson items_json in
-    Ok (of_list items))
+    if declared_length < 0
+    then Error "keeper event queue snapshot.length must not be negative"
+    else if declared_length <> List.length items
+    then
+      Error
+        (Printf.sprintf
+           "keeper event queue snapshot length mismatch: declared=%d actual=%d"
+           declared_length
+           (List.length items))
+    else Ok (of_list items))

@@ -422,7 +422,6 @@ type registry_entry = {
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
-  event_queue : Keeper_event_queue.t Atomic.t;
       (** Event Layer queue for incoming stimuli. Independent of
           [fiber_wakeup] (which remains a hint signal). The Policy
           Layer turn must consult this queue at the start of every

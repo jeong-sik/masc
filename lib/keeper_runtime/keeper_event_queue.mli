@@ -6,9 +6,8 @@
     pending stimuli once it gets a turn, and dedup/urgency are
     bookkeeping concerns that never delay an [enqueue].
 
-    This module is data only. The enqueue side is wired:
-    [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
-    before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
+    This module is data only. Producers commit through a typed durable queue
+    boundary before sending a non-authoritative wake hint. On the dequeue side,
     [keeper_heartbeat_loop.ml] leases every queued board signal at turn
     start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
     over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
@@ -102,7 +101,7 @@ val board_stimulus_error_to_string : board_stimulus_error -> string
 
 val board_stimulus_to_yojson : board_stimulus -> Yojson.Safe.t
 val board_stimulus_of_yojson : Yojson.Safe.t -> (board_stimulus, string) result
-(** Exact hard-cut v3 codec for embedding one Board delivery snapshot in other
+(** Exact hard-cut v4 codec for embedding one Board delivery snapshot in other
     MASC-owned durable records. *)
 
 type stimulus_payload =

@@ -17,12 +17,20 @@ let rec rm_rf path =
     else Sys.remove path
 
 let with_temp_workspace f =
+  Eio_main.run
+  @@ fun _env ->
   let base_path = Filename.temp_dir "keeper-heartbeat-current-task" "" in
   let config = Workspace.default_config base_path in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      rm_rf base_path)
     (fun () ->
       ignore (Workspace.init config ~agent_name:None : string);
+      Board.reset_global_for_test ();
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
       f config)
 
 let make_keepalive_meta ~name ~agent_name =
@@ -277,9 +285,13 @@ let persist_and_register_board_lane config meta =
 ;;
 
 let board_queue_length config keeper_name =
-  Keeper_registry_event_queue.snapshot
-    ~base_path:config.Workspace.base_path
-    keeper_name
+  (match
+     Keeper_registry_event_queue.snapshot_result
+       ~base_path:config.Workspace.base_path
+       keeper_name
+   with
+   | Ok queue -> queue
+   | Error detail -> fail ("event queue snapshot failed: " ^ detail))
   |> Keeper_event_queue.length
 ;;
 
@@ -288,6 +300,27 @@ let overwrite_file path contents =
   Fun.protect
     ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel contents)
+;;
+
+let create_board_signal ~content =
+  match
+    Board_dispatch.create_post
+      ~author:"external-author"
+      ~title:"addressed"
+      ~content
+      ~post_kind:Board.Human_post
+      ()
+  with
+  | Error error -> fail ("Board signal fixture failed: " ^ Board.show_board_error error)
+  | Ok post ->
+    { Board_dispatch.kind = Board_dispatch.Board_post_created
+    ; post_id = Board.Post_id.to_string post.id
+    ; author = Board.Agent_id.to_string post.author
+    ; title = post.title
+    ; content = post.content
+    ; hearth = post.hearth
+    ; updated_at = Some post.updated_at
+    }
 ;;
 
 let test_exact_mentions_deliver_and_wake_each_lane_independently () =
@@ -299,16 +332,7 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
        let beta = make_board_resume_meta "beta" in
        persist_and_register_board_lane config alpha;
        persist_and_register_board_lane config beta;
-       let signal : Board_dispatch.board_signal =
-         { kind = Board_dispatch.Board_post_created
-         ; post_id = "post-multi-lane"
-         ; author = "external-author"
-         ; title = "addressed"
-         ; content = "@alpha @beta inspect independently"
-         ; hearth = None
-         ; updated_at = Some 123.0
-         }
-       in
+       let signal = create_board_signal ~content:"@alpha @beta inspect independently" in
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "alpha durable queue" 1 (board_queue_length config "alpha");
        check int "beta durable queue" 1 (board_queue_length config "beta");
@@ -337,16 +361,7 @@ let test_paused_exact_mention_is_durable_without_wake () =
         with
         | Ok _ -> ()
         | Error _ -> fail "failed to pause Keeper fixture");
-       let signal : Board_dispatch.board_signal =
-         { kind = Board_dispatch.Board_post_created
-         ; post_id = "post-paused-lane"
-         ; author = "external-author"
-         ; title = "addressed"
-         ; content = "@pausedlane retain this"
-         ; hearth = None
-         ; updated_at = Some 124.0
-         }
-       in
+       let signal = create_board_signal ~content:"@pausedlane retain this" in
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "paused durable queue" 1 (board_queue_length config meta.name);
        match Keeper_registry.get ~base_path:config.base_path meta.name with
@@ -373,15 +388,8 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
         with
         | Ok _ -> ()
         | Error _ -> fail "failed to register Restarting Keeper fixture");
-       let signal : Board_dispatch.board_signal =
-         { kind = Board_dispatch.Board_post_created
-         ; post_id = "post-restarting-lane"
-         ; author = "external-author"
-         ; title = "addressed"
-         ; content = "@restartlane retain this while relaunching"
-         ; hearth = None
-         ; updated_at = Some 124.5
-         }
+       let signal =
+         create_board_signal ~content:"@restartlane retain this while relaunching"
        in
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "Restarting durable queue" 1
@@ -409,15 +417,9 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
        overwrite_file
          (Keeper_types_profile.keeper_meta_path config broken.name)
          "{ malformed Keeper metadata";
-       let signal : Board_dispatch.board_signal =
-         { kind = Board_dispatch.Board_post_created
-         ; post_id = "post-lane-isolation"
-         ; author = "external-author"
-         ; title = "addressed"
-         ; content = "@zzzbroken @aaahealthy inspect independently"
-         ; hearth = None
-         ; updated_at = Some 125.0
-         }
+       let signal =
+         create_board_signal
+           ~content:"@zzzbroken @aaahealthy inspect independently"
        in
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "unreadable lane has no queued signal" 0

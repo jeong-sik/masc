@@ -375,7 +375,7 @@ let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
    [run_state] onto the Bonsai wire record. [Masc_dashboard_api_types]
    cannot depend on [Keeper_composite_observer] (see that library's
    README), so the conversion lives here where both are in scope. *)
-let bonsai_run_state_of_entry (entry : Keeper_registry.registry_entry)
+let bonsai_run_state_of_entry ~base_path (entry : Keeper_registry.registry_entry)
     : Masc_dashboard_api_types.Keepers.keeper_run_state =
   let module K = Masc_dashboard_api_types.Keepers in
   let empty : K.keeper_run_state =
@@ -385,6 +385,7 @@ let bonsai_run_state_of_entry (entry : Keeper_registry.registry_entry)
     ; started_at = None
     ; active_tool_count = None
     ; queue_depth = None
+    ; queue_read_error = None
     ; skip_reasons = []
     ; phase = None
     }
@@ -395,7 +396,18 @@ let bonsai_run_state_of_entry (entry : Keeper_registry.registry_entry)
       Some Keeper_composite_observer.{ ls_ts = ts; ls_reasons = reasons }
     | None -> None
   in
-  match Keeper_composite_observer.run_state_of_entry entry ~last_skip with
+  let event_queue_observation =
+    Keeper_event_queue_persistence.observe_snapshot
+      ~base_path
+      ~keeper_name:entry.name
+    |> Keeper_composite_observer.event_queue_observation_of_snapshot
+  in
+  match
+    Keeper_composite_observer.run_state_of_entry
+      entry
+      ~last_skip
+      ~event_queue_observation
+  with
   | Keeper_composite_observer.In_turn { rs_wake; rs_started_at; rs_active_tool_count } ->
     let wake_kind, stimulus_kinds =
       Keeper_composite_observer.wake_reason_kind_and_stimuli rs_wake
@@ -407,10 +419,12 @@ let bonsai_run_state_of_entry (entry : Keeper_registry.registry_entry)
     ; started_at = Some rs_started_at
     ; active_tool_count = Some rs_active_tool_count
     }
-  | Keeper_composite_observer.Waiting { rs_queue_depth; rs_last_skip } ->
+  | Keeper_composite_observer.Waiting
+      { rs_queue_depth; rs_queue_read_error; rs_last_skip } ->
     { empty with
       kind = K.Waiting
-    ; queue_depth = Some rs_queue_depth
+    ; queue_depth = rs_queue_depth
+    ; queue_read_error = rs_queue_read_error
     ; skip_reasons =
         (match rs_last_skip with
          | Some ls -> ls.Keeper_composite_observer.ls_reasons
@@ -460,7 +474,7 @@ let keepers_summary_from_registry ~base_path
           ; last_tool = latest_tool_name entry
           ; lane_frames = []
           ; ctx_history = []
-          ; run_state = bonsai_run_state_of_entry entry
+          ; run_state = bonsai_run_state_of_entry ~base_path entry
           })
       entries
   in

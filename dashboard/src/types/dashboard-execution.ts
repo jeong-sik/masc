@@ -253,6 +253,7 @@ export interface DashboardKeeperReactionLedgerHealth {
   read_error_count: number | null
   pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]
   keepers: DashboardKeeperReactionLedgerKeeperHealth[]
+  decode_errors: string[]
 }
 
 export interface DashboardFleetPressureHealth {

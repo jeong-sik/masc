@@ -672,16 +672,23 @@ let lease_to_yojson (lease : lease) =
 let lease_of_yojson json =
   let context = "event queue lease" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:[ "lease_id"; "sequence"; "kind"; "claimed_at_unix"; "stimuli" ]
+      fields
+  in
   let* lease_id = string_field ~context "lease_id" fields in
   let* sequence = int64_field ~context "sequence" fields in
   let* kind_label = string_field ~context "kind" fields in
   let* kind = lease_kind_of_label kind_label in
   let* claimed_at =
-    match List.assoc_opt "claimed_at_unix" fields with
-    | None | Some `Null -> Ok None
-    | Some (`Float value) -> Ok (Some value)
-    | Some (`Int value) -> Ok (Some (float_of_int value))
-    | Some _ -> Error "event queue lease.claimed_at_unix must be a number or null"
+    let* json = required_field ~context "claimed_at_unix" fields in
+    match json with
+    | `Null -> Ok None
+    | `Float value -> Ok (Some value)
+    | `Int value -> Ok (Some (float_of_int value))
+    | _ -> Error "event queue lease.claimed_at_unix must be a number or null"
   in
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
@@ -831,6 +838,7 @@ let outbox_entry_to_yojson entry =
 let outbox_entry_of_yojson json =
   let context = "event queue outbox entry" in
   let* fields = assoc_fields ~context json in
+  let* () = exact_fields ~context ~expected:[ "receipt"; "stimuli" ] fields in
   let* receipt_json = required_field ~context "receipt" fields in
   let* receipt = transition_receipt_of_yojson receipt_json in
   let* stimuli =
@@ -839,9 +847,11 @@ let outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
-let to_yojson state =
+let to_yojson ~owner_base_path ~keeper_name state =
   `Assoc
     [ "schema", `String schema
+    ; "owner_base_path", `String owner_base_path
+    ; "keeper_name", `String keeper_name
     ; "revision", int64_json state.revision
     ; "next_lease_sequence", int64_json state.next_lease_sequence
     ; "pending", Keeper_event_queue.queue_to_yojson state.pending
@@ -987,13 +997,47 @@ let validate_state state =
 
 let validate state = validate_state state |> Result.map (fun _ -> ())
 
-let of_yojson json =
+let of_yojson ~expected_owner_base_path ~expected_keeper_name json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "schema"
+        ; "owner_base_path"
+        ; "keeper_name"
+        ; "revision"
+        ; "next_lease_sequence"
+        ; "pending"
+        ; "leases"
+        ; "last_settlement"
+        ; "transition_outbox"
+        ]
+      fields
+  in
   let* schema_value = string_field ~context "schema" fields in
   if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
+    let* owner_base_path = string_field ~context "owner_base_path" fields in
+    if not (String.equal owner_base_path expected_owner_base_path)
+    then
+      Error
+        (Printf.sprintf
+           "keeper event queue snapshot base-path owner mismatch: expected=%S actual=%S"
+           expected_owner_base_path
+           owner_base_path)
+    else
+    let* keeper_name = string_field ~context "keeper_name" fields in
+    if not (String.equal keeper_name expected_keeper_name)
+    then
+      Error
+        (Printf.sprintf
+           "keeper event queue snapshot owner mismatch: expected=%S actual=%S"
+           expected_keeper_name
+           keeper_name)
+    else
     let* revision = int64_field ~context "revision" fields in
     let* next_lease_sequence = int64_field ~context "next_lease_sequence" fields in
     let* pending_json = required_field ~context "pending" fields in

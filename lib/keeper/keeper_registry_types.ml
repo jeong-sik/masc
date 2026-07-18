@@ -107,7 +107,6 @@ type registry_entry =
     (** Observable conditions that derive [phase]. *)
   ; fiber_stop : bool Atomic.t
   ; fiber_wakeup : bool Atomic.t
-  ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
   ; lane : Keeper_lane.t

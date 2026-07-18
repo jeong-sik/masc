@@ -219,6 +219,21 @@ type board_cursor_observation =
 (** Typed request observation supplied by the server boundary. The observer
     never opens SQLite or performs other I/O. *)
 
+type event_queue_observation =
+  { eq_pending : Keeper_event_queue.t option
+  ; eq_read_errors : string list
+  }
+
+type board_attention_candidate_epoch_observation =
+  (string option, string) result
+
+val event_queue_observation_of_result :
+  (Keeper_event_queue.t, string) result -> event_queue_observation
+
+val event_queue_observation_of_snapshot :
+  Keeper_event_queue_persistence.snapshot_observation -> event_queue_observation
+(** Exact durable pending projection captured once by the request boundary. *)
+
 (** Total run-state classification (#16, 38-bug campaign PR-5). Previously
     the dashboard collapsed "actively executing a turn", "idle waiting for
     proactive cadence", and "reactively woken (and by what stimulus)" into
@@ -233,16 +248,21 @@ type run_state =
       rs_active_tool_count : int;
     }
   | Waiting of {
-      rs_queue_depth : int;
-          (** [Keeper_event_queue.length] of the entry's event queue at
-              observation time — stimuli already enqueued but not yet
-              drained by a turn. *)
+      rs_queue_depth : int option;
+          (** Exact durable pending count, or [None] when the authority could
+              not be read. *)
+      rs_queue_read_error : string option;
+          (** Explicit durable read failure. Exactly one of this field and
+              [rs_queue_depth] is populated. *)
       rs_last_skip : last_skip option;
     }
   | Suspended of Keeper_state_machine.phase
 
 val run_state_of_entry :
-  Keeper_registry.registry_entry -> last_skip:last_skip option -> run_state
+  Keeper_registry.registry_entry ->
+  last_skip:last_skip option ->
+  event_queue_observation:event_queue_observation ->
+  run_state
 (** Pure derivation, exposed so other server surfaces (Bonsai
     keepers/summary row, [masc_keeper_list] detailed rows) can classify a
     registry entry directly instead of re-deriving a full {!snapshot}. *)
@@ -324,6 +344,13 @@ type snapshot = {
   board_cursor_read_error : string option;
       (** Explicit SQLite cursor projection failure. [None] distinguishes a
           valid uninitialized cursor from a failed read. *)
+  event_queue_depth : int option;
+      (** Exact durable pending count at the request boundary. *)
+  event_queue_read_error : string option;
+  board_attention_candidate_retired_epoch_residue : string option;
+      (** Raw retired-epoch path, never behavior authority. *)
+  board_attention_candidate_epoch_read_error : string option;
+      (** Explicit durable queue read failure; never converted to depth zero. *)
   board_wakeups : int;
       (** Number of distinct board-wakeup dedup keys currently held.
           The registry keeps a content-fingerprint debounce ledger
@@ -383,6 +410,8 @@ val observe :
   ?run_id:string ->
   ?now:float ->
   board_cursor_observation:board_cursor_observation ->
+  event_queue_observation:event_queue_observation ->
+  board_attention_candidate_epoch_observation:board_attention_candidate_epoch_observation ->
   Keeper_registry.registry_entry ->
   snapshot
 

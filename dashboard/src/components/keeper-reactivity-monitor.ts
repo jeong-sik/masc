@@ -356,6 +356,14 @@ export function ReactionLedgerPanel({
         </div>
       ` : null}
 
+      ${ledger.decode_errors.length > 0 ? html`
+        <div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--color-status-bad)]" role="alert" data-ledger-decode-errors>
+          ${ledger.decode_errors.map(error => html`
+            <div key=${error} class="break-all">projection decode: ${error}</div>
+          `)}
+        </div>
+      ` : null}
+
       ${ledger.keepers.length === 0 ? html`
         <${EmptyState} message=${ledger.empty === true ? '기록된 keeper reaction 없음' : 'keeper별 reaction 관측값 없음'} />
       ` : html`

@@ -109,20 +109,10 @@ val interruptible_sleep :
   clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
   float -> sleep_outcome
 
-(** Wake up a specific keeper immediately.
-
-    When [?stimulus] is given, the stimulus is durably appended to the keeper's
-    Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
-    lifecycle phase. The wake hint is sent only to a lifecycle-admitted Running
-    Keeper; inactive, paused, and dead-tombstone lanes retain the durable event
-    without a false delivery claim. If no live registry entry exists, callers
-    must supply [base_path] so the payload can be persisted for replay. Callers
-    that only need to break the keeper out of [interruptible_sleep] may omit the
-    stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
-val wakeup_keeper :
-  ?base_path:string ->
-  ?stimulus:Keeper_event_queue.stimulus ->
-  string -> unit
+(** Send only the non-authoritative wake hint to a running Keeper. Payload
+    producers must first use a typed durable event-queue admission API and may
+    call this function only after a committed success. *)
+val wakeup_keeper : ?base_path:string -> string -> unit
 
 (** Wake up all running keepers. [None] preserves legacy global wakeup. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit

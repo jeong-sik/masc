@@ -140,8 +140,17 @@ let handle_keeper_list ctx args : tool_result =
                   Some Keeper_composite_observer.{ ls_ts = ts; ls_reasons = reasons }
                 | None -> None
               in
+              let event_queue_observation =
+                Keeper_event_queue_persistence.observe_snapshot
+                  ~base_path:ctx.config.base_path
+                  ~keeper_name:m.name
+                |> Keeper_composite_observer.event_queue_observation_of_snapshot
+              in
               Keeper_composite_observer.run_state_to_json
-                (Keeper_composite_observer.run_state_of_entry entry ~last_skip)
+                (Keeper_composite_observer.run_state_of_entry
+                   entry
+                   ~last_skip
+                   ~event_queue_observation)
             | None -> `Null
           in
           Some (`Assoc ([

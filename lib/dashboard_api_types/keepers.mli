@@ -57,6 +57,7 @@ type keeper_run_state = {
   started_at : float option;
   active_tool_count : int option;
   queue_depth : int option;
+  queue_read_error : string option;
   skip_reasons : string list;
   phase : string option;
 }

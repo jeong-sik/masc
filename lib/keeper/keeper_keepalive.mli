@@ -20,15 +20,9 @@ val process_directive : agent_name:string -> Keeper_directive.t -> unit
     the value, and returns an empty string when reconciliation cannot be trusted. *)
 val current_task_id_for_agent : config:Workspace.config -> string -> string
 
-(** Wake up a specific keeper immediately. Used by broadcast notification
-    when a @mention targets a running keeper.
-
-    [?stimulus] appends the payload to the keeper's Event Layer queue
-    before flipping the wakeup flag. See RFC-0020 §3. *)
-val wakeup_keeper :
-  ?base_path:string ->
-  ?stimulus:Keeper_event_queue.stimulus ->
-  string -> unit
+(** Send only the non-authoritative wake hint to a running Keeper. Durable
+    payload admission is a separate typed-result operation. *)
+val wakeup_keeper : ?base_path:string -> string -> unit
 
 (** Wake up all running keepers. Used for @@all broadcast mentions
     or system-wide events. *)

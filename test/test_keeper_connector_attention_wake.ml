@@ -19,6 +19,12 @@ let contains ~needle haystack =
   in
   nl = 0 || loop 0
 
+let load_event_queue_or_fail ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error detail -> fail ("event queue load failed: " ^ detail)
+;;
+
 (* keeper_cycle_decision resolves a runtime id unconditionally (RFC-0206 §2.1),
    so a minimal default runtime must exist — same setup the other cycle-decision
    unit tests use. *)
@@ -256,7 +262,7 @@ let test_distinct_connector_events_are_not_collapsed () =
       enqueue `Enqueued second;
       enqueue `Already_present first_retry;
       let event_ids =
-        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        load_event_queue_or_fail ~base_path ~keeper_name
         |> Keeper_event_queue.to_list
         |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
           match stimulus.payload with

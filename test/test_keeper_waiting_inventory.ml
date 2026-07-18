@@ -61,6 +61,17 @@ let with_workspace f =
   f config
 ;;
 
+let persist_event_queue_or_fail ~base_path ~keeper_name queue =
+  match
+    Keeper_event_queue_persistence.update_result
+      ~base_path
+      ~keeper_name
+      (fun _ -> queue)
+  with
+  | Ok () -> ()
+  | Error detail -> fail ("event queue persist failed: " ^ detail)
+;;
+
 let keeper_meta_fixture keeper_name =
   Masc_test_deps.meta_of_json_fixture
     (`Assoc
@@ -192,7 +203,7 @@ let test_event_queue_pending_and_inflight_are_visible () =
   let inflight =
     stimulus ~post_id:"inflight-1" ~arrived_at:110.0 Keeper_event_queue.Bootstrap
   in
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list [ pending; inflight ]);
@@ -262,7 +273,7 @@ let test_request_observation_freezes_shared_store_revisions () =
     stimulus ~post_id:"captured-queue-row" ~arrived_at:100.0
       Keeper_event_queue.Bootstrap
   in
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list [ captured_stimulus ]);
@@ -275,7 +286,7 @@ let test_request_observation_freezes_shared_store_revisions () =
        ~schedule_id:"later-schedule"
        ~scheduled_by:(automated keeper_name)
       : Schedule_domain.schedule_request);
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list
@@ -317,7 +328,7 @@ let test_snapshot_only_unregistered_keeper_is_visible () =
     stimulus ~post_id:"durable-without-meta" ~arrived_at:125.0
       Keeper_event_queue.Bootstrap
   in
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list [ pending ]);
@@ -354,7 +365,7 @@ let test_manual_compaction_waiting_row_has_typed_producer () =
       ~arrived_at:120.0
       Keeper_event_queue.Manual_compaction_requested
   in
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
     (queue_of_list [ pending ]);
@@ -824,7 +835,7 @@ let test_queue_observation_replays_wal_without_mutating_files () =
       ~arrived_at:100.0
       Keeper_event_queue.Bootstrap
   in
-  Keeper_event_queue_persistence.persist
+  persist_event_queue_or_fail
     ~base_path
     ~keeper_name
     (queue_of_list [ queued ]);

@@ -1,6 +1,6 @@
 (** Per-Keeper SQLite authority for reaction-ledger events.
 
-    The database contains only the current v3 typed schema.  Retired file-based
+    The database contains only the current v4 typed schema.  Retired file-based
     generations are outside this module's authority. *)
 
 type stimulus_kind =
@@ -157,6 +157,7 @@ type read_observation =
 
 type path_operation =
   | Inspect_parent
+  | Inspect_retired_epoch
   | Prepare_parent
   | Inspect_database
   | Inspect_sidecar
@@ -185,6 +186,7 @@ type error =
   | Invalid_event_identity of { field : string }
   | Invalid_timestamp of { field : string; value : float }
   | Invalid_transition of string
+  | Retired_epoch_residue of { path : string }
   | Lock_failure of File_lock_eio.durable_lock_error
   | Path_failure of
       { operation : path_operation
@@ -310,7 +312,7 @@ val recent_events :
   keeper_name:string ->
   limit:int ->
   (stored_event list, error) result
-(** Newest-first typed events.  An absent v3 database is an exact empty store. *)
+(** Newest-first typed events.  An absent v4 database is an exact empty store. *)
 
 val exact_summary :
   base_path:string ->

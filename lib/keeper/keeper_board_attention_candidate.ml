@@ -6,6 +6,49 @@ module Id_set = Set.Make (String)
 
 let ( let* ) = Result.bind
 
+module Attempt_count = struct
+  type t = string
+
+  let one = "1"
+  let to_string value = value
+
+  let of_string value =
+    let length = String.length value in
+    if length = 0
+    then Error "Board attention attempt_count must not be empty"
+    else if Char.equal value.[0] '0'
+    then Error "Board attention attempt_count must be a canonical positive integer"
+    else
+      let rec validate index =
+        if index = length
+        then Ok value
+        else
+          let digit = value.[index] in
+          if digit >= '0' && digit <= '9'
+          then validate (index + 1)
+          else Error "Board attention attempt_count must contain decimal digits only"
+      in
+      validate 0
+  ;;
+
+  let succ value =
+    let digits = Bytes.of_string value in
+    let rec increment index =
+      if index < 0
+      then "1" ^ Bytes.to_string digits
+      else
+        match Bytes.get digits index with
+        | '9' ->
+          Bytes.set digits index '0';
+          increment (index - 1)
+        | digit ->
+          Bytes.set digits index (Char.chr (Char.code digit + 1));
+          Bytes.to_string digits
+    in
+    increment (Bytes.length digits - 1)
+  ;;
+end
+
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
   | Prompt_contract_unavailable
@@ -16,6 +59,8 @@ type retryable_failure_kind =
 type retryable_failure =
   { kind : retryable_failure_kind
   ; detail : string
+  ; attempt_count : Attempt_count.t
+  ; first_failed_at : float
   ; failed_at : float
   }
 
@@ -42,13 +87,10 @@ type consumed_state =
   ; consumed_at : float
   }
 
-type expired_state = { expired_at : float }
-
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
-  | Expired of expired_state
 
 type candidate =
   { candidate_id : string
@@ -115,16 +157,57 @@ let delivery_of_string = function
   | _ -> None
 ;;
 
+let current_schema = "masc.board_attention_candidates.v2"
+let current_candidate_directory = "board_attention_candidates_v2"
+let retired_candidate_directory = "board_attention_candidates"
+
 let candidate_dir base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "board_attention_candidates"
+    current_candidate_directory
+;;
+
+let retired_candidate_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       retired_candidate_directory)
+    (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 ;;
 
 let candidate_path ~base_path ~keeper_name =
   Filename.concat
     (candidate_dir base_path)
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
+;;
+
+let canonical_owner_base_path base_path =
+  Config_dir_resolver.canonical_base_path base_path
+  |> Result.map_error Config_dir_resolver.canonical_base_path_error_to_string
+;;
+
+let retired_epoch_residue ~base_path ~keeper_name =
+  let path = retired_candidate_path ~base_path ~keeper_name in
+  try
+    match Unix.lstat path with
+    | _ -> Ok (Some path)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Printf.sprintf
+           "failed to inspect retired Board attention candidate epoch path=%S operation=%s argument=%S: %s"
+           path
+           operation
+           argument
+           (Unix.error_message error))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to inspect retired Board attention candidate epoch path=%S: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 let option_json f = function
@@ -281,6 +364,8 @@ let retryable_failure_to_yojson failure =
   `Assoc
     [ "kind", `String (retryable_failure_kind_to_string failure.kind)
     ; "detail", `String failure.detail
+    ; "attempt_count", `String (Attempt_count.to_string failure.attempt_count)
+    ; "first_failed_at", `Float failure.first_failed_at
     ; "failed_at", `Float failure.failed_at
     ]
 ;;
@@ -313,11 +398,6 @@ let status_to_yojson = function
       ; "judgment", judgment_to_yojson consumed.judgment
       ; "delivery", `String (delivery_to_string consumed.delivery)
       ; "consumed_at", `Float consumed.consumed_at
-      ]
-  | Expired expired ->
-    `Assoc
-      [ "kind", `String "expired"
-      ; "expired_at", `Float expired.expired_at
       ]
 ;;
 
@@ -368,10 +448,16 @@ let bool_json ~context = function
   | _ -> Error (context ^ " must be a boolean")
 ;;
 
-let float_json ~context = function
-  | `Float value -> Ok value
-  | `Int value -> Ok (float_of_int value)
-  | _ -> Error (context ^ " must be a number")
+let float_json ~context json =
+  let* value =
+    match json with
+    | `Float value -> Ok value
+    | `Int value -> Ok (float_of_int value)
+    | _ -> Error (context ^ " must be a number")
+  in
+  if Float.is_finite value
+  then Ok value
+  else Error (context ^ " must be finite")
 ;;
 
 let optional_json parser = function
@@ -476,7 +562,12 @@ let signal_of_yojson json =
 let retryable_failure_of_yojson json =
   let context = "candidate.status.last_failure" in
   let* fields = assoc ~context json in
-  let* () = exact_fields ~context [ "kind"; "detail"; "failed_at" ] fields in
+  let* () =
+    exact_fields
+      ~context
+      [ "kind"; "detail"; "attempt_count"; "first_failed_at"; "failed_at" ]
+      fields
+  in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
   let* kind =
@@ -486,9 +577,18 @@ let retryable_failure_of_yojson json =
   in
   let* detail_json = field ~context "detail" fields in
   let* detail = string_json ~context:(context ^ ".detail") detail_json in
+  let* attempt_count_json = field ~context "attempt_count" fields in
+  let* attempt_count_raw =
+    string_json ~context:(context ^ ".attempt_count") attempt_count_json
+  in
+  let* attempt_count = Attempt_count.of_string attempt_count_raw in
+  let* first_failed_at_json = field ~context "first_failed_at" fields in
+  let* first_failed_at =
+    float_json ~context:(context ^ ".first_failed_at") first_failed_at_json
+  in
   let* failed_at_json = field ~context "failed_at" fields in
   let* failed_at = float_json ~context:(context ^ ".failed_at") failed_at_json in
-  Ok { kind; detail; failed_at }
+  Ok { kind; detail; attempt_count; first_failed_at; failed_at }
 ;;
 
 let judgment_of_yojson json =
@@ -545,11 +645,6 @@ let status_of_yojson json =
     let* consumed_at_json = field ~context "consumed_at" fields in
     let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
     Ok (Consumed { judgment; delivery; consumed_at })
-  | "expired" ->
-    let* () = exact_fields ~context [ "kind"; "expired_at" ] fields in
-    let* expired_at_json = field ~context "expired_at" fields in
-    let* expired_at = float_json ~context:(context ^ ".expired_at") expired_at_json in
-    Ok (Expired { expired_at })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -602,7 +697,70 @@ let candidate_of_json json =
     }
 ;;
 
-let parse_rows content =
+let stored_row_to_json ~owner_base_path candidate =
+  `Assoc
+    [ "schema", `String current_schema
+    ; "owner_base_path", `String owner_base_path
+    ; "keeper_name", `String candidate.keeper_name
+    ; "candidate", candidate_to_json candidate
+    ]
+;;
+
+let stored_row_of_json ~expected_owner_base_path ~expected_keeper_name json =
+  let context = "Board attention candidate v2 row" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "schema"; "owner_base_path"; "keeper_name"; "candidate" ]
+      fields
+  in
+  let* schema_json = field ~context "schema" fields in
+  let* schema = string_json ~context:(context ^ ".schema") schema_json in
+  let* () =
+    if String.equal schema current_schema
+    then Ok ()
+    else Error (Printf.sprintf "unsupported Board attention candidate schema %S" schema)
+  in
+  let* owner_json = field ~context "owner_base_path" fields in
+  let* owner_base_path =
+    string_json ~context:(context ^ ".owner_base_path") owner_json
+  in
+  let* () =
+    if String.equal owner_base_path expected_owner_base_path
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "Board attention candidate base-path owner mismatch expected=%S actual=%S"
+           expected_owner_base_path
+           owner_base_path)
+  in
+  let* keeper_json = field ~context "keeper_name" fields in
+  let* keeper_name = string_json ~context:(context ^ ".keeper_name") keeper_json in
+  let* () =
+    if String.equal keeper_name expected_keeper_name
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "Board attention candidate Keeper owner mismatch expected=%S actual=%S"
+           expected_keeper_name
+           keeper_name)
+  in
+  let* candidate_json = field ~context "candidate" fields in
+  let* candidate = candidate_of_json candidate_json in
+  if String.equal candidate.keeper_name expected_keeper_name
+  then Ok candidate
+  else
+    Error
+      (Printf.sprintf
+         "Board attention candidate embedded Keeper mismatch expected=%S actual=%S"
+         expected_keeper_name
+         candidate.keeper_name)
+;;
+
+let parse_rows ~expected_owner_base_path ~expected_keeper_name content =
   let lines = String.split_on_char '\n' content in
   let rec loop line_number acc = function
     | [] -> Ok (List.rev acc)
@@ -613,7 +771,12 @@ let parse_rows content =
       else
         (match Yojson.Safe.from_string line with
          | json ->
-           (match candidate_of_json json with
+           (match
+              stored_row_of_json
+                ~expected_owner_base_path
+                ~expected_keeper_name
+                json
+            with
             | Ok candidate -> loop (line_number + 1) (candidate :: acc) rest
             | Error detail ->
               Error (Printf.sprintf "candidate ledger line %d: %s" line_number detail))
@@ -646,8 +809,10 @@ let latest_candidates rows =
   |> List.map snd
 ;;
 
-let load_candidates_from_content content =
-  let* rows = parse_rows content in
+let load_candidates_from_content ~expected_owner_base_path ~expected_keeper_name content =
+  let* rows =
+    parse_rows ~expected_owner_base_path ~expected_keeper_name content
+  in
   Ok (latest_candidates rows)
 ;;
 
@@ -702,6 +867,7 @@ let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
 let candidate_read_memo_mutex = Stdlib.Mutex.create ()
 
 let load_candidates ~base_path ~keeper_name =
+  let* owner_base_path = canonical_owner_base_path base_path in
   let path = candidate_path ~base_path ~keeper_name in
   let before = ledger_stat_key_opt path in
   let cached =
@@ -716,7 +882,13 @@ let load_candidates ~base_path ~keeper_name =
   match cached with
   | Some candidates -> Ok candidates
   | None ->
-    let* candidates = read_locked path load_candidates_from_content in
+    let* candidates =
+      read_locked
+        path
+        (load_candidates_from_content
+           ~expected_owner_base_path:owner_base_path
+           ~expected_keeper_name:keeper_name)
+    in
     (* Double-stat: memoize only when the file identity is unchanged across
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
@@ -728,14 +900,38 @@ let load_candidates ~base_path ~keeper_name =
     Ok candidates
 ;;
 
-let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
+let append_row ~owner_base_path candidate =
+  Yojson.Safe.to_string (stored_row_to_json ~owner_base_path candidate) ^ "\n"
+;;
 
-let serialize_candidates candidates =
-  String.concat "" (List.map append_row candidates)
+let serialize_candidates ~owner_base_path candidates =
+  String.concat "" (List.map (append_row ~owner_base_path) candidates)
+;;
+
+let rewrite_ledger ~base_path ~keeper_name decide =
+  let* owner_base_path = canonical_owner_base_path base_path in
+  let path = candidate_path ~base_path ~keeper_name in
+  match
+    Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
+      match
+        load_candidates_from_content
+          ~expected_owner_base_path:owner_base_path
+          ~expected_keeper_name:keeper_name
+          content
+      with
+      | Error detail -> None, Error detail
+      | Ok candidates ->
+        (match decide candidates with
+         | Error _ as error -> None, error
+         | Ok (None, result) -> None, Ok result
+         | Ok (Some rewritten, result) ->
+           Some (serialize_candidates ~owner_base_path rewritten), Ok result))
+  with
+  | Error error -> Error error
+  | Ok result -> result
 ;;
 
 let update_ledger ~base_path ~keeper_name decide =
-  let path = candidate_path ~base_path ~keeper_name in
   (* Compact on write: a committed change rewrites the ledger as the deduped
      latest-per-id set (via [latest_candidates]) instead of appending one row.
      The reader already discards all but the latest row per candidate_id, so the
@@ -743,20 +939,12 @@ let update_ledger ~base_path ~keeper_name decide =
      made every update O(n^2) because the durable transaction re-parses the whole
      ledger before writing. Rewriting keeps the file bounded to the number of
      distinct candidates. *)
-  match
-    Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-      match load_candidates_from_content content with
-      | Error detail -> None, Error detail
-      | Ok candidates ->
-        (match decide candidates with
-         | Error _ as error -> None, error
-         | Ok (None, result) -> None, Ok result
-         | Ok (Some candidate, result) ->
-           let compacted = latest_candidates (candidates @ [ candidate ]) in
-           Some (serialize_candidates compacted), Ok result))
-  with
-  | Error error -> Error error
-  | Ok result -> result
+  rewrite_ledger ~base_path ~keeper_name (fun candidates ->
+    match decide candidates with
+    | Error _ as error -> error
+    | Ok (None, result) -> Ok (None, result)
+    | Ok (Some candidate, result) ->
+      Ok (Some (latest_candidates (candidates @ [ candidate ])), result))
 ;;
 
 let find_candidate candidates candidate_id =
@@ -766,23 +954,31 @@ let find_candidate candidates candidate_id =
 ;;
 
 let record ~base_path candidate =
-  match
-    update_ledger
-      ~base_path
-      ~keeper_name:candidate.keeper_name
-      (fun candidates ->
-         match find_candidate candidates candidate.candidate_id with
-         | None -> Ok (Some candidate, Recorded candidate)
-         | Some existing
-           when existing.signal = candidate.signal
-                && existing.delivery_signal = candidate.delivery_signal ->
-           Ok (None, Duplicate existing)
-         | Some _ ->
-           Error
-             "candidate identity conflict: the same candidate_id has different Board occurrence or delivery evidence")
-  with
-  | Ok result -> result
-  | Error detail -> Record_error detail
+  match candidate.status with
+  | Judged _ | Consumed _ | Pending { last_failure = Some _ } ->
+    Record_error
+      "Board attention admission requires Pending status without retry evidence"
+  | Pending { last_failure = None } ->
+    (match candidate_of_json (candidate_to_json candidate) with
+     | Error detail -> Record_error ("invalid Board attention candidate: " ^ detail)
+     | Ok candidate ->
+    (match
+       update_ledger
+         ~base_path
+         ~keeper_name:candidate.keeper_name
+         (fun candidates ->
+            match find_candidate candidates candidate.candidate_id with
+            | None -> Ok (Some candidate, Recorded candidate)
+            | Some existing
+              when existing.signal = candidate.signal
+                   && existing.delivery_signal = candidate.delivery_signal ->
+              Ok (None, Duplicate existing)
+            | Some _ ->
+              Error
+                "candidate identity conflict: the same candidate_id has different Board occurrence or delivery evidence")
+     with
+     | Ok result -> result
+     | Error detail -> Record_error detail))
 ;;
 
 let update_candidate ~base_path candidate_id keeper_name transition =
@@ -790,13 +986,55 @@ let update_candidate ~base_path candidate_id keeper_name transition =
     match find_candidate candidates candidate_id with
     | None -> Error (Printf.sprintf "Board attention candidate not found: %s" candidate_id)
     | Some current ->
-      (match transition current with
+      let* transition = transition current in
+      (match transition with
        | None -> Ok (None, current)
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
-let same_failure left right =
-  left.kind = right.kind && String.equal left.detail right.detail
+let validate_failure_occurrence failure =
+  if not (String.equal (Attempt_count.to_string failure.attempt_count) "1")
+  then
+    Error
+      "Board attention retry occurrence must enter the durable boundary with attempt_count=1"
+  else if not (Float.is_finite failure.first_failed_at && Float.is_finite failure.failed_at)
+  then Error "Board attention retry occurrence timestamps must be finite"
+  else if Float.compare failure.first_failed_at failure.failed_at <> 0
+  then
+    Error
+      "Board attention retry occurrence must enter the durable boundary with identical first_failed_at and failed_at"
+  else Ok failure
+;;
+
+let next_failure previous failure =
+  let* failure = validate_failure_occurrence failure in
+  match previous with
+  | None -> Ok failure
+  | Some previous ->
+    Ok
+      { failure with
+        attempt_count = Attempt_count.succ previous.attempt_count
+      ; first_failed_at = previous.first_failed_at
+      }
+;;
+
+let with_retryable_failure failure current =
+  match current.status with
+  | Pending pending ->
+    let* next_failure = next_failure pending.last_failure failure in
+    Ok
+      (Some
+         { current with
+           status = Pending { last_failure = Some next_failure }
+         })
+  | Judged judged ->
+    let* next_failure = next_failure judged.last_failure failure in
+    Ok
+      (Some
+         { current with
+           status = Judged { judged with last_failure = Some next_failure }
+         })
+  | Consumed _ -> Ok None
 ;;
 
 let record_retryable_failure ~base_path candidate failure =
@@ -804,22 +1042,7 @@ let record_retryable_failure ~base_path candidate failure =
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
-    (fun current ->
-       match current.status with
-       | Pending pending ->
-         (match pending.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some { current with status = Pending { last_failure = Some failure } })
-       | Judged judged ->
-         (match judged.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some
-              { current with
-                status = Judged { judged with last_failure = Some failure }
-              })
-       | Consumed _ | Expired _ -> None)
+    (with_retryable_failure failure)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -830,11 +1053,12 @@ let record_judgment ~base_path candidate judgment =
     (fun current ->
        match current.status with
        | Pending _ ->
-         Some
-           { current with
-             status = Judged { judgment; last_failure = None }
-           }
-       | Judged _ | Consumed _ | Expired _ -> None)
+         Ok
+           (Some
+              { current with
+                status = Judged { judgment; last_failure = None }
+              })
+       | Judged _ | Consumed _ -> Ok None)
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
@@ -845,16 +1069,25 @@ let mark_consumed ~base_path candidate judgment delivery =
     (fun current ->
        match current.status with
        | Judged _ ->
-         Some
-           { current with
-             status =
-               Consumed
-                 { judgment; delivery; consumed_at = Time_compat.now () }
-           }
-       | Pending _ | Consumed _ | Expired _ -> None)
+         Ok
+           (Some
+              { current with
+                status =
+                  Consumed
+                    { judgment; delivery; consumed_at = Time_compat.now () }
+              })
+       | Pending _ | Consumed _ -> Ok None)
 ;;
 
-let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
+let failure ~kind detail =
+  let failed_at = Time_compat.now () in
+  { kind
+  ; detail
+  ; attempt_count = Attempt_count.one
+  ; first_failed_at = failed_at
+  ; failed_at
+  }
+;;
 
 let board_attention_stimulus candidate =
   { Keeper_event_queue.post_id = candidate.signal.post_id
@@ -954,7 +1187,7 @@ let reject_unregistered_tool ~name ~args:_ =
 
 let rec process_with_judge ~base_path ~judge candidate =
   match candidate.status with
-  | Consumed _ | Expired _ -> Ok candidate
+  | Consumed _ -> Ok candidate
   | Judged judged -> consume_judged ~base_path candidate judged
   | Pending _ ->
     (match judge candidate with
@@ -977,7 +1210,7 @@ let record_and_wake ~base_path candidate =
       match persisted.status with
       | Pending _ | Judged _ ->
         Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
-      | Consumed _ | Expired _ -> Wake_not_required
+      | Consumed _ -> Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -986,30 +1219,9 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
-(* ── TTL and batch judgment ───────────────────────────── *)
+(* ── Batch judgment ───────────────────────────────────── *)
 
 let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
-let batch_max_candidates = 8
-let candidate_ttl_sec = 86_400.0
-
-let is_pending_expired ~now candidate =
-  match candidate.status with
-  | Pending _ ->
-    Float.compare candidate.recorded_at (now -. candidate_ttl_sec) < 0
-  | Judged _ | Consumed _ | Expired _ -> false
-;;
-
-let expire_candidate ~base_path ~now candidate =
-  update_candidate
-    ~base_path
-    candidate.candidate_id
-    candidate.keeper_name
-    (fun current ->
-       match current.status with
-       | Pending _ ->
-         Some { current with status = Expired { expired_at = now } }
-       | Judged _ | Consumed _ | Expired _ -> None)
-;;
 
 let batch_request_json candidates =
   let keeper_context_of candidate =
@@ -1163,152 +1375,391 @@ let run_judge_batch ~base_path candidates =
 
 (* ── Owner-lane batch drain ───────────────────────────── *)
 
-let apply_judgment ~base_path candidate judgment =
-  process_with_judge ~base_path ~judge:(fun _ -> Ok judgment) candidate
+let quoted_ids ids =
+  String.concat "," (List.map (Printf.sprintf "%S") ids)
 ;;
 
-let chunks_of size items =
-  let rec loop current count chunks = function
-    | [] ->
-      (match current with
-       | [] -> List.rev chunks
-       | _ -> List.rev (List.rev current :: chunks))
-    | x :: rest ->
-      if count = size
-      then loop [ x ] 1 (List.rev current :: chunks) rest
-      else loop (x :: current) (count + 1) chunks rest
-  in
-  loop [] 0 [] items
-;;
-
-let record_batch_failure ~base_path candidate failure =
-  match record_retryable_failure ~base_path candidate failure with
-  | Ok _ -> ()
-  | Error detail ->
-    Log.Keeper.error
-      "Board attention batch failure evidence could not be persisted keeper=%s \
-       candidate=%s: %s"
-      candidate.keeper_name
-      candidate.candidate_id
-      detail
-;;
-
-let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
-  let* candidates = load_candidates ~base_path ~keeper_name in
-  let stale, judged_ready, pending =
+let validate_batch_judgments candidates judgments =
+  let requested =
     List.fold_left
-      (fun (stale, judged_ready, pending) candidate ->
-         match candidate.status with
-         | Pending _ when is_pending_expired ~now candidate ->
-           candidate :: stale, judged_ready, pending
-         | Pending _ -> stale, judged_ready, candidate :: pending
-         | Judged judged -> stale, (candidate, judged) :: judged_ready, pending
-         | Consumed _ | Expired _ -> stale, judged_ready, pending)
-      ([], [], [])
+      (fun ids candidate -> Id_set.add candidate.candidate_id ids)
+      Id_set.empty
       candidates
   in
-  (* Stale pending rows expire first: the durable backlog must die even while
-     the provider is unavailable. *)
-  let* () =
+  if Id_set.cardinal requested <> List.length candidates
+  then
+    Error
+      (failure
+         ~kind:Response_contract_unavailable
+         "Board attention owner-lane batch contains duplicate candidate identities")
+  else
+    let unknown =
+      Candidate_map.bindings judgments
+      |> List.filter_map (fun (candidate_id, _) ->
+        if Id_set.mem candidate_id requested then None else Some candidate_id)
+    in
+    let missing =
+      List.filter_map
+        (fun candidate ->
+           if Candidate_map.mem candidate.candidate_id judgments
+           then None
+           else Some candidate.candidate_id)
+        candidates
+    in
+    match unknown with
+    | candidate_id :: other_candidate_ids ->
+      let candidate_ids = candidate_id :: other_candidate_ids in
+      let detail =
+        match missing with
+        | [] ->
+          Printf.sprintf
+            "batch verdict references unknown candidate_ids [%s]"
+            (quoted_ids candidate_ids)
+        | _ :: _ ->
+          Printf.sprintf
+            "batch verdict references unknown candidate_ids [%s] and omits requested candidate_ids [%s]"
+            (quoted_ids candidate_ids)
+            (quoted_ids missing)
+      in
+      Error (failure ~kind:Response_contract_unavailable detail)
+    | [] ->
+      (match missing with
+       | _ :: _ ->
+         Error
+           (failure
+              ~kind:Response_contract_unavailable
+              (Printf.sprintf
+                 "batch verdict omits requested candidate_ids [%s]"
+                 (quoted_ids missing)))
+       | [] -> Ok judgments)
+;;
+
+let record_batch_failure ~base_path candidates failure =
+  match candidates with
+  | [] -> Ok ()
+  | first :: _ ->
+    (match
+       List.find_opt
+         (fun candidate -> not (String.equal candidate.keeper_name first.keeper_name))
+         candidates
+     with
+     | Some candidate ->
+       Error
+         (Printf.sprintf
+            "Board attention failure batch crosses Keeper lanes: %S and %S"
+            first.keeper_name
+            candidate.keeper_name)
+     | None ->
+       let requested =
+         List.fold_left
+           (fun ids candidate -> Id_set.add candidate.candidate_id ids)
+           Id_set.empty
+           candidates
+       in
+       rewrite_ledger ~base_path ~keeper_name:first.keeper_name (fun current ->
+         let* rewritten, found, changed =
+           List.fold_right
+             (fun candidate result ->
+                let* rows, found, changed = result in
+                if Id_set.mem candidate.candidate_id requested
+                then
+                  let found = Id_set.add candidate.candidate_id found in
+                  let* updated = with_retryable_failure failure candidate in
+                  (match updated with
+                   | None -> Ok (candidate :: rows, found, changed)
+                   | Some updated -> Ok (updated :: rows, found, true))
+                else Ok (candidate :: rows, found, changed))
+             current
+             (Ok ([], Id_set.empty, false))
+         in
+         let missing = Id_set.diff requested found |> Id_set.elements in
+         match missing with
+         | _ :: _ ->
+           Error
+             (Printf.sprintf
+                "Board attention candidates disappeared before failure evidence commit: [%s]"
+                (quoted_ids missing))
+         | [] ->
+           Ok ((if changed then Some rewritten else None), ())))
+;;
+
+let record_batch_judgments ~base_path ~keeper_name candidates judgments =
+  let requested =
     List.fold_left
-      (fun result candidate ->
-         match result with
-         | Error _ -> result
-         | Ok () ->
-           (match expire_candidate ~base_path ~now candidate with
-            | Ok _ -> Ok ()
-            | Error detail -> Error detail))
-      (Ok ())
-      stale
+      (fun ids candidate -> Id_set.add candidate.candidate_id ids)
+      Id_set.empty
+      candidates
   in
-  let expired_count = List.length stale in
+  rewrite_ledger ~base_path ~keeper_name (fun current ->
+    let rec rewrite found judged reversed = function
+      | [] ->
+        let missing = Id_set.diff requested found |> Id_set.elements in
+        (match missing with
+         | _ :: _ ->
+           Error
+             (Printf.sprintf
+                "Board attention candidates disappeared before judgment commit: [%s]"
+                (quoted_ids missing))
+         | [] -> Ok (Some (List.rev reversed), List.rev judged))
+      | candidate :: rest ->
+        if not (Id_set.mem candidate.candidate_id requested)
+        then rewrite found judged (candidate :: reversed) rest
+        else
+          let found = Id_set.add candidate.candidate_id found in
+          (match Candidate_map.find_opt candidate.candidate_id judgments with
+           | None ->
+             Error
+               (Printf.sprintf
+                  "validated Board attention verdict disappeared before commit candidate_id=%S"
+                  candidate.candidate_id)
+           | Some judgment ->
+             (match candidate.status with
+              | Pending _ ->
+                let updated =
+                  { candidate with
+                    status = Judged { judgment; last_failure = None }
+                  }
+                in
+                rewrite found (updated :: judged) (updated :: reversed) rest
+              | Judged _ | Consumed _ ->
+                Error
+                  (Printf.sprintf
+                     "Board attention candidate changed state before judgment commit candidate_id=%S"
+                     candidate.candidate_id)))
+    in
+    rewrite Id_set.empty [] [] current)
+;;
+
+type delivery_attempt_outcome =
+  | Delivery_committed of delivery
+  | Delivery_failed of retryable_failure
+
+type delivery_attempt =
+  { da_candidate : candidate
+  ; da_judgment : judgment
+  ; da_outcome : delivery_attempt_outcome
+  }
+
+let attempt_judged_delivery ~base_path candidate judgment =
+  match judgment.verdict.decision with
+  | Keeper_board_attention_judgment.Not_relevant ->
+    { da_candidate = candidate
+    ; da_judgment = judgment
+    ; da_outcome = Delivery_committed Not_relevant
+    }
+  | Keeper_board_attention_judgment.Relevant ->
+    let stimulus = board_attention_stimulus candidate in
+    let da_outcome =
+      match
+        Keeper_registry_event_queue.enqueue_if_missing_durable_result
+          ~base_path
+          ~event_id:candidate.candidate_id
+          candidate.keeper_name
+          stimulus
+      with
+      | Keeper_registry_event_queue.Enqueued
+      | Keeper_registry_event_queue.Already_present ->
+        Delivery_committed Enqueued_to_keeper_lane
+      | Keeper_registry_event_queue.Identity_conflict detail
+      | Keeper_registry_event_queue.Storage_error detail ->
+        Delivery_failed (failure ~kind:Durable_delivery_unavailable detail)
+    in
+    { da_candidate = candidate; da_judgment = judgment; da_outcome }
+;;
+
+let commit_delivery_attempts ~base_path ~keeper_name attempts =
+  let attempt_index_result =
+    List.fold_left
+      (fun result attempt ->
+         let* index = result in
+         let candidate_id = attempt.da_candidate.candidate_id in
+         if Candidate_map.mem candidate_id index
+         then
+           Error
+             (Printf.sprintf
+                "Board attention delivery batch duplicates candidate_id=%S"
+                candidate_id)
+         else Ok (Candidate_map.add candidate_id attempt index))
+      (Ok Candidate_map.empty)
+      attempts
+  in
+  let* attempt_index = attempt_index_result in
+  let requested =
+    Candidate_map.fold (fun candidate_id _ ids -> Id_set.add candidate_id ids)
+      attempt_index
+      Id_set.empty
+  in
+  let consumed_at = Time_compat.now () in
+  rewrite_ledger ~base_path ~keeper_name (fun current ->
+    let rec rewrite found consumed wake reversed = function
+      | [] ->
+        let missing = Id_set.diff requested found |> Id_set.elements in
+        (match missing with
+         | _ :: _ ->
+           Error
+             (Printf.sprintf
+                "Board attention candidates disappeared before delivery commit: [%s]"
+                (quoted_ids missing))
+         | [] ->
+           Ok
+             ( Some (List.rev reversed)
+             , (consumed, List.length attempts - consumed, List.rev wake) ))
+      | candidate :: rest ->
+        (match Candidate_map.find_opt candidate.candidate_id attempt_index with
+         | None -> rewrite found consumed wake (candidate :: reversed) rest
+         | Some attempt ->
+           let found = Id_set.add candidate.candidate_id found in
+           (match candidate.status with
+            | Judged judged when judged.judgment = attempt.da_judgment ->
+              (match attempt.da_outcome with
+               | Delivery_committed delivery ->
+                 let updated =
+                   { candidate with
+                     status =
+                       Consumed
+                         { judgment = attempt.da_judgment
+                         ; delivery
+                         ; consumed_at
+                         }
+                   }
+                 in
+                 let wake =
+                   match delivery with
+                   | Not_relevant -> wake
+                   | Enqueued_to_keeper_lane -> updated :: wake
+                 in
+                 rewrite found (consumed + 1) wake (updated :: reversed) rest
+               | Delivery_failed failure ->
+                 (match with_retryable_failure failure candidate with
+                  | Error detail -> Error detail
+                  | Ok None ->
+                    Error
+                      (Printf.sprintf
+                         "Board attention judged candidate rejected retry evidence candidate_id=%S"
+                         candidate.candidate_id)
+                  | Ok (Some updated) ->
+                    rewrite found consumed wake (updated :: reversed) rest))
+            | Pending _ | Consumed _ | Judged _ ->
+              Error
+                (Printf.sprintf
+                   "Board attention candidate changed state before delivery commit candidate_id=%S"
+                   candidate.candidate_id)))
+    in
+    rewrite Id_set.empty 0 [] [] current)
+  |> Result.map (fun (consumed, remaining, wake) ->
+    List.iter
+      (fun candidate ->
+         let (_ : Keeper_registry.wakeup_outcome) =
+           request_owner_wake ~site:"durable_delivery_batch" ~base_path candidate
+         in
+         ())
+      wake;
+    consumed, remaining)
+;;
+
+let consume_judged_batch ~base_path ~keeper_name judged =
+  let attempts =
+    List.map
+      (fun (candidate, (state : judged_state)) ->
+         attempt_judged_delivery ~base_path candidate state.judgment)
+      judged
+  in
+  commit_delivery_attempts ~base_path ~keeper_name attempts
+;;
+
+let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
+  let* candidates = load_candidates ~base_path ~keeper_name in
+  let judged_ready, pending =
+    List.fold_left
+      (fun (judged_ready, pending) candidate ->
+         match candidate.status with
+         | Pending _ -> judged_ready, candidate :: pending
+         | Judged judged -> (candidate, judged) :: judged_ready, pending
+         | Consumed _ -> judged_ready, pending)
+      ([], [])
+      candidates
+  in
   (* Already-judged verdicts deliver without new model calls. *)
   let* judged_consumed, judged_remaining =
-    List.fold_left
-      (fun result (candidate, judged) ->
-         match result with
-         | Error _ -> result
-         | Ok (consumed, remaining) ->
-           (match consume_judged ~base_path candidate judged with
-            | Ok current ->
-              (match current.status with
-               | Consumed _ -> Ok (consumed + 1, remaining)
-               | Pending _ | Judged _ | Expired _ -> Ok (consumed, remaining + 1))
-            | Error detail -> Error detail))
-      (Ok (0, 0))
-      judged_ready
+    match judged_ready with
+    | [] -> Ok (0, 0)
+    | _ :: _ ->
+      consume_judged_batch
+        ~base_path
+        ~keeper_name
+        (List.rev judged_ready)
   in
-  (* Fresh pending rows are judged in batches. A failed batch aborts the
-     round: the next keepalive turn owns the retry cadence, not a hot loop. *)
-  let batches = chunks_of batch_max_candidates (List.rev pending) in
-  let rec loop report = function
-    | [] -> Ok report
-    | batch :: rest ->
-      (match judge_batch batch with
-       | Error failure ->
-         List.iter
-           (fun candidate -> record_batch_failure ~base_path candidate failure)
-           batch;
-         let deferred =
-           List.fold_left
-             (fun count rest_batch -> count + List.length rest_batch)
-             (List.length batch)
-             rest
-         in
-         Ok
-           { report with
-             attempted = report.attempted + List.length batch
-           ; remaining = report.remaining + deferred
-           }
-       | Ok map ->
-         (match
-            List.fold_left
-              (fun result candidate ->
-                 match result with
-                 | Error _ -> result
-                 | Ok (consumed, remaining) ->
-                   (match Candidate_map.find_opt candidate.candidate_id map with
-                    | None -> Ok (consumed, remaining + 1)
-                    | Some judgment ->
-                      (match apply_judgment ~base_path candidate judgment with
-                       | Ok current ->
-                         (match current.status with
-                          | Consumed _ -> Ok (consumed + 1, remaining)
-                          | Pending _ | Judged _ | Expired _ ->
-                            Ok (consumed, remaining + 1))
-                       | Error detail -> Error detail)))
-              (Ok (0, 0))
-              batch
-          with
-          | Error detail -> Error detail
-          | Ok (consumed, remaining) ->
-            loop
-              { attempted = report.attempted + List.length batch
-              ; consumed = report.consumed + consumed
-              ; remaining = report.remaining + remaining
-              }
-              rest))
-  in
-  let* batch_report = loop { attempted = 0; consumed = 0; remaining = 0 } batches in
-  Ok
-    { attempted = batch_report.attempted + judged_consumed + judged_remaining
-    ; consumed = batch_report.consumed + judged_consumed + expired_count
-    ; remaining = batch_report.remaining + judged_remaining
-    }
+  let pending = List.rev pending in
+  let pending_count = List.length pending in
+  match pending with
+  | [] ->
+    Ok
+      { attempted = judged_consumed + judged_remaining
+      ; consumed = judged_consumed
+      ; remaining = judged_remaining
+      }
+  | _ :: _ ->
+    (match judge_batch pending with
+     | Error failure ->
+       let* () = record_batch_failure ~base_path pending failure in
+       Ok
+         { attempted = pending_count + judged_consumed + judged_remaining
+         ; consumed = judged_consumed
+         ; remaining = pending_count + judged_remaining
+         }
+     | Ok judgments ->
+       (match validate_batch_judgments pending judgments with
+        | Error failure ->
+          let* () = record_batch_failure ~base_path pending failure in
+          Ok
+            { attempted = pending_count + judged_consumed + judged_remaining
+            ; consumed = judged_consumed
+            ; remaining = pending_count + judged_remaining
+            }
+        | Ok exact_judgments ->
+          let* newly_judged =
+            record_batch_judgments
+              ~base_path
+              ~keeper_name
+              pending
+              exact_judgments
+          in
+          let* newly_judged =
+            let rec collect reversed = function
+              | [] -> Ok (List.rev reversed)
+              | candidate :: rest ->
+                (match candidate.status with
+                 | Judged judged -> collect ((candidate, judged) :: reversed) rest
+                 | Pending _ | Consumed _ ->
+                   Error
+                     (Printf.sprintf
+                        "judgment commit returned non-Judged candidate_id=%S"
+                        candidate.candidate_id))
+            in
+            collect [] newly_judged
+          in
+          let* consumed, remaining =
+            consume_judged_batch ~base_path ~keeper_name newly_judged
+          in
+          Ok
+            { attempted = pending_count + judged_consumed + judged_remaining
+            ; consumed = consumed + judged_consumed
+            ; remaining = remaining + judged_remaining
+            }))
 ;;
 
 let drain_pending_on_owner_lane ~base_path ~keeper_name =
   drain_pending_with_judge_batch
     ~base_path
     ~keeper_name
-    ~now:(Time_compat.now ())
     ~judge_batch:(run_judge_batch ~base_path)
 ;;
 
 module For_testing = struct
+  let next_retryable_failure ~previous failure = next_failure previous failure
   let drain_pending_with_judge_batch = drain_pending_with_judge_batch
 
-  let drain_pending_with_judge ~base_path ~keeper_name ~now ~judge =
+  let drain_pending_with_judge ~base_path ~keeper_name ~judge =
     let judge_batch candidates =
       let rec fold map = function
         | [] -> Ok map
@@ -1320,7 +1771,7 @@ module For_testing = struct
       in
       fold Candidate_map.empty candidates
     in
-    drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch
+    drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch
   ;;
 end
 ;;

@@ -81,7 +81,18 @@ let launch_supervised_fiber_body
       ; payload = Keeper_event_queue.Bootstrap
       }
     in
-    Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
+    match
+      Keeper_registry_event_queue.enqueue_stimulus_durable_result
+        ~base_path
+        meta.name
+        bootstrap_signal
+    with
+    | Keeper_registry_event_queue.Stimulus_storage_error reason ->
+      Error
+        (Keeper_state_machine.Precondition_violation
+           { event = "supervisor_bootstrap_enqueue"; reason })
+    | Keeper_registry_event_queue.Stimulus_enqueued _
+    | Keeper_registry_event_queue.Stimulus_already_present _ ->
     (* RFC-0059 PR-7-pilot originally routed the whole keepalive body through
        a Domain_pool worker.  Live recovery proved that unsafe: the body is
        an Eio fiber loop that uses the server switch, clock, turn timeouts, and

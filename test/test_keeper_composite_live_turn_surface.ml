@@ -43,9 +43,19 @@ let observe_json ~base ~name entry =
       ~base_path:base
       ~keeper_name:name
       ~pending_id_display_limit:0
-    |> Result.map (fun observation -> observation.cursor)
+    |> Result.map (fun (observation : Masc.Keeper_reaction_store.read_observation) ->
+      observation.cursor)
   in
-  Observer.observe ~board_cursor_observation entry |> Observer.snapshot_to_json
+  let event_queue_observation =
+    Masc.Keeper_registry_event_queue.snapshot_result ~base_path:base name
+    |> Observer.event_queue_observation_of_result
+  in
+  Observer.observe
+    ~board_cursor_observation
+    ~event_queue_observation
+    ~board_attention_candidate_epoch_observation:(Ok None)
+    entry
+  |> Observer.snapshot_to_json
 ;;
 
 (* Register a keeper and return the fresh entry after [setup] has run its

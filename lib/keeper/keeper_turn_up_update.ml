@@ -221,16 +221,14 @@ let update_keeper ?(preserve_prompt_defaults = false)
             tool_result_error err
           | Ok () ->
             let enqueue_goal_assignment_wakes (meta : keeper_meta) =
-              let (_ : string list) =
-                Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-                  ~config:ctx.config
-                  ~keeper_name:meta.name
-                  ~assigned_by:"keeper_up"
-                  ~old_ids:old.active_goal_ids
-                  ~new_ids:meta.active_goal_ids
-                  ()
-              in
-              ()
+              Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+                ~config:ctx.config
+                ~keeper_name:meta.name
+                ~assigned_by:"keeper_up"
+                ~old_ids:old.active_goal_ids
+                ~new_ids:meta.active_goal_ids
+                ()
+              |> Result.map (fun (_ : string list) -> ())
             in
             if dead_revival_requested
             then
@@ -248,8 +246,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  tool_result_error
                    (Keeper_dead_revival_transaction.error_to_string error)
                | Ok success ->
-                 enqueue_goal_assignment_wakes success.meta;
-                 tool_result_ok_data (Keeper_meta_json.meta_to_json success.meta))
+                 (match enqueue_goal_assignment_wakes success.meta with
+                  | Error detail -> tool_result_error detail
+                  | Ok () ->
+                    tool_result_ok_data (Keeper_meta_json.meta_to_json success.meta)))
             else
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
                builds [updated] from a meta snapshot ([old]), so a concurrent
@@ -296,35 +296,38 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
-               enqueue_goal_assignment_wakes updated;
-               let stop_outcome =
-                 stop_keepalive_and_await
-                   ~base_path:ctx.config.base_path
-                   updated.name
-               in
-               let launch_outcome = start_keepalive ctx updated in
-               (match launch_outcome with
-                | Keepalive_started _ ->
-                  tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
-                | Keepalive_already_registered entry ->
-                  let stop_detail =
-                    match stop_outcome with
-                    | Keeper_not_registered -> "keeper was not registered before restart"
-                    | Keeper_joined _ -> "previous keeper lane joined"
+               (match enqueue_goal_assignment_wakes updated with
+                | Error detail -> tool_result_error detail
+                | Ok () ->
+                  let stop_outcome =
+                    stop_keepalive_and_await
+                      ~base_path:ctx.config.base_path
+                      updated.name
                   in
-                  tool_result_error
-                    (Printf.sprintf
-                       "keeper update launch conflicted after %s: %s"
-                       stop_detail
-                       (start_keepalive_outcome_to_string
-                          (Keepalive_already_registered entry)))
-                | ( Keepalive_lifecycle_denied _
-                  | Keepalive_identity_unrepairable
-                  | Keepalive_registration_rejected _
-                  | Keepalive_fiber_start_rejected _
-                  | Keepalive_lane_ownership_lost
-                  | Keepalive_fork_rejected _ ) as rejected ->
-                  tool_result_error
-                    (Printf.sprintf
-                       "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))))
+                  let launch_outcome = start_keepalive ctx updated in
+                  (match launch_outcome with
+                   | Keepalive_started _ ->
+                     tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
+                   | Keepalive_already_registered entry ->
+                     let stop_detail =
+                       match stop_outcome with
+                       | Keeper_not_registered ->
+                         "keeper was not registered before restart"
+                       | Keeper_joined _ -> "previous keeper lane joined"
+                     in
+                     tool_result_error
+                       (Printf.sprintf
+                          "keeper update launch conflicted after %s: %s"
+                          stop_detail
+                          (start_keepalive_outcome_to_string
+                             (Keepalive_already_registered entry)))
+                   | ( Keepalive_lifecycle_denied _
+                     | Keepalive_identity_unrepairable
+                     | Keepalive_registration_rejected _
+                     | Keepalive_fiber_start_rejected _
+                     | Keepalive_lane_ownership_lost
+                     | Keepalive_fork_rejected _ ) as rejected ->
+                     tool_result_error
+                       (Printf.sprintf
+                          "keeper metadata was updated but lane restart failed: %s"
+                          (start_keepalive_outcome_to_string rejected))))))))

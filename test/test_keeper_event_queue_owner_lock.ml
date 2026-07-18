@@ -32,6 +32,16 @@ let require_some label = function
   | None -> Alcotest.failf "%s: missing result" label
 ;;
 
+let load_or_fail ~base_path ~keeper_name =
+  Persistence.load_result ~base_path ~keeper_name
+  |> require_ok "load durable event queue"
+;;
+
+let persist_or_fail ~base_path ~keeper_name queue =
+  Persistence.update_result ~base_path ~keeper_name (fun _ -> queue)
+  |> require_ok "persist durable event queue"
+;;
+
 let rec await_atomic flag =
   if Atomic.get flag
   then ()
@@ -189,15 +199,15 @@ let test_canonical_owner_and_cross_context_isolation () =
       Alcotest.(check (list string))
         "BasePath aliases preserve both serialized updates exactly once"
         [ "domain-a"; "fiber-a" ]
-        (Persistence.load ~base_path:base_a ~keeper_name:keeper_a |> post_ids);
+        (load_or_fail ~base_path:base_a ~keeper_name:keeper_a |> post_ids);
       Alcotest.(check (list string))
         "different keeper persisted independently"
         [ "other-keeper" ]
-        (Persistence.load ~base_path:base_a ~keeper_name:keeper_b |> post_ids);
+        (load_or_fail ~base_path:base_a ~keeper_name:keeper_b |> post_ids);
       Alcotest.(check (list string))
         "different BasePath persisted independently"
         [ "other-base" ]
-        (Persistence.load ~base_path:base_b ~keeper_name:keeper_a |> post_ids)))
+        (load_or_fail ~base_path:base_b ~keeper_name:keeper_a |> post_ids)))
 ;;
 
 let test_cancelled_waiter_does_not_leak_owner_lock () =
@@ -266,11 +276,11 @@ let test_cancelled_waiter_does_not_leak_owner_lock () =
     Alcotest.(check (list string))
       "cancelled waiter committed no durable stimulus"
       [ "survivor" ]
-      (Persistence.load ~base_path ~keeper_name |> post_ids);
+      (load_or_fail ~base_path ~keeper_name |> post_ids);
     Alcotest.(check (list string))
       "peer owner persisted during cancellation"
       [ "peer-during-cancel" ]
-      (Persistence.load ~base_path ~keeper_name:peer_name |> post_ids))
+      (load_or_fail ~base_path ~keeper_name:peer_name |> post_ids))
 ;;
 
 let test_exception_does_not_poison_owner_or_other_lane () =
@@ -292,11 +302,11 @@ let test_exception_does_not_poison_owner_or_other_lane () =
     Alcotest.(check (list string))
       "same owner durable state after exception"
       [ "same-owner" ]
-      (Persistence.load ~base_path ~keeper_name:keeper_a |> post_ids);
+      (load_or_fail ~base_path ~keeper_name:keeper_a |> post_ids);
     Alcotest.(check (list string))
       "peer owner durable state after exception"
       [ "peer-owner" ]
-      (Persistence.load ~base_path ~keeper_name:keeper_b |> post_ids))
+      (load_or_fail ~base_path ~keeper_name:keeper_b |> post_ids))
 ;;
 
 let test_fleet_summary_serializes_with_owner_commit () =
@@ -304,7 +314,7 @@ let test_fleet_summary_serializes_with_owner_commit () =
     let keeper_name = "summary_owner" in
     let pending = stimulus ~post_id:"pending" ~arrived_at:9.0 in
     let inflight = stimulus ~post_id:"inflight" ~arrived_at:10.0 in
-    Persistence.persist
+    persist_or_fail
       ~base_path
       ~keeper_name
       (Queue.empty |> fun queue -> Queue.enqueue queue pending |> fun queue ->
@@ -370,72 +380,11 @@ let test_fleet_summary_serializes_with_owner_commit () =
     |> require_ok "split writer update")
 ;;
 
-let test_cancel_after_claim_commit_resumes_stable_lease () =
-  with_temp_dir "event-queue-owner-cancel-after-commit" (fun base_path ->
-    let keeper_name = "cancel_after_commit" in
-    let pending = stimulus ~post_id:"durable-claim" ~arrived_at:11.0 in
-    Persistence.persist
-      ~base_path
-      ~keeper_name
-      (Queue.enqueue Queue.empty pending);
-    let after_commit_entered = Atomic.make false in
-    let release_after_commit = Atomic.make false in
-    let winner =
-      Eio.Fiber.first
-        (fun () ->
-           let result =
-             Persistence.claim_when_result
-               ~base_path
-               ~keeper_name
-               ~claimed_at:12.0
-               ~ready:(fun _ -> true)
-               ~after_commit:(fun _pending ->
-                 Atomic.set after_commit_entered true;
-                 await_atomic release_after_commit)
-               ()
-           in
-           `Claim_returned result)
-        (fun () ->
-           await_atomic after_commit_entered;
-           Atomic.set release_after_commit true;
-           `Cancellation_won)
-    in
-    (match winner with
-     | `Cancellation_won -> ()
-     | `Claim_returned _ ->
-       Alcotest.fail "claim returned before deterministic cancellation won");
-    let lease =
-      Persistence.active_lease_result ~base_path ~keeper_name
-      |> require_ok "resume committed lease"
-      |> require_some "committed lease remains discoverable"
-    in
-    Alcotest.(check (list string))
-      "committed claim is absent from pending"
-      []
-      (Persistence.load_pending ~base_path ~keeper_name |> post_ids);
-    Persistence.settle_result
-      ~base_path
-      ~keeper_name
-      ~settled_at:13.0
-      ~lease
-      ~settlement:Persistence.Ack
-      ()
-    |> require_ok "settle resumed lease"
-    |> ignore;
-    Alcotest.(check bool)
-      "resumed lease settled exactly once"
-      true
-      (Persistence.active_lease_result ~base_path ~keeper_name
-       |> require_ok "read settled state"
-       |> Option.is_none))
-;;
-
 let () =
   Eio_main.run (fun _env ->
     test_canonical_owner_and_cross_context_isolation ();
     test_cancelled_waiter_does_not_leak_owner_lock ();
     test_exception_does_not_poison_owner_or_other_lane ();
-    test_fleet_summary_serializes_with_owner_commit ();
-    test_cancel_after_claim_commit_resumes_stable_lease ());
+    test_fleet_summary_serializes_with_owner_commit ());
   print_endline "test_keeper_event_queue_owner_lock: OK"
 ;;

@@ -657,4 +657,33 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       },
     })
   })
+
+  it('surfaces indexed reaction-ledger row decode failures without dropping valid rows', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_reaction_ledger: {
+        status: 'ok',
+        operator_action_required: false,
+        counts_complete: true,
+        pending_by_keeper: [
+          { keeper_name: 'keeper-a', pending_stimulus_count: 1 },
+          { keeper_name: 'keeper-b' },
+        ],
+        keepers: [
+          { keeper_name: 'keeper-a', status: 'ok' },
+          { status: 'missing-owner' },
+        ],
+      },
+    }))
+
+    expect(result?.fleet_safety?.keeper_reaction_ledger).toMatchObject({
+      operator_action_required: true,
+      counts_complete: false,
+      pending_by_keeper: [{ keeper_name: 'keeper-a', pending_stimulus_count: 1 }],
+      keepers: [{ keeper_name: 'keeper-a', status: 'ok' }],
+      decode_errors: [
+        'pending_by_keeper[1]: invalid keeper reaction pending row',
+        'keepers[1]: invalid keeper reaction health row',
+      ],
+    })
+  })
 })

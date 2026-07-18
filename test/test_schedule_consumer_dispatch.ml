@@ -3,6 +3,12 @@ open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let registry_snapshot_or_fail ~base_path keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Ok queue -> queue
+  | Error detail -> Alcotest.failf "event queue snapshot failed: %s" detail
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_consumer_dispatch_test" "" in
   Sys.remove path;
@@ -308,7 +314,7 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
           (detail |> member "keeper_name" |> to_string)
       | None -> fail "execution detail missing"));
   let queue =
-    Keeper_registry_event_queue.snapshot
+    registry_snapshot_or_fail
       ~base_path:config.Workspace_utils.base_path
       "schedule-keeper"
   in
@@ -405,7 +411,7 @@ let test_recurring_wakes_keep_distinct_occurrence_ids () =
   let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
   check bool "recurrences have distinct identities" false (String.equal first_id second_id);
   let queued =
-    Keeper_registry_event_queue.snapshot
+    registry_snapshot_or_fail
       ~base_path:config.Workspace_utils.base_path
       "schedule-keeper"
     |> Keeper_event_queue.to_list
@@ -445,7 +451,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
   Unix.rmdir queue_path;
   check int "failed commit leaves no queued wake after storage repair" 0
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot
+       (registry_snapshot_or_fail
           ~base_path:config.Workspace_utils.base_path
           "schedule-keeper"));
   let retried = tick_ok config ~now:202.0 in
@@ -454,7 +460,7 @@ let test_keeper_wake_durable_enqueue_failure_retries_same_occurrence () =
    | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
    | _ -> fail "next sequential tick did not retry the durable enqueue");
   let queued =
-    Keeper_registry_event_queue.snapshot
+    registry_snapshot_or_fail
       ~base_path:config.Workspace_utils.base_path
       "schedule-keeper"
     |> Keeper_event_queue.to_list
@@ -637,7 +643,7 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
            Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
        | _ -> fail "retry completion receipt missing");
       check int "retry enqueues no second occurrence" 0
-        (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+        (registry_snapshot_or_fail ~base_path keeper_name
          |> Keeper_event_queue.length))
 ;;
 
@@ -735,7 +741,7 @@ let run_terminal_ack_projection_race ~config ~base_path ~keeper_name =
   check int
     "terminal ACK is not resurrected as pending"
     0
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+    (registry_snapshot_or_fail ~base_path keeper_name
      |> Keeper_event_queue.length);
   (match
      Keeper_registry_event_queue.transition_outbox_result ~base_path keeper_name
@@ -818,7 +824,16 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     ; payload = Keeper_event_queue.Schedule_due stale_wake
     }
   in
-  Keeper_registry_event_queue.enqueue ~base_path keeper_name stale_stimulus;
+  (match
+     Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path
+       keeper_name
+       stale_stimulus
+   with
+   | Keeper_registry_event_queue.Stimulus_enqueued _
+   | Keeper_registry_event_queue.Stimulus_already_present _ -> ()
+   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+     Alcotest.failf "stale schedule stimulus admission failed: %s" detail);
   let dashboard =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
   in
@@ -1136,12 +1151,12 @@ let test_invalid_sqlite_store_is_keeper_local_and_retryable () =
     "blocked occurrence was not enqueued"
     0
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path blocked_keeper));
+       (registry_snapshot_or_fail ~base_path blocked_keeper));
   check int
     "healthy keeper received its own occurrence"
     1
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path healthy_keeper))
+       (registry_snapshot_or_fail ~base_path healthy_keeper))
 ;;
 
 let test_missing_sqlite_store_is_exact_empty_evidence () =

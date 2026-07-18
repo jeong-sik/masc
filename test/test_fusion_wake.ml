@@ -21,6 +21,12 @@ let contains ~needle haystack =
   nl = 0 || go 0
 ;;
 
+let load_event_queue_or_fail ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error detail -> fail ("event queue load failed: " ^ detail)
+;;
+
 let assoc_fields label = function
   | `Assoc fields -> fields
   | json ->
@@ -602,7 +608,7 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
     check bool "route consumed only after the durable commit" true
       (Fusion_wake_route.peek ~run_id = None);
     match
-      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      load_event_queue_or_fail ~base_path:base_dir ~keeper_name:keeper
       |> Keeper_event_queue.dequeue
     with
     | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
@@ -655,12 +661,19 @@ let test_completion_stimulus_persists_without_live_registry () =
   with_isolated_base_path "fusion-wake-offline" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-offline-%d" (Random.bits ()) in
     let stimulus = fusion_stimulus ~run_id:"fus-offline" () in
-    Keeper_keepalive_signal.wakeup_keeper
-      ~base_path:base_dir
-      ~stimulus
-      keeper;
+    (match
+       Keeper_registry_event_queue.enqueue_stimulus_durable_result
+         ~base_path:base_dir
+         keeper
+         stimulus
+     with
+     | Keeper_registry_event_queue.Stimulus_enqueued _
+     | Keeper_registry_event_queue.Stimulus_already_present _ ->
+       Keeper_keepalive_signal.wakeup_keeper ~base_path:base_dir keeper
+     | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+       fail ("offline Fusion stimulus admission failed: " ^ detail));
     match
-      Keeper_event_queue_persistence.load
+      load_event_queue_or_fail
         ~base_path:base_dir
         ~keeper_name:keeper
       |> Keeper_event_queue.dequeue

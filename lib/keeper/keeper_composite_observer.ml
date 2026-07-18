@@ -122,7 +122,8 @@ type run_state =
       rs_active_tool_count : int;
     }
   | Waiting of {
-      rs_queue_depth : int;
+      rs_queue_depth : int option;
+      rs_queue_read_error : string option;
       rs_last_skip : last_skip option;
     }
   | Suspended of Keeper_state_machine.phase
@@ -140,6 +141,14 @@ type board_cursor = {
 
 type board_cursor_observation =
   (Keeper_reaction_store.cursor option, Keeper_reaction_store.error) result
+
+type event_queue_observation =
+  { eq_pending : Keeper_event_queue.t option
+  ; eq_read_errors : string list
+  }
+
+type board_attention_candidate_epoch_observation =
+  (string option, string) result
 
 type fsm_guard_violation_bucket = {
   action : string;
@@ -168,6 +177,10 @@ type snapshot = {
   turn_attempt : turn_attempt option;
   board_cursor : board_cursor;
   board_cursor_read_error : string option;
+  event_queue_depth : int option;
+  event_queue_read_error : string option;
+  board_attention_candidate_retired_epoch_residue : string option;
+  board_attention_candidate_epoch_read_error : string option;
   board_wakeups : int;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
@@ -363,7 +376,43 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
 (* Run-state classification (#16, 38-bug campaign PR-5). Exhaustive on
    [Keeper_state_machine.phase]: a future phase addition must be classified
    here explicitly rather than silently inheriting a catch-all arm. *)
-let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
+let event_queue_projection observation =
+  let depth =
+    Option.map Keeper_event_queue.length observation.eq_pending
+  in
+  let read_error =
+    match observation.eq_read_errors with
+    | [] -> None
+    | errors -> Some (String.concat "; " errors)
+  in
+  depth, read_error
+;;
+
+let event_queue_observation_of_result = function
+  | Ok queue -> { eq_pending = Some queue; eq_read_errors = [] }
+  | Error detail -> { eq_pending = None; eq_read_errors = [ detail ] }
+;;
+
+let event_queue_observation_of_snapshot
+      (snapshot : Keeper_event_queue_persistence.snapshot_observation)
+  =
+  let eq_pending =
+    Option.map (fun _generation -> snapshot.pending) snapshot.source_generation
+  in
+  let eq_read_errors =
+    List.map
+      (fun error ->
+         Keeper_event_queue_persistence.snapshot_read_error_to_yojson error
+         |> Yojson.Safe.to_string)
+      snapshot.read_errors
+  in
+  { eq_pending; eq_read_errors }
+;;
+
+let run_state_of_entry
+      (entry : Keeper_registry.registry_entry)
+      ~last_skip
+      ~event_queue_observation
     : run_state =
   match entry.phase with
   | Keeper_state_machine.Running ->
@@ -376,9 +425,13 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
            rs_active_tool_count = obs.active_tool_count;
          }
      | None ->
+       let rs_queue_depth, rs_queue_read_error =
+         event_queue_projection event_queue_observation
+       in
        Waiting
          {
-           rs_queue_depth = Keeper_event_queue.length (Atomic.get entry.event_queue);
+           rs_queue_depth;
+           rs_queue_read_error;
            rs_last_skip = last_skip;
          })
   | Keeper_state_machine.Offline
@@ -416,11 +469,15 @@ let run_state_to_json (rs : run_state) : Yojson.Safe.t =
         "started_at", `Float rs_started_at;
         "active_tool_count", `Int rs_active_tool_count;
       ]
-  | Waiting { rs_queue_depth; rs_last_skip } ->
+  | Waiting { rs_queue_depth; rs_queue_read_error; rs_last_skip } ->
     `Assoc
       [
         "kind", `String "waiting";
-        "queue_depth", `Int rs_queue_depth;
+        "queue_depth",
+          (match rs_queue_depth with
+           | Some depth -> `Int depth
+           | None -> `Null);
+        "queue_read_error", Json_util.string_opt_to_json rs_queue_read_error;
         "skip_reasons",
           (match rs_last_skip with
            | Some ls -> `List (List.map (fun r -> `String r) ls.ls_reasons)
@@ -546,6 +603,9 @@ let observe
     ?run_id
     ?now
     ~(board_cursor_observation : board_cursor_observation)
+    ~(event_queue_observation : event_queue_observation)
+    ~(board_attention_candidate_epoch_observation :
+        board_attention_candidate_epoch_observation)
     (entry : Keeper_registry.registry_entry)
     : snapshot =
   let ts = match now with Some t -> t | None -> Time_compat.now () in
@@ -578,6 +638,15 @@ let observe
     | Error error ->
       ( { bc_ts = 0.0; bc_post_id = None }
       , Some (Keeper_reaction_store.error_to_string error) )
+  in
+  let event_queue_depth, event_queue_read_error =
+    event_queue_projection event_queue_observation
+  in
+  let ( board_attention_candidate_retired_epoch_residue
+      , board_attention_candidate_epoch_read_error ) =
+    match board_attention_candidate_epoch_observation with
+    | Ok residue -> residue, None
+    | Error detail -> None, Some detail
   in
   let invariants =
     compute_invariants
@@ -622,7 +691,7 @@ let observe
              wake = obs.wake;
            }
        | None -> None);
-    run_state = run_state_of_entry entry ~last_skip;
+    run_state = run_state_of_entry entry ~last_skip ~event_queue_observation;
     last_outcome =
       (match entry.last_completed_turn with
        | Some lc ->
@@ -647,6 +716,10 @@ let observe
        | None -> None);
     board_cursor;
     board_cursor_read_error;
+    event_queue_depth;
+    event_queue_read_error;
+    board_attention_candidate_retired_epoch_residue;
+    board_attention_candidate_epoch_read_error;
     board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
@@ -843,6 +916,18 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ];
     "board_cursor_read_error",
       Json_util.string_opt_to_json s.board_cursor_read_error;
+    "event_queue_depth",
+      (match s.event_queue_depth with
+       | Some depth -> `Int depth
+       | None -> `Null);
+    "event_queue_read_error",
+      Json_util.string_opt_to_json s.event_queue_read_error;
+    "board_attention_candidate_retired_epoch_residue",
+      Json_util.string_opt_to_json
+        s.board_attention_candidate_retired_epoch_residue;
+    "board_attention_candidate_epoch_read_error",
+      Json_util.string_opt_to_json
+        s.board_attention_candidate_epoch_read_error;
     "board_wakeups", `Int s.board_wakeups;
     "fiber_stop_flag", `Bool s.fiber_stop_flag;
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;

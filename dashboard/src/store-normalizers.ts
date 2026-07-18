@@ -884,12 +884,33 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   const reactionStoreDiscoveryErrorCount = asNumber(raw.reaction_store_discovery_error_count)
   const reactionStoreDiscoveryErrors = asStringArray(raw.reaction_store_discovery_errors)
   const readErrorCount = asNumber(raw.read_error_count)
-  const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
-    .map(normalizeDashboardKeeperReactionLedgerPendingKeeper)
-    .filter((item): item is DashboardKeeperReactionLedgerPendingKeeper => item !== null)
-  const keepers = (Array.isArray(raw.keepers) ? raw.keepers : [])
-    .map(normalizeDashboardKeeperReactionLedgerKeeperHealth)
-    .filter((item): item is DashboardKeeperReactionLedgerKeeperHealth => item !== null)
+  const decodeErrors: string[] = []
+  const pendingByKeeper: DashboardKeeperReactionLedgerPendingKeeper[] = []
+  if (!Array.isArray(raw.pending_by_keeper)) {
+    decodeErrors.push('pending_by_keeper: expected array')
+  } else {
+    raw.pending_by_keeper.forEach((item, index) => {
+      const normalized = normalizeDashboardKeeperReactionLedgerPendingKeeper(item)
+      if (normalized == null) {
+        decodeErrors.push(`pending_by_keeper[${index}]: invalid keeper reaction pending row`)
+      } else {
+        pendingByKeeper.push(normalized)
+      }
+    })
+  }
+  const keepers: DashboardKeeperReactionLedgerKeeperHealth[] = []
+  if (!Array.isArray(raw.keepers)) {
+    decodeErrors.push('keepers: expected array')
+  } else {
+    raw.keepers.forEach((item, index) => {
+      const normalized = normalizeDashboardKeeperReactionLedgerKeeperHealth(item)
+      if (normalized == null) {
+        decodeErrors.push(`keepers[${index}]: invalid keeper reaction health row`)
+      } else {
+        keepers.push(normalized)
+      }
+    })
+  }
   if (
     schema == null
     && status == null
@@ -925,6 +946,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     && readErrorCount == null
     && pendingByKeeper.length === 0
     && keepers.length === 0
+    && decodeErrors.length === 0
   ) {
     return null
   }
@@ -932,13 +954,13 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     schema,
     status,
     status_reasons: statusReasons,
-    operator_action_required: operatorActionRequired,
+    operator_action_required: decodeErrors.length > 0 ? true : operatorActionRequired,
     empty,
     keeper_count: keeperCount ?? null,
     keeper_names: keeperNames,
     keeper_name_discovery_error_count: keeperNameDiscoveryErrorCount ?? null,
     keeper_name_discovery_errors: keeperNameDiscoveryErrors,
-    counts_complete: countsComplete,
+    counts_complete: decodeErrors.length > 0 ? false : countsComplete,
     pending_id_display_limit_per_keeper: pendingIdDisplayLimitPerKeeper ?? null,
     row_count: rowCount ?? null,
     stimulus_count: stimulusCount ?? null,
@@ -963,6 +985,7 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     read_error_count: readErrorCount ?? null,
     pending_by_keeper: pendingByKeeper,
     keepers,
+    decode_errors: decodeErrors,
   }
 }
 

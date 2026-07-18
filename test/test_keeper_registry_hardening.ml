@@ -326,14 +326,23 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
          }
        in
        Atomic.set entry.fiber_wakeup false;
-       Masc.Keeper_keepalive_signal.wakeup_keeper
-         ~base_path:dir
-         ~stimulus
-         meta.name;
+       (match
+          Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+            ~base_path:dir
+            meta.name
+            stimulus
+        with
+        | Masc.Keeper_registry_event_queue.Stimulus_enqueued _
+        | Masc.Keeper_registry_event_queue.Stimulus_already_present _ ->
+          Masc.Keeper_keepalive_signal.wakeup_keeper ~base_path:dir meta.name
+        | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+          fail ("offline reactive stimulus admission failed: " ^ detail));
        check bool "offline reactive wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
-         Masc.Keeper_registry_event_queue.snapshot ~base_path:dir meta.name
+         (match Masc.Keeper_registry_event_queue.snapshot_result ~base_path:dir meta.name with
+          | Ok queue -> queue
+          | Error detail -> fail ("offline reactive snapshot failed: " ^ detail))
          |> Keeper_event_queue.to_list
        with
        | [ { post_id; payload = Keeper_event_queue.Bootstrap; _ } ] ->
@@ -365,14 +374,21 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
            ~old_ids:[]
            ~new_ids:[ "goal-offline-1" ]
            ()
+         |> function
+         | Ok added -> added
+         | Error detail -> fail ("goal assignment admission failed: " ^ detail)
        in
        check (list string) "new goal is reported" [ "goal-offline-1" ] added;
        check bool "offline goal wake flag remains clear" false
          (Atomic.get entry.fiber_wakeup);
        match
-         Masc.Keeper_registry_event_queue.snapshot
-           ~base_path:config.base_path
-           meta.name
+         (match
+            Masc.Keeper_registry_event_queue.snapshot_result
+              ~base_path:config.base_path
+              meta.name
+          with
+          | Ok queue -> queue
+          | Error detail -> fail ("goal assignment snapshot failed: " ^ detail))
          |> Keeper_event_queue.to_list
        with
        | [ { payload = Keeper_event_queue.Goal_assigned assignment; _ } ] ->

@@ -625,7 +625,7 @@ let test_board_queue_failure_retains_prior_cursor () =
      with
      | Error (Keeper_reaction_ledger.Event_queue_stimulus_admission_error _) -> ()
      | Error error -> fail_ledger_error "unexpected admission failure" error
-     | Ok () -> fail "corrupt queue must reject Board admission");
+     | Ok _ -> fail "corrupt queue must reject Board admission");
     check_cursor
       "queue failure retained prior cursor"
       (Some prior)

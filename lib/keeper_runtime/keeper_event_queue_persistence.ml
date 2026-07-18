@@ -42,7 +42,7 @@ type settle_result =
   | Already_settled of transition_receipt
   | Committed_followup_failed of
       { receipt : transition_receipt
-      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; stage : [ `Checkpoint | `Wal_compaction ]
       ; detail : string
       }
 
@@ -140,7 +140,14 @@ let save_state_unlocked owner state =
          path
          detail)
   | Ok () ->
-    (match save_json_atomic path (State.to_yojson state) with
+    (match
+       save_json_atomic
+         path
+         (State.to_yojson
+            ~owner_base_path:(Owner_lock.base_path owner)
+            ~keeper_name
+            state)
+     with
      | Ok () -> Ok ()
      | Error message ->
        Error
@@ -219,7 +226,12 @@ let read_primary_unlocked owner =
     (match schema_field json with
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
      | Ok schema when String.equal schema State.schema ->
-       (match State.of_yojson json with
+       (match
+          State.of_yojson
+            ~expected_owner_base_path:(Owner_lock.base_path owner)
+            ~expected_keeper_name:(keeper_name_of_owner owner)
+            json
+        with
         | Ok state -> Ok (Primary_current state)
         | Error message -> Error (Printf.sprintf "%s: %s" path message))
      | Ok schema ->
@@ -410,33 +422,6 @@ let load_result ~base_path ~keeper_name =
   load_with_projection ~projection:replay_queue ~base_path ~keeper_name
 ;;
 
-let unavailable_projection_exn ~keeper_name message =
-  Failure
-    (Printf.sprintf
-       "event queue state unavailable keeper=%s: %s"
-       keeper_name
-       message)
-;;
-
-let load ~base_path ~keeper_name =
-  match load_result ~base_path ~keeper_name with
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-  | Ok queue ->
-    if not (Keeper_event_queue.is_empty queue)
-    then
-      Log.Keeper.info
-        "event_queue_snapshot: restored %s for keeper=%s"
-        (Keeper_event_queue.summary queue)
-        keeper_name;
-    queue
-;;
-
-let load_pending ~base_path ~keeper_name =
-  match load_with_projection ~projection:State.pending ~base_path ~keeper_name with
-  | Ok queue -> queue
-  | Error message -> raise (unavailable_projection_exn ~keeper_name message)
-;;
-
 let load_pending_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.pending
 ;;
@@ -486,7 +471,12 @@ let read_primary_for_observation_unlocked owner =
             | Error message ->
               Error (snapshot_read_error Parse_failed ~path message)
             | Ok schema when String.equal schema State.schema ->
-              (match State.of_yojson json with
+              (match
+                 State.of_yojson
+                   ~expected_owner_base_path:(Owner_lock.base_path owner)
+                   ~expected_keeper_name:(keeper_name_of_owner owner)
+                   json
+               with
                | Ok state -> Ok (true, state)
                | Error message ->
                  Error (snapshot_read_error Parse_failed ~path message))
@@ -698,7 +688,7 @@ let discover_keeper_names_with_snapshots ~base_path =
        })
 ;;
 
-let commit_transform_unlocked owner ~after_commit transform =
+let commit_transform_unlocked owner transform =
   match load_state_unlocked owner with
   | Error _ as error -> error
   | Ok current ->
@@ -711,18 +701,16 @@ let commit_transform_unlocked owner ~after_commit transform =
         | Ok next ->
           (match save_state_unlocked owner next with
            | Error _ as error -> error
-           | Ok () ->
-             after_commit (State.pending next);
-             Ok value)))
+           | Ok () -> Ok value)))
 ;;
 
-let commit_transform ~base_path ~keeper_name ~after_commit transform =
+let commit_transform ~base_path ~keeper_name transform =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         commit_transform_unlocked owner ~after_commit transform)
+         commit_transform_unlocked owner transform)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -734,11 +722,10 @@ let commit_transform ~base_path ~keeper_name ~after_commit transform =
             (Printexc.to_string exn)))
 ;;
 
-let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
+let update_checked_result ~base_path ~keeper_name f =
   commit_transform
     ~base_path
     ~keeper_name
-    ~after_commit:(fun _pending -> after_commit ())
     (fun state ->
        match f (State.pending state) with
        | Error _ as error -> error
@@ -868,11 +855,7 @@ let admit_stimuli_if_absent state stimuli =
     loop initial_index (State.pending state) false [] stimuli
 ;;
 
-let enqueue_stimulus_if_absent_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      stimulus
+let enqueue_stimulus_if_absent_result ~base_path ~keeper_name stimulus
   =
   match
     validate_enqueue_stimuli
@@ -881,7 +864,7 @@ let enqueue_stimulus_if_absent_result
   with
   | Error _ as error -> error
   | Ok () ->
-    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    commit_transform ~base_path ~keeper_name (fun state ->
       match admit_stimuli_if_absent state [ stimulus ] with
       | Error _ as error -> error
       | Ok (state, [ outcome ]) -> Ok (state, outcome)
@@ -889,11 +872,7 @@ let enqueue_stimulus_if_absent_result
         Error "event queue single admission changed result cardinality")
 ;;
 
-let enqueue_stimuli_if_absent_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      stimuli
+let enqueue_stimuli_if_absent_result ~base_path ~keeper_name stimuli
   =
   match
     validate_enqueue_stimuli
@@ -902,51 +881,25 @@ let enqueue_stimuli_if_absent_result
   with
   | Error _ as error -> error
   | Ok () ->
-    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    commit_transform ~base_path ~keeper_name (fun state ->
       admit_stimuli_if_absent state stimuli)
 ;;
 
-let update_result ?after_commit ~base_path ~keeper_name f =
-  update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
+let update_result ~base_path ~keeper_name f =
+  update_checked_result ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
 
-let update ~base_path ~keeper_name f =
-  match update_result ~base_path ~keeper_name f with
-  | Ok () -> ()
-  | Error message ->
-    Log.Keeper.error "event_queue_snapshot: update failed keeper=%s: %s" keeper_name message
-;;
-
-let persist ~base_path ~keeper_name queue =
-  update ~base_path ~keeper_name (fun _ -> queue)
-;;
-
-let persist_snapshot ~base_path ~keeper_name snapshot =
-  update ~base_path ~keeper_name (fun _ -> snapshot ())
-;;
-
-let claim_when_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~claimed_at
-      ~ready
-      ()
+let claim_when_result ~base_path ~keeper_name ~claimed_at ~ready ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+  commit_transform ~base_path ~keeper_name (fun state ->
     match State.claim_when ~claimed_at ~ready state with
     | Error _ as error -> error
     | Ok (state, lease) -> Ok (state, lease))
 ;;
 
-let claim_board_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~claimed_at
-      ()
+let claim_board_result ~base_path ~keeper_name ~claimed_at ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+  commit_transform ~base_path ~keeper_name (fun state ->
     match State.claim_board ~claimed_at state with
     | Error _ as error -> error
     | Ok (state, lease) -> Ok (state, lease))
@@ -954,7 +907,6 @@ let claim_board_result
 
 let commit_settlement_unlocked
       owner
-      ~after_commit
       ~settled_at
       ~lease
       ~settlement
@@ -998,34 +950,10 @@ let commit_settlement_unlocked
                   ( Committed_followup_failed
                       { receipt; stage = `Wal_compaction; detail }
                   , pending )
-              | Ok () ->
-                (match
-                   try
-                     after_commit pending;
-                     Ok ()
-                   with
-                   | Eio.Cancel.Cancelled _ as exn ->
-                     Error
-                       ("pending projection cancelled after settlement commit: "
-                        ^ Printexc.to_string exn)
-                   | exn -> Error (Printexc.to_string exn)
-                 with
-                 | Ok () -> Ok (Settled receipt, pending)
-                 | Error detail ->
-                   Ok
-                     ( Committed_followup_failed
-                         { receipt; stage = `Projection; detail }
-                     , pending ))))))
+              | Ok () -> Ok (Settled receipt, pending)))))
 ;;
 
-let settle_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ~lease
-      ~settlement
-      ()
+let settle_result ~base_path ~keeper_name ~settled_at ~lease ~settlement ()
   =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
@@ -1037,7 +965,6 @@ let settle_result
          | Ok state ->
            commit_settlement_unlocked
              owner
-             ~after_commit
              ~settled_at
              ~lease
              ~settlement
@@ -1053,12 +980,7 @@ let settle_result
             (Printexc.to_string exn)))
 ;;
 
-let prepare_registration_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~settled_at
-      ()
+let prepare_registration_result ~base_path ~keeper_name ~settled_at ()
   =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
@@ -1074,7 +996,6 @@ let prepare_registration_result
               (match
                  commit_settlement_unlocked
                    owner
-                   ~after_commit
                    ~settled_at
                    ~lease
                    ~settlement:(Requeue Registration_recovery)
@@ -1098,24 +1019,17 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
   commit_transform
     ~base_path
     ~keeper_name
-    ~after_commit:(fun _ -> ())
     (fun state ->
        match State.mark_transition_projected ~transition_id state with
        | Error _ as error -> error
        | Ok state -> Ok (state, ()))
 ;;
 
-let drop_by_post_id
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~post_id
-      ()
+let drop_by_post_id ~base_path ~keeper_name ~post_id ()
   =
   commit_transform
     ~base_path
     ~keeper_name
-    ~after_commit
     (fun state ->
        let removed, state = State.remove_by_post_id post_id state in
        Ok (state, removed))

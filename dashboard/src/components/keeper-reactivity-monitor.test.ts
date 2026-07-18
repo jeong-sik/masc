@@ -77,6 +77,7 @@ function reactionLedger(
       read_error: null,
     }],
     ...overrides,
+    decode_errors: overrides.decode_errors ?? [],
   }
 }
 

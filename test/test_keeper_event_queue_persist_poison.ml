@@ -41,26 +41,42 @@ let () =
   let queue = Keeper_event_queue.empty in
 
   (* 1) Force mkdir_p to raise inside the critical section: a base path whose
-        ancestor is a regular file yields ENOTDIR. [persist] logs the failure as
-        a warning and returns; pre-fix it ALSO poisoned the shared mutex. *)
+        ancestor is a regular file yields ENOTDIR. The typed write must return
+        [Error]; pre-fix the exception also poisoned the shared mutex. *)
   let blocker_path = Filename.temp_file "kqp_poison_blocker" "" in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists blocker_path then rm_rf blocker_path)
     (fun () ->
       let base_path = Filename.concat blocker_path "base" in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
+      (match
+         Keeper_event_queue_persistence.update_result
+           ~base_path
+           ~keeper_name
+           (fun _ -> queue)
+       with
+       | Error _ -> ()
+       | Ok () -> failwith "invalid event queue path unexpectedly persisted");
 
       (* 2) Replace the invalid ancestor and retry the same owner identity. *)
       Sys.remove blocker_path;
       Unix.mkdir blocker_path 0o755;
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
+      (match
+         Keeper_event_queue_persistence.update_result
+           ~base_path
+           ~keeper_name
+           (fun _ -> queue)
+       with
+       | Ok () -> ()
+       | Error detail -> failwith ("event queue retry failed: " ^ detail));
       let path = snapshot_path ~base_path ~keeper_name in
       assert (Sys.file_exists path);
 
       (* 3) The lock still serializes correctly after recovery: load round-trips
-         the persisted (empty) queue without raising. *)
+         the persisted (empty) queue through the typed read boundary. *)
       let restored =
-        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+        | Ok queue -> queue
+        | Error detail -> failwith ("event queue reload failed: " ^ detail)
       in
       assert (Keeper_event_queue.is_empty restored));
 

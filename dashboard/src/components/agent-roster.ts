@@ -264,6 +264,11 @@ function rosterPresenceDisplay(
   // missing data.
   if (state.kind === 'running') {
     const runState = composite?.run_state
+    const candidateEpochIssue = composite?.board_attention_candidate_epoch_read_error != null
+      ? `후보 저장소 관측 실패: ${composite.board_attention_candidate_epoch_read_error}`
+      : composite?.board_attention_candidate_retired_epoch_residue != null
+        ? `은퇴 후보 epoch 잔존: ${composite.board_attention_candidate_retired_epoch_residue}`
+        : null
     if (runState?.kind === 'in_turn') {
       const wakeLabel = runState.wake_kind === 'woken'
         ? '반응형'
@@ -272,16 +277,28 @@ function rosterPresenceDisplay(
           : runState.wake_kind != null
             ? `기원 ${runState.wake_kind}`
             : '기원 확인 필요'
-      return { status: 'busy', detail: `${state.turnPhase} live · ${wakeLabel}` }
+      const detail = `${state.turnPhase} live · ${wakeLabel}`
+      return {
+        status: 'busy',
+        detail: candidateEpochIssue == null ? detail : `${detail} · ${candidateEpochIssue}`,
+      }
     }
     if (runState?.kind === 'waiting') {
+      const queueReadError = runState.queue_read_error
       const depth = runState.queue_depth
-      const detail = depth == null
+      const queueDetail = queueReadError != null
+        ? `대기 중 · 큐 읽기 실패: ${queueReadError}`
+        : depth == null
         ? '대기 중 · 큐 확인 필요'
         : depth > 0
           ? `대기 중 · 큐 ${depth}`
           : '대기 중'
-      return { status: 'idle', detail }
+      return {
+        status: 'idle',
+        detail: candidateEpochIssue == null
+          ? queueDetail
+          : `${queueDetail} · ${candidateEpochIssue}`,
+      }
     }
     if (runState?.kind === 'suspended') {
       const phase = runState.phase?.trim()

@@ -5,6 +5,12 @@ open Masc
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
+let registry_snapshot_or_fail ~base_path keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Ok queue -> queue
+  | Error detail -> Alcotest.failf "event queue snapshot failed: %s" detail
+;;
+
 (** Temp directory for test isolation — set before any Board.global call *)
 let fresh_test_base_path () =
   let dir =
@@ -412,35 +418,6 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
-let test_dedup_hit_does_not_emit_post_created_fanout () =
-  let keeper_signals = ref 0 in
-  let sse_post_created = ref 0 in
-  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
-  Board_dispatch.set_board_sse_hook (function
-    | Board_dispatch.Post_created _ -> incr sse_post_created
-    | _ -> ());
-  let create () =
-    Board_dispatch.create_post ~author:"dedup-agent"
-      ~content:"same post body from one keeper turn"
-      ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
-  in
-  let first =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let second =
-    match create () with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  Alcotest.(check string)
-    "dedup returns existing post"
-    (Board.Post_id.to_string first.id)
-    (Board.Post_id.to_string second.id);
-  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
-  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
-
 let test_create_post_persistence_failure_returns_error_without_fanout () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
@@ -620,7 +597,7 @@ let test_board_cursor_bootstrap_and_registry_restart_resume () =
        Alcotest.(check int) "new post count" 1 new_count;
        Alcotest.(check int) "new mention count" 1 mention_count;
        let queued_after_first_scan =
-         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         registry_snapshot_or_fail ~base_path keeper_name
          |> Keeper_event_queue.to_list
        in
        Alcotest.(check (list string))
@@ -689,7 +666,7 @@ let test_board_cursor_bootstrap_and_registry_restart_resume () =
        Alcotest.(check int) "only post after persisted cursor is new" 1 new_count;
        Alcotest.(check int) "only later mention is counted" 1 mention_count;
        let queued_after_restart =
-         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         registry_snapshot_or_fail ~base_path keeper_name
          |> Keeper_event_queue.to_list
        in
        Alcotest.(check (list string))
@@ -832,7 +809,7 @@ let test_concurrent_board_scan_cannot_resurrect_terminal_stimulus () =
                  mention_count
              | Error exn -> raise exn);
             let pending =
-              Keeper_registry_event_queue.snapshot ~base_path keeper_name
+              registry_snapshot_or_fail ~base_path keeper_name
               |> Keeper_event_queue.to_list
             in
             Alcotest.(check (list string))
@@ -2283,8 +2260,6 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
-      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
-        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);

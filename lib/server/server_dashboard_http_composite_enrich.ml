@@ -56,7 +56,22 @@ let dashboard_keeper_composite_json
     |> Result.map (fun (observation : Keeper_reaction_store.read_observation) ->
       observation.cursor)
   in
-  Keeper_composite_observer.observe ~board_cursor_observation entry
+  let event_queue_observation =
+    Keeper_event_queue_persistence.observe_snapshot
+      ~base_path:config.base_path
+      ~keeper_name:entry.name
+    |> Keeper_composite_observer.event_queue_observation_of_snapshot
+  in
+  let board_attention_candidate_epoch_observation =
+    Keeper_board_attention_candidate.retired_epoch_residue
+      ~base_path:config.base_path
+      ~keeper_name:entry.name
+  in
+  Keeper_composite_observer.observe
+    ~board_cursor_observation
+    ~event_queue_observation
+    ~board_attention_candidate_epoch_observation
+    entry
   |> Keeper_composite_observer.snapshot_to_json
   |> enrich_composite_snapshot_json ~config entry
 ;;

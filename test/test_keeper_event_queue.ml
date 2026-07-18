@@ -62,26 +62,42 @@ let read_file path =
   | Ok bytes -> bytes
   | Error error -> Alcotest.fail ("failed to read test file: " ^ error)
 
-let latest_log_seq () =
-  match Log.Ring.recent ~limit:1 () with
-  | (entry : Log.Ring.entry) :: _ -> entry.seq
-  | [] -> -1
+let registry_enqueue_or_fail ~base_path keeper_name stimulus =
+  match
+    Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+      ~base_path
+      keeper_name
+      stimulus
+  with
+  | Masc.Keeper_registry_event_queue.Stimulus_enqueued _
+  | Masc.Keeper_registry_event_queue.Stimulus_already_present _ -> ()
+  | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+    Alcotest.failf "event queue admission failed: %s" detail
+;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec scan offset =
-    offset + needle_len <= haystack_len
-    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
-  in
-  String.equal needle "" || scan 0
+let registry_snapshot_or_fail ~base_path keeper_name =
+  match Masc.Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Ok queue -> queue
+  | Error detail -> Alcotest.failf "event queue snapshot failed: %s" detail
+;;
 
-let restored_log_messages_since before_seq =
-  Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
-  |> List.filter_map (fun (entry : Log.Ring.entry) ->
-    if contains_substring ~needle:"event_queue_snapshot: restored " entry.message
-    then Some entry.message
-    else None)
+let persistence_result_or_fail label = function
+  | Ok value -> value
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
+let persistence_load_or_fail ~base_path ~keeper_name =
+  Keeper_event_queue_persistence.load_result ~base_path ~keeper_name
+  |> persistence_result_or_fail "event queue load failed"
+;;
+
+let persistence_persist_or_fail ~base_path ~keeper_name queue =
+  Keeper_event_queue_persistence.update_result
+    ~base_path
+    ~keeper_name
+    (fun _ -> queue)
+  |> persistence_result_or_fail "event queue persist failed"
+;;
 
 let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
   match
@@ -844,9 +860,9 @@ let () =
     (fun () ->
       let keeper_name = "keeper-event-queue-test" in
       let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
+      persistence_persist_or_fail ~base_path ~keeper_name q;
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      let restored = persistence_load_or_fail ~base_path ~keeper_name in
       assert (length restored = 2);
       let first, rest =
         match dequeue restored with
@@ -854,41 +870,15 @@ let () =
         | None -> Alcotest.fail "persisted queue should restore first stimulus"
       in
       assert (String.equal first.post_id "p1");
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
+      persistence_persist_or_fail ~base_path ~keeper_name rest;
       let second, rest =
-        match dequeue (Keeper_event_queue_persistence.load ~base_path ~keeper_name) with
+        match dequeue (persistence_load_or_fail ~base_path ~keeper_name) with
         | Some item -> item
         | None -> Alcotest.fail "persisted queue should restore second stimulus"
       in
       assert (String.equal second.post_id "bootstrap");
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
-
-  (* --- health snapshot reads stay quiet; live hydration still announces replay. --- *)
-  let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      Log.set_level Log.Info;
-      let keeper_name = "keeper-event-queue-restore-log-gate-test" in
-      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
-      let before_health_reads = latest_log_seq () in
-      ignore (Keeper_event_queue_persistence.observe_snapshot ~base_path ~keeper_name);
-      ignore (Keeper_event_queue_persistence.observe_snapshot ~base_path ~keeper_name);
-      Alcotest.(check (list string))
-        "health snapshot reads do not emit restore log"
-        []
-        (restored_log_messages_since before_health_reads);
-      let before_live_load = latest_log_seq () in
-      ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
-      Alcotest.(check bool)
-        "live load emits restore log"
-        true
-        (List.exists
-           (contains_substring
-              ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
-           (restored_log_messages_since before_live_load)));
+      persistence_persist_or_fail ~base_path ~keeper_name rest;
+      assert (is_empty (persistence_load_or_fail ~base_path ~keeper_name)));
 
   (* --- Invalid typed input is rejected before either a batch admission or a
          generic state update can publish a new durable generation. --- *)
@@ -897,7 +887,7 @@ let () =
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-invalid-save-boundary-test" in
-      Keeper_event_queue_persistence.persist
+      persistence_persist_or_fail
         ~base_path
         ~keeper_name
         (enqueue empty bootstrap_stim);
@@ -993,8 +983,8 @@ let () =
         |> fun q -> enqueue q bootstrap_stim
         |> fun q -> enqueue q duplicate_bootstrap_stim
       in
-      Keeper_event_queue_persistence.persist ~base_path ~keeper_name duplicated;
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      persistence_persist_or_fail ~base_path ~keeper_name duplicated;
+      let restored = persistence_load_or_fail ~base_path ~keeper_name in
       assert (length restored = 1);
       let only, rest = Option.get (dequeue restored) in
       assert (String.equal only.post_id "bootstrap");
@@ -1014,11 +1004,11 @@ let () =
       let inflight =
         { ghost_stim with post_id = "old-inflight"; arrived_at = 5.0 }
       in
-      Keeper_event_queue_persistence.persist
+      persistence_persist_or_fail
         ~base_path
         ~keeper_name:pending_keeper
         (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
-      Keeper_event_queue_persistence.persist
+      persistence_persist_or_fail
         ~base_path
         ~keeper_name:inflight_keeper
         (enqueue empty inflight);
@@ -1086,7 +1076,7 @@ let () =
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-corrupt-summary-test" in
-      Keeper_event_queue_persistence.persist
+      persistence_persist_or_fail
         ~base_path
         ~keeper_name
         (empty |> fun q -> enqueue q board_stim);
@@ -1141,13 +1131,13 @@ let () =
       let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      assert (length (registry_snapshot_or_fail ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let restored = registry_snapshot_or_fail ~base_path keeper_name in
       assert (length restored = 1);
       (match
          Masc.Keeper_registry_event_queue.claim_when_result
@@ -1160,7 +1150,7 @@ let () =
        | Ok (Some _) -> Alcotest.fail "unready stimulus must remain queued"
        | Error error -> Alcotest.fail ("readiness claim failed: " ^ error));
       assert (
-        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+        length (registry_snapshot_or_fail ~base_path keeper_name) = 1);
       let replay_lease, replayed =
         claim_single
           ~base_path
@@ -1176,7 +1166,7 @@ let () =
            ~settled_at:3.0
            ~lease:replay_lease
            ~settlement:Masc.Keeper_registry_event_queue.Ack);
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+      assert (is_empty (persistence_load_or_fail ~base_path ~keeper_name)));
 
   (* --- registry identity barrier: [base] and [base/.masc] must address one
      live atomic and the same durable owner. Two registrations followed by one
@@ -1229,8 +1219,8 @@ let () =
         1
         (List.length (Masc.Keeper_registry.all ~base_path:base_path_masc ()));
 
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      registry_enqueue_or_fail
         ~base_path:base_path_masc
         keeper_name
         bootstrap_stim;
@@ -1238,12 +1228,12 @@ let () =
       Alcotest.(check (list string))
         "both aliases publish to one live atomic"
         expected_post_ids
-        (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name
+        (registry_snapshot_or_fail ~base_path keeper_name
          |> queue_post_ids);
       Alcotest.(check (list string))
         "both alias stimuli share one durable snapshot"
         expected_post_ids
-        (Keeper_event_queue_persistence.load
+        (persistence_load_or_fail
            ~base_path:base_path_masc
            ~keeper_name
          |> queue_post_ids);
@@ -1257,7 +1247,7 @@ let () =
       Alcotest.(check (list string))
         "restart through alias restores both stimuli"
         expected_post_ids
-        (Masc.Keeper_registry_event_queue.snapshot
+        (registry_snapshot_or_fail
            ~base_path
            keeper_name
          |> queue_post_ids));
@@ -1282,7 +1272,7 @@ let () =
         { post_id; urgency; arrived_at; payload = board_payload () }
       in
       List.iter
-        (Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name)
+        (registry_enqueue_or_fail ~base_path keeper_name)
         [ board_at ~post_id:"dg1" ~urgency:Normal 0.0
         ; board_at ~post_id:"dg2" ~urgency:Normal (digest_now -. 600.0)
         ; board_at ~post_id:"dg3" ~urgency:Immediate (digest_now -. 90.0)
@@ -1367,18 +1357,18 @@ let () =
       let keeper_name = "keeper-event-queue-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
       Masc.Keeper_registry.clear ();
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
-      Masc.Keeper_registry_event_queue.enqueue
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      registry_enqueue_or_fail ~base_path keeper_name bootstrap_stim;
+      registry_enqueue_or_fail
         ~base_path
         keeper_name
         duplicate_bootstrap_stim;
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let pending = registry_snapshot_or_fail ~base_path keeper_name in
       assert (length pending = 2);
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      let restored = registry_snapshot_or_fail ~base_path keeper_name in
       assert (length restored = 2);
       let claim_and_ack expected_post_id =
         let claimed_at = Time_compat.now () in
@@ -1449,7 +1439,7 @@ let () =
       in
       claim_and_ack "p1";
       claim_and_ack "bootstrap";
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+      assert (is_empty (persistence_load_or_fail ~base_path ~keeper_name)));
 
   (* A pending durable stimulus is the structural cooperative-yield signal for
      an already-running autonomous OAS loop. The classifier reads the same
@@ -1481,7 +1471,7 @@ let () =
            Alcotest.failf "empty queue snapshot failed: %s" error
          | Ok (Some _) ->
            Alcotest.fail "empty work queues must not request an autonomous yield");
-        Masc.Keeper_registry_event_queue.enqueue
+        registry_enqueue_or_fail
           ~base_path
           keeper_name
           bootstrap_stim;
@@ -1557,7 +1547,7 @@ let () =
        | Error msg -> assert (String.length msg > 0)
        | Ok () -> Alcotest.fail "conflicting approval decision was accepted");
       match
-        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        persistence_load_or_fail ~base_path ~keeper_name
         |> Keeper_event_queue.to_list
       with
       | [ { payload = Hitl_resolved { decision = Hitl_approved; _ }; _ } ] -> ()
@@ -1612,7 +1602,7 @@ let () =
        | Masc.Keeper_registry_event_queue.Identity_conflict _ -> ()
        | _ -> Alcotest.fail "same candidate id with different payload did not conflict");
       match
-        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        persistence_load_or_fail ~base_path ~keeper_name
         |> Keeper_event_queue.to_list
       with
       | [ { payload = Board_attention { signal = { content = "c"; _ }; _ }; _ } ] ->
@@ -1640,7 +1630,7 @@ let () =
        | Ok () -> ()
        | Error msg -> Alcotest.fail ("offline durable enqueue failed: " ^ msg));
       assert (
-        length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
+        length (registry_snapshot_or_fail ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name)));
 
   (* --- critical delivery: an unwritable path is an explicit error, never an
@@ -1689,8 +1679,8 @@ let () =
       let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-front-test" in
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
-      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
+      registry_enqueue_or_fail ~base_path keeper_name board_stim;
+      registry_enqueue_or_fail ~base_path keeper_name bootstrap_stim;
       let consumed_lease, consumed =
         claim_single
           ~base_path
@@ -1699,7 +1689,7 @@ let () =
           ~ready:(fun _ -> true)
       in
       assert (String.equal consumed.post_id "p1");
-      let restart_replay = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      let restart_replay = persistence_load_or_fail ~base_path ~keeper_name in
       assert (length restart_replay = 2);
       let replay_head =
         match dequeue restart_replay with
@@ -1724,7 +1714,7 @@ let () =
         | Ok _ -> Alcotest.fail "first requeue settlement follow-up failed"
         | Error error -> Alcotest.fail ("typed requeue failed: " ^ error)
       in
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
+      assert (length (persistence_load_or_fail ~base_path ~keeper_name) = 2);
       (match
          Masc.Keeper_registry_event_queue.settle_result
            ~base_path
@@ -1742,7 +1732,7 @@ let () =
          Alcotest.fail "repeated requeue changed the durable receipt"
        | Ok _ -> Alcotest.fail "repeated requeue settlement follow-up failed"
        | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
+      assert (length (persistence_load_or_fail ~base_path ~keeper_name) = 2);
       (match
          Masc.Keeper_registry_event_queue.mark_transition_projected_result
            ~base_path

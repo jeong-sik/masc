@@ -2,10 +2,9 @@
 
     Extracted from keeper_registry.ml (lines 1854-1900) as part of the
     godfile decomp campaign. Each [registry_entry] carries its own
-    [event_queue : Keeper_event_queue.t Atomic.t].  The durable v2 envelope is
-    the mutation authority; these wrappers publish its pending projection to
-    that per-entry Atomic only after commit.  No coupling to the central
-    registry Atomic state primitive. *)
+    The durable v4 envelope is the sole mutation and read authority. Registry
+    entries carry no mutable queue projection, so a callback gap cannot change
+    Keeper behavior or operator truth. *)
 
 type lease = Keeper_event_queue_persistence.lease
 
@@ -45,7 +44,7 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
   | Already_settled of transition_receipt
   | Committed_followup_failed of
       { receipt : transition_receipt
-      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; stage : [ `Checkpoint | `Wal_compaction ]
       ; detail : string
       }
 
@@ -75,18 +74,6 @@ let mark_transition_projected_result ~base_path name ~transition_id =
     ~transition_id
 ;;
 
-let rec queue_contains queue stimulus =
-  match Keeper_event_queue.dequeue queue with
-  | None -> false
-  | Some (head, rest) ->
-    Keeper_event_queue.stimulus_identity_equal head stimulus
-    || queue_contains rest stimulus
-;;
-
-let enqueue_if_missing queue stimulus =
-  if queue_contains queue stimulus then queue else Keeper_event_queue.enqueue queue stimulus
-;;
-
 let rec stimulus_with_post_id queue post_id =
   match Keeper_event_queue.dequeue queue with
   | None -> None
@@ -109,62 +96,16 @@ let enqueue_external_decision queue stimulus =
          stimulus.post_id)
 ;;
 
-let publish_pending ~base_path name pending =
-  match Keeper_registry.get ~base_path name with
-  | None -> ()
-  | Some entry -> Atomic.set entry.event_queue pending
-;;
-
-let enqueue ~base_path name stimulus =
-  if Option.is_none (Keeper_registry.get ~base_path name)
-  then
-    Log.Keeper.warn
-      "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
-      name
-      base_path;
-  let committed_pending = ref None in
-  match
-    Keeper_event_queue_persistence.update_checked_result
-      ~base_path
-      ~keeper_name:name
-      ~after_commit:(fun () ->
-        match !committed_pending with
-        | None -> ()
-        | Some pending -> publish_pending ~base_path name pending)
-      (fun current ->
-         let pending = enqueue_if_missing current stimulus in
-         committed_pending := Some pending;
-         Ok pending)
-  with
-  | Ok () -> ()
-  | Error message ->
-    Log.Keeper.error
-      "registry: durable enqueue failed name=%s base_path=%s post_id=%s: %s"
-      name
-      base_path
-      stimulus.Keeper_event_queue.post_id
-      message
-;;
-
 let enqueue_durable_result ~base_path name stimulus =
   (* Commit the identity-deduplicated durable row before exposing a successful
-     delivery result. This path is intentionally separate from [enqueue]: most
-     stimuli already have an upstream replay source, while HITL resolution is
-     the sole carrier of an operator decision and must fail closed. *)
-  let committed_pending = ref None in
+     delivery result. *)
   Keeper_event_queue_persistence.update_checked_result
     ~base_path
     ~keeper_name:name
-    ~after_commit:(fun () ->
-      match !committed_pending with
-      | None -> ()
-      | Some pending -> publish_pending ~base_path name pending)
     (fun queue ->
        match enqueue_external_decision queue stimulus with
        | Error _ as error -> error
-       | Ok pending ->
-         committed_pending := Some pending;
-         Ok pending)
+       | Ok pending -> Ok pending)
 ;;
 
 type enqueue_if_missing_durable_result =
@@ -214,27 +155,20 @@ let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
   | Some _ when String.equal event_id "" ->
     Identity_conflict "durable event identity must not be empty"
   | Some _ ->
-    let committed_pending = ref None in
     let commit_result = ref Enqueued in
     let identity_conflict = ref None in
     (match
        Keeper_event_queue_persistence.update_checked_result
          ~base_path
          ~keeper_name:name
-         ~after_commit:(fun () ->
-           match !committed_pending with
-           | None -> ()
-           | Some pending -> publish_pending ~base_path name pending)
          (fun queue ->
             match stimulus_with_board_attention_event_id queue event_id with
             | None ->
               let pending = Keeper_event_queue.enqueue queue stimulus in
-              committed_pending := Some pending;
               commit_result := Enqueued;
               Ok pending
             | Some existing
               when Keeper_event_queue.stimulus_identity_equal existing stimulus ->
-              committed_pending := Some queue;
               commit_result := Already_present;
               Ok queue
             | Some _ ->
@@ -270,7 +204,6 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
       ~base_path
       ~keeper_name:name
-      ~after_commit:(publish_pending ~base_path name)
       stimulus
   with
   | Ok (Keeper_event_queue_persistence.Enqueued committed) ->
@@ -284,7 +217,6 @@ let enqueue_stimuli_durable_result ~base_path ~keeper_name stimuli =
   Keeper_event_queue_persistence.enqueue_stimuli_if_absent_result
     ~base_path
     ~keeper_name
-    ~after_commit:(publish_pending ~base_path keeper_name)
     stimuli
   |> Result.map (fun outcomes ->
     List.map
@@ -321,7 +253,6 @@ let drop_by_post_id ~base_path name ~post_id =
       ~base_path
       ~keeper_name:name
       ~post_id
-      ~after_commit:(publish_pending ~base_path name)
       ()
   with
   | Error msg ->
@@ -334,10 +265,10 @@ let drop_by_post_id ~base_path name ~post_id =
   | Ok persisted_removed -> Ok persisted_removed
 ;;
 
-let snapshot ~base_path name =
-  match Keeper_registry.get ~base_path name with
-  | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
-  | Some entry -> Atomic.get entry.event_queue
+let snapshot_result ~base_path name =
+  Keeper_event_queue_persistence.load_pending_result
+    ~base_path
+    ~keeper_name:name
 ;;
 
 let claim_when_result ~base_path name ~claimed_at ~ready =
@@ -349,7 +280,6 @@ let claim_when_result ~base_path name ~claimed_at ~ready =
       ~keeper_name:name
       ~claimed_at
       ~ready
-      ~after_commit:(publish_pending ~base_path name)
       ()
 ;;
 
@@ -361,7 +291,6 @@ let claim_board_result ~base_path name ~claimed_at =
       ~base_path
       ~keeper_name:name
       ~claimed_at
-      ~after_commit:(publish_pending ~base_path name)
       ()
 ;;
 
@@ -372,6 +301,5 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~settled_at
     ~lease
     ~settlement
-    ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

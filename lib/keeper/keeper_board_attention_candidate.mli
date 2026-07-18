@@ -1,11 +1,21 @@
 (** Durable Board-attention judgment boundary.
 
     A candidate is persisted before any model call. Its lifecycle is
-    [Pending -> Judged -> Consumed], with [Pending -> Expired] as the terminal
-    path for rows that outlived their relevance window. Relevant judgments
-    become normal Keeper-lane events only after an exact candidate-id durable
-    queue commit; failures retain the latest retryable evidence and never
-    consume the candidate. *)
+    [Pending -> Judged -> Consumed]. Pending work has no time, count, cost, or
+    turn-based terminal gate: it remains durable until a typed judgment is
+    delivered. Relevant judgments become normal Keeper-lane events only after
+    an exact candidate-id durable queue commit; failures retain the latest
+    retryable evidence and never consume the candidate. *)
+
+module Attempt_count : sig
+  type t
+
+  val one : t
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+end
+(** Canonical arbitrary-precision positive count. It is serialized as a decimal
+    string so observation never becomes a machine-integer behavior gate. *)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -17,6 +27,8 @@ type retryable_failure_kind =
 type retryable_failure =
   { kind : retryable_failure_kind
   ; detail : string
+  ; attempt_count : Attempt_count.t
+  ; first_failed_at : float
   ; failed_at : float
   }
 
@@ -43,13 +55,10 @@ type consumed_state =
   ; consumed_at : float
   }
 
-type expired_state = { expired_at : float }
-
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
-  | Expired of expired_state
 
 type candidate =
   { candidate_id : string
@@ -119,14 +128,29 @@ val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
+(** Reads only the owner-bound current v2 authority. Retired JSONL bytes are
+    never decoded, migrated, renamed, deleted, or used as fallback input. *)
+
+val retired_epoch_residue :
+  base_path:string -> keeper_name:string -> (string option, string) result
+(** Raw [lstat] observation of the retired candidate epoch. [Some path] is
+    operator evidence only and never blocks or augments current behavior. *)
 
 val record : base_path:string -> candidate -> record_result
+(** Initial admission accepts only [Pending { last_failure = None }] and
+    validates the complete canonical candidate before the durable write.
+    Invalid record values are returned as [Record_error] and cannot poison the
+    current epoch. *)
 
 val record_retryable_failure :
   base_path:string ->
   candidate ->
   retryable_failure ->
   (candidate, string) result
+(** The supplied failure is one new occurrence: [attempt_count] must be [1],
+    [first_failed_at] and [failed_at] must be identical finite timestamps. The
+    store derives the unbounded aggregate count and first timestamp from
+    durable state. *)
 
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
@@ -154,32 +178,27 @@ val drain_pending_on_owner_lane :
     dashboard/producer domain may call it.
 
     Semantics:
-    - Pending rows older than {!candidate_ttl_sec} transition to [Expired]
-      first; the durable backlog dies even while the provider is unavailable.
     - Already-judged verdicts deliver without new model calls.
-    - Fresh pending rows are judged in batches of up to
-      {!batch_max_candidates} per model call. A failed batch aborts the round:
-      the next keepalive turn owns the retry cadence, so provider outages
-      cannot turn the drain into a hot retry loop.
-    - Verdicts referencing unknown or duplicate candidate identities are
-      rejected as response-contract failures. Candidates absent from a
-      successful batch verdict stay [Pending] without failure evidence.
-    [drain_report.consumed] includes expired rows. *)
-
-val candidate_ttl_sec : float
-(** Operational policy constant: a pending candidate older than this many
-    seconds (24h) is expired by the next drain. *)
-
-val batch_max_candidates : int
-(** Maximum candidates judged per model call. *)
+    - All Pending rows owned by this Keeper lane form one typed array request;
+      no arbitrary count budget is a behavior gate. Provider failure records
+      retryable evidence for the complete requested set, and the next owner
+      turn controls retry cadence rather than a hot loop.
+    - A successful response must contain exactly one verdict for every
+      requested candidate identity. Unknown, duplicate, or omitted identities
+      are response-contract failures recorded on the complete requested set;
+      no partial verdict is applied. *)
 
 module Candidate_map : Map.S with type key = string
 
 module For_testing : sig
+  val next_retryable_failure :
+    previous:retryable_failure option ->
+    retryable_failure ->
+    (retryable_failure, string) result
+
   val drain_pending_with_judge :
     base_path:string ->
     keeper_name:string ->
-    now:float ->
     judge:(candidate -> (judgment, retryable_failure) result) ->
     (drain_report, string) result
   (** Per-candidate judging adapter over the batch engine. *)
@@ -187,7 +206,6 @@ module For_testing : sig
   val drain_pending_with_judge_batch :
     base_path:string ->
     keeper_name:string ->
-    now:float ->
     judge_batch:(candidate list -> (judgment Candidate_map.t, retryable_failure) result) ->
     (drain_report, string) result
 end

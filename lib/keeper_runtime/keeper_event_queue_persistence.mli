@@ -48,7 +48,7 @@ type settle_result =
   | Already_settled of transition_receipt
   | Committed_followup_failed of
       { receipt : transition_receipt
-      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; stage : [ `Checkpoint | `Wal_compaction ]
       ; detail : string
       }
 
@@ -74,20 +74,10 @@ val with_reaction_coordination_lock_result :
     cannot be retired and then resurrected as pending. Board recovery admission
     and cursor ACK share it so the cursor never passes non-durable work. *)
 
-val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility replay projection: pending followed by active lease stimuli.
-    New live registry code should use {!load_pending} after explicitly
-    recovering abandoned leases at registration. Raises [Failure] when the
-    durable state is unavailable; it never substitutes an empty queue. *)
-
 val load_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 (** Result-returning replay projection for callers that can propagate a durable
     read failure. *)
-
-val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.t
-(** Compatibility pending projection. Raises [Failure] on a durable read
-    failure; use {!load_pending_result} in production control flow. *)
 
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
@@ -155,14 +145,13 @@ val observe_snapshot :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection. A malformed v4
+(** Strict recovery read used by queue control paths and focused tests. A malformed v4
     envelope is an [Error], never an empty queue. Retired-epoch residue is not
     consulted by this authority path and cannot block a current lane.
     Committed WAL rows are replayed idempotently, checkpointed, and then
     compacted to the exact empty suffix before the state is returned. *)
 
 val claim_when_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   claimed_at:float ->
@@ -171,7 +160,6 @@ val claim_when_result :
   (lease option, string) result
 
 val claim_board_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   claimed_at:float ->
@@ -179,7 +167,6 @@ val claim_board_result :
   (lease option, string) result
 
 val settle_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   settled_at:float ->
@@ -190,11 +177,10 @@ val settle_result :
 (** Append and fsync the owner-bound canonical receipt before checkpointing the
     state snapshot. Once checkpointed, the exact WAL prefix is durably compacted
     rather than retained by an arbitrary size policy. A post-commit checkpoint,
-    WAL-compaction or pending-projection failure is returned as a committed
+    or WAL-compaction failure is returned as a committed
     outcome, never relabelled as an uncommitted error. *)
 
 val prepare_registration_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   settled_at:float ->
@@ -212,21 +198,13 @@ val mark_transition_projected_result :
   transition_id:string ->
   (unit, string) result
 
-val persist :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
-
-val update :
-  base_path:string -> keeper_name:string -> (Keeper_event_queue.t -> Keeper_event_queue.t) -> unit
-
 val update_result :
-  ?after_commit:(unit -> unit) ->
   base_path:string ->
   keeper_name:string ->
   (Keeper_event_queue.t -> Keeper_event_queue.t) ->
   (unit, string) result
 
 val update_checked_result :
-  ?after_commit:(unit -> unit) ->
   base_path:string ->
   keeper_name:string ->
   (Keeper_event_queue.t -> (Keeper_event_queue.t, string) result) ->
@@ -237,7 +215,6 @@ type enqueue_stimulus_result =
   | Already_present of Keeper_event_queue.stimulus
 
 val enqueue_stimulus_if_absent_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.stimulus ->
@@ -249,7 +226,6 @@ val enqueue_stimulus_if_absent_result :
     [Already_present]. *)
 
 val enqueue_stimuli_if_absent_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.stimulus list ->
@@ -258,11 +234,7 @@ val enqueue_stimuli_if_absent_result :
     is resolved against pending, active leases, outbox, and earlier items in
     this batch inside one queue transaction. A conflict commits nothing. *)
 
-val persist_snapshot :
-  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
 val drop_by_post_id :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   post_id:string ->

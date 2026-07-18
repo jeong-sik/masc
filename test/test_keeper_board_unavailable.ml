@@ -33,6 +33,12 @@ let with_eio f () =
   f ()
 ;;
 
+let load_event_queue_or_fail ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Ok queue -> queue
+  | Error detail -> fail ("event queue load failed: " ^ detail)
+;;
+
 let test_meta name =
   match
     Keeper_meta_json_parse.meta_of_json
@@ -46,6 +52,13 @@ let test_meta name =
   with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "test meta failed: %s" message
+;;
+
+let with_registered_keeper ~base_path meta f =
+  ignore (Keeper_registry.register ~base_path meta.Keeper_meta_contract.name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path meta.name)
+    f
 ;;
 
 (* (1) Exhaustive classification, pinned. A future new [Board.board_error]
@@ -146,6 +159,7 @@ let test_leased_snapshot_renders_before_ack_without_board_source () =
   let keeper_name = "durable-board-intake" in
   let meta = test_meta keeper_name in
   let stimulus = poison_board_signal_stimulus () in
+  with_registered_keeper ~base_path meta @@ fun () ->
   (match
      Keeper_registry_event_queue.enqueue_durable_result
        ~base_path
@@ -198,7 +212,7 @@ let test_leased_snapshot_renders_before_ack_without_board_source () =
     "ACK removes only the already-rendered durable payload"
     true
     (Keeper_event_queue.is_empty
-       (Keeper_event_queue_persistence.load ~base_path ~keeper_name))
+       (load_event_queue_or_fail ~base_path ~keeper_name))
 ;;
 
 let test_same_post_queued_occurrences_are_lossless () =

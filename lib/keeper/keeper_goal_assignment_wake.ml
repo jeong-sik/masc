@@ -10,10 +10,11 @@ let enqueue_goal_assigned_wakes
     ~(assigned_by : string)
     ~(old_ids : string list)
     ~(new_ids : string list)
-    () : string list =
+    () : (string list, string) result =
   let added = added_goal_ids ~old_ids ~new_ids in
-  List.iter
-    (fun goal_id ->
+  let rec enqueue committed = function
+    | [] -> Ok (List.rev committed)
+    | goal_id :: rest ->
       let title =
         (* Unknown ids are rejected upstream (turn_up validates against
            Goal_store); this fallback only labels a race where the goal was
@@ -35,35 +36,47 @@ let enqueue_goal_assigned_wakes
         ; payload = Keeper_event_queue.Goal_assigned ga
         }
       in
-      Keeper_registry_event_queue.enqueue
-        ~base_path:config.base_path
-        keeper_name
-        stimulus;
-      match
-        Keeper_registry.wakeup_running
-          ~intent:Keeper_registry.Goal_signal
-          ~base_path:config.base_path
-          keeper_name
-      with
-      | Keeper_registry.Signaled -> ()
-      | Keeper_registry.Deferred_unregistered ->
-        Log.Keeper.info
-          "goal assignment wake persisted for unregistered keeper=%s goal_id=%s"
-          keeper_name
-          goal_id
-      | Keeper_registry.Deferred_not_running phase ->
-        Log.Keeper.info
-          "goal assignment wake deferred by registry phase contract keeper=%s \
-           phase=%s goal_id=%s"
-          keeper_name
-          (Keeper_state_machine.phase_to_string phase)
-          goal_id
-      | Keeper_registry.Deferred_lifecycle denial ->
-        Log.Keeper.info
-          "goal assignment wake deferred by lifecycle keeper=%s reason=%s \
-           goal_id=%s"
-          keeper_name
-          (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-          goal_id)
-    added;
-  added
+      (match
+         Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path:config.base_path
+           keeper_name
+           stimulus
+       with
+       | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+         Error
+           (Printf.sprintf
+              "goal assignment durable admission failed keeper=%S goal_id=%S: %s"
+              keeper_name
+              goal_id
+              detail)
+       | Keeper_registry_event_queue.Stimulus_enqueued _
+       | Keeper_registry_event_queue.Stimulus_already_present _ ->
+         (match
+            Keeper_registry.wakeup_running
+              ~intent:Keeper_registry.Goal_signal
+              ~base_path:config.base_path
+              keeper_name
+          with
+          | Keeper_registry.Signaled -> ()
+          | Keeper_registry.Deferred_unregistered ->
+            Log.Keeper.info
+              "goal assignment wake persisted for unregistered keeper=%s goal_id=%s"
+              keeper_name
+              goal_id
+          | Keeper_registry.Deferred_not_running phase ->
+            Log.Keeper.info
+              "goal assignment wake deferred by registry phase contract keeper=%s \
+               phase=%s goal_id=%s"
+              keeper_name
+              (Keeper_state_machine.phase_to_string phase)
+              goal_id
+          | Keeper_registry.Deferred_lifecycle denial ->
+            Log.Keeper.info
+              "goal assignment wake deferred by lifecycle keeper=%s reason=%s \
+               goal_id=%s"
+              keeper_name
+              (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+              goal_id);
+         enqueue (goal_id :: committed) rest)
+  in
+  enqueue [] added

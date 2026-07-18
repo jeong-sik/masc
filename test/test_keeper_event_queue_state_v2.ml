@@ -749,6 +749,76 @@ let write_state path state =
   |> require_ok ("write fixture " ^ path)
 ;;
 
+let test_settlement_wal_commit_replay_and_owner_fence () =
+  with_temp_dir "keeper-event-queue-settlement-wal" (fun base_path ->
+    let keeper_name = "wal_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "wal-source" 1.0))
+    |> require_ok "seed WAL owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path ~keeper_name ~claimed_at:2.0 ~ready:(fun _ -> true) ()
+      |> require_ok "claim WAL source"
+      |> require_some "WAL lease"
+    in
+    let owner_dir = keeper_dir ~base_path ~keeper_name in
+    let wal_path = Filename.concat owner_dir "event-queue-settlements.jsonl" in
+    Fs_compat.save_file_atomic wal_path "" |> require_ok "create WAL";
+    Unix.chmod owner_dir 0o500;
+    let outcome =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod owner_dir 0o700)
+        (fun () ->
+           Persistence.settle_result
+             ~base_path ~keeper_name ~settled_at:3.0 ~lease ~settlement:State.Ack ())
+      |> require_ok "commit with blocked checkpoint"
+    in
+    (match outcome with
+     | Persistence.Committed_followup_failed { stage = `Checkpoint; _ } -> ()
+     | _ -> Alcotest.fail "checkpoint failure did not preserve committed outcome");
+    let committed_wal = Fs_compat.load_file wal_path in
+    Alcotest.(check bool)
+      "committed receipt remains in WAL before recovery"
+      true
+      (not (String.equal committed_wal ""));
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay committed WAL suffix"
+    in
+    Alcotest.(check int) "active lease replayed once" 0 (List.length (State.leases replayed));
+    Alcotest.(check string)
+      "checkpointed WAL is compacted exactly"
+      ""
+      (Fs_compat.load_file wal_path);
+    let replayed_again =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load after exact WAL compaction"
+    in
+    Alcotest.(check int64)
+      "applied WAL row is not replayed again"
+      (State.revision replayed)
+      (State.revision replayed_again);
+    let peer = "wal_peer" in
+    Persistence.update_result ~base_path ~keeper_name:peer (fun pending ->
+      Queue.enqueue pending (stimulus "peer-source" 4.0))
+    |> require_ok "seed peer owner";
+    ignore
+      (Persistence.claim_when_result
+         ~base_path ~keeper_name:peer ~claimed_at:5.0 ~ready:(fun _ -> true) ()
+       |> require_ok "claim peer source"
+       |> require_some "peer lease");
+    let peer_wal =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name:peer)
+        "event-queue-settlements.jsonl"
+    in
+    Fs_compat.save_file_atomic peer_wal committed_wal
+    |> require_ok "copy stale owner WAL";
+    match Persistence.load_state_result ~base_path ~keeper_name:peer with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "another Keeper owner's WAL receipt was replayed")
+;;
+
 let test_context_compaction_retry_is_durable_and_lane_local () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
@@ -793,7 +863,7 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
         |> require_ok "settle context-compacted source"
       with
       | Persistence.Settled receipt -> receipt
-      | Persistence.Already_settled _ ->
+      | _ ->
         Alcotest.fail "first retryable settlement was already settled"
     in
     let peer_lease =
@@ -948,7 +1018,7 @@ let test_transition_outbox_projects_with_stable_identity () =
         |> require_ok "settle projection source"
       with
       | Persistence.Settled receipt -> receipt
-      | Persistence.Already_settled _ ->
+      | _ ->
         Alcotest.fail "first projection settlement was already settled"
     in
     (match
@@ -1145,6 +1215,10 @@ let () =
             "context compaction retry is durable and lane-local"
             `Quick
             test_context_compaction_retry_is_durable_and_lane_local
+        ; Alcotest.test_case
+            "settlement WAL commit replay and owner fence"
+            `Quick
+            test_settlement_wal_commit_replay_and_owner_fence
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick

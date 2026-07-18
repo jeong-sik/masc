@@ -38,14 +38,20 @@ type lease = State.lease
 type transition_receipt = State.transition_receipt
 type outbox_entry = State.outbox_entry
 
-type settle_result = State.settle_result =
+type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
 
 let snapshot_filename = "event-queue.json"
+let settlement_wal_filename = "event-queue-settlements.jsonl"
 let unsupported_inflight_filename = "event-queue-inflight.json"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
@@ -68,6 +74,26 @@ let keeper_runtime_dir_of_owner owner =
 
 let snapshot_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) snapshot_filename
+;;
+
+let settlement_wal_path_of_owner owner =
+  Filename.concat (keeper_runtime_dir_of_owner owner) settlement_wal_filename
+;;
+
+let compact_settlement_wal_unlocked owner =
+  let path = settlement_wal_path_of_owner owner in
+  match
+    Fs_compat.rewrite_private_file_durable_locked_result path (fun existing ->
+      (if String.equal existing "" then None else Some ""), ())
+  with
+  | Ok () -> Ok ()
+  | Error detail ->
+    Error
+      (Printf.sprintf
+         "failed to compact checkpointed settlement WAL keeper=%s path=%s: %s"
+         (keeper_name_of_owner owner)
+         path
+         detail)
 ;;
 
 let unsupported_inflight_path_of_owner owner =
@@ -179,14 +205,105 @@ let reject_unsupported_inflight owner =
     Error (Printf.sprintf "failed to inspect unsupported sidecar %s: %s" path (Printexc.to_string exn))
 ;;
 
+let bump_revision state =
+  if Int64.equal (State.revision state) Int64.max_int
+  then Error "event queue revision exhausted"
+  else Ok (State.with_revision (Int64.succ (State.revision state)) state)
+;;
+
+let settlement_wal_entry_to_line owner receipt =
+  `Assoc
+    [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+    ; "base_path", `String (Owner_lock.base_path owner)
+    ; "keeper_name", `String (keeper_name_of_owner owner)
+    ; "receipt", State.transition_receipt_to_yojson receipt
+    ]
+  |> Yojson.Safe.to_string
+  |> fun row -> row ^ "\n"
+;;
+
+let settlement_wal_receipt_of_json owner = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ ("base_path", `String base_path)
+       ; ("keeper_name", `String keeper_name)
+       ; ("receipt", receipt)
+       ; ("schema", `String schema)
+       ] ->
+       if not (String.equal schema "masc.keeper_event_queue.settlement.v1")
+       then Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
+       else if
+         not
+           (String.equal base_path (Owner_lock.base_path owner)
+            && String.equal keeper_name (keeper_name_of_owner owner))
+       then Error "settlement WAL row owner does not match its Keeper lane"
+       else State.transition_receipt_of_yojson receipt
+     | _ -> Error "settlement WAL row fields are not exact")
+  | _ -> Error "settlement WAL row must be a JSON object"
+;;
+
+let replay_settlement_wal_bytes owner state bytes =
+  let rec replay state = function
+    | [] | [ "" ] -> Ok state
+    | "" :: _ -> Error "settlement WAL contains an empty row"
+    | line :: rest ->
+      (match
+         try Ok (Yojson.Safe.from_string line) with
+         | Yojson.Json_error detail -> Error detail
+       with
+       | Error detail -> Error ("invalid settlement WAL JSON: " ^ detail)
+       | Ok json ->
+         (match settlement_wal_receipt_of_json owner json with
+          | Error _ as error -> error
+          | Ok receipt ->
+            (match State.replay_transition_receipt receipt state with
+             | Error _ as error -> error
+             | Ok state -> replay state rest)))
+  in
+  replay state (String.split_on_char '\n' bytes)
+;;
+
+let replay_settlement_wal_unlocked owner state =
+  let path = settlement_wal_path_of_owner owner in
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to read settlement WAL keeper=%s path=%s: %s"
+         (keeper_name_of_owner owner)
+         path
+         (Fs_compat.Private_jsonl_slice.error_to_string error))
+  | Ok { bytes = ""; _ } -> Ok state
+  | Ok slice ->
+    (match replay_settlement_wal_bytes owner state slice.bytes with
+     | Error detail -> Error (Printf.sprintf "failed to replay %s: %s" path detail)
+     | Ok replayed ->
+       (match bump_revision replayed with
+        | Error _ as error -> error
+        | Ok replayed ->
+          (match save_state_unlocked owner replayed with
+           | Ok () ->
+             (match compact_settlement_wal_unlocked owner with
+              | Ok () -> Ok replayed
+              | Error detail ->
+                Error
+                  ("settlement WAL checkpoint recovered but compaction failed: "
+                   ^ detail))
+           | Error detail ->
+             Error
+               (Printf.sprintf
+                  "settlement WAL is committed but checkpoint replay failed: %s"
+                  detail))))
+;;
+
 let load_state_unlocked owner =
   match reject_unsupported_inflight owner with
   | Error _ as error -> error
   | Ok () ->
     (match read_primary_unlocked owner with
      | Error _ as error -> error
-     | Ok (Primary_current state) -> Ok state
-     | Ok Primary_missing -> Ok State.empty)
+     | Ok (Primary_current state) -> replay_settlement_wal_unlocked owner state
+     | Ok Primary_missing -> replay_settlement_wal_unlocked owner State.empty)
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -389,12 +506,6 @@ let discover_keeper_names_with_snapshots ~base_path =
        })
 ;;
 
-let bump_revision state =
-  if Int64.equal (State.revision state) Int64.max_int
-  then Error "event queue revision exhausted"
-  else Ok (State.with_revision (Int64.succ (State.revision state)) state)
-;;
-
 let commit_transform_unlocked owner ~after_commit transform =
   match load_state_unlocked owner with
   | Error _ as error -> error
@@ -519,6 +630,72 @@ let claim_board_result
     | Ok (state, lease) -> Ok (state, lease))
 ;;
 
+let commit_settlement_unlocked
+      owner
+      ~after_commit
+      ~settled_at
+      ~lease
+      ~settlement
+      current
+  =
+  match State.settle ~settled_at ~lease ~settlement current with
+  | Error _ as error -> error
+  | Ok (state, State.Already_settled receipt) ->
+    Ok (Already_settled receipt, State.pending state)
+  | Ok (state, State.Settled receipt) ->
+    (match bump_revision state with
+     | Error _ as error -> error
+     | Ok checkpoint ->
+       let suffix = settlement_wal_entry_to_line owner receipt in
+       let path = settlement_wal_path_of_owner owner in
+       (match
+          Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+            path
+            ~expected_end_offset:0
+            suffix
+        with
+        | Error error ->
+          Error
+            (Printf.sprintf
+               "settlement WAL commit failed keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               path
+               (Fs_compat.private_jsonl_append_error_to_string error))
+        | Ok _committed_end_offset ->
+          let pending = State.pending checkpoint in
+          (match save_state_unlocked owner checkpoint with
+           | Error detail ->
+             Ok
+               ( Committed_followup_failed
+                   { receipt; stage = `Checkpoint; detail }
+               , pending )
+           | Ok () ->
+             (match compact_settlement_wal_unlocked owner with
+              | Error detail ->
+                Ok
+                  ( Committed_followup_failed
+                      { receipt; stage = `Wal_compaction; detail }
+                  , pending )
+              | Ok () ->
+                (match
+                   try
+                     after_commit pending;
+                     Ok ()
+                   with
+                   | Eio.Cancel.Cancelled _ as exn ->
+                     Error
+                       ("pending projection cancelled after settlement commit: "
+                        ^ Printexc.to_string exn)
+                   | exn -> Error (Printexc.to_string exn)
+                 with
+                 | Ok () -> Ok (Settled receipt, pending)
+                 | Error detail ->
+                   Ok
+                     ( Committed_followup_failed
+                         { receipt; stage = `Projection; detail }
+                     , pending ))))))
+;;
+
 let settle_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -528,8 +705,30 @@ let settle_result
       ~settlement
       ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    State.settle ~settled_at ~lease ~settlement state)
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_unlocked
+             owner
+             ~after_commit
+             ~settled_at
+             ~lease
+             ~settlement
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let prepare_registration_result
@@ -539,10 +738,38 @@ let prepare_registration_result
       ~settled_at
       ()
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.recover_leases ~settled_at state with
-    | Error _ as error -> error
-    | Ok state -> Ok (state, State.pending state))
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           (match State.active_lease state with
+            | None -> Ok (State.pending state)
+            | Some lease ->
+              (match
+                 commit_settlement_unlocked
+                   owner
+                   ~after_commit
+                   ~settled_at
+                   ~lease
+                   ~settlement:(Requeue Registration_recovery)
+                   state
+               with
+               | Error _ as error -> error
+               | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
+               | Ok (Committed_followup_failed { detail; _ }, _) ->
+                 Error ("registration settlement committed with follow-up failure: " ^ detail))))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue registration settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =

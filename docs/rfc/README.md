@@ -300,7 +300,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0304 | Withdraw Critical-class HITL escalation | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0305 | Withdraw global fail-closed governance policy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0306 | Typed, comment-preserving fusion settings editor | Draft | ba354b7bb0 2026-07-17 | - |
-| 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | 36fee8372f 2026-07-18 | - |
+| 0307 | Mid-turn advisor consult for keepers — evaluation and deferral | Draft | 512aa17c23 2026-07-18 | - |
 | 0308 | Withdraw verifier-required Task routing | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0309 | Withdrawn product-specific capability hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0311 | Withdraw deterministic evidence floors | Withdrawn | 7b62a87d44 2026-07-13 | - |
@@ -331,9 +331,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |
-| masc | Withdraw budget-and-slot authority from the MASC OAS bridge | Withdrawn | a56b4dc327 2026-07-18 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 03d5feaf25 2026-07-08 | - |
-| shar | Withdraw shared MASC admission and knob-binding policy | Withdrawn | a56b4dc327 2026-07-18 | - |
 | type | Withdraw product-specific egress effect classification | Withdrawn | 7b62a87d44 2026-07-13 | - |
 
 ### 신규 RFC

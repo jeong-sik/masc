@@ -42,6 +42,26 @@ let unknown_masc_keys_are_not_inherited () =
     (Env_keeper_scrub.is_allowed "MASC_INTERNAL_MCP_TOKEN")
 ;;
 
+(* The fake-docker shim keys must cross the boundary only for test
+   executables — a production process never inherits them (masc#25123). *)
+let shim_keys_gated_on_test_executable () =
+  List.iter
+    (fun key ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s denied for production processes" key)
+         false
+         (Env_keeper_scrub.is_allowed_for ~test_executable:false key);
+       Alcotest.(check bool)
+         (Printf.sprintf "%s allowed for test executables" key)
+         true
+         (Env_keeper_scrub.is_allowed_for ~test_executable:true key))
+    [ "MASC_TEST_FAKE_DOCKER_PATH"; "MASC_KEEPER_TEST_DOCKER_LOG" ];
+  (* This suite runs as a test_ executable, so the current-process view
+     agrees with the test side of the gate. *)
+  Alcotest.(check bool) "shim key allowed in this test process" true
+    (Env_keeper_scrub.is_allowed "MASC_TEST_FAKE_DOCKER_PATH")
+;;
+
 let filter_environment_keeps_only_allowed () =
   let input =
     [| "ANTHROPIC_API_KEY=sk-ant-secret"
@@ -134,6 +154,8 @@ let () =
       , [ Alcotest.test_case "basic envs are allowed" `Quick allowed_basic_envs
         ; Alcotest.test_case "unknown host keys are not inherited" `Quick
             unknown_host_keys_are_not_inherited
+        ; Alcotest.test_case "shim keys gated on test executable" `Quick
+            shim_keys_gated_on_test_executable
         ; Alcotest.test_case "unknown MASC keys are not inherited" `Quick
             unknown_masc_keys_are_not_inherited
         ] )

@@ -65,12 +65,17 @@ let resolved_trigger_policy () =
       else None
     with _ -> None
   in
-  match from_toml () with
+  (* Env > TOML > default — the same precedence every other env↔TOML pair in
+     this codebase uses (keeper_runtime_config key_to_env, runtime lanes), and
+     the precedence config/runtime.toml documents for this key. This site was
+     the one inversion (TOML-first), which silently ignored the env var
+     whenever [discord].trigger_policy was set (masc#25123). *)
+  match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
   | Some raw -> parse_trigger_policy raw
   | None ->
-    (match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
-    | None -> Gw.Mention_or_thread
-    | Some raw -> parse_trigger_policy raw)
+    (match from_toml () with
+    | Some raw -> parse_trigger_policy raw
+    | None -> Gw.Mention_or_thread)
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)

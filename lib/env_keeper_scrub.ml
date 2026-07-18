@@ -38,16 +38,33 @@ let allow_exact : string list =
   ; "MASC_TELEMETRY_ENABLED"; "MASC_PARSE_WARN"
   ; "MASC_DATA_DIR"; "MASC_PERSONAS_DIR"
   ; "MASC_SECRET_DIR"
-  ; "MASC_TEST_FAKE_DOCKER_PATH"
-  ; "MASC_KEEPER_TEST_DOCKER_LOG"
   ]
+
+(* Test-harness-only propagation (masc#25123): these keys drive the fake
+   docker shim in the sandbox suites, which observe them from the spawned
+   docker subprocess. They are inherited only when the current process is a
+   test executable (same [test_] basename gate as [Fs_compat]); a production
+   server process never propagates them, so they are not test backdoors on
+   the production boundary. *)
+let test_only_allow : string list =
+  [ "MASC_TEST_FAKE_DOCKER_PATH"; "MASC_KEEPER_TEST_DOCKER_LOG" ]
+
+let running_under_test_executable () =
+  String.starts_with
+    ~prefix:"test_"
+    (String.lowercase_ascii (Filename.basename Sys.executable_name))
 
 let allow_exact_table =
   let t = Hashtbl.create (List.length allow_exact) in
   List.iter (fun k -> Hashtbl.replace t k ()) allow_exact;
   t
 
-let is_allowed key = Hashtbl.mem allow_exact_table key
+let is_allowed_for ~test_executable key =
+  Hashtbl.mem allow_exact_table key
+  || (test_executable && List.mem key test_only_allow)
+
+let is_allowed key =
+  is_allowed_for ~test_executable:(running_under_test_executable ()) key
 
 let key_of_entry entry =
   match String.index_opt entry '=' with

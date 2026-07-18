@@ -10,7 +10,6 @@ type retryable_failure_kind =
   | Provider_unavailable
   | Response_contract_unavailable
   | Durable_delivery_unavailable
-  | Lifecycle_policy_migrated
 
 type retryable_failure =
   { kind : retryable_failure_kind
@@ -88,7 +87,6 @@ let retryable_failure_kind_to_string = function
   | Provider_unavailable -> "provider_unavailable"
   | Response_contract_unavailable -> "response_contract_unavailable"
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
-  | Lifecycle_policy_migrated -> "lifecycle_policy_migrated"
 ;;
 
 let retryable_failure_kind_of_string = function
@@ -97,7 +95,6 @@ let retryable_failure_kind_of_string = function
   | "provider_unavailable" -> Some Provider_unavailable
   | "response_contract_unavailable" -> Some Response_contract_unavailable
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
-  | "lifecycle_policy_migrated" -> Some Lifecycle_policy_migrated
   | _ -> None
 ;;
 
@@ -529,20 +526,6 @@ let status_of_yojson json =
     let* consumed_at_json = field ~context "consumed_at" fields in
     let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
     Ok (Consumed { judgment; delivery; consumed_at })
-  | "expired" ->
-    let* () = exact_fields ~context [ "kind"; "expired_at" ] fields in
-    let* expired_at_json = field ~context "expired_at" fields in
-    let* expired_at = float_json ~context:(context ^ ".expired_at") expired_at_json in
-    Ok
-      (Pending
-         { last_failure =
-             Some
-               { kind = Lifecycle_policy_migrated
-               ; detail =
-                   "legacy wall-clock expiry recovered to Pending; no customer work was discarded"
-               ; failed_at = expired_at
-               }
-         })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 

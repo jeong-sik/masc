@@ -3,6 +3,7 @@
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
 module Id_set = Set.Make (String)
+module Sequence_map = Map.Make (Int)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -70,6 +71,20 @@ type drain_report =
   ; consumed : int
   ; remaining : int
   }
+
+type compaction_report =
+  { rewritten : bool
+  ; removed_rows : int
+  }
+
+type ledger_measurement =
+  { rows : int
+  ; bytes : int
+  }
+
+type ledger_operation =
+  | Append of ledger_measurement
+  | Rewrite of ledger_measurement
 
 exception Candidate_unavailable of string
 
@@ -526,6 +541,97 @@ let status_of_yojson json =
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
+let delivery_matches_judgment delivery judgment =
+  match judgment.verdict.decision, delivery with
+  | Keeper_board_attention_judgment.Relevant, Enqueued_to_keeper_lane
+  | Keeper_board_attention_judgment.Not_relevant, Not_relevant -> true
+  | Keeper_board_attention_judgment.Relevant, Not_relevant
+  | Keeper_board_attention_judgment.Not_relevant, Enqueued_to_keeper_lane -> false
+;;
+
+let validate_status_payload candidate =
+  match candidate.status with
+  | Pending { last_failure = None } -> Ok ()
+  | Pending { last_failure = Some failure } ->
+    (match failure.kind with
+     | Runtime_configuration_unavailable
+     | Prompt_contract_unavailable
+     | Provider_unavailable
+     | Response_contract_unavailable -> Ok ()
+     | Partition_membership_conflict | Durable_delivery_unavailable ->
+       Error
+         (Printf.sprintf
+            "candidate %s Pending status contains non-judge failure kind %s"
+            candidate.candidate_id
+            (retryable_failure_kind_to_string failure.kind)))
+  | Judged { last_failure = None; _ } -> Ok ()
+  | Judged { last_failure = Some failure; _ } ->
+    (match failure.kind with
+     | Durable_delivery_unavailable -> Ok ()
+     | Runtime_configuration_unavailable
+     | Prompt_contract_unavailable
+     | Provider_unavailable
+     | Response_contract_unavailable
+     | Partition_membership_conflict ->
+       Error
+         (Printf.sprintf
+            "candidate %s Judged status contains non-delivery failure kind %s"
+            candidate.candidate_id
+            (retryable_failure_kind_to_string failure.kind)))
+  | Consumed { judgment; delivery; _ } ->
+    if delivery_matches_judgment delivery judgment
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "candidate %s Consumed delivery disagrees with its judgment"
+           candidate.candidate_id)
+;;
+
+let validate_candidate_invariants candidate =
+  let expected_id = candidate_id_of_signal ~keeper_name:candidate.keeper_name candidate.signal in
+  let* () =
+    if String.equal candidate.candidate_id expected_id
+    then Ok ()
+    else Error "candidate_id does not match the exact Keeper and Board signal identity"
+  in
+  let request_context = "board attention candidate.judgment_request" in
+  let* request_fields = assoc ~context:request_context candidate.judgment_request in
+  let* request_candidate_id_json =
+    field ~context:request_context "candidate_id" request_fields
+  in
+  let* request_candidate_id =
+    string_json
+      ~context:(request_context ^ ".candidate_id")
+      request_candidate_id_json
+  in
+  let* request_signal_json = field ~context:request_context "signal" request_fields in
+  let* request_signal = signal_of_yojson request_signal_json in
+  let* keeper_context_json =
+    field ~context:request_context "keeper_context" request_fields
+  in
+  let keeper_context = request_context ^ ".keeper_context" in
+  let* keeper_context_fields = assoc ~context:keeper_context keeper_context_json in
+  let* lane_keeper_name_json =
+    field ~context:keeper_context "lane_keeper_name" keeper_context_fields
+  in
+  let* lane_keeper_name =
+    string_json
+      ~context:(keeper_context ^ ".lane_keeper_name")
+      lane_keeper_name_json
+  in
+  let* () =
+    if not (String.equal request_candidate_id candidate.candidate_id)
+    then Error "judgment_request.candidate_id differs from the outer candidate identity"
+    else if request_signal <> candidate.signal
+    then Error "judgment_request.signal differs from the outer candidate signal"
+    else if not (String.equal lane_keeper_name candidate.keeper_name)
+    then Error "judgment_request Keeper identity differs from the outer Keeper identity"
+    else Ok ()
+  in
+  validate_status_payload candidate
+;;
+
 let candidate_of_json json =
   let context = "board attention candidate" in
   let* fields = assoc ~context json in
@@ -547,21 +653,16 @@ let candidate_of_json json =
   let* keeper_name = string_json ~context:(context ^ ".keeper_name") keeper_name_json in
   let* signal_json = field ~context "signal" fields in
   let* signal = signal_of_yojson signal_json in
-  let expected_id = candidate_id_of_signal ~keeper_name signal in
-  let* () =
-    if String.equal candidate_id expected_id
-    then Ok ()
-    else Error "candidate_id does not match the exact Keeper and Board signal identity"
-  in
   let* judgment_request = field ~context "judgment_request" fields in
-  let* (_ : (string * Yojson.Safe.t) list) =
-    assoc ~context:(context ^ ".judgment_request") judgment_request
-  in
   let* recorded_at_json = field ~context "recorded_at" fields in
   let* recorded_at = float_json ~context:(context ^ ".recorded_at") recorded_at_json in
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
-  Ok { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  let candidate =
+    { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  in
+  let* () = validate_candidate_invariants candidate in
+  Ok candidate
 ;;
 
 let parse_rows content =
@@ -589,139 +690,250 @@ let parse_rows content =
   loop 1 [] lines
 ;;
 
-let latest_candidates rows =
-  let _, latest =
-    List.fold_left
-      (fun (index, map) candidate ->
-         let first_index =
-           match Candidate_map.find_opt candidate.candidate_id map with
-           | Some (first_index, _) -> first_index
-           | None -> index
-         in
-         index + 1, Candidate_map.add candidate.candidate_id (first_index, candidate) map)
-      (0, Candidate_map.empty)
-      rows
-  in
-  Candidate_map.bindings latest
-  |> List.map snd
-  |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
-  |> List.map snd
-;;
-
-let load_candidates_from_content content =
-  let* rows = parse_rows content in
-  Ok (latest_candidates rows)
-;;
-
-let durable_error_to_string error =
-  Fs_compat.durable_append_error_to_string error
-;;
-
-let read_locked path parse =
-  match
-    Fs_compat.update_private_file_durable_locked_result path (fun content ->
-      None, parse content)
-  with
-  | Private_file_failed error -> Error (durable_error_to_string error)
-  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "%s; descriptor settlement failed: %s"
-         (durable_error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-  | Private_file_succeeded result -> result
-  | Private_file_succeeded_with_cleanup_failure
-      { value = result; cleanup_failure } ->
-    Log.Keeper.error
-      "board attention candidate read succeeded with descriptor settlement failure path=%s: %s"
-      path
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    result
-;;
-
-(* Read-side stat memo. Owner-lane drains call [load_candidates] far more often
-   than the ledger changes, and every call otherwise re-reads and re-parses the
-   whole file — with multi-MB ledgers this was a dominant CPU source (issue
-   #25003: concurrent whole-file Yojson parses in systhreads starving the
-   domain's main event loop). Every producer replaces the ledger through an
-   atomic temp+rename ([update_ledger] via
-   [Fs_compat.rewrite_private_file_durable_locked_result]), so any content
-   change allocates a new inode; (dev, ino, mtime, size) equality therefore
-   implies unchanged content. One entry per keeper ledger path, so the table
-   stays as small as the fleet. *)
-type ledger_stat_key =
-  { stat_dev : int
-  ; stat_ino : int
-  ; stat_mtime : float
-  ; stat_size : int
+type view =
+  { cursor : Fs_compat.Private_jsonl_cursor.t
+  ; by_id : candidate Candidate_map.t
+  ; by_sequence : string Sequence_map.t
+  ; next_sequence : int
+  ; keeper_names : Id_set.t
   }
 
-let ledger_stat_key_opt path =
-  match Unix.stat path with
-  | stats ->
-    Some
-      { stat_dev = stats.st_dev
-      ; stat_ino = stats.st_ino
-      ; stat_mtime = stats.st_mtime
-      ; stat_size = stats.st_size
-      }
-  | exception Unix.Unix_error _ -> None
+let empty_view cursor =
+  { cursor
+  ; by_id = Candidate_map.empty
+  ; by_sequence = Sequence_map.empty
+  ; next_sequence = 0
+  ; keeper_names = Id_set.empty
+  }
 ;;
 
-let candidate_read_memo : (string, ledger_stat_key * candidate list) Hashtbl.t =
-  Hashtbl.create 16
+let same_candidate_identity left right =
+  String.equal left.candidate_id right.candidate_id
+  && String.equal left.keeper_name right.keeper_name
+  && left.signal = right.signal
+  && left.judgment_request = right.judgment_request
+  && Float.equal left.recorded_at right.recorded_at
 ;;
 
-(* Stdlib mutex on purpose: touched from systhread read paths and module-level
-   state; the critical sections are Hashtbl lookups with no yield. *)
-let candidate_read_memo_mutex = Stdlib.Mutex.create ()
+let same_failure left right =
+  left.kind = right.kind && String.equal left.detail right.detail
+;;
 
-let load_candidates_path path =
-  let before = ledger_stat_key_opt path in
-  let cached =
-    match before with
-    | None -> None
-    | Some key ->
-      Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
-        match Hashtbl.find_opt candidate_read_memo path with
-        | Some (cached_key, candidates) when cached_key = key -> Some candidates
-        | Some _ | None -> None)
-  in
-  match cached with
-  | Some candidates -> Ok candidates
+let legal_status_transition previous next =
+  match previous, next with
+  | Pending { last_failure = None }, Pending { last_failure = Some _ } -> true
+  | ( Pending { last_failure = Some previous }
+    , Pending { last_failure = Some next } ) ->
+    not (same_failure previous next)
+  | Pending _, Judged { last_failure = None; _ } -> true
+  | ( Judged { judgment = previous; last_failure = None }
+    , Judged { judgment = next; last_failure = Some _ } ) ->
+    previous = next
+  | ( Judged { judgment = previous_judgment; last_failure = Some previous }
+    , Judged { judgment = next_judgment; last_failure = Some next } ) ->
+    previous_judgment = next_judgment && not (same_failure previous next)
+  | Judged previous, Consumed next -> previous.judgment = next.judgment
+  | ( Pending { last_failure = None }
+    , Pending { last_failure = None } )
+  | ( Pending { last_failure = Some _ }
+    , Pending { last_failure = None } )
+  | ( Pending _
+    , Judged { last_failure = Some _; _ } )
+  | ( Judged { last_failure = None; _ }
+    , Judged { last_failure = None; _ } )
+  | ( Judged { last_failure = Some _; _ }
+    , Judged { last_failure = None; _ } )
+  | ( Pending _, Consumed _ )
+  | ( Judged _, Pending _ )
+  | ( Consumed _, (Pending _ | Judged _ | Consumed _) ) -> false
+;;
+
+let apply_row view candidate =
+  let* () = validate_candidate_invariants candidate in
+  match Candidate_map.find_opt candidate.candidate_id view.by_id with
   | None ->
-    let* candidates = read_locked path load_candidates_from_content in
-    (* Double-stat: memoize only when the file identity is unchanged across
-       the read; a concurrent rewrite lands as a new inode and skips the
-       store, so the next call re-reads. *)
-    (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after when key_before = key_after ->
-       Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
-         Hashtbl.replace candidate_read_memo path (key_before, candidates))
-     | Some _, (Some _ | None) | None, (Some _ | None) -> ());
-    Ok candidates
+    Ok
+      { view with
+        by_id = Candidate_map.add candidate.candidate_id candidate view.by_id
+      ; by_sequence =
+          Sequence_map.add
+            view.next_sequence
+            candidate.candidate_id
+            view.by_sequence
+      ; next_sequence = view.next_sequence + 1
+      ; keeper_names = Id_set.add candidate.keeper_name view.keeper_names
+      }
+  | Some previous ->
+    if not (same_candidate_identity previous candidate)
+    then Error ("candidate changed immutable identity: " ^ candidate.candidate_id)
+    else if previous = candidate
+    then Ok view
+    else if legal_status_transition previous.status candidate.status
+    then
+      Ok
+        { view with
+          by_id = Candidate_map.add candidate.candidate_id candidate view.by_id
+        }
+    else
+      Error
+        (Printf.sprintf
+           "candidate %s has an illegal durable status transition"
+           candidate.candidate_id)
 ;;
 
-let validate_keeper_identity ~keeper_name candidates =
-  match
-    List.find_opt
-      (fun candidate -> not (String.equal candidate.keeper_name keeper_name))
-      candidates
-  with
-  | None -> Ok candidates
-  | Some candidate ->
+let apply_rows view rows =
+  List.fold_left
+    (fun result candidate ->
+       let* view = result in
+       apply_row view candidate)
+    (Ok view)
+    rows
+;;
+
+let view_candidates view =
+  Sequence_map.bindings view.by_sequence
+  |> List.fold_left
+       (fun result (_, candidate_id) ->
+          let* candidates = result in
+          match Candidate_map.find_opt candidate_id view.by_id with
+          | Some candidate -> Ok (candidate :: candidates)
+          | None -> Error ("candidate index lost identity " ^ candidate_id))
+       (Ok [])
+  |> Result.map List.rev
+;;
+
+type cache_entry =
+  { cached : view option Atomic.t
+  ; mutation_mutex : Stdlib.Mutex.t
+  }
+
+let cache_registry : (string, cache_entry) Hashtbl.t = Hashtbl.create 16
+let cache_registry_mutex = Stdlib.Mutex.create ()
+let ledger_operation_observer : (ledger_operation -> unit) Atomic.t =
+  Atomic.make (fun _ -> ())
+
+let observe_ledger_operation operation =
+  (Atomic.get ledger_operation_observer) operation
+;;
+
+let cache_entry path =
+  Stdlib.Mutex.protect cache_registry_mutex (fun () ->
+    match Hashtbl.find_opt cache_registry path with
+    | Some entry -> entry
+    | None ->
+      let entry =
+        { cached = Atomic.make None; mutation_mutex = Stdlib.Mutex.create () }
+      in
+      Hashtbl.add cache_registry path entry;
+      entry)
+;;
+
+let run_blocking label operation =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> Eio_unix.run_in_systhread ~label operation
+  | exception Effect.Unhandled _ -> operation ()
+;;
+
+let store_error error = Fs_compat.private_jsonl_transaction_error_to_string error
+
+let invalidate_cached entry observed =
+  ignore (Atomic.compare_and_set entry.cached observed None : bool)
+;;
+
+let publish_cached entry observed view =
+  ignore (Atomic.compare_and_set entry.cached observed (Some view) : bool)
+;;
+
+let read_view_blocking path =
+  let entry = cache_entry path in
+  let observed = Atomic.get entry.cached in
+  let after = Option.map (fun view -> view.cursor) observed in
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after with
+  | Error error ->
+    invalidate_cached entry observed;
+    Error (store_error error)
+  | Ok snapshot ->
+    let* rows = parse_rows snapshot.bytes in
+    let base =
+      match observed with
+      | Some view -> view
+      | None -> empty_view snapshot.cursor
+    in
+    let* view = apply_rows base rows in
+    let view = { view with cursor = snapshot.cursor } in
+    publish_cached entry observed view;
+    Ok view
+;;
+
+let read_view path =
+  run_blocking "board-attention-candidate-read" (fun () ->
+    let entry = cache_entry path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () -> read_view_blocking path))
+;;
+
+let validate_keeper_identity ~keeper_name view =
+  match Id_set.elements view.keeper_names with
+  | [] -> Ok ()
+  | [ observed ] when String.equal observed keeper_name -> Ok ()
+  | observed ->
     Error
       (Printf.sprintf
-         "Board attention candidate ledger identity mismatch expected=%s observed=%s candidate=%s"
+         "Board attention candidate ledger identity mismatch expected=%s observed=[%s]"
          keeper_name
-         candidate.keeper_name
-         candidate.candidate_id)
+         (String.concat "," observed))
+;;
+
+let load_candidates_path path =
+  let* view = read_view path in
+  view_candidates view
 ;;
 
 let load_candidates ~base_path ~keeper_name =
+  let* view = read_view (candidate_path ~base_path ~keeper_name) in
+  let* () = validate_keeper_identity ~keeper_name view in
+  view_candidates view
+;;
+
+let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
+
+let serialize_candidates candidates =
+  String.concat "" (List.map append_row candidates)
+;;
+
+let compact_for_process_start ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
-  let* candidates = load_candidates_path path in
-  validate_keeper_identity ~keeper_name candidates
+  run_blocking "board-attention-candidate-process-start-compaction" (fun () ->
+    let entry = cache_entry path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+      | Error error -> Error (store_error error)
+      | Ok snapshot ->
+        let* rows = parse_rows snapshot.bytes in
+        let* view = apply_rows (empty_view snapshot.cursor) rows in
+        let* () = validate_keeper_identity ~keeper_name view in
+        let* candidates = view_candidates view in
+        let canonical = serialize_candidates candidates in
+        let removed = List.length rows - List.length candidates in
+        if String.equal canonical snapshot.bytes
+        then (
+          Atomic.set entry.cached (Some view);
+          Ok { rewritten = false; removed_rows = 0 })
+        else
+          (match
+             Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+               path
+               ~expected:snapshot.cursor
+               canonical
+           with
+           | Error error -> Error (store_error error)
+           | Ok cursor ->
+             Atomic.set entry.cached (Some { view with cursor });
+             observe_ledger_operation
+               (Rewrite
+                  { rows = List.length candidates
+                  ; bytes = String.length canonical
+                  });
+             Ok { rewritten = true; removed_rows = removed })))
 ;;
 
 type ledger_read_error =
@@ -824,149 +1036,138 @@ let discover_keeper_names ~base_path =
     }
 ;;
 
-let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
-
-let serialize_candidates candidates =
-  String.concat "" (List.map append_row candidates)
-;;
-
-let ledger_rewrite_observer : (unit -> unit) Atomic.t =
-  Atomic.make (fun () -> ())
-;;
-
 let update_ledger_many ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
-  (* Compact on write: a committed change rewrites the ledger as the deduped
-     latest-per-id set (via [latest_candidates]) instead of appending one row.
-     The reader already discards all but the latest row per candidate_id, so the
-     older rows are dead weight; appending them grew the file without bound and
-     made every update O(n^2) because the durable transaction re-parses the whole
-     ledger before writing. Rewriting keeps the file bounded to the number of
-     distinct candidates. *)
-  try
-    (Atomic.get ledger_rewrite_observer) ();
-    match
-      Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-        match load_candidates_from_content content with
-        | Error detail -> None, Error detail
-        | Ok candidates ->
-          (match validate_keeper_identity ~keeper_name candidates with
-           | Error _ as error -> None, error
-           | Ok candidates ->
-          (match decide candidates with
-           | Error _ as error -> None, error
-           | Ok (None, result) -> None, Ok result
-           | Ok (Some updated, result) ->
-             let compacted = latest_candidates (candidates @ updated) in
-             Some (serialize_candidates compacted), Ok result)))
-    with
-    | Error error -> Error error
-    | Ok result -> result
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | (Sys_error _ | Unix.Unix_error _) as exn ->
-    Error
-      (Printf.sprintf
-         "Board attention ledger update failed path=%s: %s"
-         path
-         (Printexc.to_string exn))
+  run_blocking "board-attention-candidate-update" (fun () ->
+    let entry = cache_entry path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* view = read_view_blocking path in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let* rows, result = decide view in
+      match rows with
+      | [] -> Ok result
+      | _ :: _ ->
+        let* updated = apply_rows view rows in
+        let bytes = serialize_candidates rows in
+        (match
+           Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+             path
+             ~expected:view.cursor
+             bytes
+         with
+         | Error error -> Error (store_error error)
+         | Ok cursor ->
+           Atomic.set entry.cached (Some { updated with cursor });
+           observe_ledger_operation
+             (Append { rows = List.length rows; bytes = String.length bytes });
+           Ok result)))
 ;;
 
 let update_ledger ~base_path ~keeper_name decide =
-  update_ledger_many ~base_path ~keeper_name (fun candidates ->
-    match decide candidates with
+  update_ledger_many ~base_path ~keeper_name (fun view ->
+    match decide view with
     | Error _ as error -> error
-    | Ok (None, result) -> Ok (None, result)
-    | Ok (Some candidate, result) -> Ok (Some [ candidate ], result))
-;;
-
-let find_candidate candidates candidate_id =
-  List.find_opt
-    (fun candidate -> String.equal candidate.candidate_id candidate_id)
-    candidates
+    | Ok (None, result) -> Ok ([], result)
+    | Ok (Some candidate, result) -> Ok ([ candidate ], result))
 ;;
 
 let record ~base_path candidate =
-  match
-    update_ledger
-      ~base_path
-      ~keeper_name:candidate.keeper_name
-      (fun candidates ->
-         match find_candidate candidates candidate.candidate_id with
-         | None -> Ok (Some candidate, Recorded candidate)
-         | Some existing when existing.signal = candidate.signal ->
-           Ok (None, Duplicate existing)
-         | Some _ ->
-           Error
-             "candidate identity conflict: the same candidate_id has a different Board signal")
-  with
-  | Ok result -> result
+  match validate_candidate_invariants candidate with
   | Error detail -> Record_error detail
+  | Ok () ->
+    (match
+       update_ledger
+         ~base_path
+         ~keeper_name:candidate.keeper_name
+         (fun view ->
+            match Candidate_map.find_opt candidate.candidate_id view.by_id with
+            | None ->
+              (match candidate.status with
+               | Pending { last_failure = None } ->
+                 Ok (Some candidate, Recorded candidate)
+               | Pending { last_failure = Some _ } | Judged _ | Consumed _ ->
+                 Error
+                   ("new candidate must start Pending without failure evidence: "
+                    ^ candidate.candidate_id))
+            | Some existing when existing.signal = candidate.signal ->
+              Ok (None, Duplicate existing)
+            | Some _ ->
+              Error
+                "candidate identity conflict: the same candidate_id has a different Board signal")
+     with
+     | Ok result -> result
+     | Error detail -> Record_error detail)
 ;;
 
-let update_candidate ~base_path candidate_id keeper_name transition =
-  update_ledger ~base_path ~keeper_name (fun candidates ->
-    match find_candidate candidates candidate_id with
+let update_candidate_result ~base_path candidate_id keeper_name transition =
+  update_ledger ~base_path ~keeper_name (fun view ->
+    match Candidate_map.find_opt candidate_id view.by_id with
     | None -> Error (Printf.sprintf "Board attention candidate not found: %s" candidate_id)
     | Some current ->
       (match transition current with
-       | None -> Ok (None, current)
-       | Some updated -> Ok (Some updated, updated)))
+       | Error _ as error -> error
+       | Ok None -> Ok (None, current)
+       | Ok (Some updated) -> Ok (Some updated, updated)))
+;;
+
+let update_candidate_ids_result ~base_path ~keeper_name candidate_ids transition =
+  let requested =
+    List.fold_left
+      (fun result candidate_id ->
+         let* ids = result in
+         if Id_set.mem candidate_id ids
+         then Error ("duplicate candidate in atomic batch: " ^ candidate_id)
+         else Ok (Id_set.add candidate_id ids))
+      (Ok Id_set.empty)
+      candidate_ids
+  in
+  let* (_requested : Id_set.t) = requested in
+  update_ledger_many ~base_path ~keeper_name (fun view ->
+    let* updated_rows, selected_in_request_order =
+      List.fold_left
+        (fun result candidate_id ->
+           let* updated_rows, selected = result in
+           match Candidate_map.find_opt candidate_id view.by_id with
+             | None ->
+               Error
+                 (Printf.sprintf
+                    "Board attention candidate not found for atomic batch: %s"
+                    candidate_id)
+             | Some current ->
+               let* next = transition current in
+               Ok
+                 ( (if next = current then updated_rows else next :: updated_rows)
+                 , next :: selected ))
+        (Ok ([], []))
+        candidate_ids
+    in
+    let rows = List.rev updated_rows in
+    Ok (rows, List.rev selected_in_request_order))
 ;;
 
 let update_candidate_batch_result ~base_path ~keeper_name candidates transition =
-  let requested =
+  let* candidate_ids =
     List.fold_left
       (fun result candidate ->
-         let* ids = result in
-         if Id_set.mem candidate.candidate_id ids
-         then Error ("duplicate candidate in atomic batch: " ^ candidate.candidate_id)
-         else Ok (Id_set.add candidate.candidate_id ids))
-      (Ok Id_set.empty)
+         let* candidate_ids = result in
+         if String.equal candidate.keeper_name keeper_name
+         then Ok (candidate.candidate_id :: candidate_ids)
+         else
+           Error
+             (Printf.sprintf
+                "atomic batch Keeper identity mismatch expected=%s observed=%s candidate=%s"
+                keeper_name
+                candidate.keeper_name
+                candidate.candidate_id))
+      (Ok [])
       candidates
+    |> Result.map List.rev
   in
-  let* requested = requested in
-  update_ledger_many ~base_path ~keeper_name (fun current_rows ->
-    let* found, updated_rows, selected =
-      List.fold_left
-        (fun result current ->
-           let* found, updated_rows, selected = result in
-           if not (Id_set.mem current.candidate_id requested)
-           then Ok (found, updated_rows, selected)
-           else
-             let* next = transition current in
-             Ok
-               ( Id_set.add current.candidate_id found
-               , (if next = current then updated_rows else next :: updated_rows)
-               , Candidate_map.add current.candidate_id next selected ))
-        (Ok (Id_set.empty, [], Candidate_map.empty))
-        current_rows
-    in
-    if not (Id_set.equal requested found)
-    then
-      let missing = Id_set.diff requested found |> Id_set.elements in
-      Error
-        (Printf.sprintf
-           "Board attention candidates not found for atomic batch: [%s]"
-           (String.concat "," missing))
-    else
-      let* selected_in_request_order =
-        List.fold_left
-          (fun result candidate ->
-             let* selected_rows = result in
-             match Candidate_map.find_opt candidate.candidate_id selected with
-             | Some current -> Ok (current :: selected_rows)
-             | None ->
-               Error ("atomic batch result missing candidate " ^ candidate.candidate_id))
-          (Ok [])
-          candidates
-        |> Result.map List.rev
-      in
-      Ok
-        ( (match updated_rows with
-           | [] -> None
-           | _ :: _ -> Some (List.rev updated_rows))
-        , selected_in_request_order ))
+  update_candidate_ids_result
+    ~base_path
+    ~keeper_name
+    candidate_ids
+    transition
 ;;
 
 let update_candidate_batch ~base_path ~keeper_name candidates transition =
@@ -977,67 +1178,81 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
     (fun current -> Ok (transition current))
 ;;
 
-let same_failure left right =
-  left.kind = right.kind && String.equal left.detail right.detail
-;;
-
 let candidate_with_retryable_failure current failure =
   match current.status with
   | Pending pending ->
     (match pending.last_failure with
-     | Some existing when same_failure existing failure -> current
+     | Some existing when same_failure existing failure -> Ok current
      | Some _ | None ->
-       { current with status = Pending { last_failure = Some failure } })
+       Ok { current with status = Pending { last_failure = Some failure } })
   | Judged judged ->
     (match judged.last_failure with
-     | Some existing when same_failure existing failure -> current
+     | Some existing when same_failure existing failure -> Ok current
      | Some _ | None ->
-       { current with
-         status = Judged { judged with last_failure = Some failure }
-       })
-  | Consumed _ -> current
+       Ok
+         { current with
+           status = Judged { judged with last_failure = Some failure }
+         })
+  | Consumed _ ->
+    Error
+      (Printf.sprintf
+         "retryable failure cannot be recorded after candidate consumption: %s"
+         current.candidate_id)
 ;;
 
 let record_retryable_failure ~base_path candidate failure =
-  update_candidate
+  update_candidate_result
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
-       let updated = candidate_with_retryable_failure current failure in
-       if updated = current then None else Some updated)
+       let* updated = candidate_with_retryable_failure current failure in
+       Ok (if updated = current then None else Some updated))
 ;;
 
 let record_judgment ~base_path candidate judgment =
-  update_candidate
+  update_candidate_result
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
        match current.status with
        | Pending _ ->
-         Some
-           { current with
-             status = Judged { judgment; last_failure = None }
-           }
-       | Judged _ | Consumed _ -> None)
+         Ok
+           (Some
+              { current with
+                status = Judged { judgment; last_failure = None }
+              })
+       | Judged persisted when persisted.judgment = judgment -> Ok None
+       | Consumed persisted when persisted.judgment = judgment -> Ok None
+       | Judged _ | Consumed _ ->
+         Error
+           ("judgment conflicts with persisted candidate " ^ current.candidate_id))
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
-  update_candidate
+  update_candidate_result
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
        match current.status with
-       | Judged _ ->
-         Some
-           { current with
-             status =
-               Consumed
-                 { judgment; delivery; consumed_at = Time_compat.now () }
-           }
-       | Pending _ | Consumed _ -> None)
+       | Judged persisted when persisted.judgment = judgment ->
+         Ok
+           (Some
+              { current with
+                status =
+                  Consumed
+                    { judgment; delivery; consumed_at = Time_compat.now () }
+              })
+       | Consumed persisted
+         when persisted.judgment = judgment && persisted.delivery = delivery ->
+         Ok None
+       | Pending _ ->
+         Error ("candidate is not durably Judged: " ^ current.candidate_id)
+       | Judged _ | Consumed _ ->
+         Error
+           ("consumption conflicts with persisted candidate " ^ current.candidate_id))
 ;;
 
 let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
@@ -1349,11 +1564,15 @@ let record_batch_failures ~base_path candidates failure =
   | [] -> Ok ()
   | first :: _ ->
     (match
-       update_candidate_batch
+       update_candidate_batch_result
          ~base_path
          ~keeper_name:first.keeper_name
          candidates
-         (fun current -> candidate_with_retryable_failure current failure)
+         (fun current ->
+            match current.status with
+            | Consumed _ -> Ok current
+            | Pending _ | Judged _ ->
+              candidate_with_retryable_failure current failure)
      with
      | Ok _ -> Ok ()
      | Error detail ->
@@ -1529,23 +1748,12 @@ let apply_completed_judgments ~base_path ~keeper_name completed =
         (Ok Candidate_map.empty)
         completed
     in
-    let* current = load_candidates ~base_path ~keeper_name in
-    let* targets =
-      List.fold_left
-        (fun result (candidate_id, _) ->
-           let* targets = result in
-           match find_candidate current candidate_id with
-           | Some candidate -> Ok (candidate :: targets)
-           | None -> Error ("completed partition candidate not found: " ^ candidate_id))
-        (Ok [])
-        completed
-      |> Result.map List.rev
-    in
+    let candidate_ids = List.map fst completed in
     let* judged =
-      update_candidate_batch_result
+      update_candidate_ids_result
         ~base_path
         ~keeper_name
-        targets
+        candidate_ids
         (fun candidate ->
            match Candidate_map.find_opt candidate.candidate_id expected with
            | None -> Error ("completed judgment lookup failed: " ^ candidate.candidate_id)
@@ -1647,12 +1855,12 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
 ;;
 
 module For_testing = struct
-  let set_ledger_rewrite_observer observer =
-    Atomic.set ledger_rewrite_observer observer
+  let set_ledger_operation_observer observer =
+    Atomic.set ledger_operation_observer observer
   ;;
 
-  let reset_ledger_rewrite_observer () =
-    Atomic.set ledger_rewrite_observer (fun () -> ())
+  let reset_ledger_operation_observer () =
+    Atomic.set ledger_operation_observer (fun _ -> ())
   ;;
 
   let drain_pending_with_judge_batch = drain_pending_with_judge_batch

@@ -807,32 +807,38 @@ let full_health_field_is_cached name =
   List.exists (String.equal name) full_health_cached_field_names
 
 let full_health_placeholder_fields ?error ?(component_timed_out = false)
-    ?(status = "warming") () =
+    ?(status = Health_status.Warming) () =
+  let status_string = Health_status.to_string status in
   [
     ( "feature_flags",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "feature_flags" );
-    ("overall_status", `String status);
+    ("overall_status", `String status_string);
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);
     ("keeper_fibers", `Int 0);
     ( "fd_observation",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "fd_observation" );
     ( "fd_accountant",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "fd_accountant" );
     ( "disk_observation",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "disk_observation" );
     ( "keeper_fleet_safety",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "keeper_fleet_safety" );
     ( "keeper_identity_drift",
       `Assoc
         [
           ("schema", `String "masc.keeper_identity_drift.v1");
-          ("status", `String status);
+          ("status", `String status_string);
           ("blocking", `Bool false);
           ("terminal_reason", `String "snapshot_not_ready");
           ("operator_action_required", `Bool false);
@@ -853,21 +859,24 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
       full_health_component_placeholder
         ?error
         ~component_timed_out
-        ~status
+        ~status:status_string
         "publication_recovery_activation" );
     ( "keeper_reaction_ledger",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "keeper_reaction_ledger" );
     ( "keeper_turn_admission",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "keeper_turn_admission" );
     ( "keeper_board_event_collection",
-      full_health_component_placeholder ?error ~component_timed_out ~status
+      full_health_component_placeholder ?error ~component_timed_out
+        ~status:status_string
         "keeper_board_event_collection" );
     ( "keeper_event_queue",
       `Assoc
         [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v1")
-        ; ("status", `String status)
+        ; ("status", `String status_string)
         ; ("operator_action_required", `Bool false)
         ; ("keeper_count", `Int 0)
         ; ("keeper_names", `List [])
@@ -884,45 +893,12 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("component_timed_out", `Bool component_timed_out)
         ] );
     ( "keeper_board_attention_partitions",
-      `Assoc
-        [ ("schema", `String "masc.keeper_board_attention_partitions.fleet_summary.v1")
-        ; ("status", `String status)
-        ; ("operator_action_required", `Bool false)
-        ; ("status_reasons", `List [])
-        ; ("worker_registered", `Bool false)
-        ; ("active_keeper_count", `Int 0)
-        ; ("lane_failure_count", `Int 0)
-        ; ("lane_failures", `List [])
-        ; ("candidate_ledger_keeper_count", `Int 0)
-        ; ("candidate_ledger_keeper_names", `List [])
-        ; ("candidate_ledger_discovery_error_count", `Int 0)
-        ; ("candidate_ledger_discovery_errors", `List [])
-        ; ("candidate_pending_count", `Int 0)
-        ; ("candidate_judged_count", `Int 0)
-        ; ("candidate_consumed_count", `Int 0)
-        ; ("candidate_ledger_read_error_count", `Int 0)
-        ; ("candidate_ledger_read_errors", `List [])
-        ; ("keeper_count", `Int 0)
-        ; ("keeper_names", `List [])
-        ; ("ledger_count", `Int 0)
-        ; ("partition_count", `Int 0)
-        ; ("pending_candidate_count", `Int 0)
-        ; ("ready_count", `Int 0)
-        ; ("running_count", `Int 0)
-        ; ("deferred_count", `Int 0)
-        ; ("completed_count", `Int 0)
-        ; ("settled_count", `Int 0)
-        ; ("blocked_count", `Int 0)
-        ; ("read_error_count", `Int 0)
-        ; ("read_errors", `List [])
-        ; ("blocked", `List [])
-        ; ("deferred", `List [])
-        ; ("component_timed_out", `Bool component_timed_out)
-        ] );
+      Keeper_board_attention_worker.placeholder_health_json
+        ~status ~component_timed_out );
     ( "paused_keepers",
       `Assoc
         [
-          ("status", `String status);
+          ("status", `String status_string);
           ("count", `Int 0);
           ("names", `List []);
           ("component_timed_out", `Bool component_timed_out);
@@ -932,7 +908,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("keeper_config_probe_error", `Null);
     ("keeper_config_unknown_key_count", `Int 0);
     ("keeper_config_unknown_keys", `List []);
-    ("keeper_config_schema_status", `String status);
+    ("keeper_config_schema_status", `String status_string);
     ("keeper_config_schema_blocking", `Bool false);
     ("keeper_config_schema_terminal_reason", `String "snapshot_not_ready");
     ("keeper_config_operator_action_required", `Bool false);
@@ -948,7 +924,7 @@ let cached_full_health_fields = function
         List.exists (fun (cached_name, _) -> String.equal cached_name name) cached
       in
       let missing_placeholders =
-        full_health_placeholder_fields ~status:"unavailable" ()
+        full_health_placeholder_fields ~status:Health_status.Unavailable ()
         |> List.filter (fun (name, _) ->
             full_health_field_is_cached name && not (has_cached name))
       in
@@ -991,7 +967,8 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
       let finished_at = Unix.gettimeofday () in
       let error = Printexc.to_string exn in
       {
-        fields = full_health_placeholder_fields ~error ~status:"error" ();
+        fields =
+          full_health_placeholder_fields ~error ~status:Health_status.Error ();
         computed_at = finished_at;
         duration_ms = duration_ms ~started_at ~finished_at;
         error = Some error;
@@ -1054,7 +1031,9 @@ let mark_full_health_snapshot_error exn =
                timeouts as [timeout] instead of generic [error] so
                operators can distinguish "no last-good payload yet"
                from a stale last-good fallback. *)
-            let status = if timed_out then "timeout" else "error" in
+            let status =
+              if timed_out then Health_status.Timeout else Health_status.Error
+            in
             ( full_health_placeholder_fields ~error
                 ~component_timed_out:timed_out ~status (),
               now,

@@ -133,6 +133,10 @@ val status_reasons : fleet_summary -> string list
 val operator_action_required : fleet_summary -> bool
 val fleet_summary_schema : string
 val fleet_summary_detail_fields : fleet_summary -> (string * Yojson.Safe.t) list
+val empty_fleet_summary_detail_fields : (string * Yojson.Safe.t) list
+(** Exact zero-value detail projection for an explicitly unavailable outer
+    component. This owns the field shape; callers must also publish a non-OK
+    typed status and must not present these values as an observed empty fleet. *)
 val fleet_summary_fields : fleet_summary -> (string * Yojson.Safe.t) list
 val fleet_summary_to_yojson : fleet_summary -> Yojson.Safe.t
 val fleet_summary_json : base_path:string -> Yojson.Safe.t

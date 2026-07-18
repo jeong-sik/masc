@@ -489,20 +489,6 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
-(** Resolve the primary model max context for a keeper.
-
-    Returns the resolved primary provider/runtime context window, separate from
-    any requested [max_context_override].
-    Returns the configured default Runtime capacity when meta is unavailable. *)
-let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
-  match meta with
-  | None -> Runtime.default_max_context ()
-  | Some meta ->
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-    in
-    resolution.effective_budget
-
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match
     Keeper_registry.wakeup_running
@@ -647,11 +633,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
         | None -> Keeper_context_runtime.generate_trace_id ()
       in
-      let max_tokens = resolve_primary_max_context meta_for_trace in
       let session, ctx_opt =
         Keeper_context_runtime.load_context_from_checkpoint
           ~trace_id
-          ~primary_model_max_tokens:max_tokens
           ~base_dir
       in
       let checkpoint_found = Option.is_some ctx_opt in
@@ -671,16 +655,12 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             else
               []
           in
-          let cleared_ctx =
-            {
-              wctx with
-              checkpoint =
-                {
-                  (Keeper_context_runtime.checkpoint_of_context wctx) with
-                  messages = cleared_messages;
-                };
+          let checkpoint =
+            { (Keeper_context_runtime.checkpoint_of_context wctx) with
+              messages = cleared_messages
             }
           in
+          let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
              — the keeper_unified_turn retry loop uses meta.runtime.generation

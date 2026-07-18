@@ -25,24 +25,11 @@ let write_heartbeat_snapshot
   let metrics_store =
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
-  let runtime_models =
-    Provider_runtime_projection.default_execution_model_strings
-      ((Keeper_meta_contract.runtime_id_of_meta meta_current))
-  in
-  let max_runtime_context =
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution
-        ~requested_override:meta_current.max_context_override
-        runtime_models
-    in
-    resolution.effective_budget
-  in
   let base_dir = session_base_dir ctx.config in
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));
   let _session, ctx_opt =
     load_context_from_checkpoint
       ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-      ~primary_model_max_tokens:max_runtime_context
       ~base_dir
   in
   let message_count =

@@ -139,7 +139,6 @@ let recover_provider_context_overflow_in_lane
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
-      ~primary_model_max_tokens
       error
   =
   match context_overflow_event_of_error error with
@@ -201,7 +200,6 @@ let recover_provider_context_overflow_in_lane
                  ~base_dir
                  ~meta
                  ~trigger
-                 ~primary_model_max_tokens
              with
              | Error error ->
                retry_after_started
@@ -1079,7 +1077,6 @@ dominant source of the observed CAS race exhaustion after
                       ~config
                       ~base_dir
                       ~meta
-                      ~primary_model_max_tokens:final_execution.max_context
                       err
                   in
                   let source_lease_disposition, turn_state =
@@ -1144,7 +1141,6 @@ dominant source of the observed CAS race exhaustion after
                       ~meta
                       ~turn_ctx_cell
                       ~observation
-                      ~final_execution
                       ~latency_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime

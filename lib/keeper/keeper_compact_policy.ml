@@ -375,11 +375,11 @@ let compact_for_request_typed
       ~message_count:before_messages;
     { context = ctx; decision = Rejected (trigger, reason); evidence = None }
   | Ok requested ->
+    let checkpoint =
+      { (checkpoint_of_context ctx) with messages = requested.messages }
+    in
     let compacted_ctx =
-      { ctx with
-        checkpoint =
-          { (checkpoint_of_context ctx) with messages = requested.messages }
-      }
+      sync_oas_context { checkpoint }
     in
     let after_bytes = serialized_bytes compacted_ctx in
     let reject reason =

@@ -871,7 +871,7 @@ let run_keeper_invocation_turn_admitted
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
-	            | Ok (result, final_max_runtime_context) ->
+            | Ok (result, _) ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
@@ -889,7 +889,6 @@ let run_keeper_invocation_turn_admitted
                   ~resilience_strategy_executor:
                     resilience_handles.resilience_strategy_executor
 	                  ~meta
-	                  ~primary_model_max_tokens:final_max_runtime_context
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
               in

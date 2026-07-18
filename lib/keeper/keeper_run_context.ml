@@ -69,7 +69,6 @@ let prepare_run_context
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(base_dir : string)
-      ~(max_context : int)
       ~(runtime_id : string)
       ?temperature
       ?shared_context
@@ -115,7 +114,6 @@ let prepare_run_context
   let session, ctx_opt =
     Keeper_context_runtime.load_context_from_checkpoint
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~primary_model_max_tokens:max_context
       ~base_dir
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
@@ -138,7 +136,6 @@ let prepare_run_context
     | Some c -> c
     | None ->
       Keeper_context_runtime.create ~eio:true ~system_prompt:base_system_prompt
-        ~max_tokens:max_context
   in
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt

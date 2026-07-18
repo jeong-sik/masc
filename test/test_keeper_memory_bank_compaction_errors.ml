@@ -194,7 +194,6 @@ let test_memory_search_json_returns_partial_bank_match () =
     Masc.Keeper_context_runtime.create
       ~eio:false
       ~system_prompt:"test"
-      ~max_tokens:4000
   in
   let raw =
     Search.keeper_memory_search_json

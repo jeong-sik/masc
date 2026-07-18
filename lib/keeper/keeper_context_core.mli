@@ -11,24 +11,18 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 val message_count : working_context -> int
-val max_tokens_of_context : working_context -> int
-
-(** Replace the working-context's [max_tokens]; mirrors the value
-    into [checkpoint.max_total_tokens]. *)
-val with_max_tokens : working_context -> int -> working_context
 
 (** Re-export of [Agent_sdk.Types.text_of_message]. *)
 val text_of_message : Agent_sdk.Types.message -> string
 
 (** {1 Working-context construction & mutation} *)
 
-(** Construct a fresh working context with the given system prompt
-    and token budget.
+(** Construct a fresh working context with the given system prompt.
 
     [~eio:true] selects the OAS context backend required when the context can
     be touched by Eio fibers. Use [~eio:false] only for synchronous tests or
     serialization fixtures. *)
-val create : eio:bool -> system_prompt:string -> max_tokens:int -> working_context
+val create : eio:bool -> system_prompt:string -> working_context
 
 val set_system_prompt :
   working_context -> system_prompt:string -> working_context
@@ -73,8 +67,6 @@ val serialize_context : working_context -> string
 val serialized_bytes : working_context -> int
 (** Exact byte length of {!serialize_context}. This is structural observation,
     not a token estimate or provider context-window admission signal. *)
-val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
-val context_to_json : working_context -> Yojson.Safe.t
 
 (** {1 Session lifecycle} *)
 
@@ -172,21 +164,17 @@ val save_oas_checkpoint_if_source :
 (** {1 OAS checkpoint inspection} *)
 
 val checkpoint_generation : Agent_sdk.Checkpoint.t -> fallback:int -> int
-val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** Project an OAS checkpoint to a working context without rewriting its
     messages. *)
 val context_of_oas_checkpoint :
-  Agent_sdk.Checkpoint.t ->
-  primary_model_max_tokens:int ->
-  working_context
+  Agent_sdk.Checkpoint.t -> working_context
 
 (** Load the canonical OAS checkpoint for a given
     [trace_id]. Returns the session plus the recovered
     working_context (or [None] when nothing was found). *)
 val load_context_from_checkpoint :
   trace_id:string ->
-  primary_model_max_tokens:int ->
   base_dir:string ->
   session_context * working_context option
 

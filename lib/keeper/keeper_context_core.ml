@@ -30,26 +30,14 @@ let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.
     context = checkpoint_context;
   }
 
-(* OAS no longer persists a cumulative-token cap on the checkpoint
-   (budget enforcement removed). The per-response output max_tokens is
-   resolved from the model default at restore time. *)
-let checkpoint_max_tokens (_cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  fallback
-
-let context_of_oas_checkpoint
-    (cp : Agent_sdk.Checkpoint.t)
-    ~(primary_model_max_tokens : int) : working_context =
+let context_of_oas_checkpoint (cp : Agent_sdk.Checkpoint.t) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
-  let max_tokens =
-    checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
-  in
   let messages = cp.messages in
   let context = Agent_sdk.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
-  sync_oas_context
-    { checkpoint; max_tokens }
+  sync_oas_context { checkpoint }
 
 let checkpoint_for_persistence
     ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
@@ -190,7 +178,7 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
 
-let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
+let load_context_from_checkpoint ~trace_id ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
   let oas_result =
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
@@ -236,13 +224,7 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   in
   match oas_checkpoint with
   | Some checkpoint ->
-      let ctx =
-        context_of_oas_checkpoint checkpoint ~primary_model_max_tokens
-      in
-      let ctx =
-        if primary_model_max_tokens <= 0 then ctx
-        else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
-      in
+      let ctx = context_of_oas_checkpoint checkpoint in
       (session, Some ctx)
   | None ->
       (* No canonical OAS checkpoint is available. Non-trivial OAS errors

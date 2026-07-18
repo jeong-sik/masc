@@ -21,14 +21,12 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 let text_of_message = Keeper_context_core.text_of_message
-let max_tokens_of_context = Keeper_context_core.max_tokens_of_context
 let message_count = Keeper_context_core.message_count
 let serialized_bytes = Keeper_context_core.serialized_bytes
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
 let oas_context_of_context = Keeper_context_core.oas_context_of_context
-let with_max_tokens = Keeper_context_core.with_max_tokens
 let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
 let messages_of_context = Keeper_context_core.messages_of_context
 let create = Keeper_context_core.create
@@ -41,8 +39,6 @@ let role_of_string_opt = Keeper_context_core.role_of_string_opt
 let message_to_json = Keeper_context_core.message_to_json
 let message_of_json = Keeper_context_core.message_of_json
 let serialize_context = Keeper_context_core.serialize_context
-let deserialize_context = Keeper_context_core.deserialize_context
-let context_to_json = Keeper_context_core.context_to_json
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
@@ -52,7 +48,6 @@ let usage_of_response = Keeper_context_core.usage_of_response
 let total_tokens = Keeper_context_core.total_tokens
 
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
-let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint

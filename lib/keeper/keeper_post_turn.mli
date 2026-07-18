@@ -54,7 +54,6 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
   meta:Keeper_meta_contract.keeper_meta ->
-  primary_model_max_tokens:int ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
@@ -90,5 +89,4 @@ val recover_latest_checkpoint_for_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
-  primary_model_max_tokens:int ->
   (compaction_recovery, compaction_recovery_error) result

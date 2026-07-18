@@ -658,11 +658,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           let cleared_ctx =
             {
               wctx with
-              checkpoint =
-                {
-                  (Keeper_context_runtime.checkpoint_of_context wctx) with
-                  messages = cleared_messages;
-                };
+              checkpoint = { messages = cleared_messages };
             }
           in
           (* Increment generation from meta to signal a new context epoch.

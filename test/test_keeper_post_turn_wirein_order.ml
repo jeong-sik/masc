@@ -423,7 +423,7 @@ let test_manual_compaction_serializes_owner_lane () =
                    ])
                |> Result.to_option))
           (fun () ->
-             Post_turn.recover_latest_checkpoint_for_overflow_retry
+             Post_turn.recover_latest_checkpoint_for_compaction
                ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
                ~meta
                ~trigger:Compaction_trigger.Manual

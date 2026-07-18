@@ -55,12 +55,9 @@ include module type of Otel_runtime_metric_names
 (** {1 Core counters / gauges} *)
 
 include module type of Otel_core_metric_names
-val metric_pool_idle_total : string
-val metric_pool_inflight_total : string
-val metric_pool_reuse_total : string
-val metric_pool_evict_total : string
-val metric_pool_evict_failure_total : string
-val metric_pool_create_total : string
+
+(* masc_pool_* series are emitted solely by [Otel_runtime_observables]; no
+   store cells are declared here. *)
 
 include module type of Otel_policy_metric_names
 
@@ -85,7 +82,6 @@ val metric_oas_bus_capacity : string
     [bus], [purpose], [capacity], and [overflow]. *)
 
 val metric_oas_bridge_unmigrated_payload_kind : string
-val metric_keeper_context_tool_result_compacted : string
 
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
@@ -113,11 +109,6 @@ val metric_build_identity_probe_failures : string
 val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)
-
-(** IDE read routes that resolved to the shared orphan partition instead of
-    [by-url/<canonical-repo>]. Labels: [reason] =
-    [no_canonical_url | unmatched | base_unresolved | legacy_default]. *)
-val metric_ide_orphan_reads : string
 
 (** #10130: boot-time sweep of save_file_atomic orphan temp files.
     Labels: [size_class = empty | with_data]. *)

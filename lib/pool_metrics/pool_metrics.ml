@@ -1,22 +1,14 @@
 (** RFC-0107 Phase D.4 — Otel_metric_store exporter for [Masc_http_client.Pool].
 
-    Read-only adapter: owns the metric name constants and exposes a
-    snapshot accessor over [Masc_http_client.all_domain_pools].  The
-    actual Otel_metric_store [set_gauge] calls live in {!Otel_metric_store} (see
-    [update_pool_metrics_gauges] there) to avoid a Otel_metric_store ↔
-    Pool_metrics module cycle.
+    Read-only adapter: exposes a snapshot accessor over
+    [Masc_http_client.all_domain_pools].  The metric name constants and
+    sample emission live in [Otel_runtime_observables] (single export
+    wiring); this module deliberately owns no metric names.
 
     Aggregation: sums integer counters across all OCaml Domains so the
     exported gauges reflect process-wide totals.  [idle_per_host] from
     each domain pool is concatenated so the per-host breakdown remains
     available. *)
-
-let metric_idle_total = "masc_pool_idle_total"
-let metric_inflight_total = "masc_pool_inflight_total"
-let metric_reuse_total = "masc_pool_reuse_total"
-let metric_evict_total = "masc_pool_evict_total"
-let metric_evict_failure_total = "masc_pool_evict_failure_total"
-let metric_create_total = "masc_pool_create_total"
 
 let current_snapshot () =
   let pools = Masc_http_client.all_domain_pools () in

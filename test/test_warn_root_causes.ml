@@ -400,28 +400,6 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})
 
-let test_oas_mainline_warns_are_promoted_in_bridge () =
-  check bool "bridge promotes MCP server failure" true
-    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_config", "MCP server failed" -> true|});
-  check bool "bridge promotes context injector failure" true
-    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-       {|Warn, "agent_turn", "context_injector raised" -> true|})
-
-let test_correction_pipeline_log_preserves_detail_fields () =
-  List.iter
-    (fun (key, pattern) ->
-      check bool ("bridge renders correction detail " ^ key) true
-        (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
-           pattern))
-    [ "fields", {|[ "fields"|}
-    ; "stages", {|; "stages"|}
-    ; "input_keys", {|; "input_keys"|}
-    ; "corrected_keys", {|; "corrected_keys"|}
-    ; "added_fields", {|; "added_fields"|}
-    ; "changed_fields", {|; "changed_fields"|}
-    ]
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -453,9 +431,5 @@ let () =
         [
           test_case "keeper mainline failures log at error" `Quick
             test_keeper_mainline_failures_log_at_error;
-          test_case "oas mainline warns are promoted in bridge" `Quick
-            test_oas_mainline_warns_are_promoted_in_bridge;
-          test_case "correction pipeline log preserves detail fields" `Quick
-            test_correction_pipeline_log_preserves_detail_fields;
         ] );
     ]

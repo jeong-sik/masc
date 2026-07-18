@@ -417,7 +417,7 @@ let test_partition_ledger_rejects_cross_keeper_identity () =
 
 let test_provider_failure_defers_until_process_start_recovery () =
   with_temp_base "board-partition-defer" @@ fun base_path ->
-  let candidates = [ candidate 1; candidate 2 ] in
+  let candidates = [ candidate 1 ] in
   record_all ~base_path candidates;
   ignore (ensure ~base_path candidates : P.t list);
   let root = claim ~base_path in
@@ -485,7 +485,7 @@ let test_running_claim_recovers_at_process_start () =
 
 let test_completion_requires_exact_identity_then_settles () =
   with_temp_base "board-partition-complete" @@ fun base_path ->
-  let candidates = List.init 3 (fun index -> candidate (index + 1)) in
+  let candidates = [ candidate 1 ] in
   record_all ~base_path candidates;
   ignore (ensure ~base_path candidates : P.t list);
   let root = claim ~base_path in

@@ -12,7 +12,7 @@ import {
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
-import { formatTokens, formatPct, formatCost } from '../lib/format-number'
+import { formatTokens, formatPct } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import type { AsyncState } from '../lib/async-state'
@@ -700,9 +700,9 @@ export function keeperConfigControlInventory(
           tab,
           label: 'Hook slots',
           kind: 'live-read',
-          source: `${configApiSource} hooks.slots/hooks.deny_list/hooks.cost_budget`,
+          source: `${configApiSource} hooks.scope/hooks.slots`,
           action: 'read-only global runtime architecture projection',
-          contracts: configReadContracts(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget']),
+          contracts: configReadContracts(['hooks.scope', 'hooks.slots']),
         },
         {
           id: 'kcf-hooks-filter',
@@ -2258,8 +2258,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           `}
         <div style="margin-top:14px;">
           <${KcfFacts} rows=${[
-            ['거부 목록 수', String(c.hooks.deny_list.length), true],
-            ['비용 예산 (텔레메트리·미강제)', c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'],
+            ['적용 범위', c.hooks.scope ?? MISSING_DATA_DASH, true],
+            ['활성 슬롯 수', String(allEntries.filter(([, slot]) => slot.active).length), true],
           ]} />
         </div>
       ` : null}

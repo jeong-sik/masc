@@ -108,9 +108,10 @@ let test_dashboard_always_present () =
       let surfaces =
         Surface.connected_surfaces_for_keeper ~keeper_name:"unbound-keeper"
       in
+      check int "no presence failures" 0 (List.length surfaces.failures);
       check (list presence) "dashboard only"
         [ { Surface.surface = Surface.Dashboard; alive = true } ]
-        surfaces)
+        surfaces.surfaces)
 
 let test_bound_discord_channel_listed_offline_without_gateway () =
   register_discord ();
@@ -120,6 +121,7 @@ let test_bound_discord_channel_listed_offline_without_gateway () =
       let surfaces =
         Surface.connected_surfaces_for_keeper ~keeper_name:"surface-keeper"
       in
+      check int "no presence failures" 0 (List.length surfaces.failures);
       check (list presence) "dashboard + own discord channel, not alive"
         [ { Surface.surface = Surface.Dashboard; alive = true }
         ; { Surface.surface =
@@ -128,7 +130,27 @@ let test_bound_discord_channel_listed_offline_without_gateway () =
           ; alive = false
           }
         ]
-        surfaces)
+        surfaces.surfaces)
+
+let test_binding_failure_is_not_empty_presence () =
+  register_discord ();
+  let path = Filename.temp_file "gate-surface-bindings" ".json" in
+  Yojson.Safe.to_file path (`Assoc [ ("bad", `Int 1) ]);
+  Unix.putenv "MASC_DISCORD_BINDING_STORE_PATH" path;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_DISCORD_BINDING_STORE_PATH" "";
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      let snapshot =
+        Surface.connected_surfaces_for_keeper ~keeper_name:"surface-keeper"
+      in
+      check int "dashboard remains present" 1 (List.length snapshot.surfaces);
+      match snapshot.failures with
+      | [ failure ] ->
+        check string "connector identity retained" "discord" failure.connector_id
+      | failures ->
+        failf "expected one typed presence failure, got %d" (List.length failures))
 
 let test_bound_channels_blank_keeper_is_empty () =
   with_binding_store
@@ -168,6 +190,8 @@ let () =
             `Quick test_bound_discord_channel_listed_offline_without_gateway;
           test_case "bound_channels blank keeper" `Quick
             test_bound_channels_blank_keeper_is_empty;
+          test_case "binding failure is not empty presence" `Quick
+            test_binding_failure_is_not_empty_presence;
           test_case "discord not connected without run loop" `Quick
             test_discord_not_connected_without_run_loop;
         ] );

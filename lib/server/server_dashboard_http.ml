@@ -649,15 +649,9 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
            | None -> None
            | Some keeper_name ->
              let last_seen_ms =
-               match Masc_domain.parse_iso8601_opt agent.last_seen with
-               | Some seconds -> Int64.of_float (seconds *. 1000.0)
-               | None ->
-                 Log.Server.warn
-                   "dashboard IDE presence mapped invalid last_seen timestamp to 0 \
-                    agent=%s value=%S"
-                   agent.name
-                   agent.last_seen;
-                 0L
+               Server_presence.last_seen_ms
+                 ~context:"dashboard IDE presence"
+                 agent
              in
              Some
                (`Assoc

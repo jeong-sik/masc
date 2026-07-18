@@ -85,6 +85,7 @@ type world_observation =
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
+  ; connected_surface_failures : Gate_surface.presence_failure list
   }
 
 type keeper_cycle_channel =
@@ -1061,6 +1062,9 @@ let observe
       in
       events
   in
+  let surface_presence =
+    Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
+  in
   { pending_messages
   ; pending_board_events
   ; idle_seconds
@@ -1072,8 +1076,8 @@ let observe
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count
-  ; connected_surfaces =
-      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
+  ; connected_surfaces = surface_presence.surfaces
+  ; connected_surface_failures = surface_presence.failures
   }
 ;;
 
@@ -1094,6 +1098,9 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
       ~config
       ~now:(Time_compat.now ())
   in
+  let surface_presence =
+    Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
+  in
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
@@ -1105,8 +1112,8 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
-  ; connected_surfaces =
-      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
+  ; connected_surfaces = surface_presence.surfaces
+  ; connected_surface_failures = surface_presence.failures
   }
 ;;
 

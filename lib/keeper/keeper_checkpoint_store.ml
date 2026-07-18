@@ -64,13 +64,12 @@ let leaf_is_real_segment leaf =
    [Domain_pool_ref.submit_cpu_or_inline] — the typed CPU-weight policy layer
    keeper call sites are documented to prefer over the raw
    [Executor_pool_ref]; it re-raises job exceptions instead of rerunning the
-   closure inline on failure. The pool submit is only legal from an Eio
-   fiber: the store is also reachable from raw Domains (see the stale-guard
-   "raw Domain saves through Unix context" test), where the conversion runs
-   inline exactly as before. *)
+   closure inline on failure, and falls back to inline execution for
+   non-Eio callers itself (#25158) — the store is also reachable from raw
+   Domains (see the stale-guard "raw Domain saves through Unix context"
+   test). *)
 let offload_checkpoint_cpu (f : unit -> 'a) : 'a =
-  if Eio_guard.is_eio_fiber () then Domain_pool_ref.submit_cpu_or_inline f
-  else f ()
+  Domain_pool_ref.submit_cpu_or_inline f
 
 let decode_checkpoint_off_scheduler (content : string) :
     (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result =

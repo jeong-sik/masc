@@ -197,10 +197,18 @@ let read_bindings_result store : (binding list, binding_store_error) result =
     |> Result.map_error (fun error ->
          Binding_store_decode_failed { path; error })
 
-let read_bindings store : binding list =
-  match read_bindings_result store with
-  | Ok bindings -> bindings
-  | Error _ -> []
+let bound_channels_result store ~keeper_name =
+  let normalized = String.trim keeper_name in
+  if String.equal normalized "" then Ok []
+  else
+    read_bindings_result store
+    |> Result.map (fun bindings ->
+         List.filter_map
+           (fun (binding : binding) ->
+             if String.equal binding.keeper_name normalized then
+               Some binding.channel_id
+             else None)
+           bindings)
 
 let binding_json (binding : binding) =
   `Assoc
@@ -211,9 +219,7 @@ let binding_json (binding : binding) =
 
 (* Durable atomic write delegated to the Fs_compat durability SSOT:
    tmp -> fsync(tmp) -> rename -> best-effort fsync(parent dir), the same
-   primitive board/event-queue/Memory-OS persistence use. The result-returning
-   form is the authority for transactional callers; [save_bindings] preserves
-   the older connector interface until those callers move to [mutate_bindings]. *)
+   primitive board/event-queue/Memory-OS persistence use. *)
 let save_bindings_result store (bindings : binding list) =
   let path = store.binding_store_path () in
   let normalized =
@@ -236,11 +242,6 @@ let save_bindings_result store (bindings : binding list) =
   | Sys_error detail -> Error detail
   | Unix.Unix_error (code, fn, arg) ->
     Error (unix_error_message path fn arg code)
-
-let save_bindings store bindings =
-  match save_bindings_result store bindings with
-  | Ok () -> ()
-  | Error msg -> raise (Sys_error msg)
 
 let guild_id_items store event =
   match store.guild_id_field with
@@ -279,11 +280,6 @@ let append_audit_event_result store event =
   | Sys_error detail -> Error (Audit_io_failed detail)
   | Unix.Unix_error (code, fn, arg) ->
     Error (Audit_io_failed (unix_error_message path fn arg code))
-
-let append_audit_event store event =
-  match append_audit_event_result store event with
-  | Ok () -> ()
-  | Error error -> raise (Sys_error (audit_append_error_to_string error))
 
 let mutate_bindings store ~decide =
   Cross_context_mutex.with_durable_lock store.mutation_lock (fun () ->

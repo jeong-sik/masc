@@ -78,6 +78,7 @@ let all_fields =
 ;;
 
 let wire_field_names = List.map field_name all_fields
+let exact_evidence_key = "exact_evidence"
 
 let known_field name =
   List.exists (fun field -> String.equal name (field_name field)) all_fields

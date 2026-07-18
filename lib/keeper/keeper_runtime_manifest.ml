@@ -381,7 +381,7 @@ let decision_public_allowlist =
     ; "media_dropped_total"; "media_dropped_counts"
     ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
     ; "ratio"; "threshold"; "count"
-    ; "source_requeued"; "exact_evidence"
+    ; "source_requeued"; Keeper_compaction_evidence.exact_evidence_key
     ; "clock_refs"
     ]
 
@@ -408,7 +408,8 @@ let decision_allowlist = function
 
 let decision_child_scope scope key =
   if String.equal key "clock_refs" then Clock_refs
-  else if String.equal key "exact_evidence" then Compaction_evidence
+  else if String.equal key Keeper_compaction_evidence.exact_evidence_key
+  then Compaction_evidence
   else scope
 
 let rec reject_unknown_fields ~allowlist path = function

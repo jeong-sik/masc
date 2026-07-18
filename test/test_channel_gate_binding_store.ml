@@ -49,6 +49,14 @@ let sample_event ?guild_id ~action () =
       previous_keeper = "";
     }
 
+let seed_bindings dir (bindings : Store.binding list) =
+  `Assoc
+    (List.map
+       (fun (binding : Store.binding) ->
+         binding.channel_id, `String binding.keeper_name)
+       bindings)
+  |> Yojson.Safe.to_file (Filename.concat dir "bindings.json")
+
 let test_normalizes_bindings_json () =
   let bindings =
     Store.normalize_bindings_json
@@ -83,20 +91,6 @@ let test_rejects_malformed_binding_rows () =
       [ "channel-1", `String "luna"
       ; "channel-1", `String "sangsu"
       ])
-
-let test_save_and_read_bindings_round_trip () =
-  with_temp_dir @@ fun dir ->
-  let store = store_for_dir dir ~guild_id_field:Store.Omit in
-  Store.save_bindings store
-    [
-      ({ channel_id = "z-channel"; keeper_name = "luna" } : Store.binding);
-      ({ channel_id = "a-channel"; keeper_name = "arya" } : Store.binding);
-    ];
-  let bindings = Store.read_bindings store in
-  check int "two bindings" 2 (List.length bindings);
-  let first = List.hd bindings in
-  check string "read sorted channel" "a-channel" first.channel_id;
-  check string "read sorted keeper" "arya" first.keeper_name
 
 let test_read_bindings_result_missing_store_is_empty () =
   with_temp_dir @@ fun dir ->
@@ -134,7 +128,7 @@ let test_audit_failure_rolls_back_binding_mutation () =
   let original =
     [ ({ channel_id = "channel-1"; keeper_name = "luna" } : Store.binding) ]
   in
-  Store.save_bindings store original;
+  seed_bindings dir original;
   let result =
     Store.mutate_bindings store ~decide:(fun _ ->
       Ok
@@ -189,7 +183,7 @@ let test_failed_mutation_cannot_erase_concurrent_success () =
       ~binding_audit_read_path:(fun () -> audit_path)
       ~guild_id_field:Store.Omit
   in
-  Store.save_bindings store
+  seed_bindings dir
     [ ({ channel_id = "original"; keeper_name = "luna" } : Store.binding) ];
   let bind channel_id keeper_name =
     Store.mutate_bindings store ~decide:(fun bindings ->
@@ -258,9 +252,17 @@ let test_audit_guild_id_policy () =
 let test_append_and_read_recent_audit () =
   with_temp_dir @@ fun dir ->
   let store = store_for_dir dir ~guild_id_field:Store.Include_empty in
-  Store.append_audit_event store (sample_event ~action:"bind" ());
-  Store.append_audit_event store (sample_event ~action:"rebind" ());
-  Store.append_audit_event store (sample_event ~action:"unbind" ());
+  let append action =
+    match
+      Store.mutate_bindings store ~decide:(fun bindings ->
+        Ok (bindings, sample_event ~action (), ()))
+    with
+    | Ok () -> ()
+    | Error error -> fail (Store.mutation_error_to_string error)
+  in
+  append "bind";
+  append "rebind";
+  append "unbind";
   let recent = Store.read_recent_audit store ~limit:2 in
   check int "limit applied" 2 (List.length recent);
   check string "newest first" "unbind"
@@ -276,8 +278,6 @@ let () =
           test_case "normalizes binding JSON" `Quick test_normalizes_bindings_json;
           test_case "rejects malformed binding rows" `Quick
             test_rejects_malformed_binding_rows;
-          test_case "saves and reads bindings" `Quick
-            test_save_and_read_bindings_round_trip;
           test_case "missing binding store is empty" `Quick
             test_read_bindings_result_missing_store_is_empty;
           test_case "invalid binding store is an error" `Quick

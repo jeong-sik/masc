@@ -281,7 +281,7 @@ let append_provider_overflow_manifest
                ; "trigger_detail", Compaction_trigger.to_detail_json trigger
                ; "source_requeued", `Bool true
                ; "error", error
-               ; ( "exact_evidence"
+               ; ( Keeper_compaction_evidence.exact_evidence_key
                  , Keeper_compaction_evidence.to_json evidence )
                ]))
         Keeper_runtime_manifest.Context_compacted

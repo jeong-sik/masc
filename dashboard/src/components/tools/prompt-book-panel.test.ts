@@ -62,10 +62,10 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 60,
   }),
   makePrompt({
-    key: 'verification.action_verifier',
+    key: 'verification.anti_rationalization',
     category: 'verification',
-    description: 'action verifier',
-    file_path: 'config/prompts/verification.action_verifier.md',
+    description: 'anti-rationalization guidance',
+    file_path: 'config/prompts/verification.anti_rationalization.md',
     char_count: 50,
   }),
   makePrompt({

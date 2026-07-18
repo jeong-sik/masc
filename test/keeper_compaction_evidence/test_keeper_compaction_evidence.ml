@@ -16,6 +16,13 @@ let evidence : Keeper_compaction_evidence.t =
 
 let canonical = Keeper_compaction_evidence.to_json evidence
 
+let test_exact_evidence_envelope_key () =
+  Alcotest.(check string)
+    "persisted envelope key"
+    "exact_evidence"
+    Keeper_compaction_evidence.exact_evidence_key
+;;
+
 let fields = function
   | `Assoc fields -> fields
   | _ -> Alcotest.fail "canonical evidence must be an object"
@@ -203,6 +210,10 @@ let () =
     "keeper compaction evidence"
     [ ( "projection"
       , [ Alcotest.test_case
+            "exact evidence envelope key"
+            `Quick
+            test_exact_evidence_envelope_key
+        ; Alcotest.test_case
             "projection and roundtrip"
             `Quick
             test_projection_and_roundtrip

@@ -156,16 +156,12 @@ durable_queue_stale_sec = 0.0 # default: any durable backlog degrades full healt
 stream_idle_timeout_sec = 120
 # Optional Agent.run no-progress guard. Tool timeouts live in the tool layer.
 # execution_idle_timeout_sec = 300
-tool_cost_max_usd = 1.25
 llm_rerank = true
 
 [watchdog]
 stale_sec = 600
 grace_sec = 900
 ```
-
-`tool_cost_max_usd = 0` leaves the advisory cost threshold unset. Cost
-thresholds are telemetry only and never gate keeper tool execution.
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values

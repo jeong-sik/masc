@@ -421,10 +421,14 @@ let handle_surface_post_with_outcome
         (Keeper_surface_post.error_json
            (Channel_gate_discord_state.binding_lookup_error_to_string detail))
     | Ok bound_discord_channels ->
-      let bound_slack_channels =
-        Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
-      in
-      (match
+      (match Channel_gate_slack_state.bound_channels ~keeper_name:meta.name with
+       | Error detail ->
+         fail
+           ~class_:Tool_result.Runtime_failure
+           (Keeper_surface_post.error_json
+              (Channel_gate_binding_store.binding_store_error_to_string detail))
+       | Ok bound_slack_channels ->
+       match
          Keeper_surface_post.resolve_target ~surface ~channel_id
            ~bound_slack_channels ~bound_discord_channels ()
        with

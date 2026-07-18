@@ -21,7 +21,9 @@ module type S = sig
     channel_id:string ->
     actor_name:string ->
     (Yojson.Safe.t, string) result
-  val bound_channels : keeper_name:string -> string list
+  val bound_channels :
+    keeper_name:string ->
+    (string list, Channel_gate_binding_store.binding_store_error) result
   val connected : unit -> bool
 end
 

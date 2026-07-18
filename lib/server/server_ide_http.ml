@@ -532,14 +532,7 @@ let build_presence_snapshot state =
          | None, _ | _, None -> None
          | Some keeper_id, Some status ->
            let last_seen_ms =
-             match Masc_domain.parse_iso8601_opt agent.last_seen with
-             | Some seconds -> Int64.of_float (seconds *. 1000.0)
-             | None ->
-               Log.Server.warn
-                 "IDE presence mapped invalid last_seen timestamp to 0 agent=%s value=%S"
-                 agent.name
-                 agent.last_seen;
-               0L
+             Server_presence.last_seen_ms ~context:"IDE presence" agent
            in
            Some
              (`Assoc

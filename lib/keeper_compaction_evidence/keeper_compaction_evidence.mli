@@ -56,6 +56,11 @@ val decode_error_to_string : decode_error -> string
 val wire_field_names : string list
 (** Canonical JSON field names for public projection and closed decoding. *)
 
+val exact_evidence_key : string
+(** JSON envelope key under which a manifest decision payload carries the
+    [to_json] evidence object. Writers, the manifest projection allowlist,
+    and dashboard readers spell the key through this constant. *)
+
 val create
   :  selected_runtime_id:string
   -> before_checkpoint_bytes:int

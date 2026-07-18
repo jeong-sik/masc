@@ -839,7 +839,10 @@ let compaction_context_snapshot_json
          ; compaction_source
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
-         ; exact_evidence = Json_util.assoc_member_opt "exact_evidence" row.decision
+         ; exact_evidence =
+             Json_util.assoc_member_opt
+               Keeper_compaction_evidence.exact_evidence_key
+               row.decision
          ; reinjection_observation =
              compaction_reinjection_observation_json
                ~manifest_rows

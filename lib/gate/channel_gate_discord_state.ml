@@ -557,26 +557,11 @@ let keeper_for_channel_result ~channel_id =
    presence state. *)
 
 let bound_channels_result ~keeper_name =
-  let normalized = String.trim keeper_name in
-  if String.equal normalized "" then Ok []
-  else
-    read_bindings_lookup_result ()
-    |> Result.map (fun bindings ->
-         bindings
-         |> List.filter_map (fun (b : binding) ->
-              if String.equal b.keeper_name normalized
-              then Some b.channel_id
-              else None))
+  Store.bound_channels_result binding_store ~keeper_name
+  |> Result.map_error (fun error -> Binding_store_read_failed error)
 
 let bound_channels ~keeper_name =
-  match bound_channels_result ~keeper_name with
-  | Ok channels -> channels
-  | Error detail ->
-    Log.Discord.error
-      "Discord binding presence read failed (keeper=%s): %s"
-      keeper_name
-      (binding_lookup_error_to_string detail);
-    []
+  Store.bound_channels_result binding_store ~keeper_name
 
 let connected () =
   (* The in-process gateway (RFC-0203) is the only Discord transport;

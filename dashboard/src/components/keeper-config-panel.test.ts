@@ -76,11 +76,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       last_reason: 'board quiet',
     },
     hooks: {
+      scope: 'keeper_runtime_composite',
       slots: {},
-      deny_list: [],
-      cost_budget: {
-        active: false,
-      },
     },
     runtime: {
       paused: false,
@@ -206,11 +203,10 @@ describe('filterHookSlots', () => {
 
   it('matches a feature on a slot that also carries gates (categories coexist)', () => {
     const coexist: HookSlotEntry[] = [
-      ['pre_tool_use', makeSlot({ gates: ['keeper_deny_list'], features: ['cost_telemetry_threshold'] })],
+      ['pre_tool_use', makeSlot({ gates: ['policy_gate'], features: ['tool_start_timing'] })],
     ]
-    // The cost-telemetry feature must remain searchable even though gates is non-empty.
-    expect(filterHookSlots(coexist, 'cost_telemetry_threshold')).toHaveLength(1)
-    expect(filterHookSlots(coexist, 'keeper_deny_list')).toHaveLength(1)
+    expect(filterHookSlots(coexist, 'tool_start_timing')).toHaveLength(1)
+    expect(filterHookSlots(coexist, 'policy_gate')).toHaveLength(1)
   })
 })
 
@@ -389,7 +385,7 @@ describe('keeperConfigControlInventory', () => {
     const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
     const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
     expect(hookStatus.kind).toBe('missing-config-field')
-    expect(hookStatus.missingConfigFields).toEqual(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget'])
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.scope', 'hooks.slots'])
 
     const contextOverride = findItem('runtime', c, 'kcf-runtime-context-override')
     const contextStatus = keeperConfigControlContractStatus(contextOverride.contracts, c)
@@ -408,9 +404,9 @@ describe('keeperConfigControlInventory', () => {
     const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
     const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
 
-    expect(c.hooks?.deny_list).toEqual([])
+    expect(c.hooks?.scope).toBe('keeper_runtime_composite')
     expect(hookStatus.kind).toBe('missing-config-field')
-    expect(hookStatus.missingConfigFields).toEqual(['hooks.deny_list', 'hooks.cost_budget'])
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.scope'])
   })
 
   it('keeps lifecycle directives live when runtime manifest writes are unsupported', () => {
@@ -1029,7 +1025,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).not.toContain('자동 부팅 등록')
 
     // hooks tab: the "전역 런타임 아키텍처" block is keeper-agnostic and
-    // collapsed by default; its deny list and cost telemetry are hidden until
+    // collapsed by default; its authoritative scope and slots are hidden until
     // the operator expands it.
     selectKcfTab(container, '훅')
     await flush()
@@ -1039,7 +1035,8 @@ describe('KeeperConfigPanel', () => {
     expect(archToggle).toBeTruthy()
     archToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
-    expect(container.textContent).toContain('거부 목록 수')
+    expect(container.textContent).toContain('keeper_runtime_composite')
+    expect(container.textContent).toContain('활성 슬롯 수')
 
     // prompt tab: editable prompt controls.
     selectKcfTab(container, '프롬프트')
@@ -1211,8 +1208,8 @@ describe('KeeperConfigPanel', () => {
     const hookRow = container.querySelector('[data-control-id="kcf-hooks-slots"]')
     expect(hookRow?.getAttribute('data-control-contract-status')).toBe('missing-config-field')
     expect(hookRow?.getAttribute('data-control-missing-config-fields'))
-      .toBe('hooks.slots | hooks.deny_list | hooks.cost_budget')
-    expect(hookRow?.textContent).toContain('missing 3 config fields')
+      .toBe('hooks.scope | hooks.slots')
+    expect(hookRow?.textContent).toContain('missing 2 config fields')
 
     const hookFilter = container.querySelector('[data-control-id="kcf-hooks-filter"]')
     expect(hookFilter?.getAttribute('data-control-contract-status')).toBe('ok')

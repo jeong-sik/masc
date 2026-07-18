@@ -120,12 +120,10 @@ let status_json ?(audit_limit = 10) () =
   let startup_ok = Option.is_none startup_error in
   let configured_bindings_result = read_bindings_result () in
   let binding_store_read_ok = Result.is_ok configured_bindings_result in
-  let configured_bindings =
-    Result.value ~default:[] configured_bindings_result
-  in
-  let binding_store_error =
-    Result.fold ~ok:(fun _ -> "")
-      ~error:Store.binding_store_error_to_string configured_bindings_result
+  let configured_bindings, binding_store_error =
+    match configured_bindings_result with
+    | Ok bindings -> bindings, ""
+    | Error error -> [], Store.binding_store_error_to_string error
   in
   let available = app_present && startup_ok && binding_store_read_ok in
   let connected =

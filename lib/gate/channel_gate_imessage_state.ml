@@ -112,12 +112,12 @@ let status_json ?(audit_limit = 10) () =
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
   let configured_bindings_result = read_bindings_result () in
-  let configured_bindings = Result.value ~default:[] configured_bindings_result in
-  let binding_store_read_ok = Result.is_ok configured_bindings_result in
-  let binding_store_error =
-    Result.fold ~ok:(fun _ -> "")
-      ~error:Store.binding_store_error_to_string configured_bindings_result
+  let configured_bindings, binding_store_error =
+    match configured_bindings_result with
+    | Ok bindings -> bindings, ""
+    | Error error -> [], Store.binding_store_error_to_string error
   in
+  let binding_store_read_ok = Result.is_ok configured_bindings_result in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let available = Option.is_some live_status && binding_store_read_ok in
   let updated_at =
@@ -256,12 +256,16 @@ let bind ~channel_id ~keeper_name ~actor_name =
   else
     Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
       let previous_keeper =
-        original_bindings
-        |> List.find_map (fun (binding : binding) ->
-               if String.equal binding.channel_id channel_id then
-                 Some binding.keeper_name
-               else None)
-        |> Option.value ~default:""
+        match
+          List.find_map
+            (fun (binding : binding) ->
+              if String.equal binding.channel_id channel_id then
+                Some binding.keeper_name
+              else None)
+            original_bindings
+        with
+        | Some name -> name
+        | None -> ""
       in
       let updated_bindings =
         (({ channel_id; keeper_name } : binding)

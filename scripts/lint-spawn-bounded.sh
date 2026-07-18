@@ -2,11 +2,9 @@
 # RFC-0109 P1 — Spawn-bounded ratchet.
 #
 # Every `Eio.Process.spawn` site in lib/ must either:
-#   (a) Be the canonical `Bounded_proc.run_argv_with_timeout` helper
-#       itself.
-#   (b) Live inside a function whose public callers wrap the spawn in
+#   (a) Live inside a function whose public callers wrap the spawn in
 #       `Eio.Time.with_timeout_exn` + a fresh `Eio.Switch.run`.
-#   (c) Carry a `(* SPAWN-UNBOUNDED-OK: <reason> *)` inline justification.
+#   (b) Carry a `(* SPAWN-UNBOUNDED-OK: <reason> *)` inline justification.
 #
 # This script enforces (a)/(b) via an explicit allowlist
 # (scripts/lint-spawn-bounded.allowlist). New spawn sites added to the
@@ -50,10 +48,9 @@ if [ -n "$new" ]; then
   echo "$new" | sed 's/^/  /' >&2
   echo >&2
   echo "  Each new site MUST satisfy one of:" >&2
-  echo "    (a) Bounded_proc.run_argv_with_timeout (RFC-0109 SSOT)" >&2
-  echo "    (b) Eio.Time.with_timeout_exn + fresh Eio.Switch.run wrap" >&2
+  echo "    (a) Eio.Time.with_timeout_exn + fresh Eio.Switch.run wrap" >&2
   echo "        at the caller boundary" >&2
-  echo "    (c) Inline (* SPAWN-UNBOUNDED-OK: <reason> *) justification" >&2
+  echo "    (b) Inline (* SPAWN-UNBOUNDED-OK: <reason> *) justification" >&2
   echo >&2
   echo "  After auditing, append the path:line entry to:" >&2
   echo "    scripts/lint-spawn-bounded.allowlist" >&2

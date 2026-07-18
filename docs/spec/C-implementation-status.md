@@ -152,7 +152,9 @@ External memory projection은 제거됨. Hebbian Learning(synapse model)은 reti
 ### 13-OAS Integration (100% IMPL)
 
 단방향 경계(MASC→OAS) 14개 모듈에서 완벽 준수.
-Oas_worker, Runtime config, Verifier, Event bus(13 types), Context compaction(4 strategies) 전부 운용.
+Oas_worker, Runtime config, Event bus(13 types), Context compaction(4 strategies)를
+운용한다. 별도 Verifier bridge와 action-verifier prompt는 consumer가 없어 제거됐고,
+도메인별 structured judgment가 각 호출 경계를 소유한다.
 
 ### 14-Configuration (100% IMPL)
 

@@ -816,7 +816,6 @@ lib/verification.ml:185
 lib/verification.ml:268
 lib/verification.ml:274
 lib/verification.ml:279
-lib/verifier_core.ml:42
 lib/voice/voice_bridge.ml:294
 lib/voice/voice_bridge.ml:784
 lib/voice/voice_config.ml:123

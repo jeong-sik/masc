@@ -122,7 +122,6 @@ let type_string_of_schema_property prop =
   | _ -> None
 
 let params_of_json_schema schema =
-  let __t0 = Mtime_clock.now () in
   (* [required] is conceptually a set (membership semantics, no ordering
      or duplicates) — materialise as Hashtbl so the per-property check
      below is O(1) instead of O(R) per property.  Per-call savings scale
@@ -145,30 +144,24 @@ let params_of_json_schema schema =
         tbl
     | _ -> Hashtbl.create 0
   in
-  let result =
-    match Json_util.get_object schema "properties" with
-    | Some (`Assoc pairs) ->
-        List.map
-          (fun (name, prop) ->
-            let param_type =
-              prop
-              |> type_string_of_schema_property
-              |> Option.value ~default:"string"
-              |> param_type_of_string
-            in
-            let description =
-              Json_util.get_string prop "description"
-              |> Option.value ~default:""
-            in
-            let required = Hashtbl.mem required_set name in
-            { Agent_sdk.Types.name = name; description; param_type; required })
-          pairs
-    | _ -> []
-  in
-  Otel_metric_hotpath.observe
-    ~metric:Otel_metric_hotpath.metric_oas_params_of_schema_sec
-    ~start:__t0;
-  result
+  match Json_util.get_object schema "properties" with
+  | Some (`Assoc pairs) ->
+      List.map
+        (fun (name, prop) ->
+          let param_type =
+            prop
+            |> type_string_of_schema_property
+            |> Option.value ~default:"string"
+            |> param_type_of_string
+          in
+          let description =
+            Json_util.get_string prop "description"
+            |> Option.value ~default:""
+          in
+          let required = Hashtbl.mem required_set name in
+          { Agent_sdk.Types.name = name; description; param_type; required })
+        pairs
+  | _ -> []
 
 (** {1 OAS Tool.t Creation}
 

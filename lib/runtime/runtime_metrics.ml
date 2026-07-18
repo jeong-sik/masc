@@ -11,17 +11,16 @@
     dashboards / alert rules query them by name), so renaming the module does
     not rename the series. *)
 
-let metric_provider_cooldown = "masc_runtime_provider_cooldown_total"
 let metric_runtime_metrics_eviction = "masc_runtime_metrics_eviction_total"
 let metric_runtime_audit_failure = "masc_runtime_audit_failure_total"
 
-let on_provider_cooldown ~provider ~reason =
-  Otel_metric_store_core.inc_counter
-    metric_provider_cooldown
-    ~labels:[("provider", provider); ("reason", reason)]
-    ()
+let on_runtime_metrics_eviction () =
+  Otel_metric_store_core.inc_counter metric_runtime_metrics_eviction ()
 ;;
 
-let on_runtime_metrics_eviction () = ()
-
-let on_runtime_audit_failure ~stage:_ = ()
+let on_runtime_audit_failure ~stage =
+  Otel_metric_store_core.inc_counter
+    metric_runtime_audit_failure
+    ~labels:[("stage", stage)]
+    ()
+;;

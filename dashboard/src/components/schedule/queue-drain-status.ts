@@ -30,8 +30,7 @@ export type QueueDrainState =
   | 'drained' // left the queue AND the keeper reacted — healthy completion
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
-  | 'evidence_invalid' // the exact occurrence row is quarantined
-  | 'indeterminate' // receipt / stimulus / ledger completeness cannot be correlated
+  | 'indeterminate' // receipt / stimulus identity cannot be correlated
 
 export interface QueueDrainStatus {
   readonly state: QueueDrainState
@@ -73,11 +72,6 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     tone: 'warn',
     title: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가',
   },
-  evidence_invalid: {
-    label: '증거 격리',
-    tone: 'warn',
-    title: '해당 occurrence의 reaction ledger 행이 격리되어 정확한 드레인 판정 불가',
-  },
   indeterminate: {
     label: '확인 불가',
     tone: 'neutral',
@@ -103,8 +97,7 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
       if (reaction != null && REACTED.has(reaction)) return 'drained'
       if (reaction === 'not_found' || reaction === 'matched_stimulus') return 'missed'
       if (reaction === 'read_error') return 'read_error'
-      if (reaction === 'quarantined') return 'evidence_invalid'
-      // quarantine / missing identity / unrecognized / absent:
+      // Missing identity / unrecognized receipt / absent evidence:
       // exact negative evidence is unavailable, so this can never be a miss.
       return 'indeterminate'
     }
@@ -133,7 +126,6 @@ const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>(
   'inflight',
   'missed',
   'read_error',
-  'evidence_invalid',
 ])
 
 export function isCalendarVisible(status: QueueDrainStatus): boolean {

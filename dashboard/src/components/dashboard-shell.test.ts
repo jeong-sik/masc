@@ -681,43 +681,6 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).not.toContain('FD pressure')
   })
 
-  it('surfaces quarantined reaction ledger rows even when pending backlog is clear', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 2, configured_keepers: 2 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: null,
-          paused_keepers: null,
-          keeper_fleet_no_fibers: null,
-          keeper_fleet_safety: null,
-          keeper_reaction_ledger: {
-            status: 'ok',
-            operator_action_required: false,
-            cursor_ack_count: 4,
-            cursor_swept_stimulus_count: 3,
-            quarantined_row_count: 1,
-            pending_stimulus_count: 0,
-            read_error_count: 0,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'reaction-ledger')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Reaction ledger quarantined 1',
-      tone: 'warn',
-    }))
-    expect(chip?.detail).toContain('cursor_swept=3')
-    expect(chip?.detail).toContain('quarantined=1')
-  })
-
   it('warns on real reaction ledger pending backlog', () => {
     const chips = dashboardHealthChips({
       connected: true,
@@ -736,7 +699,6 @@ describe('dashboardHealthChips', () => {
             operator_action_required: true,
             cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
-            quarantined_row_count: 1,
             pending_stimulus_count: 2,
             read_error_count: 0,
           },
@@ -842,7 +804,6 @@ describe('dashboardHealthChips', () => {
             status: 'degraded',
             pending_stimulus_count: 2,
             cursor_swept_stimulus_count: 0,
-            quarantined_row_count: 0,
             read_error_count: 0,
             cursor_ack_count: 5,
             operator_action_required: false,

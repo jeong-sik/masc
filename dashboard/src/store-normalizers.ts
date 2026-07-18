@@ -820,7 +820,6 @@ function normalizeDashboardKeeperReactionLedgerHealth(
   const reactionCount = asNumber(raw.reaction_count)
   const turnStartedCount = asNumber(raw.turn_started_count)
   const cursorAckCount = asNumber(raw.cursor_ack_count)
-  const quarantinedRowCount = asNumber(raw.quarantined_row_count)
   const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
   const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
   const readErrorCount = asNumber(raw.read_error_count)
@@ -836,7 +835,6 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     && reactionCount == null
     && turnStartedCount == null
     && cursorAckCount == null
-    && quarantinedRowCount == null
     && cursorSweptStimulusCount == null
     && pendingStimulusCount == null
     && readErrorCount == null
@@ -853,7 +851,6 @@ function normalizeDashboardKeeperReactionLedgerHealth(
     reaction_count: reactionCount ?? null,
     turn_started_count: turnStartedCount ?? null,
     cursor_ack_count: cursorAckCount ?? null,
-    quarantined_row_count: quarantinedRowCount ?? null,
     cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
     pending_stimulus_count: pendingStimulusCount ?? null,
     read_error_count: readErrorCount ?? null,

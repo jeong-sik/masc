@@ -355,25 +355,22 @@ function reactionLedgerHealthChip(
   if (!ledger) return null
   const pending = ledgerCount(ledger.pending_stimulus_count)
   const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
-  const quarantined = ledgerCount(ledger.quarantined_row_count)
   const readErrors = ledgerCount(ledger.read_error_count)
   const cursorAck = ledgerCount(ledger.cursor_ack_count)
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
-  if (!requiresAction && pending === 0 && quarantined === 0 && readErrors === 0 && cursorSwept === 0 && status !== 'degraded') {
+  if (!requiresAction && pending === 0 && readErrors === 0 && cursorSwept === 0 && status !== 'degraded') {
     return null
   }
   const tone: DashboardHealthChipTone = readErrors > 0
     ? 'bad'
-    : requiresAction || pending > 0 || quarantined > 0 || status === 'degraded'
+    : requiresAction || pending > 0 || status === 'degraded'
       ? 'warn'
       : 'ok'
   const label = pending > 0
     ? `Reaction ledger pending ${pending}`
-    : quarantined > 0
-      ? `Reaction ledger quarantined ${quarantined}`
-      : cursorSwept > 0
-        ? `Reaction ledger swept ${cursorSwept}`
+    : cursorSwept > 0
+      ? `Reaction ledger swept ${cursorSwept}`
       : `Reaction ledger ${status}`
   return {
     key: 'reaction-ledger',
@@ -382,7 +379,6 @@ function reactionLedgerHealthChip(
       `status=${status}`,
       `pending=${pending}`,
       `cursor_swept=${cursorSwept}`,
-      `quarantined=${quarantined}`,
       `cursor_ack=${cursorAck}`,
       `read_errors=${readErrors}`,
     ].join(', '),

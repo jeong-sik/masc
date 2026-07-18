@@ -497,7 +497,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         reaction_count: 4,
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
-        quarantined_row_count: 1,
         pending_stimulus_count: 0,
         read_error_count: 0,
         pending_by_keeper: [],
@@ -548,7 +547,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         status: 'ok',
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
-        quarantined_row_count: 1,
         pending_stimulus_count: 0,
         read_error_count: 0,
       },
@@ -562,7 +560,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         operator_action_required: true,
         pending_stimulus_count: 2,
         cursor_swept_stimulus_count: 5,
-        quarantined_row_count: 1,
         pending_by_keeper: [{
           keeper_name: 'keeper-a',
           pending_stimulus_count: 2,
@@ -578,7 +575,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         operator_action_required: true,
         pending_stimulus_count: 2,
         cursor_swept_stimulus_count: 5,
-        quarantined_row_count: 1,
         pending_by_keeper: [{
           keeper_name: 'keeper-a',
           pending_stimulus_count: 2,

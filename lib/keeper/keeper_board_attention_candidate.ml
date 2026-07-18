@@ -9,6 +9,7 @@ type retryable_failure_kind =
   | Prompt_contract_unavailable
   | Provider_unavailable
   | Response_contract_unavailable
+  | Durable_candidate_storage_unavailable
   | Partition_membership_conflict
   | Durable_delivery_unavailable
 
@@ -77,6 +78,7 @@ let retryable_failure_kind_to_string = function
   | Prompt_contract_unavailable -> "prompt_contract_unavailable"
   | Provider_unavailable -> "provider_unavailable"
   | Response_contract_unavailable -> "response_contract_unavailable"
+  | Durable_candidate_storage_unavailable -> "durable_candidate_storage_unavailable"
   | Partition_membership_conflict -> "partition_membership_conflict"
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
 ;;
@@ -86,6 +88,8 @@ let retryable_failure_kind_of_string = function
   | "prompt_contract_unavailable" -> Some Prompt_contract_unavailable
   | "provider_unavailable" -> Some Provider_unavailable
   | "response_contract_unavailable" -> Some Response_contract_unavailable
+  | "durable_candidate_storage_unavailable" ->
+    Some Durable_candidate_storage_unavailable
   | "partition_membership_conflict" -> Some Partition_membership_conflict
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
   | _ -> None

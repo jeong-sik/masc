@@ -85,14 +85,16 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val load : base_path:string -> keeper_name:string -> (t list, string) result
 
 val ensure_roots :
-  now:float ->
   base_path:string ->
   keeper_name:string ->
   Candidate.candidate list ->
   (t list, string) result
 (** Persist one singleton root for each unassigned Pending candidate.
-    Candidate order is [(recorded_at, candidate_id)]. Existing live leaf
-    membership is validated as a one-to-one assignment. *)
+    Root creation time and claim order come from the exact candidate
+    [(recorded_at, candidate_id)] identity, not worker observation time.
+    Existing live leaf membership is validated as a one-to-one assignment;
+    an exact historical root is idempotent even when a concurrently-settled
+    candidate snapshot is stale. *)
 
 val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
@@ -167,9 +169,10 @@ val empty_fleet_summary_detail_fields : (string * Yojson.Safe.t) list
 val fleet_summary_fields : fleet_summary -> (string * Yojson.Safe.t) list
 val fleet_summary_to_yojson : fleet_summary -> Yojson.Safe.t
 val fleet_summary_json : base_path:string -> Yojson.Safe.t
-(** Exact on-disk partition state for operators. [Blocked], [Deferred], and
-    ledger read failures require operator action and make the component
-    degraded. No process-local worker state is inferred here. *)
+(** Exact on-disk partition state for operators. [Blocked], [Deferred],
+    [Completed] delivery obligations, and ledger read failures require
+    operator action and make the component degraded. No process-local worker
+    state is inferred here. *)
 
 module For_testing : sig
   val path : base_path:string -> keeper_name:string -> string

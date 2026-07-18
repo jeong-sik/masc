@@ -11,6 +11,7 @@ type retryable_failure_kind =
   | Prompt_contract_unavailable
   | Provider_unavailable
   | Response_contract_unavailable
+  | Durable_candidate_storage_unavailable
   | Partition_membership_conflict
   | Durable_delivery_unavailable
 

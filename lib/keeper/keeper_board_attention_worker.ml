@@ -172,16 +172,22 @@ let wake_owner ~base_path keeper_name =
      | Keeper_registry.Signaled -> "signaled"
      | Keeper_registry.Deferred_unregistered -> "deferred_unregistered"
      | Keeper_registry.Deferred_not_running _ -> "deferred_not_running"
-     | Keeper_registry.Deferred_lifecycle _ -> "deferred_lifecycle")
+     | Keeper_registry.Deferred_lifecycle _ -> "deferred_lifecycle");
+  outcome
 ;;
 
 let partition_failure kind detail : Candidate.retryable_failure =
   { kind; detail; failed_at = Time_compat.now () }
 ;;
 
+type candidate_selection_error =
+  | Candidate_storage_unavailable of string
+  | Partition_membership_invalid of string
+
 let candidates_for_partition ~base_path (partition : Partition.t) =
   let* candidates =
     Candidate.load_candidates ~base_path ~keeper_name:partition.keeper_name
+    |> Result.map_error (fun detail -> Candidate_storage_unavailable detail)
   in
   let by_id =
     List.fold_left
@@ -196,27 +202,33 @@ let candidates_for_partition ~base_path (partition : Partition.t) =
        match Candidate.Candidate_map.find_opt candidate_id by_id with
        | None ->
          Error
-           (Printf.sprintf
-              "partition %s candidate %s is absent from the candidate ledger"
-              partition.partition_id
-              candidate_id)
+           (Partition_membership_invalid
+              (Printf.sprintf
+                 "partition %s candidate %s is absent from the candidate ledger"
+                 partition.partition_id
+                 candidate_id))
        | Some candidate ->
          (match candidate.status with
           | Candidate.Judged _ | Candidate.Consumed _ ->
             Error
-              (Printf.sprintf
-                 "partition %s candidate %s is no longer Pending"
-                 partition.partition_id
-                 candidate_id)
+              (Partition_membership_invalid
+                 (Printf.sprintf
+                    "partition %s candidate %s is no longer Pending"
+                    partition.partition_id
+                    candidate_id))
           | Candidate.Pending _ ->
-            let* context_key = Candidate.keeper_context_key candidate in
+            let* context_key =
+              Candidate.keeper_context_key candidate
+              |> Result.map_error (fun detail -> Partition_membership_invalid detail)
+            in
             if not (String.equal context_key partition.context_key)
             then
               Error
-                (Printf.sprintf
-                   "partition %s candidate %s context changed"
-                   partition.partition_id
-                   candidate_id)
+                (Partition_membership_invalid
+                   (Printf.sprintf
+                      "partition %s candidate %s context changed"
+                      partition.partition_id
+                      candidate_id))
             else Ok (candidate :: selected)))
     (Ok [])
     partition.candidate_ids
@@ -290,7 +302,14 @@ let process_claimed ~base_path ~worker_epoch ~judge partition =
     run_storage ~label:"board-attention-load-partition-candidates" (fun () ->
       candidates_for_partition ~base_path partition)
   with
-  | Error detail ->
+  | Error (Candidate_storage_unavailable detail) ->
+    run_storage ~label:"board-attention-persist-storage-failure" (fun () ->
+      persist_failure
+        ~base_path
+        ~worker_epoch
+        partition
+        (partition_failure Candidate.Durable_candidate_storage_unavailable detail))
+  | Error (Partition_membership_invalid detail) ->
     run_storage ~label:"board-attention-persist-membership-failure" (fun () ->
       persist_failure
         ~base_path
@@ -386,11 +405,7 @@ let rec drain_keeper instance keeper_name =
     run_storage ~label:"board-attention-prepare-partition-claim" (fun () ->
       let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
       let* (_ : Partition.t list) =
-        Partition.ensure_roots
-          ~now:(Time_compat.now ())
-          ~base_path
-          ~keeper_name
-          candidates
+        Partition.ensure_roots ~base_path ~keeper_name candidates
       in
       Partition.claim_next
         ~now:(Time_compat.now ())
@@ -404,7 +419,7 @@ let rec drain_keeper instance keeper_name =
     let* transition = process_claimed_with_recovery instance partition in
     (match transition with
      | Partition.Partition_completed _ ->
-       wake_owner ~base_path keeper_name;
+       ignore (wake_owner ~base_path keeper_name : Keeper_registry.wakeup_outcome);
        Eio.Fiber.yield ();
        drain_keeper instance keeper_name
      | Partition.Partition_blocked _ ->
@@ -427,48 +442,58 @@ let record_lane_failure instance keeper_name detail =
     instance.lane_failures <- Key_map.add keeper_name detail instance.lane_failures)
 ;;
 
+let replay_completed_owner_wake instance keeper_name =
+  let* completed =
+    run_storage ~label:"board-attention-load-completed-for-wake" (fun () ->
+      Partition.completed ~base_path:instance.base_path ~keeper_name)
+  in
+  match completed with
+  | [] -> Ok ()
+  | _ :: _ ->
+    ignore
+      (wake_owner ~base_path:instance.base_path keeper_name
+        : Keeper_registry.wakeup_outcome);
+    Ok ()
+;;
+
+let run_lane_work instance keeper_name signal =
+  let* () =
+    match signal with
+    | Candidate_recorded -> Ok ()
+    | Startup_recovery ->
+      let* recovered =
+        run_storage ~label:"board-attention-recover-process-start" (fun () ->
+          Partition.recover_for_process_start
+            ~base_path:instance.base_path
+            ~keeper_name)
+      in
+      if recovered > 0
+      then
+        Log.Keeper.info
+          "Board attention partition recovery keeper=%s recovered=%d"
+          keeper_name
+          recovered;
+      Ok ()
+  in
+  let* () = replay_completed_owner_wake instance keeper_name in
+  drain_keeper instance keeper_name
+;;
+
 let run_lane instance keeper_name signal =
   try
     Eio.Switch.run (fun lane_sw ->
       Eio.Switch.on_release lane_sw (fun () -> finish_lane instance keeper_name);
-      match signal with
-      | Candidate_recorded ->
-        (match drain_keeper instance keeper_name with
-         | Ok () -> ()
-         | Error detail ->
-           record_lane_failure instance keeper_name detail;
-           Log.Keeper.error
-             "Board attention partition lane failed keeper=%s: %s"
-             keeper_name
-             detail)
-      | Startup_recovery ->
-        (match
-           run_storage ~label:"board-attention-recover-process-start" (fun () ->
-             Partition.recover_for_process_start
-               ~base_path:instance.base_path
-               ~keeper_name)
-         with
+      match run_lane_work instance keeper_name signal with
+      | Ok () -> ()
       | Error detail ->
         record_lane_failure instance keeper_name detail;
         Log.Keeper.error
-          "Board attention partition recovery failed keeper=%s: %s"
+          "Board attention partition lane failed keeper=%s signal=%s: %s"
           keeper_name
-          detail
-      | Ok recovered ->
-        if recovered > 0
-        then
-          Log.Keeper.info
-            "Board attention partition recovery keeper=%s recovered=%d"
-            keeper_name
-            recovered;
-        (match drain_keeper instance keeper_name with
-         | Ok () -> ()
-         | Error detail ->
-           record_lane_failure instance keeper_name detail;
-           Log.Keeper.error
-             "Board attention partition lane failed keeper=%s: %s"
-             keeper_name
-             detail)))
+          (match signal with
+           | Candidate_recorded -> "candidate_recorded"
+           | Startup_recovery -> "startup_recovery")
+          detail)
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (match Eio.Switch.get_error instance.sw with
@@ -587,6 +612,16 @@ let start ~sw ~base_path () =
 
 let drain_completed_on_owner_lane ~base_path ~keeper_name =
   let* resumed = Candidate.resume_judged_on_owner_lane ~base_path ~keeper_name in
+  let* () =
+    if resumed.remaining > 0
+    then
+      Error
+        (Printf.sprintf
+           "board attention durable delivery incomplete keeper=%s remaining=%d source=judged_recovery"
+           keeper_name
+           resumed.remaining)
+    else Ok ()
+  in
   let* completed = Partition.completed ~base_path ~keeper_name in
   match completed with
   | [] -> Ok resumed
@@ -614,7 +649,13 @@ let drain_completed_on_owner_lane ~base_path ~keeper_name =
     in
     let* () =
       if applied.remaining > 0
-      then Ok ()
+      then
+        Error
+          (Printf.sprintf
+             "board attention durable delivery incomplete keeper=%s remaining=%d partitions=[%s]"
+             keeper_name
+             applied.remaining
+             (String.concat "," partition_ids))
       else
         let* (_ : Partition.t list) =
           Partition.settle_many
@@ -658,6 +699,7 @@ let health_projection_json
       ~candidate_pending_count
       ~candidate_judged_count
       ~candidate_consumed_count
+      ~candidate_delivery_failure_count
       ~candidate_read_errors
       ~durable_detail_fields
       ~component_timed_out
@@ -686,6 +728,7 @@ let health_projection_json
      ; "candidate_pending_count", `Int candidate_pending_count
      ; "candidate_judged_count", `Int candidate_judged_count
      ; "candidate_consumed_count", `Int candidate_consumed_count
+     ; "candidate_delivery_failure_count", `Int candidate_delivery_failure_count
      ; "candidate_ledger_read_error_count", `Int (List.length candidate_read_errors)
      ; "candidate_ledger_read_errors", `List (List.map keeper_error_json candidate_read_errors)
      ]
@@ -708,6 +751,7 @@ let placeholder_health_json ~status ~component_timed_out =
     ~candidate_pending_count:0
     ~candidate_judged_count:0
     ~candidate_consumed_count:0
+    ~candidate_delivery_failure_count:0
     ~candidate_read_errors:[]
     ~durable_detail_fields:Partition.empty_fleet_summary_detail_fields
     ~component_timed_out:(Some component_timed_out)
@@ -723,24 +767,38 @@ let health_json ~base_path =
   let ( candidate_pending_count
       , candidate_judged_count
       , candidate_consumed_count
+      , candidate_delivery_failure_count
       , candidate_read_errors ) =
     List.fold_left
-      (fun (pending, judged, consumed, errors) keeper_name ->
+      (fun (pending, judged, consumed, delivery_failures, errors) keeper_name ->
          match Candidate.load_candidates ~base_path ~keeper_name with
-         | Error detail -> pending, judged, consumed, (keeper_name, detail) :: errors
+         | Error detail ->
+           pending, judged, consumed, delivery_failures, (keeper_name, detail) :: errors
          | Ok candidates ->
            List.fold_left
-             (fun (pending, judged, consumed, errors) candidate ->
+             (fun (pending, judged, consumed, delivery_failures, errors) candidate ->
+                let delivery_failures =
+                  match candidate.Candidate.status with
+                  | Candidate.Pending { last_failure = Some failure }
+                  | Candidate.Judged { last_failure = Some failure; _ }
+                    when failure.kind = Candidate.Durable_delivery_unavailable ->
+                    delivery_failures + 1
+                  | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ ->
+                    delivery_failures
+                in
                 match candidate.Candidate.status with
-                | Candidate.Pending _ -> pending + 1, judged, consumed, errors
-                | Candidate.Judged _ -> pending, judged + 1, consumed, errors
-                | Candidate.Consumed _ -> pending, judged, consumed + 1, errors)
-             (pending, judged, consumed, errors)
+                | Candidate.Pending _ ->
+                  pending + 1, judged, consumed, delivery_failures, errors
+                | Candidate.Judged _ ->
+                  pending, judged + 1, consumed, delivery_failures, errors
+                | Candidate.Consumed _ ->
+                  pending, judged, consumed + 1, delivery_failures, errors)
+             (pending, judged, consumed, delivery_failures, errors)
              candidates)
-      (0, 0, 0, [])
+      (0, 0, 0, 0, [])
       candidate_keeper_names
-    |> fun (pending, judged, consumed, errors) ->
-    pending, judged, consumed, List.rev errors
+    |> fun (pending, judged, consumed, delivery_failures, errors) ->
+    pending, judged, consumed, delivery_failures, List.rev errors
   in
   let worker_missing =
     (Partition.pending_candidate_count durable > 0 || candidate_pending_count > 0)
@@ -752,6 +810,9 @@ let health_json ~base_path =
     @ (if lane_failure_count > 0 then [ "lane_failures" ] else [])
     @ (if discovery.read_errors <> [] then [ "candidate_ledger_discovery_errors" ] else [])
     @ (if candidate_read_errors <> [] then [ "candidate_ledger_read_errors" ] else [])
+    @ (if candidate_delivery_failure_count > 0
+       then [ "candidate_delivery_failures" ]
+       else [])
   in
   let operator_action_required =
     Partition.operator_action_required durable
@@ -759,6 +820,7 @@ let health_json ~base_path =
     || lane_failure_count > 0
     || discovery.read_errors <> []
     || candidate_read_errors <> []
+    || candidate_delivery_failure_count > 0
   in
   health_projection_json
     ~status:
@@ -773,6 +835,7 @@ let health_json ~base_path =
     ~candidate_pending_count
     ~candidate_judged_count
     ~candidate_consumed_count
+    ~candidate_delivery_failure_count
     ~candidate_read_errors
     ~durable_detail_fields:(Partition.fleet_summary_detail_fields durable)
     ~component_timed_out:None

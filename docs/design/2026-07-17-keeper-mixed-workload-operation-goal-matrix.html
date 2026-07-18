@@ -106,21 +106,21 @@
   <div class="eyebrow">MASC 1.0 / Executable strategy</div>
   <h1>10 Keeper Mixed-Workload<br>Operation Goal Matrix</h1>
   <p class="lede">10개 Keeper가 Discord·Slack·Dashboard·Voice에서 동시에 대화하고, 서로 협업하며, 코드 작성·정보 수집·이미지 생성·장기 작업·메모리 기록·컴팩션을 수행하는 상황을 대상으로 한다. 목표는 평균 처리량이 아니라 <strong>직접 요청의 반응성, 영속 복구, lane 공정성, 자원 상한, 감사 가능한 상태 전이</strong>를 동시에 만족하는 것이다.</p>
-  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 19:52 KST · last live runtime commit 3be51c2160 · base draft #25092 · stacked partition draft #25130</p>
+  <p class="stamp">Failure baseline: 2026-07-17 16:28 KST · latest observation: 2026-07-18 20:13 KST · live runtime commit 174f62c929 · base draft #25092 · stacked partition draft #25130</p>
 
   <div class="banner">
-    <strong>현재 판정: canary outage, 고객 제품은 No-Go.</strong> 2026-07-18 19:46 KST의 마지막 fresh full snapshot은 target 자체가 6으로 축소된 상태에서 6 executable/effective, 3 running, 3 recovering을 보고했다. durable event는 pending 608 + inflight 2, oldest age 약 68.21시간이었다. 그러나 19:51 KST에는 8935 listener와 runtime process가 모두 사라졌고 supervisor와 v2 LKG도 존재하지 않아 자동 복구가 0회였다. backlog 개수 감소와 축소된 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
+    <strong>현재 판정: 제한 canary만 가능, 고객 제품은 No-Go.</strong> 19:51 KST의 runtime outage 뒤 19:54 KST에 다른 직접 기동 runtime이 올라와 20:13 KST 현재 listener는 다시 1이다. 그러나 supervisor 소유가 아니고 v2 LKG도 생성되지 않았다. fresh full snapshot은 target 자체가 6으로 축소된 상태에서 6 executable/effective, 4 running, 2 recovering을 보고하며 active task owner 2명(executor, taskmaster)은 executable fiber가 없어 fleet가 degraded다. durable event는 total 613(pending/inflight 순간값 610/3 또는 611/2), oldest age 약 68.69시간이다. 포트 재등장과 축소 target 충족은 “10 Keeper에게 맡긴 작업이 예측 가능한 시간 안에 끝난다”는 고객 계약의 증명이 아니다.
   </div>
   <p class="small muted">Runtime adoption blocker: <a href="https://github.com/jeong-sik/masc/issues/25190">#25190</a>. #25160의 복구 코드는 병합됐지만 live launch path가 직접 executable이어서 AFK 복구 권한이 없었다.</p>
 
   <section>
     <h2>1. Live baseline</h2>
     <div class="cards">
-      <div class="card bad"><div class="label">Current listener</div><div class="value">0</div><div>19:51 KST connection refused; supervisor/LKG 없음</div></div>
-      <div class="card bad"><div class="label">Last executable / effective</div><div class="value">6 / 6 · target 6</div><div>19:46 snapshot: 3 running, 3 recovering; release target 10에는 미달</div></div>
+      <div class="card warn"><div class="label">Current listener</div><div class="value">1</div><div>직접 기동 PID; supervisor/LKG 없음, AFK 복구 미증명</div></div>
+      <div class="card bad"><div class="label">Executable / effective</div><div class="value">6 / 6 · target 6</div><div>20:13 snapshot: 4 running, 2 recovering; release target 10에는 미달</div></div>
       <div class="card warn"><div class="label">Event queue read errors</div><div class="value">16 → 0</div><div>16/16 v3 변환 완료; backlog settlement는 별개</div></div>
-      <div class="card bad"><div class="label">Durable event queue</div><div class="value">608 + 2</div><div>pending + inflight, oldest 약 68.21시간, read errors 0</div></div>
-      <div class="card warn"><div class="label">Queue delta vs 13:22</div><div class="value">total -186</div><div>796 → 610, 그러나 oldest는 약 61.83h → 68.21h</div></div>
+      <div class="card bad"><div class="label">Durable event queue</div><div class="value">total 613</div><div>610/3 또는 611/2 pending/inflight, oldest 약 68.69시간, read errors 0</div></div>
+      <div class="card warn"><div class="label">Queue delta vs 13:22</div><div class="value">total -183</div><div>796 → 613, 그러나 oldest는 약 61.83h → 68.69h</div></div>
       <div class="card warn"><div class="label">Attention candidates</div><div class="value">3,644</div><div>520개 고유 signal이 평균 7.01배 증폭</div></div>
       <div class="card warn"><div class="label">Pending attention</div><div class="value">890</div><div>live runtime에는 partition ledger 0; stacked code는 아직 미배포</div></div>
       <div class="card warn"><div class="label">Candidate ledger</div><div class="value">39.71 MB</div><div>3,644 durable rows; candidate JSON 전체 실측</div></div>
@@ -142,8 +142,8 @@
       <table>
         <thead><tr><th>제품 축</th><th>Weight</th><th>현재 관측</th><th>#25073 단독 효과</th><th>1.0 정량 gate</th></tr></thead>
         <tbody>
-          <tr><td>실행 가능성</td><td>25%</td><td>현재 listener 0; 마지막 snapshot도 축소된 target 6뿐이며 release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
-          <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event pending 608, oldest 68.21시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
+          <tr><td>실행 가능성</td><td>25%</td><td>listener는 재등장했지만 unsupervised이며 축소 target 6뿐이다. release target 10과 8시간 증거가 없음 → 0점</td><td>queue schema 장애와 무관</td><td>목표 10 Keeper 10/10 executable, 8시간 동안 fleet reaction capacity = 10</td></tr>
+          <tr><td>End-to-end useful completion</td><td>25%</td><td>durable event total 613, oldest 68.69시간, mixed-workload terminal SLO 표본 없음 → 0점</td><td>attention 판정 비용만 줄이며 고객 결과 완료를 증명하지 않음</td><td>명시적 거절 제외 요청의 terminal receipt ≥ 99%, duplicate terminal effect = 0</td></tr>
           <tr><td>직접 요청 반응성</td><td>15%</td><td>owner lane이 ambient provider call에 30–50초 점유될 수 있고 direct-input p95 미측정 → 0점</td><td>55/57 calls 연속 점유를 1 call/admission으로 제한; call 자체의 점유는 남음</td><td>enqueue→turn-start p95 ≤ 2s, 접수 응답 p95 ≤ 5s</td></tr>
           <tr><td>채널·세션 연속성</td><td>15%</td><td>transport/presence 생존만 확인; Slack/Voice/원채널 terminal E2E 미검증 → 0점</td><td>영향 없음</td><td>Discord/Slack/Dashboard/Voice route accuracy 100%, restart replay 100%</td></tr>
           <tr><td>무유실·판정 정확성</td><td>10%</td><td>live main은 blind TTL + partial verdict 계약을 보유; follow-up 미병합 → 0점</td><td>후속 #25092에서 TTL 제거, exact ID coverage, context cohort로 개선</td><td>silent discard = 0, cross-context batch = 0, 모든 defer에 typed evidence</td></tr>
@@ -151,8 +151,8 @@
         </tbody>
       </table>
     </div>
-    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. 현재 listener도 0이므로 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
-    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 회복됐다. 그러나 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. 608개 pending과 2개 inflight를 정상 처리·격리·실패 종결하고 target을 10으로 복구하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
+    <p><strong>점수 공식:</strong> <code>Σ(weight × gate achievement)</code>. 각 gate는 통과 1 / 실패·Unknown 0으로 계산한다. 샘플이 없는 주장은 0점, HTTP 생존과 point-in-time fiber 수는 8시간 실행 가능성의 대체 지표가 아니다. listener 1이어도 supervisor·10-lane·8시간 gate가 실패/Unknown이므로 엄격한 live 제품 점수는 <strong>0.0 / 10</strong>이다. v3 fleet가 8시간 gate를 통과하고 본 follow-up의 무유실 계약까지 통과하면 최대 <strong>3.5 / 10</strong>이지만, completion·latency·channel·operator gate 없이는 그 이상을 받을 수 없다. 즉 #25073 계열만으로는 출시 점수 9.0에 도달하지 않는다.</p>
+    <p><strong>고객 유용성 결론:</strong> 개발자·운영자가 제한된 canary를 시작하고 새 요청 일부를 처리할 기반은 회복됐다. 그러나 일반 고객에게 “맡기고 떠나도 결과가 온다”고 약속할 수 있는 제품은 아니다. total 613의 durable event를 정상 처리·격리·실패 종결하고 target을 10으로 복구하는 증거 없이 채널 수나 Keeper 수를 늘리면 고객 가치는 늘지 않고 지연과 불신만 증폭된다.</p>
     <p><strong>9.0 release floor:</strong> 위 6개 축의 가중 합 ≥ 9.0이고, 동시에 실행 가능성·terminal exactly-once·silent loss 세 hard gate가 모두 통과해야 한다. 평균 점수가 높아도 이 셋 중 하나가 0이면 출시 불가다.</p>
   </section>
 
@@ -241,7 +241,7 @@
           <tr><td>Terminal state</td><td>Pending/Judged/Consumed</td><td>batch exact-ID failure evidence</td><td><code>Ready → Running → Completed → Settled</code>, 또는 <code>Deferred / Blocked</code></td><td>제거된 Split 상태는 strict parser가 거부; 자동 폐기·attempt budget 없음</td></tr>
           <tr><td>Claim recovery</td><td>candidate 재조회</td><td>Judged replay</td><td>process startup은 이전 process 종료 확정 후 모든 Running/Deferred를 Ready로 복구; live lane abort는 동일 worker epoch의 현재 Running claim만 cancellation-protected 경계에서 해제. Completed는 candidate apply 후에만 Settled</td><td>startup recovery와 same-epoch lane-abort recovery는 별도 typed authority; signal·시간·attempt는 복구 권한 아님</td></tr>
           <tr><td>Lane isolation</td><td>한 Keeper의 provider wait가 같은 owner lane을 막음</td><td>점유 횟수만 제한</td><td>Keeper별 actor; A provider가 block돼도 B가 완료</td><td>sibling progress 1/1, duplicate effect 0 fixture</td></tr>
-          <tr><td>Operator truth</td><td>partition 상태 없음</td><td>candidate failure만 파일에 존재</td><td>candidate Pending/Judged/Consumed, partition 6-state, worker registration, lane failure, read errors를 typed summary로 결합</td><td>Blocked/Deferred/read error/pending-without-worker/lane failure ⇒ degraded + operator action</td></tr>
+          <tr><td>Operator truth</td><td>partition 상태 없음</td><td>candidate failure만 파일에 존재</td><td>candidate Pending/Judged/Consumed, partition 6-state, worker registration, lane failure, read errors를 typed summary로 결합</td><td>Blocked/Deferred/Completed-delivery/read error/pending-without-worker/lane failure/candidate delivery failure ⇒ degraded + operator action</td></tr>
         </tbody>
       </table>
     </div>
@@ -257,8 +257,8 @@
                  └─ membership/delivery invariant → Blocked
                                                ▼
 Keeper owner admission: apply Completed → idempotent event enqueue → Consumed → Settled</pre>
-    <p><strong>Crash matrix:</strong> candidate commit 전 crash는 작업 미접수로 끝나고, commit 후 wake 전 crash는 startup scan이 복구한다. Running 중 process crash는 다음 worker epoch가 Ready로 회수하고, process가 살아 있는 상태의 독립 lane exception/cancellation은 동일 worker epoch의 claim만 Ready로 해제한다. 이미 Completed/Deferred/Blocked로 commit된 partition은 해제하지 않으며 다른 epoch의 claim도 침범하지 않는다. Completed 후 candidate apply 전 crash는 Completed replay, event enqueue 후 Consumed commit 전 crash는 candidate ID 기반 enqueue replay, Consumed 후 Settled 전 crash는 exact judgment replay 후 Settled로 수렴한다. 서로 다른 durable file을 하나의 atomic transaction으로 가장하지 않는다.</p>
-    <p><strong>현재 검증 경계:</strong> strict removed-state rejection, response failure no-split, exact settlement replay, owner nonblocking, sibling cancellation isolation, domain-safe wake stream, per-ledger startup recovery, cross-Keeper path collision, typed health projection을 focused target과 CI에서 검증한다. Candidate/partition JSONL parse·rewrite와 provider-free owner delivery는 systhread로 분리하되 OAS judge는 Eio lane fiber에 남긴다. 이 구현 단위 증거는 8-hour fleet와 direct-latency SLO를 대신하지 않는다.</p>
+    <p><strong>Crash matrix:</strong> candidate commit 전 crash는 작업 미접수로 끝나고, commit 후 wake 전 crash는 startup scan이 복구한다. Running 중 process crash는 다음 worker epoch가 Ready로 회수하고, process가 살아 있는 상태의 독립 lane exception/cancellation은 동일 worker epoch의 claim만 Ready로 해제한다. 이미 Completed/Deferred/Blocked로 commit된 partition은 해제하지 않으며 다른 epoch의 claim도 침범하지 않는다. Completed 후 owner wake 전 crash는 startup scan이 Completed를 다시 찾아 owner wake를 재생한다. Completed 후 candidate apply 전 crash는 Completed replay, event enqueue 후 Consumed commit 전 crash는 candidate ID 기반 enqueue replay, Consumed 후 Settled 전 crash는 exact judgment replay 후 Settled로 수렴한다. 서로 다른 durable file을 하나의 atomic transaction으로 가장하지 않는다.</p>
+    <p><strong>2026-07-18 적대적 code gate:</strong> 독립 fresh-context 리뷰가 stale Pending snapshot과 Settled root의 deterministic ID 충돌, Completed wake 유실, candidate storage I/O를 membership corruption으로 terminal block하는 오류, durable delivery 실패의 거짓-green, worker 관측시각 동률로 인한 FIFO 역전을 확인했다. 현재 patch는 exact historical root idempotency, startup Completed wake replay, typed storage Deferred, <code>recorded_at</code> claim order, remaining delivery의 Error 승격, Completed/delivery-failure health degradation으로 이를 막는다. focused test와 full CI가 통과하기 전 #25130은 merge-block 상태다.</p>
   </section>
 
   <section>
@@ -362,6 +362,7 @@ type job_state =
         <thead><tr><th>ID</th><th>Goal</th><th>Baseline</th><th>1.0 target</th><th>Metric / hard gate</th><th>Code owner</th><th>PR</th></tr></thead>
         <tbody>
           <tr><td><span class="tag p0">G0</span></td><td>v3 queue recovery</td><td>0 executable, 16 read errors</td><td>요청 시나리오 10/10 executable, read error 0</td><td><code>executable=10 ∧ schema_errors=0</code></td><td>event_queue_persistence, bootstrap</td><td>PR-0</td></tr>
+          <tr><td><span class="tag p0">G0b</span></td><td>Paused work disposition</td><td>paused 8 lane에 pending 243; owner 부재 동안 무기한 보존만 가능</td><td>운영자가 Resume/Transfer/Cancel/Source-terminal 중 하나를 receipt와 함께 결정</td><td>accepted work의 owner generation과 terminal disposition 100%, implicit TTL 0</td><td>event queue lifecycle transaction</td><td><a href="https://github.com/jeong-sik/masc/issues/25191">#25191</a></td></tr>
           <tr><td><span class="tag p0">G1</span></td><td>Direct responsiveness</td><td>ambient drain이 owner slot 장기 점유 가능</td><td>enqueue→turn-start p95 ≤ 2s</td><td>10-lane harness에서 direct latency p95</td><td>turn_admission, chat queue</td><td>PR-1</td></tr>
           <tr><td><span class="tag p0">G2</span></td><td>Owner-independent judgment</td><td>55/57 calls 한 owner turn</td><td>owner admission의 attention provider call = 0</td><td><code>owner_provider_wait = 0 ∧ sibling_progress = 1</code></td><td>partition worker, heartbeat</td><td>PR-2</td></tr>
           <tr><td><span class="tag p0">G3</span></td><td>No silent loss</td><td>missing verdict 무증거 Pending, blind TTL</td><td>silent drop 0, 모든 defer에 typed reason</td><td><code>requested_ids = terminal_ids ∪ deferred_ids</code></td><td>judgment contract</td><td>PR-1</td></tr>
@@ -385,6 +386,7 @@ type job_state =
         <li>v3 snapshot validator를 offline/live 동일 parser로 실행한다.</li>
         <li>10개 목표 Keeper가 등록되고 executable인지 확인한다.</li>
         <li>queue pending/inflight counts가 complete인지 확인한다.</li>
+        <li>paused lane의 durable work는 <a href="https://github.com/jeong-sik/masc/issues/25191">#25191</a>의 typed Resume/Transfer/Cancel/Source-terminal operation으로만 disposition한다. TTL·idle 추정·암묵 owner 변경은 금지한다.</li>
         <li>Discord/Slack ingress smoke는 Keeper turn receipt까지 확인한다.</li>
       </ol>
       <p><strong>Exit:</strong> 10/10 executable, queue read errors 0, direct receipt 10/10. 이 단계 전에는 성능 실험 금지.</p>
@@ -411,7 +413,9 @@ type job_state =
         <li>exact-context singleton root와 Deferred, Blocked, Completed/Settled FSM을 durable JSONL로 저장하며 근거 없는 multi-candidate packing과 Split 상태는 두지 않는다.</li>
         <li>Keeper별 process-owned actor로 provider wait를 owner admission과 sibling Keeper에서 격리한다.</li>
         <li>startup scan은 sanitized filename이 아니라 row의 exact Keeper identity를 읽고 identity collision을 거부한다.</li>
-        <li>full health에 candidate/partition/worker/read-error 상태를 추가한다.</li>
+        <li>Completed wake를 startup에서 재생하고 stale candidate snapshot은 exact historical root와 idempotent하게 수렴시킨다.</li>
+        <li>candidate storage unavailable과 membership corruption을 typed variant로 분리한다.</li>
+        <li>full health에 candidate/partition/worker/read-error/Completed delivery/delivery failure 상태를 추가하며 partial delivery는 성공으로 반환하지 않는다.</li>
       </ol>
       <p><strong>Correctness boundary:</strong> OAS #2667이 actual-wire overflow를 typed capacity/contract failure로 제공하기 전에는 oversized native Ollama request가 generic Provider failure로 남아 <code>Deferred</code>될 수 있다. 이를 문자열 매칭하거나 모든 provider failure split으로 우회하지 않는다. 전자는 불안정하고 후자는 장애를 2N−1 호출로 증폭한다. OAS #2667은 optimized multi-candidate packing의 blocker이며, immutable singleton scheduler의 correctness authority는 아니다.</p>
       <p><strong>Merge-sequence blocker:</strong> current worker의 whole-file transition rewrite는 backlog N에 대해 O(N²)이다. #25183의 append/index stack이 historical ledger 크기와 독립적인 transition cost, stale-writer rejection, deterministic replay를 증명하기 전에는 #25130 stack을 제품 성능 개선으로 병합하지 않는다.</p>

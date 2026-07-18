@@ -125,6 +125,23 @@ let test_status_json_ignores_legacy_sidecar_status_file () =
     check int "runtime bindings from persisted bindings" 0
       (json |> U.member "runtime_bindings_count" |> U.to_int)))
 
+let test_status_json_surfaces_binding_store_failure () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" (Some "token") (fun () ->
+    Fs_compat.save_file (Filename.concat dir "bindings.json") "{not-json";
+    let json = Discord_state.status_json () in
+    check bool "routing unavailable" false
+      (json |> U.member "available" |> U.to_bool);
+    check bool "binding store read failed" false
+      (json |> U.member "binding_store_read_ok" |> U.to_bool);
+    check bool "binding store error is explicit" true
+      (json |> U.member "binding_store_error" |> U.to_string |> String.length
+       |> fun length -> length > 0);
+    check bool "connector error includes binding failure" true
+      (json |> U.member "error" |> U.to_string |> String.length
+       |> fun length -> length > 0)))
+
 (* record_ready ordering: this test runs in the same process as the
    blank-identity assertions above, so it must come after them in the
    suite — last_ready is module-global and has no reset (production
@@ -471,6 +488,8 @@ let () =
             test_status_json_reports_in_process_gateway_status;
           test_case "ignores legacy sidecar status file" `Quick
             test_status_json_ignores_legacy_sidecar_status_file;
+          test_case "surfaces binding store failure" `Quick
+            test_status_json_surfaces_binding_store_failure;
           test_case "record_ready surfaces bot identity" `Quick
             test_record_ready_surfaces_bot_identity;
           test_case "bind persists binding and audit" `Quick

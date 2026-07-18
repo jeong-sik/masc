@@ -48,12 +48,25 @@ let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
     ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
 
-let read_bindings () = Store.read_bindings binding_store
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
 let save_bindings bindings = Store.save_bindings binding_store bindings
 let append_audit_event event = Store.append_audit_event binding_store event
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
+
+type binding_lookup_error =
+  | Binding_store_read_failed of string
+
+let pp_binding_lookup_error formatter = function
+  | Binding_store_read_failed detail ->
+    Format.fprintf formatter "Discord binding store read failed: %s" detail
+
+let binding_lookup_error_to_string error =
+  Format.asprintf "%a" pp_binding_lookup_error error
+
+let read_bindings_lookup_result () =
+  read_bindings_result ()
+  |> Result.map_error (fun detail -> Binding_store_read_failed detail)
 
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
@@ -174,17 +187,24 @@ let status_json ?(audit_limit = 10) () =
   let audit_path = binding_audit_read_path () in
   let names_path = Names.names_read_path () in
   let name_map = Names.read () in
-  let configured_bindings = read_bindings () in
+  let configured_bindings_result = read_bindings_lookup_result () in
+  let configured_bindings = Result.value ~default:[] configured_bindings_result in
+  let binding_store_error =
+    match configured_bindings_result with
+    | Ok _ -> None
+    | Error error -> Some (binding_lookup_error_to_string error)
+  in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let channel = "discord" in
   let gateway_state = Discord_gateway_client.connection_state () in
   let token_present = Option.is_some (bot_token_opt ()) in
-  let available =
+  let transport_available =
     match gateway_state with
     | Disconnected -> token_present
     | Awaiting_hello | Identifying | Resuming | Connected _
     | Reconnect_pending _ | Failed _ -> true
   in
+  let available = transport_available && Result.is_ok configured_bindings_result in
   let connected =
     match gateway_state with
     | Connected _ -> true
@@ -195,13 +215,20 @@ let status_json ?(audit_limit = 10) () =
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  let error =
+  let gateway_error =
     match gateway_state with
     | Disconnected ->
       if token_present then "" else "DISCORD_BOT_TOKEN is unset or empty"
     | Failed msg -> msg
     | Awaiting_hello | Identifying | Resuming | Connected _
     | Reconnect_pending _ -> ""
+  in
+  let error =
+    [ (if String.equal gateway_error "" then None else Some gateway_error)
+    ; binding_store_error
+    ]
+    |> List.filter_map Fun.id
+    |> String.concat "; "
   in
   `Assoc
     [
@@ -243,6 +270,9 @@ let status_json ?(audit_limit = 10) () =
       ("gate_healthy", if connected then `Bool true else `Null);
       ("gate_health_checked_at", `String (if connected then updated_at else ""));
       ("binding_source", `String "persisted");
+      ("binding_store_read_ok", `Bool (Result.is_ok configured_bindings_result));
+      ( "binding_store_error",
+        `String (Option.value ~default:"" binding_store_error) );
       ("runtime_bindings_count", `Int (List.length configured_bindings));
       (* NDT-OK: pid is process identity telemetry for operators; availability
          and connection status come from the gateway state above. *)
@@ -496,16 +526,6 @@ type keeper_binding_resolution = {
   via_parent : bool;
 }
 
-type binding_lookup_error =
-  | Binding_store_read_failed of string
-
-let pp_binding_lookup_error formatter = function
-  | Binding_store_read_failed detail ->
-    Format.fprintf formatter "Discord binding store read failed: %s" detail
-
-let binding_lookup_error_to_string error =
-  Format.asprintf "%a" pp_binding_lookup_error error
-
 let binding_for_channel bindings ~channel_id =
   List.find_map
     (fun (b : binding) ->
@@ -516,8 +536,8 @@ let resolve_keeper_for_channel_result ~channel_id =
   let normalized = String.trim channel_id in
   if String.equal normalized "" then Ok None
   else
-    match read_bindings_result () with
-    | Error detail -> Error (Binding_store_read_failed detail)
+    match read_bindings_lookup_result () with
+    | Error _ as error -> error
     | Ok candidates ->
       (match binding_for_channel candidates ~channel_id:normalized with
        | Some binding ->
@@ -561,8 +581,7 @@ let bound_channels_result ~keeper_name =
   let normalized = String.trim keeper_name in
   if String.equal normalized "" then Ok []
   else
-    read_bindings_result ()
-    |> Result.map_error (fun detail -> Binding_store_read_failed detail)
+    read_bindings_lookup_result ()
     |> Result.map (fun bindings ->
          bindings
          |> List.filter_map (fun (b : binding) ->

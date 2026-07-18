@@ -254,9 +254,6 @@
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
-  test_chronicle_types
-  test_chronicle_ingest
-  test_chronicle_validate
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -326,11 +323,6 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_cognitive_gravity
-  test_intentional_projection
-  test_chronicle_event
-  test_chronicle_librarian
-  test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
@@ -571,9 +563,6 @@
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_store
-  test_chronicle_types
-  test_chronicle_ingest
-  test_chronicle_validate
   test_keeper_repo_mapping
   test_repo_sync
   test_repo_git
@@ -647,11 +636,6 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_cognitive_gravity
-  test_intentional_projection
-  test_chronicle_event
-  test_chronicle_librarian
-  test_alignment_score
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level

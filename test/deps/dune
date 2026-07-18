@@ -78,8 +78,6 @@
   ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
   ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
   (re_export masc.dashboard_tla_specs)
-  ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
-  (re_export masc.chronicle_event)
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)

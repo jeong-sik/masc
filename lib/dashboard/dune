@@ -69,7 +69,6 @@
   masc.briefing_compactors
   masc.dashboard_eval_feed
   masc.sse_event
-  masc.chronicle_event
   masc.tool_call_quality_benchmark
   masc.telemetry_coverage_gap
   masc.telemetry_unified

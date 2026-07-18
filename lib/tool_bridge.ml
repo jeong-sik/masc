@@ -107,7 +107,9 @@ let oas_error_class_of_tool_failure_class = function
     ambiguous property types fail at this boundary instead of being guessed
     as strings or reduced to the first union member. *)
 
-let params_of_json_schema = Agent_sdk.Mcp.json_schema_to_params
+let params_of_json_schema schema =
+  Agent_sdk.Mcp.json_schema_to_params schema
+;;
 
 (** {1 OAS Tool.t Creation}
 

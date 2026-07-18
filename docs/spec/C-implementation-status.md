@@ -93,7 +93,7 @@ code_refs:
 | Unified Turn | Observe→BuildPrompt→AgentRun→ToolExec→Checkpoint | IMPL | keeper_unified_turn.ml, 31 calls |
 | Supervisor | Init→Alive→Zombie→Dead with backoff | IMPL | keeper_supervisor.ml |
 | Deliberation | LLM judgment + observable execution | IMPL | keeper deliberation runtime |
-| Verifier | Task completion LLM verification | IMPL | verifier_oas.ml, workspace_task_verification.ml |
+| Verification evidence | Task completion evidence request lifecycle | IMPL | workspace_task_verification.ml |
 | Eval Harness | Scenario→graders→score | IMPL | eval_harness.ml |
 | Anti-Fake | Test quality scoring | IMPL | anti_fake.ml |
 | Hooks | Tool observation + explicit caller guidance | IMPL | keeper_hooks_oas.ml |

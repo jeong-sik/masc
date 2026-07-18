@@ -32,9 +32,6 @@ val vision_analyze_output_schema : Yojson.Safe.t
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
-val verification_verdict_output_schema : Yojson.Safe.t
-(** JSON object the verification verdict providers must return. *)
-
 val failure_judgment_output_schema : Yojson.Safe.t
 (** Strict independent Keeper failure-judgment verdict. Decision tokens are
     owned by {!Keeper_failure_judgment_contract}. *)

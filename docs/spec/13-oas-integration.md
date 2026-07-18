@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-07-17
 code_refs:
   - lib/worker_oas.ml
-  - lib/verifier_oas.ml
   - lib/keeper/keeper_agent_error.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
@@ -15,7 +14,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | OAS Bridge |
-| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml`, `lib/runtime_inference.ml`, `lib/keeper/keeper_compact_policy.ml` |
+| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/runtime_inference.ml`, `lib/keeper/keeper_compact_policy.ml` |
 | Dependencies | 02-types-and-invariants |
 | OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
 
@@ -55,7 +54,6 @@ graph TB
   subgraph "MASC (Consumer)"
     OW[oas_worker.ml]
     WO[worker_oas.ml]
-    VO[verifier_oas.ml]
     OE[oas_events.ml]
     OSB[oas_event_bridge.ml]
     OM[oas_message.ml]
@@ -79,8 +77,6 @@ graph TB
   OW --> BU
   OW --> PR
   WO -->|"worker lifecycle"| AG
-  VO -->|"PreToolUse hook"| HK
-  VO -->|"tool filter"| GR
   OE -->|"Custom events"| EB
   OSB -->|"subscribe + relay"| EB
   OMR -->|"resolve labels"| CC2
@@ -387,39 +383,25 @@ SSOT rules:
 
 ---
 
-## 9. Verifier Integration
+## 9. Product Judgment Boundaries
 
-### 9.1 개요
-
-`verifier_oas.ml`은 configured structured-judge runtime을 호출하는 action verification adapter다.
-도구 이름이나 action text를 분류하여 검증을 생략하지 않는다.
-
-### 9.2 Verification Flow
+판단이 필요한 MASC 기능은 각 제품 경계가 입력 타입, prompt, structured output
+schema, 결과 소비 방식을 소유한다. OAS는 generic model/agent execution과 typed
+failure만 제공한다.
 
 ```
-verification_request
-  -> build_prompt
-  -> Keeper_turn_driver.run_named(runtime="structured_judge")
-  -> report_verdict typed tool output
-  -> provider-native structured JSON fallback
-  -> Pass | Warn | Fail | explicit Error
+MASC typed request
+  -> owner-specific prompt + schema
+  -> ordinary OAS execution
+  -> typed model output | explicit error
+  -> owner-specific transition, wake, or observation
 ```
 
-로컬 read-only 패턴, 고정 output-token cap, 도구 deny/allow list는 검증 권한을 갖지 않는다.
-LLM 호출 또는 structured output 해석이 실패하면 명시적 `Error`를 반환한다.
+Fusion, Keeper failure judgment, board attention, Task completion review는 서로 다른
+도메인 계약이다. 공통 문자열 verdict, hidden budget, caller registry로 이들을
+하나의 verifier policy에 합치지 않는다.
 
-### 9.3 Verdict contract
-
-| Verdict | 의미 |
-|---------|------|
-| Pass | 모델이 action을 정당하다고 판단 |
-| Warn | 모델이 우려와 함께 수용 가능하다고 판단 |
-| Fail | 모델이 action을 부정확하거나 유해하다고 판단 |
-
-호출자가 verdict를 소비하는 방법은 해당 제품 경계의 책임이다. OAS hook `Skip`이나
-worker-local execution blocker로 자동 변환하지 않는다.
-
-### 9.4 Keeper and Worker Guardrails
+### 9.1 Keeper and Worker Guardrails
 
 Keeper lane과 MASC worker adapter는 모두
 `Agent_sdk.Guardrails.permissive`를 고정 사용한다. Keeper public API는 OAS
@@ -505,7 +487,7 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 
 | Surface | Classification | Notes |
 |---------|----------------|-------|
-| `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
+| `oas_worker` / `worker_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
 | `keeper_compact_policy` / `keeper_manual_compaction` | Correct owner, incomplete durability | MASC owns configured-LLM planning and checkpoint mutation; durable owner operation, source CAS, and reinjection proof remain |
 | keeper context/checkpoint continuity path | Open | exact checkpoint identity, durable operation references, and restart reconciliation remain incomplete |
 

@@ -264,7 +264,6 @@ module KeeperExec : LOGGER
 module LocalWorker : LOGGER
 module Worker : LOGGER
 module Sse : LOGGER
-module Verifier : LOGGER
 module Planner : LOGGER
 module Compact : LOGGER
 module Harness : LOGGER

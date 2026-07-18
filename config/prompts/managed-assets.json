@@ -60,8 +60,6 @@
     "system.orchestrator.md",
     "tool_contract.task_lifecycle_rule.md",
     "tool_contract.task_lifecycle_workflow.md",
-    "verification.action_verifier.md",
-    "verification.adversarial_review.md",
     "verification.anti_rationalization.md"
   ]
 }

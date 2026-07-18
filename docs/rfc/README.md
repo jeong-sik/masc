@@ -254,7 +254,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0255 | Withdraw inferred argv path policy | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0256 | Migrate hand-rolled Mutex lock/protect/unlock to Mutex.protect | Draft | 727a060579 2026-07-16 | - |
 | 0257 | Per-Keeper memory execution lane | Draft | 7b62a87d44 2026-07-13 | - |
-| 0258 | Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing | Draft | b21b4a7aac 2026-07-14 | - |
 | 0259 | Memory OS — Volatile Claim Grounding, Retraction & Decay | Draft | 03d5feaf25 2026-07-08 | - |
 | 0260 | Withdraw MASC provider-health gate | Draft | 7b62a87d44 2026-07-13 | - |
 | 0261 | gRPC LSP failed-initialize FD/process teardown | Draft | 03d5feaf25 2026-07-08 | - |
@@ -308,7 +307,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0312 | Keeper repo mappings are advisory default scope, not access caps | Accepted | 03d5feaf25 2026-07-08 | - |
 | 0315 | Typed wake-turn context and self-directed work lane | Active | 434a7f5a76 2026-07-10 | - |
 | 0316 | Merge gating convergence: enforce_admins=true + live Branch Protection Watchdog | Draft | 03d5feaf25 2026-07-08 | - |
-| 0317 | In-process Slack connector (Socket Mode) | In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending) | d72c574d8f 2026-07-09 | - |
+| 0317 | In-process Slack connector (Socket Mode) | In progress (PR-1/PR-2 landed; PR-3 implemented; PR-4 sidecar removal pending) | c8b5216a15 2026-07-18 | - |
 | 0318 | Replace risk-tier auto approval with request-local Auto Judge | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0319 | Replace hierarchical approval modes with Keeper Gate choices | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0320 | Keeper connector-aware continuation: carry the originating channel through wa... | Draft | 7b62a87d44 2026-07-13 | - |
@@ -332,9 +331,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |
-| masc | Withdraw budget-and-slot authority from the MASC OAS bridge | Withdrawn | d5bd126498 2026-07-17 | - |
+| masc | Withdraw budget-and-slot authority from the MASC OAS bridge | Withdrawn | a56b4dc327 2026-07-18 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 03d5feaf25 2026-07-08 | - |
-| shar | Withdraw shared MASC admission and knob-binding policy | Withdrawn | d5bd126498 2026-07-17 | - |
+| shar | Withdraw shared MASC admission and knob-binding policy | Withdrawn | a56b4dc327 2026-07-18 | - |
 | type | Withdraw product-specific egress effect classification | Withdrawn | 7b62a87d44 2026-07-13 | - |
 
 ### 신규 RFC

@@ -128,26 +128,6 @@ let vision_analyze_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let verification_evidence_ref_schema =
-  let fields =
-    [ "path", string_schema
-    ; "line", nullable_integer_schema
-    ; "quote", string_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let verification_verdict_output_schema =
-  let fields =
-    [ "verdict", enum_schema Verifier_core.valid_verdict_strings
-    ; "reason", nullable_string_schema
-    ; "evidence", array_schema verification_evidence_ref_schema
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 let failure_judgment_output_schema =
   let fields =
     [ ( "decision"

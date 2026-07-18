@@ -933,7 +933,6 @@
   test_board_ttl
   test_board_explicit_writes
   test_keeper_path_check_error
-  test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
   test_metrics_store_eio
@@ -1105,7 +1104,6 @@
   test_board_ttl
   test_board_explicit_writes
   test_keeper_path_check_error
-  test_verifier_oas_bridge
   test_oas_adapters
   test_cache_eio
   test_metrics_store_eio
@@ -1551,13 +1549,6 @@
 ; test_cp_unit_descendant_ids removed (CP purge)
 
 ; test_failover_leader removed (CP purge)
-
-; RFC-0258 P1: grounded verifier verdict parsing.
-
-(test
- (name test_verifier_core_grounding)
- (modules test_verifier_core_grounding)
- (libraries masc_test_deps))
 
 ; Keeper Tool Matrix — shared case modules as a library
 
@@ -2490,13 +2481,6 @@
  (name test_keeper_global_shared_refs_atomic)
  (modules test_keeper_global_shared_refs_atomic)
  (libraries alcotest agent_sdk masc masc.compaction_trigger))
-
-; Adversarial review wake-on-fail routing (PoC).
-
-(test
- (name test_keeper_adversarial_review)
- (modules test_keeper_adversarial_review)
- (libraries masc_test_deps))
 
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
 

@@ -11,12 +11,12 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Keeper |
-| Maps to | `lib/keeper/` (72 files) |
+| Maps to | `lib/keeper/` |
 | Dependencies | 02-types-and-invariants, 13-oas-integration |
-| Modules | 67 (.ml) + 5 (.mli-only) |
-| LOC | ~17.8K |
+| Modules | `lib/keeper/` source tree is the inventory SSOT |
+| LOC | Derived from the source tree, not duplicated here |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference`, `Verifier_oas` |
+| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference` |
 
 ---
 
@@ -340,27 +340,18 @@ Profile별 종류당 보존 상한:
 
 ## 7. Evaluation and Verification
 
-### 7.1 Keeper Verifier (Generator-Verifier Loop)
+### 7.1 Task verification and product judgments
 
-**소스**: `lib/verifier_core.ml`, `lib/verifier_oas.ml` (구 `keeper_verifier.ml`은 #2589에서 제거)
+Task completion evidence is assembled by
+`lib/workspace/workspace_task_verification.ml` and persisted through the
+typed verification-request protocol. Evidence strings are observations; local
+substring classifiers do not decide completion.
 
-파이프라인: `evaluate_next_action` -> `generate_action_plan` -> `verify_action`
-
-```
-proposed_action
-  |-- Verifier_oas.verify -> Pass/Warn/Fail -> Proceed/Caution/Block
-```
-
-판정 결과:
-
-| Verdict | 의미 |
-|---------|------|
-| `Proceed` | 실행 진행 |
-| `ProceedWithCaution(reason)` | 실행하되 trajectory에 경고 기록 |
-| `Block(reason)` | 실행 거부, broadcast 알림 |
-
-Risk 판단은 goal metadata의 고정 조합으로 계산하지 않는다. 판단이 필요한
-경우 verifier LLM 경계가 구조화된 verdict를 내고, 비용/turn 정보는 관측만 한다.
+Model judgment belongs to the product operation that consumes it. Fusion,
+Keeper failure judgment, board attention, and Task completion review each own
+their prompt, structured schema, and result type. There is no generic
+Pass/Warn/Fail action-verifier gate shared across these domains. Cost, token,
+turn, and latency values remain observations.
 
 ### 7.2 Eval Harness (`lib/eval_harness.ml`)
 
@@ -591,7 +582,7 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
 | Deliberation | `lib/keeper/keeper_deliberation.ml` |
-| Verifier Core | `lib/verifier_core.ml`, `lib/verifier_oas.ml` |
+| Task verification evidence | `lib/workspace/workspace_task_verification.ml` |
 | OAS hook observations | `lib/keeper/keeper_hooks_oas.ml` |
 | Eval Harness | `lib/eval_harness.ml` |
 | Trajectory | `lib/trajectory.ml` |

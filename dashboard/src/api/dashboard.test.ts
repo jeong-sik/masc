@@ -1899,16 +1899,12 @@ describe('dashboard goals decoding', () => {
 })
 
 describe('fetchKeeperConfig', () => {
-  it('normalizes singleton string, numeric string, and boolean string fields', async () => {
+  it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
-      max_context_override: '64000',
-      limits: {
-        min_context_override_tokens: '64000',
-        max_context_override_tokens: '1000000',
-      },
+      max_context_override: 64_000,
       sandbox_profile: 'docker',
       network_mode: 'none',
       sandbox_last_error: 'sandbox docker exec failed',
@@ -1938,7 +1934,6 @@ describe('fetchKeeperConfig', () => {
         ratio_gate: '0.85',
         message_gate: '16',
         token_gate: '24000',
-        cooldown_sec: '120',
       },
       proactive: {
         enabled: 'true',
@@ -2026,10 +2021,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
     expect(result.autoboot_enabled).toBe(false)
     expect(result.max_context_override).toBe(64000)
-    expect(result.limits).toEqual({
-      min_context_override_tokens: 64000,
-      max_context_override_tokens: 1000000,
-    })
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
@@ -2053,11 +2044,51 @@ describe('fetchKeeperConfig', () => {
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
   })
 
+  it.each([
+    ['numeric string', '"64000"'],
+    ['fractional numeric string', '"3.9"'],
+    ['float', '3.9'],
+    ['zero', '0'],
+    ['negative integer', '-1'],
+    ['unsafe integer', '9007199254740992'],
+    ['out-of-range number', '1e309'],
+  ])('rejects a non-canonical max_context_override wire value: %s', async (_label, wireValue) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        `{"name":"keeper-sangsu","max_context_override":${wireValue}}`,
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+      'Invalid keeper config response: max_context_override must be a positive safe integer or null',
+    )
+  })
+
+  it('rejects a missing max_context_override wire field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"name":"keeper-sangsu"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+      'Invalid keeper config response: max_context_override must be a positive safe integer or null',
+    )
+  })
+
   it('tracks raw keeper config field presence before defaults are normalized', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          max_context_override: null,
           prompt: {
             instructions: 'raw instructions only',
           },
@@ -2085,6 +2116,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          max_context_override: null,
           field_presence: {
             schema: 'keeper.config.field_presence.v1',
             producer: 'dashboard_http_keeper_snapshot',
@@ -2124,6 +2156,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            max_context_override: null,
             metrics,
           }),
           {
@@ -2165,6 +2198,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            max_context_override: null,
             runtime: {
               runtime_blocker_class: blockerClass,
               runtime_blocker_summary: blockerClass,
@@ -2191,6 +2225,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        max_context_override: null,
         execution: {
           selected_runtime_id: 'b.two',
           selected_runtime_canonical: 'b.two',

@@ -17,14 +17,10 @@
     (issue #14624). *)
 val default_runtime_id : unit -> string
 
-(** Minimum context window (tokens) for any keeper turn. *)
-val min_keeper_context_tokens : int
-
-(** Maximum context window (tokens) accepted for [max_context_override].
-    Matches the largest published context window among supported
-    providers (Claude Opus 4.7 / Sonnet 4.6 = 1M).  #9953 SSOT — do not
-    re-hardcode [1_000_000] elsewhere. *)
-val max_keeper_context_tokens : int
+(** Validate one persisted/requested context override value. This is a
+    structural invariant only: positive integers are accepted verbatim and no
+    provider/model policy is applied here. *)
+val validate_max_context_override_value : int -> (int, string) result
 
 val default_proactive_enabled : bool
 
@@ -127,7 +123,6 @@ val resolve_compaction_policy :
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
-val normalize_compaction_cooldown_sec : int -> int
 
 (** {1 Runtime Parameters}
 
@@ -138,7 +133,6 @@ val normalize_compaction_cooldown_sec : int -> int
 val keeper_compact_ratio : unit -> float
 val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
-val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 
 (** Memory OS recall selection budget (masc#25052 P1). See the .ml for the

@@ -1,17 +1,25 @@
 ---
 rfc: "masc-oas-bridge-total-llm-dispatch-boundary"
-title: "Masc_oas_bridge as the total LLM dispatch boundary"
-status: Draft
+title: "Withdraw budget-and-slot authority from the MASC OAS bridge"
+status: Withdrawn
 created: 2026-07-17
 updated: 2026-07-17
 author: vincent
 supersedes: []
-superseded_by: null
+superseded_by: "0000"
 related: ["0159", "0206", "0338", "shared-admission-primitive-knob-binding-policy"]
 implementation_prs: []
 ---
 
-# RFC-masc-oas-bridge-total-llm-dispatch-boundary — Masc_oas_bridge as the total LLM dispatch boundary
+# RFC-masc-oas-bridge-total-llm-dispatch-boundary — Withdraw bridge admission authority
+
+> **WITHDRAWN — DO NOT IMPLEMENT.** A small typed MASC→OAS projection boundary
+> is valid; making it a mandatory `run_bounded` budget/slot authority is not.
+> MASC must not duplicate OAS provider admission, impose implicit deadlines,
+> or make one LLM lane wait behind an unrelated global/lane cap. Each caller
+> owns only its typed product operation and immutable observation; configured
+> LLM judgment and OAS own their respective semantic and provider boundaries.
+> Historical analysis below is retained only until the stacked tombstone PR.
 
 ## 0. Summary
 

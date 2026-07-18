@@ -1833,7 +1833,6 @@
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
 
-(include stanzas/test_keeper_context_bounds_ssot.inc)
 
 (include stanzas/test_keeper_context_isolation.inc)
 
@@ -2260,8 +2259,8 @@
  (libraries alcotest ast_grep)
  (deps ../lib/tool_library.ml))
 
-; Verify the shared MCP dispatch finalizer fires typed observers and applies
-; the result transformer before observers run.
+; Verify the shared MCP dispatch finalizer fires typed observers without
+; changing the handler result.
 
 (test
  (name test_tool_dispatch_emit)

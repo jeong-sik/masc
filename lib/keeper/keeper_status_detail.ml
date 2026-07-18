@@ -1,11 +1,6 @@
 (** Keeper_status_detail — single-keeper detailed status handler.
-    Split from keeper_status.ml.
+    Split from keeper_status.ml. *)
 
-    Server-side response cache: keyed on (base_path, name, updated_at, args_hash).
-    Avoids expensive JSONL parsing and checkpoint loading when keeper
-    state has not changed between consecutive status polls. *)
-
-open Tool_args
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
@@ -27,60 +22,25 @@ let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
       record_memory_recall_read_error ~site path exn_class;
       []
 
-(* ── Response cache ──────────────────────────────────── *)
+(* Status request contract. *)
 
-type cache_entry = {
-  updated_at : string;
-  args_hash : string;
-  response : Yojson.Safe.t;
-}
+type tail_order = Keeper_status_options_defaults.tail_order =
+  | Oldest_first
+  | Newest_first
 
-let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
-
-type docker_preflight_status_cache_entry = {
-  key : string;
-  observed_at : float;
-  value : Yojson.Safe.t option;
-}
-
-let docker_preflight_status_cache :
-    docker_preflight_status_cache_entry option ref =
-  ref None
-
-let docker_preflight_status_cache_mu = Eio.Mutex.create ()
-let docker_preflight_status_cache_ttl_sec = 60.0
-
-(** Mutex protecting [_cache].  [handle_keeper_status] runs from an MCP
-    tool-dispatch fiber, one per concurrent [masc_keeper_status]
-    request, and [invalidate_status_cache_{for,all}] is called from
-    keeper state-change paths on different fibers — so every access
-    path competes for the same module-level [Hashtbl.t] with no
-    serialisation.  The dangerous pair is [Hashtbl.filter_map_inplace]
-    (eviction) interleaving with [Hashtbl.find_opt] / [Hashtbl.replace]
-    from another fiber, which can segfault or return torn values: OCaml
-    [Hashtbl] is explicitly unsafe for concurrent mutate-during-read. *)
-let cache_mu = Eio.Mutex.create ()
-
-let invalidate_status_cache_for name =
-  Eio_guard.with_mutex cache_mu (fun () ->
-    Hashtbl.filter_map_inplace
-      (fun key entry ->
-        match String.rindex_opt key ':' with
-        | Some idx ->
-            let cached_name =
-              String.sub key (idx + 1) (String.length key - idx - 1)
-            in
-            if String.equal cached_name name then None else Some entry
-        | None -> Some entry)
-      _cache)
-
-let invalidate_status_cache_all () =
-  Eio_guard.with_mutex cache_mu (fun () ->
-    Hashtbl.clear _cache);
-  Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
-    docker_preflight_status_cache := None)
-
-let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
+type status_options =
+  { tail_turns : int
+  ; tail_messages : int
+  ; tail_compactions : int
+  ; tail_bytes : int
+  ; tail_order : tail_order
+  ; fast : bool
+  ; include_context : bool
+  ; include_metrics_overview : bool
+  ; include_memory_bank : bool
+  ; include_history_tail : bool
+  ; include_compaction_history : bool
+  }
 
 let normalize_status_name = String.trim
 
@@ -96,66 +56,210 @@ let status_name_lookup_candidates raw_name =
     in
     trimmed :: aliases
 
-let docker_preflight_status_cache_key ~timeout_sec =
-  String.concat "|"
-    [
-      string_of_bool (Env_config_sandbox.Preflight.enabled ());
-      Env_config_sandbox.Runtime.docker_image ();
-      Env_config_sandbox.Hardening.seccomp_profile ();
-      string_of_bool (Env_config_sandbox.Hardening.require_rootless ());
-      string_of_bool (Env_config_sandbox.Hardening.require_userns ());
-      Printf.sprintf "%.3f" timeout_sec;
-    ]
+let status_argument_fields = function
+  | `Assoc fields ->
+      let rec collect seen = function
+        | [] -> Ok (List.rev seen)
+        | (key, value) :: rest ->
+            if
+              not
+                (List.exists
+                   (String.equal key)
+                   Keeper_status_options_defaults.Argument.all)
+            then
+              Error
+                (Printf.sprintf
+                   "unknown keeper_status argument %S"
+                   key)
+            else if
+              List.exists
+                (fun (seen_key, _) -> String.equal key seen_key)
+                seen
+            then
+              Error
+                (Printf.sprintf
+                   "keeper_status argument %S must occur at most once"
+                   key)
+            else collect ((key, value) :: seen) rest
+      in
+      collect [] fields
+  | _ -> Error "keeper_status arguments must be a JSON object"
 
-let cached_docker_preflight_status_json ~timeout_sec =
-  if not (Env_config_sandbox.Preflight.enabled ()) then
-    None
-  else
-    let key = docker_preflight_status_cache_key ~timeout_sec in
-    Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
-      let now = Time_compat.now () in
-      match !docker_preflight_status_cache with
-      | Some entry
-        when String.equal entry.key key
-             && now -. entry.observed_at < docker_preflight_status_cache_ttl_sec ->
-          entry.value
-      | _ ->
-          let value = Keeper_sandbox_control.preflight_status_json ~timeout_sec in
-          docker_preflight_status_cache := Some { key; observed_at = now; value };
-          value)
+let status_argument fields key =
+  List.find_map
+    (fun (candidate, value) ->
+      if String.equal key candidate then Some value else None)
+    fields
+
+let optional_bool_argument fields key ~default =
+  match status_argument fields key with
+  | None -> Ok default
+  | Some (`Bool value) -> Ok value
+  | Some _ ->
+      Error
+        (Printf.sprintf "keeper_status argument %S must be a boolean" key)
+
+let optional_int_argument fields key ~default ~minimum ~maximum =
+  let validate value =
+    if value < minimum
+    then
+      Error
+        (Printf.sprintf
+           "keeper_status argument %S must be at least %d (received %d)"
+           key
+           minimum
+           value)
+    else if value > maximum
+    then
+      Error
+        (Printf.sprintf
+           "keeper_status argument %S must be at most %d (received %d)"
+           key
+           maximum
+           value)
+    else Ok value
+  in
+  match status_argument fields key with
+  | None -> Ok default
+  | Some (`Int value) -> validate value
+  | Some (`Intlit literal) ->
+      (match int_of_string_opt literal with
+       | Some value -> validate value
+       | None ->
+           Error
+             (Printf.sprintf
+                "keeper_status argument %S is outside the supported integer range"
+                key))
+  | Some _ ->
+      Error
+        (Printf.sprintf "keeper_status argument %S must be an integer" key)
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let effective_status_name_config ~(agent_name : string) args =
-  match normalize_status_name (get_string args "name" "") with
-  | "" -> normalize_status_name agent_name
-  | value -> value
+let effective_status_name_config ~(agent_name : string) fields =
+  match
+    status_argument fields Keeper_status_options_defaults.Argument.name
+  with
+  | None -> Ok (normalize_status_name agent_name)
+  | Some (`String raw_name) ->
+      (match normalize_status_name raw_name with
+       | "" ->
+           Error "keeper_status argument \"name\" must not be blank"
+       | value -> Ok value)
+  | Some _ ->
+      Error "keeper_status argument \"name\" must be a string"
 
-let effective_status_name (ctx : _ context) args =
-  effective_status_name_config ~agent_name:ctx.agent_name args
-
-type tail_order =
-  | Oldest_first
-  | Newest_first
+let tail_order_of_fields fields =
+  match
+    status_argument fields Keeper_status_options_defaults.Argument.tail_order
+  with
+  | None -> Ok Oldest_first
+  | Some (`String raw_value) ->
+      (match Keeper_status_options_defaults.tail_order_of_string raw_value with
+       | Some order -> Ok order
+       | None ->
+           Error
+             (Printf.sprintf
+                "invalid tail_order %S (allowed: %s)"
+                raw_value
+                (String.concat
+                   ", "
+                   Keeper_status_options_defaults.valid_tail_order_strings)))
+  | Some _ ->
+      Error "keeper_status argument \"tail_order\" must be a string"
 
 let tail_order_of_args args =
-  match String.lowercase_ascii (String.trim (get_string args "tail_order" "")) with
-  | "newest_first" | "newest" | "latest_first" | "desc" ->
-      Newest_first
-  | _ ->
-      Oldest_first
+  match status_argument_fields args with
+  | Error _ as error -> error
+  | Ok fields -> tail_order_of_fields fields
 
-let tail_order_to_string = function
-  | Oldest_first -> "oldest_first"
-  | Newest_first -> "newest_first"
+let tail_order_to_string = Keeper_status_options_defaults.tail_order_to_string
+let all_tail_orders = Keeper_status_options_defaults.all_tail_orders
+let valid_tail_order_strings = Keeper_status_options_defaults.valid_tail_order_strings
 
-(* Issue #8486: Variant SSOT for [tail_order]. Adding a constructor
-   forces [tail_order_to_string] exhaustiveness AND extends
-   [valid_tail_order_strings]; the schema in [Keeper_schema] mirrors
-   this list (cycle-avoidance: Keeper_schema -> Keeper_types ->
-   Keeper_types_profile -> Keeper_schema, same shape as #8467). *)
-let all_tail_orders = [ Oldest_first; Newest_first ]
-let valid_tail_order_strings =
-  List.map tail_order_to_string all_tail_orders
+let status_options_of_fields fields =
+  let ( let* ) = Result.bind in
+  let* fast =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.fast
+      ~default:(keeper_status_fast_default ())
+  in
+  let* tail_order = tail_order_of_fields fields in
+  let* tail_turns =
+    optional_int_argument
+      fields
+      Keeper_status_options_defaults.Argument.tail_turns
+      ~default:Keeper_status_options_defaults.tail_turns
+      ~minimum:Keeper_status_options_defaults.min_tail_turns
+      ~maximum:Keeper_status_options_defaults.max_tail_turns
+  in
+  let* tail_messages =
+    optional_int_argument
+      fields
+      Keeper_status_options_defaults.Argument.tail_messages
+      ~default:Keeper_status_options_defaults.tail_messages
+      ~minimum:Keeper_status_options_defaults.min_tail_messages
+      ~maximum:Keeper_status_options_defaults.max_tail_messages
+  in
+  let* tail_compactions =
+    optional_int_argument
+      fields
+      Keeper_status_options_defaults.Argument.tail_compactions
+      ~default:Keeper_status_options_defaults.tail_compactions
+      ~minimum:Keeper_status_options_defaults.min_tail_compactions
+      ~maximum:Keeper_status_options_defaults.max_tail_compactions
+  in
+  let* tail_bytes =
+    optional_int_argument
+      fields
+      Keeper_status_options_defaults.Argument.tail_bytes
+      ~default:Keeper_status_options_defaults.tail_bytes
+      ~minimum:Keeper_status_options_defaults.min_tail_bytes
+      ~maximum:Keeper_status_options_defaults.max_tail_bytes
+  in
+  let* include_context =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_context
+      ~default:(not fast)
+  in
+  let* include_metrics_overview =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_metrics_overview
+      ~default:(not fast)
+  in
+  let* include_memory_bank =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_memory_bank
+      ~default:(not fast)
+  in
+  let* include_history_tail =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_history_tail
+      ~default:(not fast)
+  in
+  let* include_compaction_history =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_compaction_history
+      ~default:(not fast)
+  in
+  Ok
+    { tail_turns
+    ; tail_messages
+    ; tail_compactions
+    ; tail_bytes
+    ; tail_order
+    ; fast
+    ; include_context
+    ; include_metrics_overview
+    ; include_memory_bank
+    ; include_history_tail
+    ; include_compaction_history
+    }
 
 let apply_tail_order order items =
   match order with
@@ -163,80 +267,24 @@ let apply_tail_order order items =
   | Newest_first -> List.rev items
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) args =
-  let requested_name = effective_status_name_config ~agent_name args in
+let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) fields =
+  let ( let* ) = Result.bind in
+  let* requested_name = effective_status_name_config ~agent_name fields in
   let candidates =
-    status_name_lookup_candidates requested_name
-    |> List.filter validate_name
+    status_name_lookup_candidates requested_name |> List.filter validate_name
   in
-  if candidates = [] then
-    Error (invalid_name_error requested_name)
+  if candidates = []
+  then Error (invalid_name_error requested_name)
   else
     let rec loop = function
       | [] -> Error (Printf.sprintf "keeper not found: %s" requested_name)
-      | candidate :: rest -> (
-          match read_effective_meta_resolved config candidate with
-          | Error e -> Error e
-          | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
-          | Ok None -> loop rest)
+      | candidate :: rest ->
+          (match read_effective_meta_resolved config candidate with
+           | Error e -> Error e
+           | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+           | Ok None -> loop rest)
     in
     loop candidates
-
-let resolve_status_target (ctx : _ context) args =
-  resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
-
-(** Hash the status-affecting args and the profile-overlay fields so different
-    parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
-    get separate cache entries. Persisted JSON writes update [updated_at], but
-    external [keepers/<name>.toml] edits do not. *)
-let cache_fingerprint_field (key, value) =
-  Printf.sprintf "%s=%d:%s" key (String.length value) value
-
-let cache_fingerprint_list values = String.concat "\x1f" values
-
-let cache_fingerprint_pairs pairs =
-  pairs
-  |> List.map (fun (key, value) ->
-       key ^ "\x1e" ^ string_of_int (String.length value) ^ "\x1e" ^ value)
-  |> String.concat "\x1f"
-
-let effective_meta_overlay_hash (meta : keeper_meta) =
-  let opt_string = function
-    | Some value -> value
-    | None -> ""
-  in
-  let opt_bool = function
-    | Some true -> "true"
-    | Some false -> "false"
-    | None -> ""
-  in
-  let opt_int = Option.fold ~none:"" ~some:string_of_int in
-  let fields =
-    [
-      ("persona", opt_string meta.persona);
-      ("instructions", meta.instructions);
-      ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
-      ("sandbox_image", opt_string meta.sandbox_image);
-      ("network_mode", network_mode_to_string meta.network_mode);
-      ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
-      ("mention_targets", cache_fingerprint_list meta.mention_targets);
-      ( "multimodal_policy",
-        multimodal_policy_to_string meta.multimodal_policy );
-      ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
-      ("proactive_enabled", string_of_bool meta.proactive.enabled);
-      ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
-      ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
-      ( "telemetry_feedback_window_hours",
-        opt_int meta.telemetry_feedback_window_hours );
-      ("always_allow", opt_bool meta.always_allow);
-      ("oas_env", cache_fingerprint_pairs meta.oas_env);
-    ]
-  in
-  fields
-  |> List.map cache_fingerprint_field
-  |> String.concat "\n"
-  |> Digest.string
-  |> Digest.to_hex
 
 type chat_queue_status_observation =
   | Chat_queue_snapshot of Keeper_chat_queue.diagnostic_snapshot
@@ -246,37 +294,6 @@ let observe_chat_queue ~keeper_name =
   if Eio_guard.is_ready ()
   then Chat_queue_snapshot (Keeper_chat_queue.snapshot ~keeper_name)
   else Chat_queue_unavailable "eio_guard_not_ready"
-
-let chat_queue_load_error_fingerprint
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  let path =
-    match error.path with
-    | Some path -> path
-    | None -> "<no-path>"
-  in
-  String.concat ":"
-    [ Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind
-    ; path
-    ; error.message
-    ]
-
-let chat_queue_observation_fingerprint observation =
-  let persistence =
-    string_of_bool (Keeper_chat_queue.persistence_configured ())
-  in
-  match observation with
-  | Chat_queue_unavailable reason ->
-    String.concat ":" [ persistence; "unavailable"; reason ]
-  | Chat_queue_snapshot snapshot ->
-    String.concat ":"
-      [ persistence
-      ; Int64.to_string snapshot.revision
-      ; string_of_int (List.length snapshot.pending)
-      ; string_of_int (List.length snapshot.inflight)
-      ; snapshot.load_errors
-        |> List.map chat_queue_load_error_fingerprint
-        |> String.concat ","
-      ]
 
 let chat_queue_load_error_to_json
     (error : Keeper_chat_queue.snapshot_load_error) =
@@ -315,71 +332,39 @@ let chat_queue_status_to_json observation =
       ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
 
-let hash_status_args _config resolved_name (meta : keeper_meta)
-    ~chat_queue_fingerprint args =
-  let parts = [
-    resolved_name;
-    effective_meta_overlay_hash meta;
-    chat_queue_fingerprint;
-    (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
-    string_of_bool (get_bool args "fast" false);
-    string_of_bool (get_bool args "include_context" false);
-    string_of_bool (get_bool args "include_metrics_overview" false);
-    string_of_bool (get_bool args "include_memory_bank" false);
-    string_of_bool (get_bool args "include_history_tail" false);
-    string_of_bool (get_bool args "include_compaction_history" false);
-    string_of_int (get_int args "tail_turns" 3);
-    string_of_int (get_int args "tail_messages" 5);
-    tail_order_to_string (tail_order_of_args args);
-  ] in
-  Digest.string (String.concat "|" parts) |> Digest.to_hex
-
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
-(* TEL-OK: status handler — telemetry surfaces via the cache layer
-   ([_cache] mutex-protected reads/writes) and Otel_metric_store counters in
-   the downstream [Keeper_status_runtime]/[Keeper_status_bridge] calls. *)
+(* TEL-OK: status handler — telemetry surfaces through Otel_metric_store
+   counters in the downstream runtime and bridge calls. *)
 let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
-  match resolve_status_target_config ~config ~agent_name args with
+  match status_argument_fields args with
   | Error err -> tool_result_error err
-  | Ok (name, m) ->
-      let cache_key = status_cache_key ~base_path:config.base_path ~name in
+  | Ok fields ->
+      (match status_options_of_fields fields with
+       | Error err -> tool_result_error err
+       | Ok options ->
+      (match resolve_status_target_config ~config ~agent_name fields with
+       | Error err -> tool_result_error err
+       | Ok (name, m) ->
       let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
-      let args_hash =
-        hash_status_args config name m
-          ~chat_queue_fingerprint:
-            (chat_queue_observation_fingerprint chat_queue_observation)
-          args
-      in
-      (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
-         The read is taken under [cache_mu] so it cannot interleave with
-         an eviction from [invalidate_status_cache_{for,all}]. *)
-      (match
-         Eio_guard.with_mutex_ro cache_mu (fun () ->
-           Hashtbl.find_opt _cache cache_key)
-       with
-       | Some entry
-         when entry.updated_at = m.updated_at
-           && entry.args_hash = args_hash ->
-         tool_result_ok_data entry.response
-       | _ ->
-      let tail_turns = max 0 (get_int args "tail_turns" 3) in
-      let tail_messages = max 0 (get_int args "tail_messages" 5) in
-      let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
-      let tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000) in
-      let fast = get_bool args "fast" (keeper_status_fast_default ()) in
-      let tail_order = tail_order_of_args args in
-      let include_context = get_bool args "include_context" (not fast) in
-      let include_metrics_overview =
-        get_bool args "include_metrics_overview" (not fast)
-      in
-      let include_memory_bank = get_bool args "include_memory_bank" (not fast) in
-      let include_history_tail = get_bool args "include_history_tail" (not fast) in
-      let include_compaction_history =
-        get_bool args "include_compaction_history" (not fast)
+      let chat_queue_status = chat_queue_status_to_json chat_queue_observation in
+      let
+        { tail_turns
+        ; tail_messages
+        ; tail_compactions
+        ; tail_bytes
+        ; tail_order
+        ; fast
+        ; include_context
+        ; include_metrics_overview
+        ; include_memory_bank
+        ; include_history_tail
+        ; include_compaction_history
+        }
+        = options
       in
       let max_context_resolution =
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
@@ -523,7 +508,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                  config
                  ~name:m.name
                  ~max_bytes:tail_bytes
-                 ~max_lines:(max (tail_turns * 10) 400)
+                 ~max_lines:
+                   (max
+                      (tail_turns
+                       * Keeper_status_options_defaults.metrics_lines_per_turn)
+                      Keeper_status_options_defaults.min_metrics_scan_lines)
                  ~recent_limit:8
              with
              | Ok summary ->
@@ -631,7 +620,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            if not include_compaction_history then
              (`List [], 0)
            else
-             let n = max 200 (tail_compactions * 20) in
+             let n =
+               max
+                 Keeper_status_options_defaults.min_compaction_scan_lines
+                 (tail_compactions
+                  * Keeper_status_options_defaults.compaction_lines_per_event)
+             in
              let lines = Dated_jsonl.read_recent_lines metrics_store n in
              let events_rev =
                List.fold_left
@@ -790,7 +784,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            | other -> other
          in
          let chat_queue =
-           chat_queue_status_to_json chat_queue_observation
+           chat_queue_status
          in
 
          let json = `Assoc ([
@@ -899,6 +893,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("token_gate_enabled", `Bool (compact_token_gate > 0));
            ]);
            ("status_options", `Assoc [
+             ("tail_turns", `Int tail_turns);
+             ("tail_messages", `Int tail_messages);
+             ("tail_compactions", `Int tail_compactions);
+             ("tail_bytes", `Int tail_bytes);
              ("fast", `Bool fast);
              ("include_context", `Bool include_context);
              ("include_metrics_overview", `Bool include_metrics_overview);
@@ -992,9 +990,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                with Sys_error _ -> `List []);
            ]);
          ]) in
-         Eio_guard.with_mutex cache_mu (fun () ->
-           Hashtbl.replace _cache cache_key
-             { updated_at = m.updated_at; args_hash; response = json });
-         tool_result_ok_data json)
+         tool_result_ok_data json))
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

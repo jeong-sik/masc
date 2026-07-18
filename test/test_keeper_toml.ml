@@ -642,6 +642,22 @@ policy_voice_enabled = true
          true
          (contains_substring msg "keeper.policy_voice_enabled"))
 
+let test_profile_rejects_removed_compaction_cooldown_key () =
+  let input = {|
+[keeper]
+compaction_cooldown_sec = 15
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed keeper.compaction_cooldown_sec error"
+     | Error msg ->
+       check bool
+         "mentions removed compaction cooldown key"
+         true
+         (contains_substring msg "keeper.compaction_cooldown_sec"))
+
 (* ================================================================ *)
 (* File loading tests                                                *)
 (* ================================================================ *)
@@ -1938,6 +1954,8 @@ let () =
             test_profile_rejects_removed_shards_key;
           test_case "rejects removed voice policy key" `Quick
             test_profile_rejects_removed_voice_policy_key;
+          test_case "rejects removed compaction cooldown key" `Quick
+            test_profile_rejects_removed_compaction_cooldown_key;
           test_case "rejects keeper.runtime_id key" `Quick
             test_profile_rejects_runtime_id_key;
           test_case "rejects keeper.model key" `Quick

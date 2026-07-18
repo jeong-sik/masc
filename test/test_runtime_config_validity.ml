@@ -1710,7 +1710,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
          check bool "error rejects alternate default routing" true
            (String_util.contains_substring msg "default fallback"))
 
-let test_runtime_toml_max_concurrent_flows_to_candidate () =
+let test_runtime_toml_max_concurrent_flows_to_provider_config () =
   with_fake_runtime_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
@@ -1757,16 +1757,20 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
             (Printf.sprintf "%s binding max_concurrent" id)
             expected
             rt.Runtime.binding.max_concurrent;
-          let candidate =
-            Runtime_candidate.of_provider_config
-              ~max_concurrent:rt.Runtime.binding.max_concurrent
-              rt.Runtime.provider_config
+          check
+            (option int)
+            (Printf.sprintf "%s provider_config max_concurrent_requests" id)
+            expected
+            rt.Runtime.provider_config.max_concurrent_requests;
+          let selected_provider_config =
+            Runtime_candidate.of_provider_config rt.Runtime.provider_config
+            |> Runtime_candidate.provider_cfg
           in
           check
             (option int)
-            (Printf.sprintf "%s candidate max_concurrent" id)
+            (Printf.sprintf "%s selected provider config admission" id)
             expected
-            (Runtime_candidate.max_concurrent candidate)
+            selected_provider_config.max_concurrent_requests
       in
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
@@ -2413,8 +2417,8 @@ let () =
             test_runtime_toml_separates_wizard_default_from_runtime_default_marker;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
-          test_case "max-concurrent flows from binding to runtime candidate" `Quick
-            test_runtime_toml_max_concurrent_flows_to_candidate;
+          test_case "max-concurrent flows from binding to provider config" `Quick
+            test_runtime_toml_max_concurrent_flows_to_provider_config;
           test_case
             "deprecated capability notice warns once per process, not per parse"
             `Quick test_deprecated_capability_notice_warns_once_per_process;

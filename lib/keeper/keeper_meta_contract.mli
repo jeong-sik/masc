@@ -21,7 +21,6 @@ type compaction_policy = {
   ratio_gate : float;
   message_gate : int;
   token_gate : int;
-  cooldown_sec : int;
 }
 
 type proactive_policy = {

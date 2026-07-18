@@ -18,17 +18,15 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
    도 함께 제거한다. *)
 let default_runtime_id () = Runtime.get_default_runtime_id ()
 
-(** Minimum context window (tokens) for any keeper turn.
-    64k-class local models are valid keeper backends; do not clamp them upward
-    to 65,536, which can exceed the discovered provider ceiling. *)
-let min_keeper_context_tokens = 64_000
-
-(** Maximum context window (tokens) accepted for [max_context_override] on
-    keeper turn-up args (#9953).  Matches the largest published context
-    window among supported providers (largest published = 1M).
-    Bumps to a 2M-class model must update this constant alongside the
-    provider registry entry. *)
-let max_keeper_context_tokens = 1_000_000
+let validate_max_context_override_value value =
+  if value > 0
+  then Ok value
+  else
+    Error
+      (Printf.sprintf
+         "max_context_override must be positive (received %d)"
+         value)
+;;
 
 include Keeper_config_text
 
@@ -115,19 +113,6 @@ let keeper_memory_os_recall_max_bytes_rp =
     ~description:"Rendered recall block byte threshold to log/count as over-budget (0 = disabled)" ()
 let keeper_memory_os_recall_max_bytes () : int =
   Runtime_params.get keeper_memory_os_recall_max_bytes_rp
-
-(** Cooldown between compaction attempts.  Previous default (90s) exceeded
-    the proactive heartbeat interval (30s), permanently blocking compaction
-    for proactive keepers.  15s allows compaction to fire every other cycle. *)
-let keeper_compaction_cooldown_sec_rp =
-  _rp_int ~key:"keeper.compaction.cooldown_sec"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_COMPACTION_COOLDOWN_SEC"
-                          ~default:15 ~min_v:0 ~max_v:two_days_seconds_int)
-    ~min_v:0 ~max_v:two_days_seconds_int
-    ~description:"Compaction cooldown (seconds)" ()
-let keeper_compaction_cooldown_sec () : int =
-  Runtime_params.get keeper_compaction_cooldown_sec_rp
-
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
@@ -168,9 +153,6 @@ let normalize_compaction_message_gate (v : int) : int =
 
 let normalize_compaction_token_gate (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:5000000
-
-let normalize_compaction_cooldown_sec (v : int) : int =
-  clamp_int v ~min_v:0 ~max_v:two_days_seconds_int
 
 let default_compaction_profile = "custom"
 

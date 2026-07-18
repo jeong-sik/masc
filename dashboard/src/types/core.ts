@@ -1398,7 +1398,6 @@ interface KeeperConfigCompaction {
   ratio_gate: number
   message_gate: number
   token_gate: number
-  cooldown_sec: number
 }
 
 interface KeeperConfigProactive {
@@ -1483,11 +1482,6 @@ interface KeeperConfigMetrics {
   compaction_count: number
 }
 
-interface KeeperConfigLimits {
-  min_context_override_tokens: number | null
-  max_context_override_tokens: number | null
-}
-
 export interface KeeperConfigFieldPresence {
   schema: string
   producer: string
@@ -1515,7 +1509,6 @@ export interface KeeperConfig {
   active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
-  limits: KeeperConfigLimits
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   sandbox_last_error?: string | null

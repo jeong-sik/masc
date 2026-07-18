@@ -326,7 +326,6 @@ let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
            with
            | Error err -> tool_result_error err
            | Ok result ->
-               invalidate_status_cache meta.name;
                tool_result_ok_data
                  (`Assoc
                     [
@@ -368,9 +367,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
         else
           None
       in
-      (match keeper_name with
-       | Some name -> invalidate_status_cache name
-       | None -> Keeper_status_detail.invalidate_status_cache_all ());
       let stop_json =
         `Assoc
           [
@@ -458,16 +454,15 @@ let handle_keeper_reset ctx args : tool_result =
 
     Returns the resolved primary provider/runtime context window, separate from
     any requested [max_context_override].
-    Returns [min_keeper_context_tokens] when meta is unavailable. *)
+    Returns the configured default Runtime capacity when meta is unavailable. *)
 let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
-  let min_ctx = Keeper_config.min_keeper_context_tokens in
   match meta with
-  | None -> min_ctx
+  | None -> Runtime.default_max_context ()
   | Some meta ->
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
     in
-    max min_ctx resolution.effective_budget
+    resolution.effective_budget
 
 let manual_compaction_wakeup_observation ~base_path keeper_name =
   match
@@ -682,7 +677,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       (* Clear registry failure state *)
       Keeper_registry.set_failure_reason ~base_path:config.base_path name None;
       Keeper_registry.reset_turn_failures ~base_path:config.base_path name;
-      invalidate_status_cache name;
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
@@ -975,8 +969,6 @@ let () =
          in
          run_external_effect (fun () ->
            Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
-           Keeper_tool_surface_ops.invalidate_status_cache
-             (Tool_args.get_string args "name" "");
            Some
              (tool_result_with_tool_name
                 ~tool_name:name

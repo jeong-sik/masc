@@ -27,7 +27,6 @@ type parsed_args =
   ; compaction_ratio_gate_opt : float option
   ; compaction_message_gate_opt : int option
   ; compaction_token_gate_opt : int option
-  ; compaction_cooldown_sec_opt : int option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
   ; instructions_arg : string option
@@ -45,6 +44,11 @@ val json_non_null_member_present : string -> Yojson.Safe.t -> bool
     [normalize_name_list]. *)
 val parse_present_string_list_opt :
   Yojson.Safe.t -> string -> (string list option, string) result
+
+(** Parse the explicit context override. Missing is [(false, None)]; null or
+    zero explicitly clears it; positive integers are preserved exactly. *)
+val parse_max_context_override :
+  Yojson.Safe.t -> (bool * int option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)

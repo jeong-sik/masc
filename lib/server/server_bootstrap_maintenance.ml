@@ -206,9 +206,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~clock
       ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* Deterministic output budget enforcement: truncate oversized tool outputs
-     with structured metadata before metrics/OTEL hooks see them. *)
-  Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      The shared dispatch observer is the canonical write path for persisted
      tool metrics so keeper-internal calls are counted exactly once. *)

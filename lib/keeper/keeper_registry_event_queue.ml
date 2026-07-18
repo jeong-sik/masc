@@ -43,6 +43,11 @@ type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind

@@ -6,39 +6,31 @@
     exactly one Runtime, so the candidate collapses to its provider config and
     the health/capacity/strategy/selection machinery is dropped.
 
-    [type t] is a record pairing the runtime's [Provider_config.t] with an
-    optional operator-declared [max_concurrent] override. [None] is the normal
-    no-static-cap path. The surviving members delegate to
-    {!Runtime_agent} / {!Runtime_provider_binding}; error decoration is
-    collapsed to identity. *)
+    [type t] is the selected [Provider_config.t]. The surviving members
+    delegate to {!Runtime_agent} / {!Runtime_provider_binding}; error
+    decoration is collapsed to identity. *)
 
-type t =
-  { config : Llm_provider.Provider_config.t
-  ; max_concurrent : int option
-  }
+type t = Llm_provider.Provider_config.t
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-let of_provider_config ~(max_concurrent : int option) (cfg : Llm_provider.Provider_config.t) : t =
-  { config = cfg; max_concurrent }
+let of_provider_config (cfg : Llm_provider.Provider_config.t) : t = cfg
 
-let of_provider_configs (cfgs : (Llm_provider.Provider_config.t * int option) list) : t list =
-  List.map (fun (cfg, max_concurrent) -> { config = cfg; max_concurrent }) cfgs
+let of_provider_configs (cfgs : Llm_provider.Provider_config.t list) : t list = cfgs
 
-let provider_cfg (t : t) : Llm_provider.Provider_config.t = t.config
-let max_concurrent (t : t) : int option = t.max_concurrent
+let provider_cfg (t : t) : Llm_provider.Provider_config.t = t
 
 let provider_label (t : t) =
-  Runtime_provider_binding.provider_label_of_config t.config
+  Runtime_provider_binding.provider_label_of_config t
 
 (* Provider-scoped health key retained for provider_attempt's single-provider
    health recording. No multi-candidate selection consumes these. *)
-let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t.config
-let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t.config
-let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t.config ]
+let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
+let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
+let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t ]
 
 let default_config ~name ~system_prompt ~tools (t : t) =
-  Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
+  Runtime_agent.default_config ~name ~provider_cfg:t ~system_prompt ~tools
 
 (* Runtime-label helpers for dashboard grouping. Delegates to the canonical
    local-runtime detector in Runtime_provider_binding (loopback + no-auth). *)
@@ -200,12 +192,8 @@ let capacity_key (t : t) = health_key t
 let capacity_keys candidates =
   candidates |> List.map capacity_key |> List.sort_uniq String.compare
 
-let declared_client_capacity (_ : t) = None
-let register_declared_client_capacity (_ : t) = ()
-
 let runtime_urls candidates =
-  candidates
-  |> List.filter_map (fun (t : t) -> nonempty_string_opt t.config.base_url)
+  candidates |> List.filter_map (fun (t : t) -> nonempty_string_opt t.base_url)
   |> List.sort_uniq String.compare
 
 let local_runtime_urls candidates = runtime_urls candidates
@@ -215,7 +203,3 @@ let filter_unhealthy_local_runtime_urls ~endpoint_health candidates =
   (candidates, [])
 
 let http_probe_urls candidates = runtime_urls candidates
-
-let register_http_probe_capable ~max_concurrent (_ : t) =
-  let _ = max_concurrent in
-  ()

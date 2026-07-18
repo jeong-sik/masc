@@ -113,6 +113,7 @@ let settle_and_project
     | Error error -> Alcotest.fail ("event queue settlement failed: " ^ error)
     | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
     | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+    | Ok _ -> Alcotest.fail "event queue settlement follow-up failed"
   in
   match
     Masc.Keeper_registry_event_queue.mark_transition_projected_result
@@ -1190,6 +1191,7 @@ let () =
         with
         | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
         | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+        | Ok _ -> Alcotest.fail "board digest settlement follow-up failed"
         | Error error -> Alcotest.fail ("board digest settlement failed: " ^ error)
       in
       (match
@@ -1295,6 +1297,7 @@ let () =
             Alcotest.failf
               "late registry registration repeated settlement for %s"
               expected_post_id
+          | Ok _ -> Alcotest.fail "late registration settlement follow-up failed"
           | Error error ->
             Alcotest.failf
               "late registry registration failed to settle %s: %s"
@@ -1588,6 +1591,7 @@ let () =
         | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
         | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
           Alcotest.fail "first requeue unexpectedly reused a prior receipt"
+        | Ok _ -> Alcotest.fail "first requeue settlement follow-up failed"
         | Error error -> Alcotest.fail ("typed requeue failed: " ^ error)
       in
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
@@ -1606,6 +1610,7 @@ let () =
        | Ok (Masc.Keeper_registry_event_queue.Already_settled _)
        | Ok (Masc.Keeper_registry_event_queue.Settled _) ->
          Alcotest.fail "repeated requeue changed the durable receipt"
+       | Ok _ -> Alcotest.fail "repeated requeue settlement follow-up failed"
        | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
       (match

@@ -84,6 +84,7 @@ let removed_keeper_input_key_names =
     "tool_denylist";
     "shards";
     "policy_voice_enabled";
+    "compaction_cooldown_sec";
   ]
 
 let removed_keeper_sandbox_input_key_names =

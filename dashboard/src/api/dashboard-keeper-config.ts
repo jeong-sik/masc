@@ -3,7 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post } from './core'
-import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
@@ -36,6 +36,14 @@ function asLooseNumber(value: unknown): number | undefined {
 
 function asLooseNullableNumber(value: unknown): number | null {
   return asLooseNumber(value) ?? null
+}
+
+function decodeMaxContextOverride(value: unknown): number | null {
+  if (value === null) return null
+  if (isPositiveSafeInteger(value)) return value
+  throw new Error(
+    'Invalid keeper config response: max_context_override must be a positive safe integer or null',
+  )
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -161,18 +169,13 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const workspace = isRecord(data.workspace) ? data.workspace : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
-  const limits = isRecord(data.limits) ? data.limits : {}
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
-    max_context_override: asInt(data.max_context_override) ?? null,
-    limits: {
-      min_context_override_tokens: asInt(limits.min_context_override_tokens) ?? null,
-      max_context_override_tokens: asInt(limits.max_context_override_tokens) ?? null,
-    },
+    max_context_override: decodeMaxContextOverride(data.max_context_override),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
@@ -208,7 +211,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       ratio_gate: asLooseNumber(compaction.ratio_gate) ?? 0.85,
       message_gate: asInt(compaction.message_gate) ?? 0,
       token_gate: asInt(compaction.token_gate) ?? 0,
-      cooldown_sec: asInt(compaction.cooldown_sec) ?? 0,
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
@@ -308,7 +310,6 @@ export type KeeperConfigUpdatePayload = {
   compaction_ratio_gate?: number
   compaction_message_gate?: number
   compaction_token_gate?: number
-  compaction_cooldown_sec?: number
 }
 
 export async function patchKeeperConfig(

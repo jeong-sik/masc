@@ -145,13 +145,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
       |> normalize_compaction_token_gate
     in
-    let compaction_cooldown_sec =
-      Safe_ops.json_int
-        ~default:(keeper_compaction_cooldown_sec ())
-        "compaction_cooldown_sec"
-        json
-      |> normalize_compaction_cooldown_sec
-    in
     let pp_always_allow = None in
     (* TOML-only (see note above); overlaid by [ensure_keeper_meta]. *)
     Ok
@@ -166,7 +159,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; ratio_gate = compaction_ratio_gate
           ; message_gate = compaction_message_gate
           ; token_gate = compaction_token_gate
-          ; cooldown_sec = compaction_cooldown_sec
           }
       ; pp_always_allow
       }
@@ -216,11 +208,29 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
   }
 ;;
 
+let parse_persisted_max_context_override json =
+  match Json_util.assoc_member_opt "max_context_override" json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) ->
+    Keeper_config.validate_max_context_override_value value |> Result.map Option.some
+  | Some (`Intlit raw) ->
+    (match int_of_string_opt raw with
+     | Some value ->
+       Keeper_config.validate_max_context_override_value value |> Result.map Option.some
+     | None -> Error (Printf.sprintf "invalid persisted max_context_override: %s" raw))
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "persisted max_context_override must be a positive integer or null (received %s)"
+         (Json_util.kind_name other))
+;;
+
 let parse_keeper_state
       (json : Yojson.Safe.t)
       ~(trace_id : Keeper_id.Trace_id.t)
       ~(trace_history : string list)
       ~(keeper_name : string)
+      ~max_context_override
   : parsed_keeper_state
   =
   (match Json_util.assoc_member_opt "auto_resume_after_sec" json with
@@ -329,7 +339,6 @@ let parse_keeper_state
        | Ok tid -> Some tid
        | Error _ -> None)
   in
-  let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
   ; ps_updated_at_raw
   ; ps_active_goal_ids
@@ -337,7 +346,7 @@ let parse_keeper_state
   ; ps_latched_reason
   ; ps_autoboot_enabled
   ; ps_current_task_id
-  ; ps_max_context_override
+  ; ps_max_context_override = max_context_override
   ; ps_runtime =
       { usage = parse_usage_metrics json
       ; compaction_rt = parse_compaction_runtime json
@@ -370,6 +379,7 @@ type removed_keeper_meta_field =
   | Tool_access
   | Tool_denylist
   | Policy_voice_enabled
+  | Compaction_cooldown
   | Last_blocker
 
 let removed_keeper_meta_field_of_key = function
@@ -380,6 +390,7 @@ let removed_keeper_meta_field_of_key = function
   | "tool_access" -> Some Tool_access
   | "tool_denylist" -> Some Tool_denylist
   | "policy_voice_enabled" -> Some Policy_voice_enabled
+  | "compaction_cooldown_sec" -> Some Compaction_cooldown
   | "last_blocker" -> Some Last_blocker
   | _ -> None
 ;;
@@ -392,6 +403,7 @@ let removed_keeper_meta_field_to_wire = function
   | Tool_access -> "tool_access"
   | Tool_denylist -> "tool_denylist"
   | Policy_voice_enabled -> "policy_voice_enabled"
+  | Compaction_cooldown -> "compaction_cooldown_sec"
   | Last_blocker -> "last_blocker"
 ;;
 
@@ -411,7 +423,8 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
        | Some (Persona_profile_path as field)
        | Some (Tool_access as field)
        | Some (Tool_denylist as field)
-       | Some (Policy_voice_enabled as field) ->
+       | Some (Policy_voice_enabled as field)
+       | Some (Compaction_cooldown as field) ->
          Error
            ( "removed keeper meta field is no longer supported: "
              ^ removed_keeper_meta_field_to_wire field )
@@ -443,12 +456,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
             (match parse_keeper_policy json ~keeper_name:identity.pk_name with
              | Error _ as e -> e
              | Ok policy ->
+               (match parse_persisted_max_context_override json with
+                | Error _ as e -> e
+                | Ok max_context_override ->
                let state =
                  parse_keeper_state
                    json
                    ~trace_id:identity.pk_trace_id
                    ~trace_history:identity.pk_trace_history
                    ~keeper_name:identity.pk_name
+                   ~max_context_override
                in
                if not (validate_name identity.pk_name)
                then Error "invalid keeper meta (bad name)"
@@ -523,7 +540,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   }))
+                   })))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

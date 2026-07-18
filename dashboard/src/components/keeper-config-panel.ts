@@ -261,19 +261,26 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Runtime config draft for sandbox/proactive/compaction inline editing
-export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
-  if (!Number.isFinite(value)) return 0
-  const normalized = Math.max(0, Math.trunc(value))
-  const max = Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0
-    ? Math.trunc(maxTokens as number)
-    : null
-  return max == null ? normalized : Math.min(max, normalized)
+export type MaxContextOverrideDraftResult =
+  | { ok: true; value: number | null }
+  | { ok: false; error: string }
+
+export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDraftResult {
+  if (raw === '0') return { ok: true, value: null }
+  if (!/^[1-9]\d*$/.test(raw)) {
+    return { ok: false, error: '컨텍스트 오버라이드는 양의 정수여야 합니다. 0은 설정을 지웁니다.' }
+  }
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value)) {
+    return { ok: false, error: '컨텍스트 오버라이드는 안전한 정수 범위 안이어야 합니다.' }
+  }
+  return { ok: true, value }
 }
 
 export type RuntimeDraft = {
   runtime_id: string
   autoboot_enabled: boolean
-  max_context_override: number
+  max_context_override: string
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
   mention_targets_text: string
@@ -284,7 +291,6 @@ export type RuntimeDraft = {
   compaction_ratio_gate: number
   compaction_message_gate: number
   compaction_token_gate: number
-  compaction_cooldown_sec: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -344,10 +350,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     autoboot_enabled: c.autoboot_enabled,
-    max_context_override: normalizeMaxContextOverrideDraft(
-      c.max_context_override ?? 0,
-      c.limits.max_context_override_tokens,
-    ),
+    max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -360,7 +363,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     compaction_ratio_gate: c.compaction.ratio_gate,
     compaction_message_gate: c.compaction.message_gate,
     compaction_token_gate: c.compaction.token_gate,
-    compaction_cooldown_sec: c.compaction.cooldown_sec,
   }
 }
 
@@ -584,10 +586,10 @@ export function keeperConfigControlInventory(
           tab,
           'kcf-runtime-context-override',
           'Context override',
-          `${configApiSource} max_context_override + limits.max_context_override_tokens`,
+          `${configApiSource} max_context_override`,
           'PATCH /api/v1/keepers/:name/config max_context_override',
           'max_context_override',
-          ['max_context_override', 'limits.min_context_override_tokens', 'limits.max_context_override_tokens'],
+          ['max_context_override'],
         ),
       ]
     case 'policy':
@@ -615,7 +617,6 @@ export function keeperConfigControlInventory(
             'compaction.ratio_gate',
             'compaction.message_gate',
             'compaction.token_gate',
-            'compaction.cooldown_sec',
             'proactive.enabled',
           ],
         ),
@@ -782,7 +783,16 @@ export function keeperConfigControlInventory(
   }
 }
 
-export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+export type RuntimePayloadBuildResult =
+  | { ok: true; payload: KeeperConfigUpdatePayload }
+  | { ok: false; error: string }
+
+export function buildRuntimePayloadResult(
+  draft: RuntimeDraft,
+  orig: KeeperConfig,
+): RuntimePayloadBuildResult {
+  const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
+  if (!maxContextOverride.ok) return maxContextOverride
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
@@ -792,12 +802,8 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
-  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(
-    draft.max_context_override,
-    orig.limits.max_context_override_tokens,
-  )
-  if (draftMaxContextOverride !== (orig.max_context_override ?? 0)) {
-    payload.max_context_override = draftMaxContextOverride > 0 ? draftMaxContextOverride : null
+  if (maxContextOverride.value !== orig.max_context_override) {
+    payload.max_context_override = maxContextOverride.value
   }
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
@@ -809,8 +815,13 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
   if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
-  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
-  return payload
+  return { ok: true, payload }
+}
+
+export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+  const result = buildRuntimePayloadResult(draft, orig)
+  if (!result.ok) throw new RangeError(result.error)
+  return result.payload
 }
 
 function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number | string) {
@@ -836,11 +847,14 @@ function listTextToStrings(text: string): string[] {
 }
 
 function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<string, boolean> {
-  const payload = buildRuntimePayload(rd, c)
+  const result = buildRuntimePayloadResult(rd, c)
+  const payload = result.ok ? result.payload : {}
   return {
     runtime_id: 'runtime_id' in payload,
     autoboot_enabled: 'autoboot_enabled' in payload,
-    max_context_override: 'max_context_override' in payload,
+    max_context_override: result.ok
+      ? 'max_context_override' in payload
+      : rd.max_context_override !== String(c.max_context_override ?? 0),
     active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
@@ -851,7 +865,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     compaction_ratio_gate: 'compaction_ratio_gate' in payload,
     compaction_message_gate: 'compaction_message_gate' in payload,
     compaction_token_gate: 'compaction_token_gate' in payload,
-    compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
   }
 }
 
@@ -1456,6 +1469,34 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty
   `
 }
 
+function InlineContextOverrideRow({ value, onChange, error, dirty = false }: {
+  value: string
+  onChange: (value: string) => void
+  error: string | null
+  dirty?: boolean
+}) {
+  return html`
+    <div class="kcf-inline-row py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} ${error ? 'border-[var(--color-status-err)]' : 'border-card-border/50'} bg-card/20 mb-2 v2-monitoring-row">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-text-muted">컨텍스트 오버라이드${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
+        <div class="kcf-inline-control flex items-center gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="컨텍스트 오버라이드"
+            aria-invalid=${error ? 'true' : 'false'}
+            class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${error ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2"
+            value=${value}
+            onInput=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+          />
+          <span class="text-xs text-text-dim w-5">tok</span>
+        </div>
+      </div>
+      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용됩니다. 0은 오버라이드를 지웁니다.</div>`}
+    </div>
+  `
+}
+
 export function InlineSelectRow({
   label,
   value,
@@ -1640,9 +1681,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
   const rd = runtimeDraft.value
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
-
-  const runtimeHasChanges = runtimeCanEdit && rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
-  const maxContextOverrideTokens = c.limits.max_context_override_tokens ?? undefined
+  const runtimePayloadResult = rd ? buildRuntimePayloadResult(rd, c) : null
+  const runtimeValidationError = runtimePayloadResult && !runtimePayloadResult.ok
+    ? runtimePayloadResult.error
+    : null
+  const runtimeHasChanges = runtimeCanEdit && rd && runtimePayloadResult
+    ? runtimePayloadResult.ok
+      ? Object.keys(runtimePayloadResult.payload).length > 0
+      : dirtyFlags.max_context_override === true
+    : false
   const runtimeOptions = rd
     ? dedupeStrings([
         rd.runtime_id,
@@ -1668,7 +1715,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   async function saveRuntimeConfig() {
     if (!rd || !runtimeCanEdit) return
-    const payload = buildRuntimePayload(rd, c)
+    const result = buildRuntimePayloadResult(rd, c)
+    if (!result.ok) {
+      showToast(result.error, 'error')
+      return
+    }
+    const payload = result.payload
     if (Object.keys(payload).length === 0) return
     runtimeSaving.value = true
     try {
@@ -1923,9 +1975,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
       ]} />
       ${rd && runtimeCanEdit ? html`
-        <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
-          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v, c.limits.max_context_override_tokens))}
-          min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
+        <${InlineContextOverrideRow}
+          value=${rd.max_context_override}
+          onChange=${(value: string) => updateRuntimeDraft('max_context_override', value)}
+          error=${runtimeValidationError}
           dirty=${dirtyFlags.max_context_override} />
       ` : html`
         <${ConfigRow} label="컨텍스트 오버라이드" value=${c.max_context_override != null ? formatTokens(c.max_context_override) : MISSING_DATA_DASH} />
@@ -1963,18 +2016,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         dirty=${dirtyFlags.compaction_message_gate} />
       <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
         onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
+        min=${0} step=${1000} suffix="tok"
         dirty=${dirtyFlags.compaction_token_gate} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.compaction_cooldown_sec} />
     ` : html`
       <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
       <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
       <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
       <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
     `}
 
     <${SectionHeader} title="프로액티브" />
@@ -2342,7 +2390,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <span class="kcf-foot-note mono">${activeTabLabel} · ${keeperName}</span>
           <div class="kcf-foot-spacer"></div>
           ${runtimeHasChanges ? html`
-            <span class="text-xs font-semibold text-accent-fg mr-1">변경된 런타임 설정</span>
+            <span class="text-xs font-semibold ${runtimeValidationError ? 'text-[var(--color-status-err)]' : 'text-accent-fg'} mr-1">
+              ${runtimeValidationError ?? '변경된 런타임 설정'}
+            </span>
             <button type="button"
               class="kcf-btn ghost v2-monitoring-action"
               title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
@@ -2351,7 +2401,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
             <button type="button"
               class="kcf-btn save v2-monitoring-action"
               onClick=${saveRuntimeConfig}
-              disabled=${runtimeSaving.value}
+              disabled=${runtimeSaving.value || runtimeValidationError !== null}
             >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           ` : null}
           ${onClose ? html`

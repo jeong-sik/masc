@@ -23,7 +23,6 @@ type parsed_args = {
   compaction_ratio_gate_opt : float option;
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
-  compaction_cooldown_sec_opt : int option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
   instructions_arg : string option;
@@ -73,19 +72,8 @@ let parse_runtime_id_opt args =
            (Json_util.kind_name other))
 
 let normalize_max_context_override_value v =
-  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-  let max_keeper_context = Keeper_config.max_keeper_context_tokens in
   if v = 0 then Ok None
-  else if v >= min_keeper_context && v <= max_keeper_context then Ok (Some v)
-  else if v > 0 && v < min_keeper_context then (
-    Log.Misc.warn
-      "max_context_override=%d below minimum %d, clamped to %d"
-      v min_keeper_context min_keeper_context;
-    Ok (Some min_keeper_context))
-  else
-    Error
-      (Printf.sprintf "max_context_override=%d out of range (0 or %d..%d)"
-         v min_keeper_context max_keeper_context)
+  else Keeper_config.validate_max_context_override_value v |> Result.map Option.some
 
 let parse_max_context_override args =
   match Json_util.assoc_member_opt "max_context_override" args with
@@ -152,9 +140,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
     let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
-    let compaction_cooldown_sec_opt =
-      Safe_ops.json_int_opt "compaction_cooldown_sec" args
-    in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
@@ -207,7 +192,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       compaction_ratio_gate_opt;
       compaction_message_gate_opt;
       compaction_token_gate_opt;
-      compaction_cooldown_sec_opt;
       sandbox_profile_opt;
       network_mode_opt;
       instructions_arg;

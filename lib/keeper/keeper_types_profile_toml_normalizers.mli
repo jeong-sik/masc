@@ -1,6 +1,4 @@
 val default_runtime_id : unit -> string
-val min_keeper_context_tokens : int
-val max_keeper_context_tokens : int
 val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
@@ -41,11 +39,9 @@ val resolve_compaction_policy :
 val normalize_compaction_ratio_gate : float -> float
 val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
-val normalize_compaction_cooldown_sec : int -> int
 val keeper_compact_ratio : unit -> float
 val keeper_compact_max_messages : unit -> int
 val keeper_compact_max_tokens : unit -> int
-val keeper_compaction_cooldown_sec : unit -> int
 val keeper_compaction_policy_from_env : unit -> float * int * int
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int

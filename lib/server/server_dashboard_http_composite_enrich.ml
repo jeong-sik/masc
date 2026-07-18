@@ -53,7 +53,8 @@ let dashboard_keeper_composite_json
       ~base_path:config.base_path
       ~keeper_name:entry.name
       ~pending_id_display_limit:0
-    |> Result.map (fun observation -> observation.cursor)
+    |> Result.map (fun (observation : Keeper_reaction_store.read_observation) ->
+      observation.cursor)
   in
   Keeper_composite_observer.observe ~board_cursor_observation entry
   |> Keeper_composite_observer.snapshot_to_json

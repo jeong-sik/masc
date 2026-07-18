@@ -10,6 +10,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
+let ( let* ) = Result.bind
+
 type board_reaction_event =
   { target_type : Board.reaction_target_type
   ; target_id : string

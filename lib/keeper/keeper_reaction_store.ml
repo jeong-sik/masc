@@ -812,7 +812,7 @@ let sqlite_finalize db stmt =
   in
   (* See sqlite3 binding lifetime: keep the finalized statement reachable
      until after the native finalize call has returned. *)
-  ignore (Sys.opaque_identity stmt);
+  let _finalized_statement = Sys.opaque_identity stmt in
   result
 ;;
 
@@ -1297,7 +1297,7 @@ let close_database_connection handle =
   in
   (* See sqlite3 binding lifetime: keep the closed database reachable until
      after the native close call has returned. *)
-  ignore (Sys.opaque_identity handle.db);
+  let _closed_database = Sys.opaque_identity handle.db in
   result
 ;;
 

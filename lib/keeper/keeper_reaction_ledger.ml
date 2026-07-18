@@ -80,10 +80,15 @@ let reaction_kind_of_string value =
 ;;
 
 let cursor_to_string (cursor : cursor) =
+  let post_id =
+    match cursor.post_id with
+    | None -> "<none>"
+    | Some post_id -> post_id
+  in
   Printf.sprintf
     "(%0.6f, %s)"
     cursor.cursor_ts
-    (Option.value ~default:"<none>" cursor.post_id)
+    post_id
 ;;
 
 let board_scan_integrity_error_to_string = function

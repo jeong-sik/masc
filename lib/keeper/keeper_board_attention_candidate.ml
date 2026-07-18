@@ -4,6 +4,8 @@ module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
 module Id_set = Set.Make (String)
 
+let ( let* ) = Result.bind
+
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
   | Prompt_contract_unavailable
@@ -330,8 +332,6 @@ let candidate_to_json candidate =
     ; "status", status_to_yojson candidate.status
     ]
 ;;
-
-let ( let* ) = Result.bind
 
 let exact_fields ~context expected fields =
   let actual = List.map fst fields in

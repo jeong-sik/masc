@@ -195,6 +195,12 @@ let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
     { cursor_ts = ts_b; post_id = Some post_id_b }
 ;;
 
+let compare_cursor_token_to_cursor (cursor_ts, post_id) cursor =
+  Keeper_reaction_store.compare_normalized_cursor
+    { cursor_ts; post_id = Some post_id }
+    cursor
+;;
+
 let normalize_cursor_token (cursor_ts, post_id) =
   Keeper_reaction_store.normalize_cursor
     { Keeper_reaction_store.cursor_ts; post_id }
@@ -214,9 +220,6 @@ let cursor_token_of_post (post : Board.post) =
 
 let list_posts_after_cursor (cursor_ts, cursor_post_id) =
   let* cursor = normalize_cursor_token (cursor_ts, cursor_post_id) in
-  let base_token =
-    cursor.cursor_ts, Option.value ~default:"" cursor.post_id
-  in
   let rec attach_tokens reversed = function
     | [] -> Ok reversed
     | post :: rest ->
@@ -227,7 +230,7 @@ let list_posts_after_cursor (cursor_ts, cursor_post_id) =
   let* with_tokens = attach_tokens [] posts in
   Ok
     (with_tokens
-     |> List.filter (fun (token, _) -> compare_cursor_token token base_token > 0)
+     |> List.filter (fun (token, _) -> compare_cursor_token_to_cursor token cursor > 0)
      |> List.sort (fun (left, _) (right, _) -> compare_cursor_token left right)
      |> List.map snd)
 ;;

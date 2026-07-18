@@ -84,10 +84,41 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     verification.  Callers own serialization; the typical pattern
     is one store per keeper, owned by the keeper bridge. *)
 
+type prepared_compaction =
+  { session : Keeper_context_core.session_context
+  ; source_ref : Keeper_checkpoint_ref.t
+  ; retry_meta : Keeper_meta_contract.keeper_meta
+  ; turn_generation : int
+  ; prepared_trigger : Compaction_trigger.t
+  ; context : Keeper_context_core.working_context
+  ; evidence : Keeper_compaction_evidence.t
+  }
+(** Fully-planned compaction: durable source loaded, policy and LLM plan
+    computed, nothing committed yet.  Carrying this value lets a caller run
+    the provider call outside any keeper admission and commit later — the
+    source CAS, not the turn slot, is the interleaving guard. *)
+
+(** Phase 1: load the durable source and run the policy + LLM planner.
+    Admission-free by contract; the caller must not hold the keeper's turn
+    slot while this runs. *)
+val prepare_compaction :
+  base_dir:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  trigger:Compaction_trigger.t ->
+  (prepared_compaction, compaction_recovery_error) result
+
+(** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
+    decides which admission (if any) guards this phase. *)
+val commit_prepared_compaction :
+  meta:Keeper_meta_contract.keeper_meta ->
+  prepared_compaction ->
+  (compaction_recovery, compaction_recovery_error) result
+
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed
     [Prepared] candidate has been durably saved; every other outcome is a
-    typed [Error]. *)
+    typed [Error].  Composition of {!prepare_compaction} and
+    {!commit_prepared_compaction} for callers that stay synchronous. *)
 val recover_latest_checkpoint_for_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->

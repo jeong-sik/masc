@@ -144,6 +144,58 @@ let test_failed_flush_does_not_block_sweep () =
     (Hashtbl.mem store.Board.posts post_id)
 ;;
 
+let test_routing_recovery_resumes_on_replacement_owner () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Unix.putenv "MASC_BASE_PATH" (fresh_base "masc-board-routing-owner-recovery");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let delivery_enabled = Atomic.make false in
+  let first_attempt, resolve_first_attempt = Eio.Promise.create () in
+  let first_attempt_resolved = Atomic.make false in
+  let delivered, resolve_delivered = Eio.Promise.create () in
+  let delivered_resolved = Atomic.make false in
+  Board_dispatch.set_board_signal_hook (fun _event ->
+    if Atomic.get delivery_enabled
+    then begin
+      if Atomic.compare_and_set delivered_resolved false true
+      then Eio.Promise.resolve resolve_delivered ();
+      Ok Board_dispatch.Atomic_sink_accepted
+    end
+    else begin
+      if Atomic.compare_and_set first_attempt_resolved false true
+      then Eio.Promise.resolve resolve_first_attempt ();
+      Error "forced transient routing failure"
+    end);
+  Eio.Switch.run (fun first_owner ->
+    (match Board_dispatch.start_runtime_actors ~sw:first_owner ~clock with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
+    (match
+       Board_dispatch.create_post ~author:"routing-owner-recovery-author"
+         ~content:"committed routing survives owner replacement"
+         ~post_kind:Board.Human_post ()
+     with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Board.show_board_error error));
+    Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+      Eio.Promise.await first_attempt));
+  Atomic.set delivery_enabled true;
+  Eio.Switch.run (fun replacement_owner ->
+    (match
+       Board_dispatch.start_runtime_actors ~sw:replacement_owner ~clock
+     with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
+    Eio.Time.with_timeout_exn clock 1.0 (fun () -> Eio.Promise.await delivered))
+;;
+
 let () =
   Alcotest.run
     "board_flusher_autonomous_retry"
@@ -156,6 +208,12 @@ let () =
             "failed flush does not block sweep"
             `Quick
             test_failed_flush_does_not_block_sweep
+        ] )
+    ; ( "routing"
+      , [ Alcotest.test_case
+            "routing recovery resumes on replacement owner"
+            `Quick
+            test_routing_recovery_resumes_on_replacement_owner
         ] )
     ]
 ;;

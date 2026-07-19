@@ -287,6 +287,17 @@ type flusher_retry_obligations = {
   sweep_retry_at : float option;
 }
 
+type 'a inbox_wait =
+  | Inbox_item of 'a
+  | Deadline_reached
+
+type routing_retry_failure =
+  | Routing_callback_rejected of string
+  | Routing_callback_raised of {
+      cause : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+
 exception Runtime_actor_start_failure of runtime_actor_start_failures
 
 let runtime_actor_to_string = function
@@ -326,6 +337,18 @@ let () =
 ;;
 
 let spawn_runtime_actor_on_switch ~sw ~clock store actor =
+  let await_inbox_until ~deadline inbox =
+    let remaining = deadline -. Eio.Time.now clock in
+    if Float.compare remaining 0.0 <= 0
+    then Deadline_reached
+    else
+      match
+        Eio.Time.with_timeout clock remaining (fun () ->
+          Ok (Eio.Stream.take inbox))
+      with
+      | Ok item -> Inbox_item item
+      | Error `Timeout -> Deadline_reached
+  in
   let flush_attempt () =
     try
       match Board.flush_dirty store with
@@ -424,18 +447,14 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
          in
          operation, recovering, without_retry obligations operation
        | Some (retry_at, _) ->
-         let remaining = retry_at -. now in
-         (match
-            Eio.Time.with_timeout clock remaining (fun () ->
-              Ok (Eio.Stream.take store.Board.flusher_inbox))
-          with
-          | Ok message ->
+         (match await_inbox_until ~deadline:retry_at store.Board.flusher_inbox with
+          | Inbox_item message ->
             let operation = message in
             let recovering =
               Option.is_some (retry_deadline obligations operation)
             in
             operation, recovering, without_retry obligations operation
-          | Error `Timeout -> await_operation obligations))
+          | Deadline_reached -> await_operation obligations))
   in
   let log_attempt_failure ~operation ~retry_operation = function
     | Dirty_projection_flush_failed (Flush_rejected error) ->
@@ -494,31 +513,51 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
   in
   let routing_retry_loop () =
     Log.BoardLog.info "Board routing retry actor started";
-    while true do
-      Eio.Stream.take routing_retry_inbox;
-      Atomic.set routing_retry_requested false;
+    let rec loop retry_at =
+      (match retry_at with
+       | None ->
+         Eio.Stream.take routing_retry_inbox;
+         Atomic.set routing_retry_requested false
+       | Some deadline ->
+         (match await_inbox_until ~deadline routing_retry_inbox with
+          | Inbox_item () -> Atomic.set routing_retry_requested false
+          | Deadline_reached -> ()));
       let outcome =
         try
-          run_routing_callback
-            ~name:"Board routing retry authority"
-            routing_retry_callback
+          match
+            run_routing_callback
+              ~name:"Board routing retry authority"
+              routing_retry_callback
+          with
+          | Ok () -> Ok ()
+          | Error detail -> Error (Routing_callback_rejected detail)
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | (Out_of_memory | Stack_overflow) as exn -> raise exn
         | exn ->
           Error
-            (Printf.sprintf
-               "Board routing retry actor callback raised: %s"
-               (Printexc.to_string exn))
+            (Routing_callback_raised
+               { cause = exn; backtrace = Printexc.get_raw_backtrace () })
       in
       match outcome with
-      | Ok () -> ()
-      | Error detail ->
-        Log.BoardLog.error
-          "Board signal outbox retry remains pending: %s"
-          detail;
-        Eio.Time.sleep clock Env_config.Board.flush_interval_sec;
-        request_routing_retry ()
-    done
+      | Ok () ->
+        if Option.is_some retry_at
+        then Log.BoardLog.info "Board signal outbox recovery obligation settled";
+        loop None
+      | Error failure ->
+        (match failure with
+         | Routing_callback_rejected detail ->
+           Log.BoardLog.error
+             "Board signal outbox recovery obligation remains pending: %s"
+             detail
+         | Routing_callback_raised { cause; backtrace } ->
+           Log.BoardLog.error
+             "Board signal outbox recovery obligation raised and remains pending: %s\n%s"
+             (Printexc.to_string cause)
+             (Printexc.raw_backtrace_to_string backtrace));
+        loop (Some (Eio.Time.now clock +. Env_config.Board.flush_interval_sec))
+    in
+    loop (Some (Eio.Time.now clock))
   in
   let loop =
     match actor with
@@ -530,8 +569,8 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
 (** Claim and start the Board runtime actors against the caller-owned root
     switch.  A losing caller yields and re-reads the typed backend state until
     another caller publishes a live owner or it can claim the transition.  An
-    unavailable prior owner is retired by exact switch identity.  There is no
-    retry budget or timing policy. *)
+    unavailable prior owner is retired by exact switch identity.  Actor
+    admission itself has no retry budget or timing policy. *)
 let actor_status actors = function
   | Flusher -> actors.flusher
   | Routing_retry -> actors.routing_retry

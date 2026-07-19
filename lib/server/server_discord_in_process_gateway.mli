@@ -65,6 +65,12 @@ module For_testing : sig
     base_dir:string ->
     Discord_gateway_client.gateway_event ->
     unit
+
+  val submit_ambient_event :
+    Connector_ingress_lane.t ->
+    base_dir:string ->
+    Discord_gateway_client.gateway_event ->
+    unit
 end
 
 val start :

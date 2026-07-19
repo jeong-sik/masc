@@ -161,6 +161,16 @@ let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
 let slack_attention_surface ~team_id ~channel_id ~thread_ts =
   Keeper_external_attention.Slack { team_id; channel_id; thread_ts }
 
+(* Typed outcome of recording an external-attention event, so the ambient arm
+   can gate the non-idempotent transcript append on the store's already-computed
+   fresh-vs-duplicate decision (masc#25262). The event_id is carried in both
+   the [Fresh] and [Duplicate] cases because the durable stimulus enqueue is
+   idempotent and must run on a redelivery too. *)
+type attention_record =
+  | Fresh of string  (** first delivery — event_id newly recorded *)
+  | Duplicate of string  (** redelivery — event_id already present in the store *)
+  | Record_failed  (** the attention store could not record the event *)
+
 let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
     ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot =
   let surface = slack_attention_surface ~team_id ~channel_id ~thread_ts in
@@ -198,13 +208,13 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
     }
   in
   match Keeper_external_attention.record ~base_path:base_dir item with
-  | `Recorded -> Some event_id
-  | `Duplicate item -> Some item.event_id
+  | `Recorded -> Fresh event_id
+  | `Duplicate item -> Duplicate item.event_id
   | `Error error ->
     Log.Server.warn
       "slack external attention record failed (channel=%s keeper=%s): %s"
       channel_id keeper_name error;
-    None
+    Record_failed
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
@@ -461,30 +471,45 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
       Slack_observability.record_ambient
         Slack_observability.Ambient_dropped_too_long
     else begin
-      let attention_event_id =
+      let recorded =
         record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
           ~thread_ts ~ts ~user_id ~user_name ~content:trimmed ~mentions_bot
       in
-      Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
-        ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
-        ~conversation_id:(slack_conversation_id ~channel_id)
-        ~external_message_id:ts
-        ~speaker:
-          { Keeper_chat_store.speaker_id = Some user_id
-          ; speaker_name = user_name
-          ; speaker_authority = Keeper_chat_store.External
-          }
-        ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+      (* RFC-0226 redelivery (masc#25262): the attention store already deduped
+         this event and the durable stimulus enqueue below is idempotent, but
+         [append_user_message] is not. Append + broadcast the user line only for
+         a freshly recorded event. A [Duplicate] is a Slack Socket-Mode
+         redelivery whose line is already in the transcript — skip the append and
+         count it as deduped. [Record_failed] keeps the prior at-least-once
+         behavior: fresh-vs-duplicate is unknown, so a transient store outage
+         must not silently drop a genuinely new line. *)
+      (match recorded with
+       | Fresh _ | Record_failed ->
+         Keeper_chat_store.append_user_message
+           ~base_dir ~keeper_name ~content:trimmed
+           ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
+           ~conversation_id:(slack_conversation_id ~channel_id)
+           ~external_message_id:ts
+           ~speaker:
+             { Keeper_chat_store.speaker_id = Some user_id
+             ; speaker_name = user_name
+             ; speaker_authority = Keeper_chat_store.External
+             }
+           ();
+         Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+         Slack_observability.record_ambient Slack_observability.Ambient_recorded
+       | Duplicate _ ->
+         Slack_observability.record_ambient Slack_observability.Ambient_deduped);
       (* Every accepted Connector event is a durable per-Keeper stimulus. The
          event identity comes from the producer-owned external-attention row;
          no content, channel activity, elapsed-time window, or rollout flag may
          suppress it. The wake is only a hint after the durable commit, so a
          busy or lifecycle-deferred Keeper retains the exact event for its next
-         lane cycle. *)
-      (match attention_event_id with
-       | Some event_id ->
+         lane cycle. The stimulus re-offer is idempotent
+         ([enqueue_stimulus_durable_result] returns [Stimulus_already_present]),
+         so it runs on a [Duplicate] redelivery too. *)
+      (match recorded with
+       | Fresh event_id | Duplicate event_id ->
          let stimulus =
            { Keeper_event_queue.post_id = event_id
            ; urgency = Keeper_event_queue.Low
@@ -550,8 +575,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
                  keeper_name
                  event_id
                  (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
-       | None -> ());
-      Slack_observability.record_ambient Slack_observability.Ambient_recorded
+       | Record_failed -> ())
     end
 
 let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =

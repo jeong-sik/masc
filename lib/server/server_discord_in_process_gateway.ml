@@ -158,6 +158,16 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
   ; external_message_id = Some message_id
   }
 
+(* Typed outcome of recording an external-attention event, so the ambient arm
+   can gate the non-idempotent transcript append on the store's already-computed
+   fresh-vs-duplicate decision (masc#25262). The event_id is carried in both
+   the [Fresh] and [Duplicate] cases because the durable stimulus enqueue is
+   idempotent and must run on a redelivery too. *)
+type attention_record =
+  | Fresh of string  (** first delivery — event_id newly recorded *)
+  | Duplicate of string  (** redelivery — event_id already present in the store *)
+  | Record_failed  (** the attention store could not record the event *)
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
   =
@@ -197,13 +207,13 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
     }
   in
   match Keeper_external_attention.record ~base_path:base_dir item with
-  | `Recorded -> Some event_id
-  | `Duplicate item -> Some item.event_id
+  | `Recorded -> Fresh event_id
+  | `Duplicate item -> Duplicate item.event_id
   | `Error error ->
       Log.Server.warn
         "discord external attention record failed (channel=%s keeper=%s): %s"
         channel_id keeper_name error;
-      None
+      Record_failed
 
 let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
   match
@@ -295,10 +305,18 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
         | None -> Keeper_external_attention.Direct_message
         | Some _ -> Keeper_external_attention.Ambient
     in
+    (* Triggered path: the dispatch boundary owns the transcript append + turn.
+       This arm only needs the event_id (fresh or duplicate) to resolve the
+       attention row after a reply, so collapse the typed record to an option
+       and keep the prior behavior. *)
     let attention_event_id =
-      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
-        ~message_id ~author_id ~author_name ~content ~mentions_bot
-        ~route:"triggered" ~urgency
+      match
+        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+          ~message_id ~author_id ~author_name ~content ~mentions_bot
+          ~route:"triggered" ~urgency
+      with
+      | Fresh event_id | Duplicate event_id -> Some event_id
+      | Record_failed -> None
     in
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
@@ -484,39 +502,56 @@ let handle_ambient ?resolved_keeper_name ~base_dir
     else begin
       let parent_channel_id = State.parent_channel_of_thread ~channel_id in
       let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
-      let attention_event_id =
+      let recorded =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
           ~message_id ~author_id ~author_name ~content:trimmed
           ~mentions_bot:false ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
       in
-      Keeper_chat_store.append_user_message
-        ~base_dir ~keeper_name ~content:trimmed
-        ~surface:
-          (Surface_ref.Discord
-             {
-               guild_id;
-               channel_id;
-               parent_channel_id;
-               thread_id;
-             })
-        ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
-        ~external_message_id:message_id
-        ~speaker:
-          { Keeper_chat_store.speaker_id = Some author_id
-          ; speaker_name = author_name
-          ; speaker_authority = Keeper_chat_store.External
-          }
-        ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+      (* RFC-0226 redelivery (masc#25262): the attention store already deduped
+         this event and the durable stimulus enqueue below is idempotent, but
+         [append_user_message] is not. Append + broadcast the user line only for
+         a freshly recorded event. A [Duplicate] is a gateway redelivery whose
+         line is already in the transcript — skip the append and count it as
+         deduped. [Record_failed] keeps the prior at-least-once behavior:
+         fresh-vs-duplicate is unknown, so a transient store outage must not
+         silently drop a genuinely new line. *)
+      (match recorded with
+       | Fresh _ | Record_failed ->
+         Keeper_chat_store.append_user_message
+           ~base_dir ~keeper_name ~content:trimmed
+           ~surface:
+             (Surface_ref.Discord
+                {
+                  guild_id;
+                  channel_id;
+                  parent_channel_id;
+                  thread_id;
+                })
+           ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
+           ~external_message_id:message_id
+           ~speaker:
+             { Keeper_chat_store.speaker_id = Some author_id
+             ; speaker_name = author_name
+             ; speaker_authority = Keeper_chat_store.External
+             }
+           ();
+         Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+         Discord_observability.record_ambient
+           Discord_observability.Ambient_recorded
+       | Duplicate _ ->
+         Discord_observability.record_ambient
+           Discord_observability.Ambient_deduped);
       (* Every accepted Connector event is a durable per-Keeper stimulus. The
          event identity comes from the producer-owned external-attention row;
          no content, channel activity, elapsed-time window, or rollout flag may
          suppress it. The wake is only a hint after the durable commit, so a
          busy or lifecycle-deferred Keeper retains the exact event for its next
-         lane cycle. *)
-      (match attention_event_id with
-       | Some event_id ->
+         lane cycle. The stimulus re-offer is idempotent
+         ([enqueue_stimulus_durable_result] returns [Stimulus_already_present]),
+         so it runs on a [Duplicate] redelivery too. *)
+      (match recorded with
+       | Fresh event_id | Duplicate event_id ->
          let stimulus =
            { Keeper_event_queue.post_id = event_id
            ; urgency = Keeper_event_queue.Low
@@ -586,9 +621,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
                  keeper_name
                  event_id
                  (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
-       | None -> ());
-      Discord_observability.record_ambient
-        Discord_observability.Ambient_recorded
+       | Record_failed -> ())
     end
 
 let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
@@ -648,10 +681,6 @@ let submit_ingress ingress ~lane ~event_id run =
       (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
 ;;
 
-module For_testing = struct
-  let submit_triggered_event = submit_triggered_event
-end
-
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
@@ -674,6 +703,11 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   | Gw.Thread_removed _
   | Gw.Ignored _ -> on_ambient ~base_dir ev
 ;;
+
+module For_testing = struct
+  let submit_triggered_event = submit_triggered_event
+  let submit_ambient_event = submit_ambient_event
+end
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)

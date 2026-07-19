@@ -11,6 +11,8 @@ open Alcotest
 open Masc
 module G = Server_discord_in_process_gateway
 module State = Channel_gate_discord_state
+module Metrics = Otel_metric_store_core
+module Names = Otel_transport_metric_names
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -282,6 +284,105 @@ let test_durable_accept_precedes_delivery_handoff () =
     failf "expected Keeper lane, got connector:%s" connector_id
 ;;
 
+let discord_ambient_message ~message_id =
+  Discord_gateway_client.Message_create
+    { channel_id = "C123"
+    ; guild_id = Some "G123"
+    ; message_id
+    ; author_id = "U123"
+    ; author_name = Some "operator"
+    ; content = "ambient discord chatter"
+    ; raw_content = "ambient discord chatter"
+    ; resolved_mentions = []
+    ; mention_user_ids = []
+    ; mentions_bot = false
+    ; explicit_mentions_bot = false
+    ; author_is_bot = false
+    ; message_reference_channel_id = None
+    ; message_reference_message_id = None
+    ; referenced_message_author_id = None
+    }
+;;
+
+(* masc#25262 counterfactual (Discord parity): a gateway redelivery replays the
+   same ambient message (identical message_id). The attention store already
+   deduped the event, but the pre-fix ambient arm re-ran the non-idempotent
+   [append_user_message], leaving two identical user lines. With the fix the
+   second delivery is a [Duplicate]: the append is skipped (exactly one user
+   line) while the idempotent durable stimulus re-offer still runs. *)
+let test_ambient_redelivery_appends_user_line_once () =
+  with_temp_dir @@ fun base_dir ->
+  with_env Env_config_core.base_path_env_key base_dir @@ fun () ->
+  with_env Env_config_core.base_path_input_env_key base_dir @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Filename.concat base_dir "bindings.json")
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  with_env "MASC_DISCORD_NAMES_PATH" (Filename.concat base_dir "names.json")
+  @@ fun () ->
+  (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+   | Error detail -> fail detail
+   | Ok _ -> ());
+  let content = "ambient discord chatter" in
+  let ambient_labels outcome =
+    [ ("outcome", Discord_observability.ambient_outcome_label outcome) ]
+  in
+  let read_metric outcome =
+    Metrics.metric_value_or_zero Names.metric_discord_ambient_record
+      ~labels:(ambient_labels outcome) ()
+  in
+  let recorded_before = read_metric Discord_observability.Ambient_recorded in
+  let deduped_before = read_metric Discord_observability.Ambient_deduped in
+  let failures = ref [] in
+  let message_id = "discord-redelivered-222" in
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let ingress =
+    Connector_ingress_lane.create ~sw
+      ~on_failure:(fun failure ->
+        failures :=
+          Connector_ingress_lane.failure_reason_to_string
+            failure.Connector_ingress_lane.reason
+          :: !failures)
+      ()
+  in
+  (* Deliver the identical ambient message twice — the gateway redelivery. *)
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (discord_ambient_message ~message_id);
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (discord_ambient_message ~message_id);
+  (* Drain the per-Keeper lane: a sentinel job on the same lane runs after both
+     ambient appends (FIFO), so awaiting it proves both completed. *)
+  let drained, resolve_drained = Eio.Promise.create () in
+  (match
+     Connector_ingress_lane.submit ingress
+       ~lane:(Connector_ingress_lane.Keeper_lane "luna")
+       ~event_id:
+         { Connector_ingress_lane.source = "test_drain"; opaque_id = message_id }
+       (fun () -> Eio.Promise.resolve resolve_drained ())
+   with
+   | Ok () -> ()
+   | Error error ->
+     failf "sentinel submit rejected: %s"
+       (Connector_ingress_lane.submit_error_to_string error));
+  Eio.Promise.await drained;
+  check (list string) "no ingress job failures" [] !failures;
+  let user_lines =
+    Keeper_chat_store.load ~base_dir ~keeper_name:"luna"
+    |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
+         Keeper_chat_store.Role.equal m.role Keeper_chat_store.Role.User
+         && String.equal m.content content)
+  in
+  check int "exactly one user line for the redelivered event" 1
+    (List.length user_lines);
+  check (float 0.0001) "one fresh record" 1.0
+    (read_metric Discord_observability.Ambient_recorded -. recorded_before);
+  check (float 0.0001) "one dedup" 1.0
+    (read_metric Discord_observability.Ambient_deduped -. deduped_before)
+;;
+
 let () =
   run "server_discord_trigger_policy"
     [ ( "toml_loader"
@@ -306,5 +407,9 @@ let () =
     ; ( "ingress handoff"
       , [ test_case "durable accept precedes Discord delivery" `Quick
             test_durable_accept_precedes_delivery_handoff
+        ] )
+    ; ( "ambient redelivery"
+      , [ test_case "duplicate ambient event appends one user line" `Quick
+            test_ambient_redelivery_appends_user_line_once
         ] )
     ]

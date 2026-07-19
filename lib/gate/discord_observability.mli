@@ -34,6 +34,10 @@ type inbound_outcome =
 
 type ambient_outcome =
   | Ambient_recorded
+  | Ambient_deduped
+      (** Redelivery of an already-recorded event: the attention store held the
+          duplicate, so the ambient arm skipped the non-idempotent transcript
+          append (masc#25262). *)
   | Ambient_binding_store_error
   | Ambient_dropped_unbound
   | Ambient_dropped_empty

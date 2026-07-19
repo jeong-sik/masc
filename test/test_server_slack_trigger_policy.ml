@@ -12,6 +12,8 @@ open Alcotest
 open Masc
 module G = Server_slack_in_process_gateway
 module State = Channel_gate_slack_state
+module Metrics = Otel_metric_store_core
+module Names = Otel_transport_metric_names
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -342,6 +344,89 @@ let test_binding_store_failure_does_not_enqueue () =
   with Exit -> ()
 ;;
 
+let slack_ambient_message ~ts =
+  Slack_gateway_state.Message_create
+    { channel_id = "C123"
+    ; thread_ts = None
+    ; user_id = "U123"
+    ; user_name = Some "operator"
+    ; text = "ambient chatter, no mention"
+    ; ts
+    ; mentions_bot = false
+    ; bot_id = None
+    }
+;;
+
+(* masc#25262 counterfactual: a Slack Socket-Mode redelivery replays the same
+   ambient event (identical ts). The attention store already deduped the event,
+   but the pre-fix ambient arm re-ran the non-idempotent [append_user_message],
+   leaving two identical user lines in the transcript. With the fix the second
+   delivery is a [Duplicate]: the append is skipped (exactly one user line)
+   while the idempotent durable stimulus re-offer still runs. *)
+let test_ambient_redelivery_appends_user_line_once () =
+  with_temp_base (fun () ->
+    match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+    | Error detail -> fail detail
+    | Ok _ ->
+      let base_dir = Env_config_core.base_path () in
+      let content = "ambient chatter, no mention" in
+      let ambient_labels outcome =
+        [ ("outcome", Slack_observability.ambient_outcome_label outcome) ]
+      in
+      let read_metric outcome =
+        Metrics.metric_value_or_zero Names.metric_slack_ambient_record
+          ~labels:(ambient_labels outcome) ()
+      in
+      let recorded_before = read_metric Slack_observability.Ambient_recorded in
+      let deduped_before = read_metric Slack_observability.Ambient_deduped in
+      let failures = ref [] in
+      let ts = "1710000000.222222" in
+      Eio_main.run @@ fun _env ->
+      Eio.Switch.run @@ fun sw ->
+      let ingress =
+        Connector_ingress_lane.create ~sw
+          ~on_failure:(fun failure ->
+            failures :=
+              Connector_ingress_lane.failure_reason_to_string
+                failure.Connector_ingress_lane.reason
+              :: !failures)
+          ()
+      in
+      (* Deliver the identical ambient event twice — the Socket-Mode redelivery. *)
+      G.For_testing.submit_ambient_event ~team_id:"T123" ingress ~base_dir
+        (slack_ambient_message ~ts);
+      G.For_testing.submit_ambient_event ~team_id:"T123" ingress ~base_dir
+        (slack_ambient_message ~ts);
+      (* Drain the per-Keeper lane: a sentinel job on the same lane runs after
+         both ambient appends (FIFO), so awaiting it proves both completed. *)
+      let drained, resolve_drained = Eio.Promise.create () in
+      (match
+         Connector_ingress_lane.submit ingress
+           ~lane:(Connector_ingress_lane.Keeper_lane "luna")
+           ~event_id:
+             { Connector_ingress_lane.source = "test_drain"; opaque_id = ts }
+           (fun () -> Eio.Promise.resolve resolve_drained ())
+       with
+       | Ok () -> ()
+       | Error error ->
+         failf "sentinel submit rejected: %s"
+           (Connector_ingress_lane.submit_error_to_string error));
+      Eio.Promise.await drained;
+      check (list string) "no ingress job failures" [] !failures;
+      let user_lines =
+        Keeper_chat_store.load ~base_dir ~keeper_name:"luna"
+        |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
+             Keeper_chat_store.Role.equal m.role Keeper_chat_store.Role.User
+             && String.equal m.content content)
+      in
+      check int "exactly one user line for the redelivered event" 1
+        (List.length user_lines);
+      check (float 0.0001) "one fresh record" 1.0
+        (read_metric Slack_observability.Ambient_recorded -. recorded_before);
+      check (float 0.0001) "one dedup" 1.0
+        (read_metric Slack_observability.Ambient_deduped -. deduped_before))
+;;
+
 let () =
   run "server_slack_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -380,5 +465,9 @@ let () =
             test_bound_message_queues_exact_slack_ts
         ; test_case "binding store failure does not enqueue" `Quick
             test_binding_store_failure_does_not_enqueue
+        ] )
+    ; ( "ambient redelivery"
+      , [ test_case "duplicate ambient event appends one user line" `Quick
+            test_ambient_redelivery_appends_user_line_once
         ] )
     ]

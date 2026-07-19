@@ -586,14 +586,13 @@ let checkpoint_generation_with_fallback ?generation_fallback checkpoint =
       "checkpoint generation key absent; recovering from meta SSOT \
        generation=%d (pre-#25046 checkpoint, #25217)"
       fallback;
+    (* A successful recovery is not an execution error — dashboard.ml aggregates
+       [OasExecutionErrors] into its error total, so counting it there inflated
+       the error signal. Record it on a dedicated non-error counter instead. *)
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
+      Keeper_metrics.(to_string CheckpointGenerationRecovered)
       ~labels:
-        [ ( "phase"
-          , Keeper_oas_execution_error_phase.(
-              to_label Compaction_checkpoint_load) )
-        ; "kind", "generation_recovered_from_meta"
-        ]
+        [ "source", "meta_ssot"; "context", "compaction_checkpoint_load" ]
       ();
     Ok fallback
   | Error _ as error, _ -> error

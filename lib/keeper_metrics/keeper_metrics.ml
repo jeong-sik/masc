@@ -120,6 +120,7 @@ type t =
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
+  | CheckpointGenerationRecovered
   | EpisodeCreateFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
@@ -338,6 +339,8 @@ let to_string = function
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
   | OasExecutionErrors -> "masc_keeper_oas_execution_errors_total"
+  | CheckpointGenerationRecovered ->
+    "masc_keeper_checkpoint_generation_recovered_total"
   | EpisodeCreateFailures -> "masc_keeper_episode_create_failures_total"
   | MemoryActivityEmitFailures -> "masc_keeper_memory_activity_emit_failures_total"
   | SupervisorSweepFailures -> "masc_keeper_supervisor_sweep_failures_total"

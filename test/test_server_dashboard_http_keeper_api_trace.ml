@@ -28,7 +28,10 @@ let record_thinking ~masc_root ~keeper_name ~trace_id ~ts ~ts_iso ~turn
     Agent_sdk.Types.Thinking { content; signature = None }
   in
   let entry =
-    match T.make_thinking_entry ~ts ~ts_iso ~turn ~block_index:0 ~block with
+    match
+      T.make_thinking_entry ~ts ~ts_iso ~keeper_turn_id:turn ~oas_turn:0
+        ~block_index:0 ~block
+    with
     | Ok entry -> entry
     | Error error ->
         fail

@@ -124,7 +124,7 @@ server_runtime_bootstrap
   -> JSONL (Board.store)
 ```
 
-모든 Board 연산은 `Board_dispatch.*`를 통해 호출한다. 이 indirection은 route/tool code가 저장소 구현에 직접 의존하지 않게 하지만, 현재 production runtime에서는 JSONL store가 durable source of truth다.
+Store mutation은 `Board_dispatch.*`를 경유하고, 타입/직렬화 접근은 `Board` facade를 직접 사용할 수 있다. 이 indirection은 route/tool code가 저장소 구현에 직접 의존하지 않게 하지만, 현재 production runtime에서는 JSONL store가 durable source of truth다.
 
 ### 4.2 JSONL 백엔드
 

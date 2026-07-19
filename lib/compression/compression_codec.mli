@@ -24,11 +24,6 @@ type compress_result =
 val min_size : int
 (** Minimum payload size (bytes) below which compression is skipped. *)
 
-val legacy_min_size : int
-(** Minimum payload size (bytes) for the legacy standard-zstd path.
-    The main {!min_size} floor is used by the dictionary-aware path; the
-    legacy path keeps its own higher floor to avoid tiny-response overhead. *)
-
 val max_dict_size : int
 (** Upper bound reserved for dictionary payloads. *)
 
@@ -48,13 +43,6 @@ val of_used_dict : bool -> encoding
 
 val content_encoding : encoding -> string
 (** HTTP [Content-Encoding] header value for an [encoding]. *)
-
-val legacy_standard_result : original:string -> compress_result -> string * bool
-(** [legacy_standard_result ~original result] adapts codec results for the
-    legacy [Content-Encoding: zstd] path. Standard zstd results are advertised
-    as compressed; unchanged payloads and dictionary results return
-    [(original_or_payload, false)] so callers cannot leak dictionary-compressed
-    bytes without a matching dictionary content-encoding. *)
 
 (** {1 Compression} *)
 

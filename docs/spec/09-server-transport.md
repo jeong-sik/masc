@@ -800,7 +800,7 @@ sequenceDiagram
 
 ### 15.5 HTTP Compression
 
-`Http_server_eio.Compression` 모듈이 zstd + dictionary 압축을 지원한다:
+`Http_response_payload` 모듈이 zstd + dictionary 압축을 지원한다:
 
 - `zstd`: 표준 zstd (256바이트 이상)
 - `zstd-dict`: MASC 전용 사전 기반 압축 (32-2048바이트에서 +70%p 향상)

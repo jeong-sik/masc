@@ -2,7 +2,6 @@
 
     Tests compression functionality across MASC modules:
     - Backend.Compression (storage layer)
-    - Http_server_eio.Compression (HTTP layer - tested separately)
 
     Expected Results:
     - 60-70% compression ratio for text/JSON data

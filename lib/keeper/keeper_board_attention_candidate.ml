@@ -558,7 +558,9 @@ let validate_status_payload candidate =
      | Prompt_contract_unavailable
      | Provider_unavailable
      | Response_contract_unavailable -> Ok ()
-     | Partition_membership_conflict | Durable_delivery_unavailable ->
+     | Durable_candidate_storage_unavailable
+     | Partition_membership_conflict
+     | Durable_delivery_unavailable ->
        Error
          (Printf.sprintf
             "candidate %s Pending status contains non-judge failure kind %s"
@@ -572,6 +574,7 @@ let validate_status_payload candidate =
      | Prompt_contract_unavailable
      | Provider_unavailable
      | Response_contract_unavailable
+     | Durable_candidate_storage_unavailable
      | Partition_membership_conflict ->
        Error
          (Printf.sprintf
@@ -837,10 +840,12 @@ let run_blocking label operation =
 let store_error error = Fs_compat.private_jsonl_transaction_error_to_string error
 
 let invalidate_cached entry observed =
+  (* See cache race contract: a failed CAS means a newer cursor owns the slot. *)
   ignore (Atomic.compare_and_set entry.cached observed None : bool)
 ;;
 
 let publish_cached entry observed view =
+  (* See cache race contract: publication is optional; [view] stays exact. *)
   ignore (Atomic.compare_and_set entry.cached observed (Some view) : bool)
 ;;
 

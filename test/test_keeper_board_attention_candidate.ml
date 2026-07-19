@@ -740,6 +740,36 @@ let test_cold_replay_rejects_failure_state_inversion () =
   | Ok _ -> Alcotest.fail "cold replay accepted Provider failure on Judged"
 ;;
 
+let test_cold_replay_rejects_candidate_storage_failure_status () =
+  let assert_rejected name status =
+    with_temp_base name @@ fun base_path ->
+    let keeper_name = "sangsu" in
+    let original = candidate ~keeper_name () in
+    let invalid = { original with status } in
+    let path = candidate_ledger_path ~base_path ~keeper_name in
+    append_ledger path (Yojson.Safe.to_string (A.candidate_to_json invalid) ^ "\n");
+    match A.load_candidates ~base_path ~keeper_name with
+    | Error _ -> ()
+    | Ok _ ->
+      Alcotest.fail "cold replay accepted candidate-storage failure as candidate state"
+  in
+  let failure : A.retryable_failure =
+    { kind = A.Durable_candidate_storage_unavailable
+    ; detail = "candidate storage unavailable"
+    ; failed_at = 120.0
+    }
+  in
+  assert_rejected
+    "attention-candidate-storage-failure-pending"
+    (A.Pending { last_failure = Some failure });
+  assert_rejected
+    "attention-candidate-storage-failure-judged"
+    (A.Judged
+       { judgment = judgment J.Not_relevant
+       ; last_failure = Some failure
+       })
+;;
+
 let test_cold_replay_rejects_pending_to_failed_judged () =
   with_temp_base "attention-candidate-failed-judgment-transition" @@ fun base_path ->
   let keeper_name = "sangsu" in
@@ -781,7 +811,7 @@ let test_same_length_rewrite_invalidates_cached_cursor_explicitly () =
        Some bytes, ())
    with
    | Ok () -> ()
-   | Error error -> Alcotest.fail (Fs_compat.durable_append_error_to_string error));
+   | Error detail -> Alcotest.fail detail);
   (match A.load_candidates ~base_path ~keeper_name with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "same-length inode replacement served a stale cache");
@@ -1327,6 +1357,10 @@ let () =
             "cold replay rejects failure state inversion"
             `Quick
             test_cold_replay_rejects_failure_state_inversion
+        ; Alcotest.test_case
+            "cold replay rejects candidate-storage failure status"
+            `Quick
+            test_cold_replay_rejects_candidate_storage_failure_status
         ; Alcotest.test_case
             "cold replay rejects Pending to failed Judged"
             `Quick

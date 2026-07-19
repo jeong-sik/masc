@@ -318,14 +318,20 @@ let deterministic_floor_runtime_id = "deterministic_floor"
 (* Units protected at each end of the compactable prefix: a positional head
    window (leading setup) plus the first User goal (see [first_user_goal_index]),
    and a trailing recency window. The floor reduces the checkpoint down to
-   {protected setup + goal + recency + all non-droppable units}. This is the
-   smallest set a UNIT-granular floor can produce; if that set alone still
-   exceeds the provider window (a single oversized message/unit), no keep/drop
-   plan — deterministic or LLM — can fit it: that needs message-content
-   truncation, out of scope here (review #25281 P1.1). Deriving these windows
-   from the token budget rather than a fixed count would let the floor keep more
-   recency when there is room; that is a quality follow-up (RFC S6), not a
-   correctness requirement for the reduction guarantee. *)
+   {protected setup + goal + recency + all non-droppable units}.
+
+   The FIXED tail is a known correctness gap (review #25281 P1.1): if the
+   protected window itself exceeds the provider limit (e.g. 12 individually large
+   recent units) the floor commits an over-limit checkpoint, because the
+   downstream guard only asserts after < before. The proper fix is an ADAPTIVE
+   tail (drop into the tail until the kept set fits the budget carried by
+   Compaction_trigger.Provider_overflow.limit_tokens), which shrinks the residual
+   to head+goal+one-recent-unit; that is a correctness follow-up, not a quality
+   one. The absolute residual — a single unit larger than the window — needs
+   message-content truncation, which no keep/drop plan (LLM or deterministic) can
+   do. As shipped the floor breaks the common spiral (each overflow drops the
+   newly accumulated middle, so it converges on non-pathological input) but does
+   not guarantee one-shot fit; #25281 stays Draft until the adaptive tail lands. *)
 let floor_protected_head_units = 3
 let floor_protected_tail_units = 12
 

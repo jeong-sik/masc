@@ -119,7 +119,7 @@ let test_run_context_binds_generation_before_oas_checkpoint () =
   let agent =
     Agent_sdk.Agent.create
       ~net:(Eio.Stdenv.net env)
-      ~config:(Agent_sdk.Agent.default_config ~model:"test-model")
+      ~config:(Agent_sdk.Types.default_config ~model:"test-model")
       ~context:run_context.shared_context
       ()
   in

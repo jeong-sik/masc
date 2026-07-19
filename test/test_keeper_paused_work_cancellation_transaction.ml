@@ -25,7 +25,7 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let with_lane ?(registered = true) ~paused ~generation f =
+let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
   let base_path = Filename.temp_dir "keeper-paused-cancel-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
@@ -49,6 +49,7 @@ let with_lane ?(registered = true) ~paused ~generation f =
        let meta =
          { meta with
            paused
+         ; latched_reason
          ; runtime = { meta.runtime with generation }
          }
        in
@@ -209,6 +210,34 @@ let test_durable_paused_owner_can_cancel_without_live_registry () =
       (List.length (State.leases state)))
 ;;
 
+let test_dead_tombstone_cannot_use_operator_cancellation () =
+  with_lane
+    ~registered:false
+    ~latched_reason:Keeper_latched_reason.Dead_tombstone
+    ~paused:true
+    ~generation:15
+    (fun config keeper_name request ->
+       (match Transaction.cancel config ~keeper_name request with
+        | Error
+            (Transaction.Failed
+               { cause = Transaction.Durable_owner_dead_tombstone
+               ; reservation_release
+               }) ->
+          check_released reservation_release
+        | Error error -> Alcotest.fail (Transaction.error_to_string error)
+        | Ok _ -> Alcotest.fail "dead tombstone accepted operator cancellation");
+       let state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load rejected dead-tombstone lane"
+       in
+       Alcotest.(check int)
+         "dead-tombstone rejection retains active lease"
+         1
+         (List.length (State.leases state)))
+;;
+
 let test_stale_generation_is_rejected_before_commit () =
   with_lane ~paused:true ~generation:13 (fun config keeper_name request ->
     let stale = { request with owner_generation = 12 } in
@@ -257,6 +286,10 @@ let () =
             "durable paused owner can cancel without live registry"
             `Quick
             test_durable_paused_owner_can_cancel_without_live_registry
+        ; Alcotest.test_case
+            "dead tombstone cannot use operator cancellation"
+            `Quick
+            test_dead_tombstone_cannot_use_operator_cancellation
         ] )
     ]
 ;;

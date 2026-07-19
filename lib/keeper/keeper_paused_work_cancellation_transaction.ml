@@ -11,6 +11,7 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
+  | Durable_owner_dead_tombstone
   | Durable_owner_generation_changed of
       { expected : int
       ; actual : int
@@ -38,6 +39,7 @@ let failure_to_string = function
   | Durable_meta_read_failed detail -> "durable Keeper metadata read failed: " ^ detail
   | Durable_meta_missing -> "durable Keeper metadata is missing"
   | Durable_owner_not_paused -> "durable Keeper owner is not paused"
+  | Durable_owner_dead_tombstone -> "durable Keeper owner is a terminal dead tombstone"
   | Durable_owner_generation_changed { expected; actual } ->
     Printf.sprintf
       "durable Keeper owner generation changed: expected %d, actual %d"
@@ -77,12 +79,22 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error detail -> Error (Durable_meta_read_failed detail)
   | Ok None -> Error Durable_meta_missing
-  | Ok (Some meta) when not meta.paused -> Error Durable_owner_not_paused
-  | Ok (Some meta) when meta.runtime.generation <> expected_generation ->
-    Error
-      (Durable_owner_generation_changed
-         { expected = expected_generation; actual = meta.runtime.generation })
-  | Ok (Some meta) -> Ok meta
+  | Ok (Some meta) ->
+    (match
+       Keeper_lifecycle_admission.state
+         ~paused:meta.paused
+         ~latched_reason:meta.latched_reason
+     with
+     | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
+     | Keeper_lifecycle_admission.Dead_tombstone ->
+       Error Durable_owner_dead_tombstone
+     | Keeper_lifecycle_admission.Paused _ ->
+       if meta.runtime.generation <> expected_generation
+       then
+         Error
+           (Durable_owner_generation_changed
+              { expected = expected_generation; actual = meta.runtime.generation })
+       else Ok meta)
 ;;
 
 let validate_registry_owner ~base_path ~keeper_name ~expected_generation =

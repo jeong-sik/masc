@@ -18,6 +18,7 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
+  | Durable_owner_dead_tombstone
   | Durable_owner_generation_changed of
       { expected : int
       ; actual : int

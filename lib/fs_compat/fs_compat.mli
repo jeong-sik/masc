@@ -791,6 +791,9 @@ type private_jsonl_transaction_operation =
   | Set_stable_lock_permissions
   | Sync_stable_lock_parent
   | Acquire_stable_lock
+  | Read_stable_lock_state
+  | Write_stable_lock_state
+  | Sync_stable_lock
   | Open_transaction_data
   | Set_transaction_data_permissions
   | Inspect_transaction_data
@@ -814,6 +817,14 @@ type private_jsonl_operation_failure =
 
 type private_jsonl_transaction_error =
   | Stable_lock_contended of { lock_path : string }
+  | Unexpected_stable_lock_permissions of
+      { path : string
+      ; actual : int
+      }
+  | Invalid_stable_lock_state of
+      { path : string
+      ; observed_length : int
+      }
   | Cursor_mismatch of
       { expected : Private_jsonl_cursor.t
       ; actual : Private_jsonl_cursor.t
@@ -852,6 +863,17 @@ val private_jsonl_lock_path : string -> string
     The returned cursor distinguishes a missing store from a present empty
     store. *)
 val read_private_jsonl_durable_locked_result :
+  string ->
+  after:Private_jsonl_cursor.t option ->
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result
+
+type private_jsonl_transaction_io_for_testing =
+  { before_sync_parent : string -> unit }
+
+(** Production-path seam for deterministic stable-lock creation durability
+    tests. *)
+val read_private_jsonl_durable_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
   string ->
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result

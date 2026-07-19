@@ -418,6 +418,25 @@ let transaction_snapshot path ~after =
   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
 ;;
 
+let transaction_snapshot_with_io ~io path ~after =
+  match
+    Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+      ~io
+      path
+      ~after
+  with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+let write_stable_lock_fixture path contents permissions =
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let output = open_out_bin lock_path in
+  output_string output contents;
+  close_out output;
+  Unix.chmod lock_path permissions
+;;
+
 let transaction_append path ~expected suffix =
   match
     Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
@@ -502,6 +521,73 @@ let test_private_jsonl_transaction_lock_is_private () =
     (Unix.stat (Fs_compat.private_jsonl_lock_path path)).Unix.st_perm land 0o777
   in
   check int "stable lock permissions" 0o600 permissions
+;;
+
+let test_private_jsonl_stable_lock_parent_sync_is_one_shot () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let parent_syncs = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> incr parent_syncs) }
+  in
+  let snapshot = transaction_snapshot_with_io ~io path ~after:None in
+  ignore (transaction_snapshot_with_io ~io path ~after:(Some snapshot.cursor));
+  ignore (transaction_snapshot_with_io ~io path ~after:(Some snapshot.cursor));
+  check int "stable lock parent sync count" 1 !parent_syncs
+;;
+
+let test_private_jsonl_stable_lock_parent_sync_failure_retries () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent =
+        (fun dir ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    }
+  in
+  (match
+     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+       ~io
+       path
+       ~after:None
+   with
+   | Error
+       (Fs_compat.Private_jsonl_operation_failed
+         { operation = Fs_compat.Sync_stable_lock_parent; _ }) ->
+     ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stable lock parent-sync failure was silently accepted");
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  check string "failed initialization remains preparing" "" (Fs_compat.load_file lock_path);
+  ignore (transaction_snapshot path ~after:None);
+  check bool
+    "successful retry publishes ready state"
+    true
+    (String.length (Fs_compat.load_file lock_path) > 0)
+;;
+
+let test_private_jsonl_stable_lock_invalid_state_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let invalid = "invalid-ready-state" in
+  write_stable_lock_fixture path invalid 0o600;
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error (Fs_compat.Invalid_stable_lock_state { observed_length; _ }) ->
+    check int "invalid stable lock length" (String.length invalid) observed_length
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "invalid stable lock state was accepted"
+;;
+
+let test_private_jsonl_stable_lock_permission_drift_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture path "" 0o640;
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+   | Error (Fs_compat.Unexpected_stable_lock_permissions { actual; _ }) ->
+     check int "observed stable lock permissions" 0o640 actual
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stable lock permission drift was silently repaired");
+  check int
+    "permission drift remains untouched"
+    0o640
+    ((Unix.stat lock_path).Unix.st_perm land 0o7777)
 ;;
 
 let test_private_jsonl_transaction_rejects_data_aliases () =
@@ -678,6 +764,22 @@ let () =
             "private JSONL stable lock is private"
             `Quick
             test_private_jsonl_transaction_lock_is_private
+        ; test_case
+            "private JSONL stable lock parent sync is one-shot"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_is_one_shot
+        ; test_case
+            "private JSONL stable lock retries failed parent sync"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_failure_retries
+        ; test_case
+            "private JSONL stable lock invalid state fails closed"
+            `Quick
+            test_private_jsonl_stable_lock_invalid_state_fails_closed
+        ; test_case
+            "private JSONL stable lock permission drift fails closed"
+            `Quick
+            test_private_jsonl_stable_lock_permission_drift_fails_closed
         ; test_case
             "private JSONL transaction rejects data aliases"
             `Quick

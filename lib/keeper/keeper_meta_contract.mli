@@ -48,6 +48,14 @@ val compaction_runtime_decision_to_string :
 val compaction_runtime_decision_of_string :
   string -> compaction_runtime_decision
 
+val compaction_decision_json_or_null :
+  compaction_runtime_decision -> Yojson.Safe.t
+(** API/dashboard projection of [last_compaction_decision]: the decision
+    string, or [`Null] when empty. Shared by keeper_status.ml and
+    dashboard_http_keeper.ml so the null-guard policy has one definition
+    (issue #25323). Not used by keeper_meta_json.ml, whose on-disk
+    representation serializes the raw string. *)
+
 type compaction_runtime = {
   count : int;
   last_ts : float;

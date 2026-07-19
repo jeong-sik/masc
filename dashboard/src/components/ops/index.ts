@@ -56,7 +56,7 @@ interface ContextMetricsDiagnostic {
   error: OperatorContextMetricsUnavailable
 }
 
-function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): ContextMetricsDiagnostic[] {
+export function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): ContextMetricsDiagnostic[] {
   if (!snapshot) return []
   const keepers = snapshot.keepers
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
@@ -66,7 +66,14 @@ function contextMetricsDiagnostics(snapshot: OperatorSnapshot | null): ContextMe
     .filter((keeper): keeper is OperatorKeeperSnapshot & { context_metrics_unavailable: OperatorContextMetricsUnavailable } =>
       keeper.context_metrics_unavailable !== undefined)
     .map(keeper => ({ keeper, source: 'persistent_agent' as const, error: keeper.context_metrics_unavailable }))
-  return [...keepers, ...persistentAgents]
+  const byName = new Map<string, ContextMetricsDiagnostic>()
+  for (const diagnostic of [...keepers, ...persistentAgents]) {
+    // persistent_agents is a filtered projection of keepers (same rows), so an
+    // autoboot keeper appears in both sections. Collapse to one diagnostic per
+    // keeper identity, preferring the canonical 'keeper' source (inserted first).
+    if (!byName.has(diagnostic.keeper.name)) byName.set(diagnostic.keeper.name, diagnostic)
+  }
+  return [...byName.values()]
 }
 
 function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {

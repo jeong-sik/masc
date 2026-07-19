@@ -25,6 +25,7 @@ async function loadOps() {
 
   return {
     Ops: mod.Ops,
+    contextMetricsDiagnostics: mod.contextMetricsDiagnostics,
     route: router.route,
     operatorActionLog: operatorStore.operatorActionLog,
     operatorDigestError: operatorStore.operatorDigestError,
@@ -477,6 +478,73 @@ describe('Ops surface', () => {
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('No operator activity in the last 3 days')
     expect(empty?.textContent).not.toContain('paused')
+  }, 60000)
+
+  it('collapses a keeper present in both keepers and persistent_agents into one diagnostic (source keeper)', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+
+    // persistent_agents is a filtered projection of keepers (same rows emitted by
+    // rows_from_keeper_rows), so an autoboot keeper with a context-metrics failure
+    // shows up in both sections under the SAME name. Pre-fix this returned 2
+    // diagnostics for that one identity (rendered twice: Keeper + Persistent agent).
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [{
+        name: 'autoboot-a',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/autoboot-a-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      persistent_agents: [{
+        name: 'autoboot-a',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/autoboot-a-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+    const forName = diagnostics.filter(d => d.keeper.name === 'autoboot-a')
+    expect(forName).toHaveLength(1)
+    expect(forName[0]?.source).toBe('keeper')
+  }, 60000)
+
+  it('keeps a persistent-agent-only entity so future drift from the subset invariant still surfaces', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [],
+      persistent_agents: [{
+        name: 'orphan-agent',
+        context_metrics_unavailable: {
+          kind: 'malformed_json',
+          reason: 'malformed_metrics_row',
+          path: '/tmp/orphan-metrics.jsonl',
+          line_number: 3,
+          detail: 'unexpected end of input',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]?.keeper.name).toBe('orphan-agent')
+    expect(diagnostics[0]?.source).toBe('persistent_agent')
   }, 60000)
 
   it('filters out entries older than 3 days so stale reviews stop showing', async () => {

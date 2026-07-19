@@ -497,7 +497,7 @@ let test_missing_board_post_id_fallback () =
   check string "synthetic fallback post id" "fusion-run:fus-9" ev.post_id
 ;;
 
-let test_emit_success_projects_board_chat_and_registry () =
+let test_orchestrator_project_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir ->
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
@@ -521,11 +521,26 @@ let test_emit_success_projects_board_chat_and_registry () =
     in
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:2.0;
-    let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+    let request : Fusion_types.fusion_request =
+      { run_id
+      ; keeper
+      ; prompt = question
+      ; preset = "unit-test"
+      ; web_tools = false
+      ; depth = Fusion_types.Fusion_depth.Top
+      ; trigger = Fusion_types.Explicit_tool_call
+      }
     in
-    check bool "emit succeeds" true (Result.is_ok result);
+    let deliberation : Fusion_orchestrator.deliberation =
+      { panel; judge = Ok synthesis; judges; judge_usage }
+    in
+    (match
+       Fusion_orchestrator.project ~base_dir ~topology:Fusion_types.Simple ~request
+         deliberation
+     with
+     | Fusion_orchestrator.Completed _ -> ()
+     | Fusion_orchestrator.Denied _ -> fail "project must not re-run admission"
+     | Fusion_orchestrator.Sink_failed error -> fail error);
     let post =
       match Board.find_post_by_run_id (Board.global ()) ~run_id with
       | Some post -> post
@@ -956,9 +971,9 @@ let () =
             `Quick
             test_missing_board_post_id_fallback
         ; test_case
-            "emit success projects board, chat block, and registry"
+            "orchestrator project emits board, chat block, and registry"
             `Quick
-            test_emit_success_projects_board_chat_and_registry
+            test_orchestrator_project_success_projects_board_chat_and_registry
         ; test_case
             "wake route: register/take/discard, unrouted never stored"
             `Quick

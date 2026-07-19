@@ -38,7 +38,8 @@ type no_compaction = State.no_compaction =
   }
 
 type accepted_cancellation = State.accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -231,18 +232,22 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let settlement_wal_entry_to_line owner receipt =
+let settlement_wal_entry_to_line owner entry =
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+    [ "schema", `String "masc.keeper_event_queue.settlement.v2"
     ; "base_path", `String (Owner_lock.base_path owner)
     ; "keeper_name", `String (keeper_name_of_owner owner)
-    ; "receipt", State.transition_receipt_to_yojson receipt
+    ; "outbox_entry", State.outbox_entry_to_yojson entry
     ]
   |> Yojson.Safe.to_string
   |> fun row -> row ^ "\n"
 ;;
 
-let settlement_wal_receipt_of_json owner = function
+type settlement_wal_transition =
+  | Legacy_receipt of transition_receipt
+  | Source_entry of outbox_entry
+
+let settlement_wal_transition_of_json owner = function
   | `Assoc fields ->
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ ("base_path", `String base_path)
@@ -257,7 +262,20 @@ let settlement_wal_receipt_of_json owner = function
            (String.equal base_path (Owner_lock.base_path owner)
             && String.equal keeper_name (keeper_name_of_owner owner))
        then Error "settlement WAL row owner does not match its Keeper lane"
-       else State.transition_receipt_of_yojson receipt
+       else State.transition_receipt_of_yojson receipt |> Result.map (fun receipt -> Legacy_receipt receipt)
+     | [ ("base_path", `String base_path)
+       ; ("keeper_name", `String keeper_name)
+       ; ("outbox_entry", entry)
+       ; ("schema", `String schema)
+       ] ->
+       if not (String.equal schema "masc.keeper_event_queue.settlement.v2")
+       then Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
+       else if
+         not
+           (String.equal base_path (Owner_lock.base_path owner)
+            && String.equal keeper_name (keeper_name_of_owner owner))
+       then Error "settlement WAL row owner does not match its Keeper lane"
+       else State.outbox_entry_of_yojson entry |> Result.map (fun entry -> Source_entry entry)
      | _ -> Error "settlement WAL row fields are not exact")
   | _ -> Error "settlement WAL row must be a JSON object"
 ;;
@@ -273,10 +291,14 @@ let replay_settlement_wal_bytes owner state bytes =
        with
        | Error detail -> Error ("invalid settlement WAL JSON: " ^ detail)
        | Ok json ->
-         (match settlement_wal_receipt_of_json owner json with
+         (match settlement_wal_transition_of_json owner json with
           | Error _ as error -> error
-          | Ok receipt ->
+          | Ok (Legacy_receipt receipt) ->
             (match State.replay_transition_receipt receipt state with
+             | Error _ as error -> error
+             | Ok state -> replay state rest)
+          | Ok (Source_entry entry) ->
+            (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
              | Ok state -> replay state rest)))
   in
@@ -656,10 +678,12 @@ let commit_settlement_transition_unlocked owner ~after_commit transition current
   | Ok (state, State.Already_settled receipt) ->
     Ok (Already_settled receipt, State.pending state)
   | Ok (state, State.Settled receipt) ->
-    (match bump_revision state with
+    (match State.transition_outbox state with
+     | [ entry ] when State.transition_receipt_equal receipt entry.receipt ->
+       (match bump_revision state with
      | Error _ as error -> error
      | Ok checkpoint ->
-       let suffix = settlement_wal_entry_to_line owner receipt in
+       let suffix = settlement_wal_entry_to_line owner entry in
        let path = settlement_wal_path_of_owner owner in
        (match
           Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
@@ -707,6 +731,8 @@ let commit_settlement_transition_unlocked owner ~after_commit transition current
                      ( Committed_followup_failed
                          { receipt; stage = `Projection; detail }
                      , pending ))))))
+     | [] | [ _ ] | _ :: _ :: _ ->
+       Error "settlement transition did not produce its canonical outbox entry")
 ;;
 
 let settle_result
@@ -776,6 +802,42 @@ let cancel_accepted_result
        Error
          (Printf.sprintf
             "event queue accepted cancellation raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let cancel_pending_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_generation
+      ~settled_at
+      ~cancellation
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.cancel_pending_accepted
+                ~current_owner_generation
+                ~settled_at
+                ~cancellation)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted cancellation raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

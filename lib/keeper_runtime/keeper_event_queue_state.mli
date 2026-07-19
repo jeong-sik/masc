@@ -42,7 +42,8 @@ type no_compaction =
   }
 
 type accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -157,6 +158,17 @@ val cancel_accepted :
     owner-fenced boundary. Replaying the same committed cancellation is
     idempotent; a different operation is a conflict. *)
 
+val cancel_pending_accepted :
+  current_owner_generation:int ->
+  settled_at:float ->
+  cancellation:accepted_cancellation ->
+  t ->
+  (t * settle_result, string) result
+(** Atomically create and terminally settle a synthetic single-event lease for
+    the exact pending [cancellation.source]. The source revision and owner
+    generation are checked before removal. This pure transition is committed
+    through a source-bearing WAL outbox entry by persistence. *)
+
 val accepted_cancellation_replay :
   lease ->
   accepted_cancellation ->
@@ -165,6 +177,13 @@ val accepted_cancellation_replay :
 (** Return the canonical receipt for an already committed exact cancellation
     without applying current owner-generation or queue-revision fences. A
     different terminal settlement for the same lease is an explicit conflict. *)
+
+val accepted_pending_cancellation_replay :
+  accepted_cancellation ->
+  t ->
+  (transition_receipt option, string) result
+(** Look up an already committed pending cancellation by its stable operator
+    operation ID and exact source-bearing settlement. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying
@@ -198,6 +217,12 @@ val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result
+val outbox_entry_to_yojson : outbox_entry -> Yojson.Safe.t
+val outbox_entry_of_yojson : Yojson.Safe.t -> (outbox_entry, string) result
+val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
+(** Replay a source-bearing committed transition. Active-lease settlements use
+    their exact lease; pending accepted cancellations reconstruct the same
+    synthetic lease from the receipt sequence and exact source. *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

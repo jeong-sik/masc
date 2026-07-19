@@ -42,7 +42,8 @@ type no_compaction = Keeper_event_queue_state.no_compaction =
   }
 
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -186,6 +187,19 @@ val cancel_accepted_result :
     that reads the current queue revision. The pure state boundary checks the
     supplied owner generation and observed source revision before the receipt
     WAL is appended, so callers cannot split fence validation from commit. *)
+
+val cancel_pending_accepted_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  cancellation:accepted_cancellation ->
+  unit ->
+  (settle_result, string) result
+(** Append and fsync the canonical source-bearing cancellation receipt before
+    checkpointing removal of the exact pending source. WAL replay can complete
+    the transition from the pre-removal state after a crash. *)
 
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

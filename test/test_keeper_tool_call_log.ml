@@ -14,6 +14,11 @@ let eio_env_test name fn =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     fn env)
 
+let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
+  match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+
 let counter = ref 0
 
 let with_tmp_log f =
@@ -507,13 +512,12 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
     let marker =
       Tool_output.encode_for_oas
-        (Tool_output.Stored {
-          sha256 = String.make 64 'b';
-          bytes = 8192;
-          mime = "application/json";
-          preview =
-            {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
-        })
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'b')
+              ~bytes:8192
+              ~mime:"application/json"
+              ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
@@ -1125,12 +1129,12 @@ let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
     let marker =
       Tool_output.encode_for_oas
-        (Tool_output.Stored {
-          sha256 = String.make 64 'a';
-          bytes = 6436;
-          mime = "text/plain";
-          preview = "{\"ok\":true,\"result\":\"42\"}";
-        })
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'a')
+              ~bytes:6436
+              ~mime:"text/plain"
+              ~preview:"{\"ok\":true,\"result\":\"42\"}"))
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_blob"

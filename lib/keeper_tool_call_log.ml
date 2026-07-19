@@ -340,7 +340,7 @@ let start_flush_fiber ~sw ~clock =
     consumers are updated in the same change to accept either shape. *)
 let blob_aware_output_json (output : string) : Yojson.Safe.t =
   match Tool_output.decode_from_oas output with
-  | Tool_output.Stored { sha256; bytes; preview; mime } ->
+  | Tool_output.Decoded { sha256; bytes; preview; mime } ->
     `Assoc
       [ ( "_blob"
         , `Assoc
@@ -350,7 +350,7 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
             ; "preview", `String preview
             ] )
       ]
-  | Tool_output.Inline _ -> `String output
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
 ;;
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =

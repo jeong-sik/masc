@@ -2,8 +2,9 @@
 
     Covers:
     - Round-trip: encode then decode for both [Inline] and [Stored] variants.
-    - Backward compat: any string without marker decodes to [Inline].
-    - Malformed marker falls back to [Inline] (fail-safe).
+    - Backward compat: any string without marker reports [Not_marker].
+    - Malformed marker surfaces as [Invalid_marker] — a visible, typed
+      outcome, not a silent inline fallback.
     - Content-addressed: same bytes -> same sha -> idempotent put.
     - Sharding: blobs land under [<sha[0..1]>/<sha>].
     - GC: blobs not in keep_set are deleted; kept ones survive.
@@ -13,6 +14,11 @@ module B = Tool_blob_store
 module O = Tool_output
 
 (* --- Helpers --- *)
+
+let ref_exn ~sha256 ~bytes ~preview ~mime =
+  match O.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (O.make_error_to_string e)
 
 let fetch_ok store ~sha256 =
   match B.fetch store ~sha256 with
@@ -46,32 +52,36 @@ let test_inline_roundtrip () =
   let encoded = O.encode_for_oas (O.Inline s) in
   Alcotest.(check string) "inline encode = identity" s encoded;
   match O.decode_from_oas encoded with
-  | O.Inline s' -> Alcotest.(check string) "inline decode" s s'
-  | O.Stored _ -> Alcotest.fail "expected Inline"
+  | O.Not_marker ->
+      (* Raw text is not a marker: the content is the string itself,
+         already asserted identical above. *)
+      ()
+  | O.Decoded _ -> Alcotest.fail "expected Not_marker"
+  | O.Invalid_marker { detail } ->
+      Alcotest.failf "expected Not_marker, got Invalid_marker: %s" detail
 
 let test_stored_roundtrip () =
-  let original =
-    O.Stored
-      {
-        sha256 = "abcd1234";
-        bytes = 128934;
-        preview = "first 200 chars\nwith newline";
-        mime = "text/plain";
-      }
+  let sha256 = String.make 64 'a' in
+  let artifact_ref =
+    ref_exn ~sha256 ~bytes:128934 ~preview:"first 200 chars\nwith newline"
+      ~mime:"text/plain"
   in
+  let original = O.Stored artifact_ref in
   let encoded = O.encode_for_oas original in
   Alcotest.(check bool)
     "encoded starts with marker"
     true
     (O.is_marker encoded);
   match O.decode_from_oas encoded with
-  | O.Stored { sha256; bytes; preview; mime } ->
-      Alcotest.(check string) "sha256" "abcd1234" sha256;
+  | O.Decoded { sha256 = decoded_sha; bytes; preview; mime } ->
+      Alcotest.(check string) "sha256" sha256 decoded_sha;
       Alcotest.(check int) "bytes" 128934 bytes;
       Alcotest.(check string)
         "preview" "first 200 chars\nwith newline" preview;
       Alcotest.(check string) "mime" "text/plain" mime
-  | O.Inline _ -> Alcotest.fail "expected Stored"
+  | O.Not_marker -> Alcotest.fail "expected Decoded"
+  | O.Invalid_marker { detail } ->
+      Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
 
 let test_encoded_marker_stays_under_externalization_threshold () =
   with_temp_dir (fun dir ->
@@ -84,13 +94,16 @@ let test_encoded_marker_stays_under_externalization_threshold () =
         true
         (String.length encoded <= threshold);
       match O.decode_from_oas encoded with
-      | O.Stored { preview; _ } ->
+      | O.Decoded { preview; _ } ->
         Alcotest.(check int) "preview remains documented cap" 200 (String.length preview)
-      | O.Inline _ -> Alcotest.fail "expected Stored")
+      | O.Not_marker -> Alcotest.fail "expected Decoded"
+      | O.Invalid_marker { detail } ->
+          Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail)
 
 let test_decode_non_marker () =
-  (* Any normal tool output decodes as Inline — backward compat for old
-     checkpoints that pre-date the artifact store. *)
+  (* Any normal tool output reports Not_marker — backward compat for old
+     checkpoints that pre-date the artifact store. The raw string passes
+     through untouched. *)
   let cases =
     [
       "";
@@ -104,19 +117,26 @@ let test_decode_non_marker () =
   List.iter
     (fun s ->
       match O.decode_from_oas s with
-      | O.Inline s' ->
-          Alcotest.(check string) ("inline-fallback for " ^ s) s s'
-      | O.Stored _ ->
-          Alcotest.failf "expected Inline for %S" s)
+      | O.Not_marker -> ()
+      | O.Decoded _ ->
+          Alcotest.failf "expected Not_marker for %S" s
+      | O.Invalid_marker _ ->
+          Alcotest.failf "expected Not_marker (not Invalid_marker) for %S" s)
     cases
 
 let test_decode_malformed_marker () =
-  (* Has the prefix but body is garbage — must NOT raise, falls back to
-     Inline so the keeper LLM sees the raw string instead of crashing. *)
+  (* Has the prefix but body is garbage — must NOT raise. Instead of the
+     old silent Inline fallback, a malformed marker is now a visible, typed
+     [Invalid_marker] outcome; the caller decides what to do with the raw
+     text. *)
   let bad = "[masc:blob garbage that cannot scanf]" in
   match O.decode_from_oas bad with
-  | O.Inline s -> Alcotest.(check string) "fallback string" bad s
-  | O.Stored _ -> Alcotest.fail "malformed should NOT decode as Stored"
+  | O.Invalid_marker { detail } ->
+      Alcotest.(check bool)
+        "detail explains the failure" true (String.length detail > 0)
+  | O.Not_marker ->
+      Alcotest.fail "malformed marker must surface as Invalid_marker"
+  | O.Decoded _ -> Alcotest.fail "malformed should NOT decode as Stored"
 
 (* --- Tool_blob_store basic --- *)
 
@@ -372,9 +392,9 @@ let () =
             "encoded marker stays under externalization threshold"
             `Quick
             test_encoded_marker_stays_under_externalization_threshold;
-          Alcotest.test_case "non-marker = Inline" `Quick
+          Alcotest.test_case "non-marker = Not_marker" `Quick
             test_decode_non_marker;
-          Alcotest.test_case "malformed = Inline" `Quick
+          Alcotest.test_case "malformed = Invalid_marker" `Quick
             test_decode_malformed_marker;
         ] );
       ( "blob store basic",

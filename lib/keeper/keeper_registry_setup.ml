@@ -1022,6 +1022,24 @@ let set_failure_reason ~base_path name reason =
   Error_tracking.set_failure_reason ~base_path name reason ~update_entry:update_entry_unit
 ;;
 
+let set_compaction_decision ~base_path name decision =
+  (* Reactive provider-overflow recovery has no other path to
+     [compaction_rt]: the [update_entry] helpers mutate only the turn
+     observation, and [meta.compaction_rt] is otherwise persisted wholesale by
+     the turn lifecycle (post_turn returns [updated_meta]; its caller persists).
+     Stamping the specific recovery decision onto the already-serialized
+     [last_decision] lets the dashboard surface why an overflow compaction
+     failed instead of only a generic [Turn_overflow_failure]. *)
+  update_entry_unit ~base_path name (fun e ->
+    { e with
+      meta =
+        map_compaction_rt
+          (fun rt ->
+            { rt with last_decision = compaction_runtime_decision_of_string decision })
+          e.meta
+    })
+;;
+
 let set_last_correlation_id ~base_path name cid =
   Error_tracking.set_last_correlation_id ~base_path name cid ~update_entry:update_entry_unit
 ;;

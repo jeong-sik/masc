@@ -1267,6 +1267,10 @@ export interface Keeper {
   handoff_count_total?: number
   compaction_count?: number
   last_compaction_saved_tokens?: number
+  // Most recent compaction decision string (e.g. a provider-overflow recovery
+  // failure reason). Backend emits it as `last_compaction_decision`; surfaced so
+  // a stuck/looping compaction shows its cause instead of appearing idle.
+  last_compaction_decision?: string | null
   metrics_window?: MetricsWindow
   agent?: {
     name?: string

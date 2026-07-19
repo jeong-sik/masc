@@ -197,13 +197,21 @@ val context_overflow_event_of_error :
 (** [Some] only for typed [Api (ContextOverflow _)]. The event preserves the
     provider-declared limit and never invents an actual input-token count. *)
 
+val provider_overflow_decision : reason:string -> string
+(** The [compaction_rt.last_decision] value stamped by [record_overflow_failure]
+    for a provider-overflow recovery failure. Exposed so the observability
+    regression test can assert the stamped decision without duplicating the tag. *)
+
 val record_overflow_failure :
   config:Workspace.config ->
   meta:keeper_meta ->
   reason:string ->
   unit
 (** Record unresolved context overflow as explicit failure evidence without
-    rewriting Keeper lifecycle. *)
+    rewriting Keeper lifecycle. Also stamps [compaction_rt.last_decision] via
+    {!Keeper_registry.set_compaction_decision} so the failure is visible in
+    status ([last_compaction_decision]), not only as a generic
+    [Turn_overflow_failure]. *)
 
 val current_keeper_meta :
   config:Workspace.config ->

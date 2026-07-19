@@ -119,6 +119,46 @@ let test_no_compaction_terminal_consumes_exact_request () =
   | Ok _ -> Alcotest.fail "different checkpoint source reused a settled request"
 ;;
 
+let test_no_compaction_rejects_scheduled_product_work () =
+  let scheduled_wake : Queue.scheduled_wake =
+    { schedule_id = "scheduled-product-work"
+    ; due_at = 1.0
+    ; payload_digest = "scheduled-product-work-digest"
+    ; title = Some "Scheduled product work"
+    ; message = "Execute this product task"
+    }
+  in
+  let work =
+    stimulus
+      ~payload:(Queue.Schedule_due scheduled_wake)
+      "schedule-occurrence:scheduled-product-work"
+      1.0
+  in
+  let claimed, lease =
+    State.with_pending (queue [ work ]) State.empty |> claim_head
+  in
+  let lease = require_some "product work lease" lease in
+  match
+    State.settle
+      ~settled_at:11.0
+      ~lease
+      ~settlement:
+        (State.No_compaction
+           (no_compaction ~turn_count:7 State.No_eligible_history))
+      claimed
+  with
+  | Error message ->
+    Alcotest.(check string)
+      "typed settlement authority rejects product work"
+      "no-compaction settlement requires one manual-compaction request stimulus"
+      message;
+    Alcotest.(check int)
+      "rejected settlement keeps the source lease active"
+      1
+      (List.length (State.leases claimed))
+  | Ok _ -> Alcotest.fail "no-compaction consumed a non-compaction product event"
+;;
+
 let test_claim_codec_ack_idempotency () =
   let first = stimulus "first" 1.0 in
   let state = State.with_pending (queue [ first ]) State.empty in
@@ -681,7 +721,7 @@ let cycle_meta () =
   | Error message -> Alcotest.failf "cycle meta fixture: %s" message
 ;;
 
-let test_manual_and_overflow_no_compaction_are_terminal () =
+let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
   let lease =
     lease_for
       (stimulus
@@ -714,20 +754,27 @@ let test_manual_and_overflow_no_compaction_are_terminal () =
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
              { meta = cycle_meta (); no_compaction })));
-  let overflow_failure =
-    { (turn_failure
-         (Keeper_runtime_failure_route.Retry_after_observed
-            { retry_class = Keeper_runtime_failure_route.Capacity_backpressure
-            ; retry_after = None
-            })) with
-      source_lease_disposition =
-        Masc.Keeper_unified_turn.Acknowledge_after_no_compaction no_compaction
-    }
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Context_overflow
+      ; provenance = Keeper_runtime_failure_route.Oas_api_error
+      ; detail = "typed provider context overflow"
+      }
   in
-  expect_terminal
-    (Masc.Keeper_heartbeat_loop.settlement_of_failure
-       ~settled_at:3.0
-       overflow_failure)
+  let overflow_failure =
+    turn_failure judgment_route
+  in
+  match
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:3.0
+      overflow_failure
+  with
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
+      ; successor = Some { payload = Queue.Failure_judgment _; _ }
+      } ->
+    ()
+  | _ -> Alcotest.fail "provider overflow no-compaction consumed the source lease"
 ;;
 
 let test_applied_compaction_settles_followup_atomically () =
@@ -1324,6 +1371,10 @@ let () =
             `Quick
             test_no_compaction_terminal_consumes_exact_request
         ; Alcotest.test_case
+            "no-compaction rejects scheduled product work"
+            `Quick
+            test_no_compaction_rejects_scheduled_product_work
+        ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
@@ -1338,9 +1389,9 @@ let () =
             `Quick
             test_applied_compaction_settles_followup_atomically
         ; Alcotest.test_case
-            "manual and overflow no-compaction are terminal"
+            "manual no-compaction is terminal but overflow escalates"
             `Quick
-            test_manual_and_overflow_no_compaction_are_terminal
+            test_manual_no_compaction_is_terminal_but_overflow_escalates
         ; Alcotest.test_case
             "stochastic reasons have no terminal codec"
             `Quick

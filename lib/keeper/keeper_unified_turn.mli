@@ -140,14 +140,11 @@ val record_streaming_cancelled_observation
 type source_lease_disposition =
   | Follow_failure_route
   | Requeue_after_context_compaction
-  | Acknowledge_after_no_compaction of Keeper_post_turn.no_compaction
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.
-    [Acknowledge_after_no_compaction] binds a typed terminal to the exact
-    checkpoint source and consumes the request lease without another attempt.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)

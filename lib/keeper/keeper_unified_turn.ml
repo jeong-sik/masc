@@ -22,7 +22,6 @@ include Keeper_unified_turn_phase_plan
 type source_lease_disposition =
   | Follow_failure_route
   | Requeue_after_context_compaction
-  | Acknowledge_after_no_compaction of Keeper_post_turn.no_compaction
   | Acknowledge_after_in_turn_handling
 
 type turn_failure =
@@ -312,12 +311,16 @@ let append_provider_overflow_manifest
   | Not_provider_overflow -> Follow_failure_route, turn_state
   | Provider_overflow_no_compaction no_compaction ->
     Log.Keeper.info
-      "provider overflow compaction reached typed terminal trace_id=%s generation=%d turn_count=%d reason=%s"
+      "provider overflow compaction made no progress; preserving the source failure route trace_id=%s generation=%d turn_count=%d reason=%s"
       (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
       no_compaction.source.generation
       no_compaction.source.turn_count
       (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
-    Acknowledge_after_no_compaction no_compaction, turn_state
+    (* [No_compaction] is terminal evidence for an explicit manual-compaction
+       operation, not successful handling of the product event whose provider
+       turn overflowed. Preserve the typed context-overflow route so the
+       owning source lease is escalated instead of silently consumed. *)
+    Follow_failure_route, turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
       append_recovery

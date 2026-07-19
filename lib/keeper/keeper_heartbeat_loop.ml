@@ -268,8 +268,6 @@ let settlement_of_failure ~settled_at failure =
   match failure.Keeper_unified_turn.source_lease_disposition with
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
-  | Keeper_unified_turn.Acknowledge_after_no_compaction { source; reason } ->
-    Keeper_registry_event_queue.No_compaction { source; reason }
   | Keeper_unified_turn.Requeue_after_context_compaction ->
     Keeper_registry_event_queue.Requeue
       Keeper_registry_event_queue.Context_compaction_retry
@@ -812,7 +810,6 @@ let run_keepalive_unified_turn
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.source_lease_disposition with
              | Keeper_unified_turn.Requeue_after_context_compaction
-             | Keeper_unified_turn.Acknowledge_after_no_compaction _
              | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
              | Keeper_unified_turn.Follow_failure_route ->
                (match failure.Keeper_unified_turn.route with

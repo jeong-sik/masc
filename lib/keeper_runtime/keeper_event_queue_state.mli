@@ -128,8 +128,10 @@ val settle :
 
     [Retry_after_observed] and [Context_compaction_retry] retain the exact
     leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. Non-finite settlement times
-    are rejected. *)
+    can proceed before another provider attempt. [No_compaction] is accepted
+    only for a lease containing exactly one typed
+    [Manual_compaction_requested] stimulus; it cannot retire product work whose
+    provider turn failed. Non-finite settlement times are rejected. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying

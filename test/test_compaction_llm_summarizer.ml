@@ -558,13 +558,15 @@ let test_floor_noop_without_middle_span () =
 
 (* Evidence-safety: the floor must never drop a tool cycle or a System unit,
    because Keeper_compaction_evidence requires invariant tool counts and system
-   instructions are foundational. Only the middle User/Assistant unit is dropped. *)
+   instructions are foundational. Only the middle Assistant unit is dropped.
+   (No User unit here, so goal protection does not apply — see the dedicated
+   goal-protection test below.) *)
 let test_floor_preserves_tool_cycles_and_system () =
   let head = floor_units floor_head in
   let tail =
     List.init floor_tail (fun i -> ordinary (text T.Assistant (Printf.sprintf "t%d" i)))
   in
-  let middle = [ closed_cycle "cyc"; ordinary (text T.System "sys"); ordinary (text T.User "usr") ] in
+  let middle = [ closed_cycle "cyc"; ordinary (text T.System "sys"); ordinary (text T.Assistant "asst") ] in
   let units = head @ middle @ tail in
   match
     Compact_policy.For_testing.deterministic_floor_for_testing
@@ -573,9 +575,9 @@ let test_floor_preserves_tool_cycles_and_system () =
   with
   | None -> Alcotest.fail "floor must engage with a droppable middle unit"
   | Some (kept, dropped) ->
-    Alcotest.(check int) "only the middle User message is dropped" 1 dropped;
+    Alcotest.(check int) "only the middle Assistant message is dropped" 1 dropped;
     let kept_texts = List.map floor_message_text kept in
-    Alcotest.(check bool) "middle User unit is dropped" false (List.mem "usr" kept_texts);
+    Alcotest.(check bool) "middle Assistant unit is dropped" false (List.mem "asst" kept_texts);
     Alcotest.(check bool) "middle System unit is preserved" true (List.mem "sys" kept_texts);
     Alcotest.(check bool)
       "tool cycle is preserved (a Tool-role message remains)"
@@ -591,9 +593,11 @@ let test_floor_preserves_metadata_bearing_units () =
     List.init floor_tail (fun i -> ordinary (text T.Assistant (Printf.sprintf "t%d" i)))
   in
   let meta_unit =
-    ordinary (message ~metadata:[ "provenance", `String "keep" ] T.User [ T.Text "meta-usr" ])
+    ordinary
+      (message ~metadata:[ "provenance", `String "keep" ] T.Assistant [ T.Text "meta-asst" ])
   in
-  let middle = [ ordinary (text T.User "plain-usr"); meta_unit ] in
+  (* Assistant units so the goal-protection (first User unit) is not in play. *)
+  let middle = [ ordinary (text T.Assistant "plain-asst"); meta_unit ] in
   let units = head @ middle @ tail in
   match
     Compact_policy.For_testing.deterministic_floor_for_testing
@@ -605,9 +609,37 @@ let test_floor_preserves_metadata_bearing_units () =
     Alcotest.(check int) "only the metadata-free middle unit is dropped" 1 dropped;
     let kept_texts = List.map floor_message_text kept in
     Alcotest.(check bool) "metadata-free middle unit is dropped" false
-      (List.mem "plain-usr" kept_texts);
+      (List.mem "plain-asst" kept_texts);
     Alcotest.(check bool) "metadata-bearing middle unit is preserved" true
-      (List.mem "meta-usr" kept_texts)
+      (List.mem "meta-asst" kept_texts)
+
+(* #25281 P1.2: a positional head window alone does not protect the first User
+   goal if setup (System) units precede it. Here the goal sits at index
+   [floor_head] — inside the drop range — yet must survive, while the droppable
+   Assistant units beside it are dropped. *)
+let test_floor_protects_first_user_goal () =
+  let head_system = List.init floor_head (fun _ -> ordinary (text T.System "sys")) in
+  let goal = ordinary (text T.User "the-goal") in
+  let mid_assts =
+    [ ordinary (text T.Assistant "mid-asst-1"); ordinary (text T.Assistant "mid-asst-2") ]
+  in
+  let tail =
+    List.init floor_tail (fun i -> ordinary (text T.Assistant (Printf.sprintf "t%d" i)))
+  in
+  let units = head_system @ (goal :: mid_assts) @ tail in
+  match
+    Compact_policy.For_testing.deterministic_floor_for_testing
+      ~units
+      ~protected_suffix:[]
+  with
+  | None -> Alcotest.fail "floor must engage with droppable middle assistants"
+  | Some (kept, dropped) ->
+    Alcotest.(check int) "the goal is protected; both middle assistants drop" 2 dropped;
+    let kept_texts = List.map floor_message_text kept in
+    Alcotest.(check bool) "first User goal preserved inside the drop range" true
+      (List.mem "the-goal" kept_texts);
+    Alcotest.(check bool) "middle assistant beside the goal is dropped" false
+      (List.mem "mid-asst-1" kept_texts)
 
 let () =
   Alcotest.run "compaction_llm_summarizer"
@@ -630,6 +662,8 @@ let () =
             test_floor_preserves_tool_cycles_and_system
         ; Alcotest.test_case "preserves metadata-bearing units" `Quick
             test_floor_preserves_metadata_bearing_units
+        ; Alcotest.test_case "protects the first User goal" `Quick
+            test_floor_protects_first_user_goal
         ] )
     ; ( "structured_judge_lane_split_25051"
       , [ Alcotest.test_case "ineligible chat runtime alone has no candidate" `Quick

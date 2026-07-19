@@ -315,8 +315,17 @@ let requested_of_plan ~units ~protected_suffix plan =
    than the current fail-closed behaviour. *)
 let deterministic_floor_runtime_id = "deterministic_floor"
 
-(* Units protected at each end of the compactable prefix. A follow-up may derive
-   these from the token budget (RFC S6); for now they are a fixed window. *)
+(* Units protected at each end of the compactable prefix: a positional head
+   window (leading setup) plus the first User goal (see [first_user_goal_index]),
+   and a trailing recency window. The floor reduces the checkpoint down to
+   {protected setup + goal + recency + all non-droppable units}. This is the
+   smallest set a UNIT-granular floor can produce; if that set alone still
+   exceeds the provider window (a single oversized message/unit), no keep/drop
+   plan — deterministic or LLM — can fit it: that needs message-content
+   truncation, out of scope here (review #25281 P1.1). Deriving these windows
+   from the token budget rather than a fixed count would let the floor keep more
+   recency when there is room; that is a quality follow-up (RFC S6), not a
+   correctness requirement for the reduction guarantee. *)
 let floor_protected_head_units = 3
 let floor_protected_tail_units = 12
 
@@ -345,6 +354,21 @@ let unit_is_floor_droppable = function
   | Keeper_compaction_unit.Ordinary_message _ -> false
 ;;
 
+(* Index of the first Ordinary User unit — the OAS goal. The positional head
+   window alone does not protect it if setup (e.g. System) units precede it, so
+   the goal could sit just past [floor_protected_head_units] and be dropped
+   (review #25281 P1.2). Protecting this exact index guarantees the goal
+   survives wherever it is. *)
+let first_user_goal_index units =
+  let rec find index = function
+    | [] -> None
+    | Keeper_compaction_unit.Ordinary_message { role = Agent_sdk.Types.User; _ } :: _ ->
+      Some index
+    | _ :: rest -> find (index + 1) rest
+  in
+  find 0 units
+;;
+
 let deterministic_floor_requested ~units ~protected_suffix =
   let total = List.length units in
   if total <= floor_protected_head_units + floor_protected_tail_units
@@ -352,6 +376,7 @@ let deterministic_floor_requested ~units ~protected_suffix =
   else (
     let drop_lo = floor_protected_head_units in
     let drop_hi = total - floor_protected_tail_units (* exclusive *) in
+    let goal_index = first_user_goal_index units in
     let kept_rev, dropped_count =
       units
       |> List.mapi (fun index unit_ -> index, unit_)
@@ -359,6 +384,7 @@ let deterministic_floor_requested ~units ~protected_suffix =
            (fun (kept_rev, dropped) (index, unit_) ->
              if index >= drop_lo
                 && index < drop_hi
+                && Some index <> goal_index
                 && unit_is_floor_droppable unit_
              then kept_rev, dropped + unit_message_count unit_
              else unit_ :: kept_rev, dropped)

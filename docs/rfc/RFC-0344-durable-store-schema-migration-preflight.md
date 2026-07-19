@@ -95,7 +95,7 @@ write temp → fsync → atomic rename over path
 
 ## 4. Acceptance
 
-- **TLA+ bug model**: `HardCutAbsorb` action(version mismatch 시 구 데이터를 조용히 버림) + `NoDurableRowLostOnBump` invariant. clean spec은 invariant 만족, `NextBuggy`(preflight 우회)는 반드시 위반.
+- **TLA+ bug model** (`specs/bug-models/DurableStoreSchemaMigration.tla`, TLC v1.8.0 검증 완료): `HardCutAbsorb` action(version mismatch 시 boot ok를 보고하면서 구 row를 drop) + `NoDurableRowLostOnBump` invariant(`boot_outcome=ok ⇒ live_rows=OldRows`; fatal boot은 fail-loud로 면제). clean cfg = "No error has been found"(3 states), buggy cfg = "Invariant NoDurableRowLostOnBump is violated". 양쪽 cfg 모두 기대대로 통과해 spec 유효.
 - **회귀 재현 테스트**: 위 4개 사고 각각을 fixture로 — 구 version 파일을 심고 boot preflight를 돌려 (a) migration 있으면 무손실 변환, (b) 없으면 fatal(silent Unavailable 아님)을 assert.
 - **counterfactual**: preflight의 version 대조를 삭제하면 재현 테스트가 red.
 - descriptor 미등록 durable store가 없음을 boot에서 열거 검증(meta guard).

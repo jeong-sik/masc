@@ -197,25 +197,38 @@ one. Be precise about the two residuals:
   commits an over-limit checkpoint (the downstream guard only asserts
   `after < before`), and the keeper can re-overflow. So a fixed tail leaves a
   residual proportional to the protected-window *size*.
-- **Adaptive tail (the proper fix):** dropping *into* the tail as needed — keep
-  `head + goal + non-droppable`, then keep only as many recent units as fit under
-  the budget — shrinks the residual to `head + goal + one recent unit`. The
-  overflow trigger already carries the budget (`Compaction_trigger.Provider_overflow
-  { limit_tokens }`), so the input exists; what it needs is a per-unit size
-  estimate consistent with how the provider counts (a token estimate, since the
-  window is in tokens while the checkpoint guards are in bytes). This is the
-  required follow-up, and it is correctness, not quality.
+- **Adaptive tail (the proper fix) — BLOCKED on fit authority.** Dropping *into*
+  the tail as needed — keep `head + goal + non-droppable`, then keep only as many
+  recent units as fit under the budget — would shrink the residual to
+  `head + goal + one recent unit`. The overflow trigger carries the *limit*
+  (`Compaction_trigger.Provider_overflow { limit_tokens }`), but the floor also
+  needs the prospective checkpoint's *actual token count* to decide "does the kept
+  set fit". That count does not exist locally: the provider window is in tokens,
+  the checkpoint guards are in bytes, and **masc has no prospective token
+  estimator** (the `n`/`input_tokens` fields are provider-reported *usage* after a
+  call, not a pre-send estimate). The only ways to bridge tokens↔bytes are:
+  1. a **byte-heuristic** token estimate — which the codebase explicitly rejects
+     as a capacity guess (#25092: "not a tokenizer estimate, byte heuristic";
+     #25130: "does not infer capacity from bytes"; CLAUDE.md workaround bar), or
+  2. the **actual-wire typed fit authority** — OAS #2667, which is unresolved and
+     is the same dependency the attention-worker capacity split waits on.
 
-The **absolute residual** that survives even the adaptive tail is a *single*
+  So the adaptive tail is **not merely a follow-up: it is blocked on #2667.**
+  Shipping the byte-heuristic version would be exactly the workaround the codebase
+  refuses, so it is not done here.
+
+The **absolute residual** that survives even a future adaptive tail is a *single*
 unit larger than the window (one oversized message). No keep/drop plan —
 deterministic or LLM — can fit that; it needs message-*content* truncation, a
 different mechanism, out of scope for this RFC.
 
-Interim honesty: as shipped, the floor breaks the *common* spiral (each overflow
-drops the newly accumulated middle, so it converges on non-pathological input)
-but does **not** guarantee one-shot fit when the protected window itself is
-over-sized. #25281 therefore stays Draft until the adaptive tail lands or the
-fixed-window residual is explicitly accepted.
+Interim honesty: as shipped, the fixed-window floor breaks the *common* spiral
+(each overflow drops the newly accumulated middle, so it converges on
+non-pathological input) but does **not** guarantee one-shot fit when the protected
+window itself is over-sized. That residual cannot be closed without #2667's fit
+authority (a byte heuristic is refused), so #25281 ships the fixed floor with this
+residual explicitly documented, and the adaptive tail is tracked against #2667
+rather than attempted with a heuristic.
 
 ### 2.2 Where the floor engages
 

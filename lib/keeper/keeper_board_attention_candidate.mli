@@ -101,6 +101,10 @@ exception Candidate_unavailable of string
 
 val retryable_failure_kind_to_string : retryable_failure_kind -> string
 val retryable_failure_kind_of_string : string -> retryable_failure_kind option
+val retryable_failure_to_yojson : retryable_failure -> Yojson.Safe.t
+val retryable_failure_of_yojson : Yojson.Safe.t -> (retryable_failure, string) result
+val judgment_to_yojson : judgment -> Yojson.Safe.t
+val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val delivery_to_string : delivery -> string
 val delivery_of_string : string -> delivery option
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t

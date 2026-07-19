@@ -2,31 +2,37 @@
 \* Bug Model: Memory bank compaction drops important notes.
 \*
 \* Models keeper_memory_bank.ml compact_memory_bank_if_needed.
-\* Correct code: selection respects kind caps + recent floor.
+\* Correct code: selection respects kind caps + fallback fill by recency.
 \* Bug: priority-only selection lets high-priority long_term notes
 \* fill all slots, starving goals and other kinds.
 \*
 \* Reference (verified 2026-07-19 — restored after collateral deletion in
-\* #24332; symbol refs, not line numbers, per ml-line-refs gate):
+\* #24332, then hardened per adversarial review; symbol refs, not line
+\* numbers, per ml-line-refs gate):
 \*   lib/keeper/keeper_memory_bank.ml — compact_memory_bank_if_needed entry point
-\*   lib/keeper/keeper_memory_bank.ml — memory_kind_caps_for_compaction (per-target cap derivation)
+\*   lib/keeper/keeper_memory_bank.ml — add_row (hard total cap + per-kind cap + dedup)
 \*   lib/keeper/keeper_memory_policy.ml — kind_caps () : (memory_kind * int) list, closed-variant SSOT
+\*   lib/keeper/keeper_memory_policy.ml — priority_for_kind (closed-variant priorities)
 \*
 \* ── Abstraction note ──
-\* The real kind_caps SSOT enumerates 5 closed memory_kind constructors,
-\* rendered canonically on the wire as:
-\*   decision:2, goal:2, progress:2, open_question:2, long_term:4
-\* This bug model collapses them to 4 representative kinds for the
-\* "starvation under priority-only selection" invariant:
-\*   goal        — collapses {goal}
-\*   decision    — collapses {decision}
-\*   progress    — collapses {progress, open_question}
-\*                 (all per-cap=2 generic notes)
-\*   long_term   — collapses {long_term} (only kind with cap=4)
-\* Two abstract caps (SmallKindCap, LongTermCap) are sufficient to
-\* express the bug because the asymmetry that causes starvation is
-\* between "the high-priority kind" (long_term) and "the small-cap
-\* kinds" (everything else with cap=2).
+\* The real kind_caps SSOT enumerates 5 closed memory_kind constructors. This
+\* model uses 4 representative kinds for the "starvation under priority-only
+\* selection" invariant:
+\*   goal        — {goal}      (priority 72, cap = SmallKindCap)
+\*   decision    — {decision}  (priority 86, cap = SmallKindCap)
+\*   progress    — {progress, open_question}
+\*   long_term   — {long_term} (priority 95, only kind with cap = LongTermCap)
+\* Scope of the collapse: open_question is folded into the small-cap bucket
+\* ONLY because the modeled bug is long_term (>=90) monopolizing every slot —
+\* which starves goals regardless of the ordering among the sub-90 kinds. The
+\* collapse is therefore conservative for THIS invariant: it neither creates nor
+\* hides the long_term-monopoly starvation. It does NOT model open_question's
+\* own starvation vector — open_question priority is 76, ABOVE goal (72), so a
+\* priority-only selection that ranked sub-90 kinds would starve goals with
+\* open_questions too. That distinct vector is out of this model's scope (a
+\* candidate follow-up spec), not asserted equivalent to progress here.
+\* Constant abstraction: production long_term cap is 4; the model uses
+\* LongTermCap = 3 (cfg). This only scales the per-kind bound, not the bug.
 
 EXTENDS Naturals, Sequences, FiniteSets
 
@@ -36,24 +42,29 @@ CONSTANTS
     LongTermCap        \* Max long_term notes to keep (e.g. 3)
 
 VARIABLES
-    bank,              \* Sequence of notes: [kind |-> "...", priority |-> Nat]
+    bank,              \* Sequence of notes: [id |-> Nat, kind |-> "...", priority |-> Nat]
     result,            \* Sequence of notes after compaction
     phase              \* "accumulating" | "compacting" | "done"
 
 vars == <<bank, result, phase>>
 
-\* Kinds and their priorities (matching OCaml code)
+\* Kinds and their priorities (matching keeper_memory_policy.ml priority_for_kind)
 Kinds == {"goal", "decision", "progress", "long_term"}
 
 \* Count notes of a given kind in a sequence
 KindCount(seq, kind) ==
     Cardinality({i \in 1..Len(seq) : seq[i].kind = kind})
 
+\* Ids present in a sequence (notes carry a unique monotonic id so the fallback
+\* fill can exclude already-selected notes — mirrors add_row's dedup by key).
+IdSet(seq) == {seq[i].id : i \in 1..Len(seq)}
+
 TypeOK ==
     /\ phase \in {"accumulating", "compacting", "done"}
     /\ \A i \in 1..Len(bank) :
          /\ bank[i].kind \in Kinds
          /\ bank[i].priority \in 0..100
+         /\ bank[i].id \in Nat
 
 Init ==
     /\ bank = <<>>
@@ -61,30 +72,21 @@ Init ==
     /\ phase = "accumulating"
 
 \* ── Accumulation (add notes to bank) ──────────────────
+\* Bounded just past the first compactable size (TargetNotes) so the state
+\* space stays small while still admitting the starvation witness (enough
+\* long_term notes to monopolize every slot alongside at least one goal).
 
-AppendGoal ==
-    /\ phase = "accumulating"
-    /\ Len(bank) < TargetNotes * 2   \* Allow growth beyond target
-    /\ bank' = Append(bank, [kind |-> "goal", priority |-> 72])
+CanAppend == phase = "accumulating" /\ Len(bank) < TargetNotes + 1
+
+AppendNote(k, p) ==
+    /\ CanAppend
+    /\ bank' = Append(bank, [id |-> Len(bank) + 1, kind |-> k, priority |-> p])
     /\ UNCHANGED <<result, phase>>
 
-AppendDecision ==
-    /\ phase = "accumulating"
-    /\ Len(bank) < TargetNotes * 2
-    /\ bank' = Append(bank, [kind |-> "decision", priority |-> 86])
-    /\ UNCHANGED <<result, phase>>
-
-AppendProgress ==
-    /\ phase = "accumulating"
-    /\ Len(bank) < TargetNotes * 2
-    /\ bank' = Append(bank, [kind |-> "progress", priority |-> 66])
-    /\ UNCHANGED <<result, phase>>
-
-AppendLongTerm ==
-    /\ phase = "accumulating"
-    /\ Len(bank) < TargetNotes * 2
-    /\ bank' = Append(bank, [kind |-> "long_term", priority |-> 95])
-    /\ UNCHANGED <<result, phase>>
+AppendGoal     == AppendNote("goal", 72)
+AppendDecision == AppendNote("decision", 86)
+AppendProgress == AppendNote("progress", 66)
+AppendLongTerm == AppendNote("long_term", 95)
 
 \* ── Trigger compaction (when bank exceeds target) ─────
 
@@ -96,24 +98,21 @@ TriggerCompaction ==
 
 \* ── Safe compaction (with kind caps) ──────────────────
 
-\* Select notes respecting per-kind caps.
-\* Priority-sorted, but each kind limited to its cap.
+\* First-cap of a kind: the leading notes of that kind, up to [cap].
+CapKind(kind, cap) ==
+    LET notes == SelectSeq(bank, LAMBDA n : n.kind = kind)
+    IN SubSeq(notes, 1, IF Len(notes) > cap THEN cap ELSE Len(notes))
+
+\* Select notes respecting per-kind caps, then fill any remaining slots from the
+\* notes NOT already selected (by recency = bank order). The fallback excludes
+\* already-selected ids so no note is counted twice — mirroring
+\* keeper_memory_bank.ml add_row, which skips keys already in selected_keys.
 SafeCompact ==
     /\ phase = "compacting"
     /\ LET
-         \* Phase 1: kind-capped selection (respects per-kind caps)
-         goals == SelectSeq(bank, LAMBDA n : n.kind = "goal")
-         kept_goals == SubSeq(goals, 1, IF Len(goals) > SmallKindCap
-                                          THEN SmallKindCap
-                                          ELSE Len(goals))
-         longtermNotes == SelectSeq(bank, LAMBDA n : n.kind = "long_term")
-         kept_longterm == SubSeq(longtermNotes, 1, IF Len(longtermNotes) > LongTermCap
-                                                   THEN LongTermCap
-                                                   ELSE Len(longtermNotes))
-         decisions == SelectSeq(bank, LAMBDA n : n.kind = "decision")
-         kept_decisions == SubSeq(decisions, 1, IF Len(decisions) > SmallKindCap
-                                                THEN SmallKindCap
-                                                ELSE Len(decisions))
+         kept_goals    == CapKind("goal", SmallKindCap)
+         kept_longterm == CapKind("long_term", LongTermCap)
+         kept_decisions == CapKind("decision", SmallKindCap)
          progress == SelectSeq(bank, LAMBDA n : n.kind = "progress")
          remaining == TargetNotes - Len(kept_goals)
                                   - Len(kept_longterm)
@@ -122,13 +121,15 @@ SafeCompact ==
                                               THEN IF remaining > 0 THEN remaining ELSE 0
                                               ELSE Len(progress))
          capped == kept_goals \o kept_longterm \o kept_decisions \o kept_progress
-         \* Phase 2: fallback fill (ignore kind caps to reach TargetNotes).
-         \* Models keeper_memory_bank.ml compact_memory_bank_if_needed fallback fill:
-         \*   if !selected_count < target_notes then
-         \*     List.iter (fun row -> add_row ~ignore_kind_cap:true row) by_recency;
+         \* Fallback fill (ignore kind caps to reach TargetNotes), drawing only
+         \* from notes not already selected, by recency (bank order).
+         selectedIds == IdSet(capped)
+         notSelected == SelectSeq(bank, LAMBDA n : n.id \notin selectedIds)
          deficit == TargetNotes - Len(capped)
          extra == IF deficit > 0
-                  THEN SubSeq(bank, 1, IF Len(bank) > deficit THEN deficit ELSE Len(bank))
+                  THEN SubSeq(notSelected, 1,
+                              IF Len(notSelected) > deficit THEN deficit
+                              ELSE Len(notSelected))
                   ELSE <<>>
        IN
          /\ result' = capped \o extra
@@ -140,16 +141,12 @@ SafeCompact ==
 BugPriorityOnlyCompact ==
     /\ phase = "compacting"
     /\ LET
-         \* Just take the first TargetNotes entries (bank is appended
-         \* in priority order: long_term(95) > decision(86) > goal(72) > progress(66))
-         \* So highest-priority notes fill all slots, starving lower kinds.
-         \*
-         \* Sort by priority descending: long_term first, then decision,
-         \* then goal, then progress. If there are more long_term notes
-         \* than TargetNotes, goals get 0 slots.
-         sortedByPri == SelectSeq(bank, LAMBDA n : n.priority >= 90)
+         \* Priority-only: the highest-priority notes (long_term, 95 >= 90) are
+         \* taken first, then the rest in bank order. When long_term notes alone
+         \* reach TargetNotes, every other kind — goals included — gets 0 slots.
+         topPri == SelectSeq(bank, LAMBDA n : n.priority >= 90)
          lowPri == SelectSeq(bank, LAMBDA n : n.priority < 90)
-         allSorted == sortedByPri \o lowPri
+         allSorted == topPri \o lowPri
          taken == SubSeq(allSorted, 1, IF Len(allSorted) > TargetNotes
                                        THEN TargetNotes
                                        ELSE Len(allSorted))
@@ -201,14 +198,12 @@ LongTermProtected ==
             THEN LongTermCap
             ELSE KindCount(bank, "long_term")
 
-\* Recent floor: compaction keeps at least min(bank_size, RecentFloor) notes.
-\* OCaml: let recent_floor = max 16 (min 64 (target_notes / 5))
-\* For our small model (TargetNotes=8), RecentFloor = max(16, min(64, 8/5)) = 16,
-\* but bank never reaches 16 in the model, so the effective floor is Len(bank).
-\* We express the general property: result is never smaller than
-\* min(Len(bank), TargetNotes).  This catches a hypothetical bug where
-\* compaction over-prunes below the available input.
-RecentFloorRespected ==
+\* Completeness bound: compaction fills up to the available input, never
+\* under-pruning below min(Len(bank), TargetNotes). This is NOT a recency
+\* guarantee — the real recent_floor (max 16 …) never binds at this model's
+\* scale (bank <= TargetNotes+1 < 16), so recency is out of scope here. It only
+\* guards against a compaction that drops notes it had room to keep.
+ResultNotUnderfilled ==
     phase = "done" =>
         Len(result) >= IF Len(bank) < TargetNotes
                        THEN Len(bank)

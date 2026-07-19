@@ -58,6 +58,7 @@ type compaction_recovery = {
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
+  projection_target : Keeper_compaction_projection_target.committed;
 }
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -507,16 +508,24 @@ type prepared_compaction =
   ; retry_meta : keeper_meta
   ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
+  ; projection_target : Keeper_compaction_projection_target.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
   }
 
-let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_trigger.t)
+let prepare_compaction
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~(trigger : Compaction_trigger.t)
+      ~projection_request
   : (prepared_compaction, compaction_recovery_error) result =
   (* Load the durable source and run the policy + LLM planner.  This phase
      is deliberately admission-free: the keeper's turn slot is not held
      while the provider call runs.  Correctness after an interleaved state
      change is enforced by the source CAS at commit, not by the slot. *)
+  let projection_target =
+    Keeper_compaction_projection_target.capture projection_request
+  in
   let session =
     create_session
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -578,6 +587,7 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
          ; retry_meta
          ; turn_generation
          ; prepared_trigger
+         ; projection_target
          ; context = preparation.context
          ; evidence
          }
@@ -608,6 +618,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
       ; retry_meta
       ; turn_generation
       ; prepared_trigger
+      ; projection_target
       ; context
       ; evidence
       } =
@@ -626,7 +637,6 @@ let commit_prepared_compaction (prepared : prepared_compaction)
              ~ctx:context
              ~generation:turn_generation
              ~expected_source_ref:source_ref
-           |> Result.map fst
            |> Result.map_error (function
              | Tool_history_invalid _ ->
                No_compaction
@@ -635,7 +645,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
                  }
              | Persistence_error error -> Checkpoint_cas_failed error))
      with
-     | Ok (saved_checkpoint, trigger) ->
+     | Ok ((saved_checkpoint, installed_ref), trigger) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
@@ -645,6 +655,10 @@ let commit_prepared_compaction (prepared : prepared_compaction)
          ; trigger
          ; evidence
          ; turn_generation
+         ; projection_target =
+             Keeper_compaction_projection_target.bind_committed_checkpoint
+               installed_ref
+               projection_target
          }
      | Error
          (Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed actual) as error) ->
@@ -677,8 +691,9 @@ let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
+    ~projection_request
   : (compaction_recovery, compaction_recovery_error) result =
-  match prepare_compaction ~base_dir ~meta ~trigger with
+  match prepare_compaction ~base_dir ~meta ~trigger ~projection_request with
   | Error _ as error -> error
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

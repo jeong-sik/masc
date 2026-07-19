@@ -158,11 +158,29 @@ let finish_preparation ~config ~base_dir ~meta = function
 
 let prepare ~config ~meta =
   let base_dir = Keeper_types_profile.session_base_dir config in
+  let projection_request =
+    Keeper_compaction_projection_target.request
+      ~assignment_id:(runtime_id_of_meta meta)
+      ~resolve_context_window:(fun runtime ->
+        match
+          Keeper_context_runtime.resolve_max_context_resolution_for_runtime
+            ~requested_override:meta.max_context_override
+            runtime
+        with
+        | Ok resolution ->
+          Keeper_compaction_projection_target.Resolved_context_window
+            resolution.effective_budget
+        | Error (Invalid_requested_context_override value) ->
+          Keeper_compaction_projection_target.Invalid_context_window value
+        | Error (Runtime_context_window_unavailable _) ->
+          Keeper_compaction_projection_target.Context_window_not_resolved)
+  in
   ( base_dir
   , Keeper_context_runtime.prepare_compaction
       ~base_dir
       ~meta
-      ~trigger:Compaction_trigger.Manual )
+      ~trigger:Compaction_trigger.Manual
+      ~projection_request )
 ;;
 
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =

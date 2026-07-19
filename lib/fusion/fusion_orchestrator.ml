@@ -9,16 +9,9 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
-type deliberation =
-  { panel : Fusion_types.panel_outcome list
-  ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
-  ; judges : Fusion_types.judge_node list
-  ; judge_usage : Fusion_types.usage
-  }
-
 type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
-  | Computed of deliberation
+  | Computed of Fusion_types.deliberation_evidence
 
 let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
   match Fusion_policy.decide ~policy request with
@@ -378,13 +371,25 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
             | Error (_, u) -> u
           in
           List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
-          Computed { panel; judge; judges = judge_nodes; judge_usage })
+          Computed
+            { Fusion_types.question = req.prompt
+            ; panel
+            ; judge
+            ; judges = judge_nodes
+            ; judge_usage
+            })
 
-let project ~base_dir ~topology ~(request : Fusion_types.fusion_request) deliberation =
+let project
+    ~base_dir
+    ~topology
+    ~(request : Fusion_types.fusion_request)
+    (deliberation : Fusion_types.deliberation_evidence)
+  =
   match
     Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id
-      ~question:request.prompt ~panel:deliberation.panel ~judge:deliberation.judge
-      ~judges:deliberation.judges ~judge_usage:deliberation.judge_usage
+      ~question:deliberation.question ~panel:deliberation.panel
+      ~judge:deliberation.judge ~judges:deliberation.judges
+      ~judge_usage:deliberation.judge_usage
   with
   | Ok () ->
     Fusion_metrics.record_invocation ~topology `Completed;

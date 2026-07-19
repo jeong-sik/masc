@@ -109,27 +109,50 @@ let test_regular_post_turn_does_not_auto_compact () =
       (retained.messages = checkpoint.messages)
 
 let test_invalid_plan_is_distinct_from_provider_unavailable () =
-  let meta = make_meta () in
-  let context =
-    Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
-  in
-  let decision failure =
-    Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-      (fun ~runtime_ids:_ ~keeper_name:_ () ->
-         Some (fun ~units:_ -> Error failure))
-      (fun () ->
-         Compact_policy.compact_for_request_typed
-           ~meta
-           ~trigger:Compaction_trigger.Manual
-           context)
-    |> fun preparation -> preparation.Compact_policy.decision
-  in
-  (match decision Masc.Keeper_compaction_llm_summarizer.Invalid_plan with
-   | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
-   | _ -> fail "invalid provider plan was not a typed source terminal");
-  match decision Masc.Keeper_compaction_llm_summarizer.Provider_unavailable with
-  | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
-  | _ -> fail "provider failure was collapsed into an invalid plan"
+  (* This test asserts the typed distinction between a provider transport
+     failure ([Plan_provider_unavailable]) and a closed-plan-contract violation
+     ([Invalid_compaction_plan]). Both terminals live *after* the runtime-id
+     gate in [Keeper_compact_policy.requested_messages]: with an uninitialized
+     global Runtime, [compaction_runtime_ids] is [[]] and the decision short-
+     circuits to [Runtime_identity_unavailable] before the summarizer override
+     is ever consulted, so both branches under test would be dead. Building the
+     working context also drives [Context.set_scoped], which requires an Eio
+     fiber. So this test must run inside [Eio_main.run] with the same Runtime
+     fixture the sibling [test_manual_compaction_serializes_owner_lane] uses. *)
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+      let meta = make_meta () in
+      let context =
+        Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+      in
+      let decision failure =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_ids:_ ~keeper_name:_ () ->
+             Some (fun ~units:_ -> Error failure))
+          (fun () ->
+             Compact_policy.compact_for_request_typed
+               ~meta
+               ~trigger:Compaction_trigger.Manual
+               context)
+        |> fun preparation -> preparation.Compact_policy.decision
+      in
+      (match decision Masc.Keeper_compaction_llm_summarizer.Invalid_plan with
+       | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
+       | _ -> fail "invalid provider plan was not a typed source terminal");
+      match decision Masc.Keeper_compaction_llm_summarizer.Provider_unavailable with
+      | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
+      | _ -> fail "provider failure was collapsed into an invalid plan")
 
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in

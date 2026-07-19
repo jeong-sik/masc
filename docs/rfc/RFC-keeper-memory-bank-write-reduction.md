@@ -24,7 +24,8 @@ consolidation-§4 conflict that has already produced two rejected PRs.
 
 ## §1 Problem — the bank is an unbounded append log of operating-constraint prose
 
-Live evidence (`~/.masc/keepers/idealist.memory.jsonl`, measured 2026-07-19):
+Live evidence (`<base-path>/.masc/keepers/idealist.memory.jsonl`, measured
+2026-07-19):
 
 - 52 rows; **18 of them** are one restated idle note
   `**FINAL archive of open loop "Wait for genuinely new signal" — turn=N, RESOLVED**`,

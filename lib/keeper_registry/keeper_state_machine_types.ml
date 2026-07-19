@@ -27,7 +27,6 @@ type conditions =
   ; fiber_alive : bool
   ; heartbeat_healthy : bool
   ; turn_healthy : bool
-  ; context_within_budget : bool
   ; context_handoff_needed : bool
   ; compaction_active : bool
   ; handoff_active : bool
@@ -45,7 +44,6 @@ let default_conditions =
   ; fiber_alive = false
   ; heartbeat_healthy = true
   ; turn_healthy = true
-  ; context_within_budget = true
   ; context_handoff_needed = false
   ; compaction_active = false
   ; handoff_active = false

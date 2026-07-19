@@ -1926,9 +1926,6 @@ describe('fetchKeeperConfig', () => {
       },
       compaction: {
         profile: 'balanced',
-        ratio_gate: '0.85',
-        message_gate: '16',
-        token_gate: '24000',
       },
       proactive: {
         enabled: 'true',
@@ -2021,6 +2018,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.compaction).toEqual({ profile: 'balanced' })
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])
     expect(result.sources.precedence).toEqual(['live_meta'])

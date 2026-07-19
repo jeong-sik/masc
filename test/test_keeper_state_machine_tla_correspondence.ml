@@ -107,7 +107,6 @@ let running_conditions : SM.conditions =
     fiber_alive = true
   ; heartbeat_healthy = true
   ; turn_healthy = true
-  ; context_within_budget = true
   ; dead_tombstone_latched = false
   }
 ;;

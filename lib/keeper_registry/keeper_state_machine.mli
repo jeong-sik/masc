@@ -63,8 +63,6 @@ type conditions = {
   (** Result of the latest heartbeat observation. *)
   turn_healthy : bool;
   (** Result of the latest completed turn observation. *)
-  context_within_budget : bool;
-  (** [context_ratio < compaction.ratio_gate] *)
   context_handoff_needed : bool;
   compaction_active : bool;
   (** Set true on compaction entry, false on exit *)
@@ -82,10 +80,9 @@ type conditions = {
   (** Current turn finished, no pending work *)
   context_overflow : bool;
   (** Provider rejected the most recent prompt for exceeding its max
-      context window. Distinct from [context_within_budget] (soft,
-      ratio-based warning): [context_overflow] is a hard failure reported
-      by the provider. Cleared by completed compaction or operator clear;
-      token counts remain observations, not lifecycle gates. *)
+      context window. This is a hard failure reported by the provider.
+      Cleared by completed compaction or operator clear; token counts remain
+      observations, not lifecycle gates. *)
   credential_archived : bool;
 }
 

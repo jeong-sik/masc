@@ -3,7 +3,7 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
@@ -12,7 +12,7 @@ import {
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
-import { formatTokens, formatPct } from '../lib/format-number'
+import { formatTokens } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import type { AsyncState } from '../lib/async-state'
@@ -288,9 +288,6 @@ export type RuntimeDraft = {
   allowed_paths_text: string
   proactive_enabled: boolean
   compaction_profile: string
-  compaction_ratio_gate: number
-  compaction_message_gate: number
-  compaction_token_gate: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -360,9 +357,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     compaction_profile: c.compaction.profile,
-    compaction_ratio_gate: c.compaction.ratio_gate,
-    compaction_message_gate: c.compaction.message_gate,
-    compaction_token_gate: c.compaction.token_gate,
   }
 }
 
@@ -614,9 +608,6 @@ export function keeperConfigControlInventory(
           [
             'autoboot_enabled',
             'compaction.profile',
-            'compaction.ratio_gate',
-            'compaction.message_gate',
-            'compaction.token_gate',
             'proactive.enabled',
           ],
         ),
@@ -812,9 +803,6 @@ export function buildRuntimePayloadResult(
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
-  if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
-  if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
-  if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
   return { ok: true, payload }
 }
 
@@ -862,9 +850,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
     compaction_profile: 'compaction_profile' in payload,
-    compaction_ratio_gate: 'compaction_ratio_gate' in payload,
-    compaction_message_gate: 'compaction_message_gate' in payload,
-    compaction_token_gate: 'compaction_token_gate' in payload,
   }
 }
 
@@ -1294,38 +1279,6 @@ function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boo
   `
 }
 
-// Segmented selector for a bounded numeric value. To avoid silently dropping a
-// value that is not one of the presets, the current value is folded into the
-// option list (sorted) so it stays visible and selectable.
-function SetSeg({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: number
-  options: readonly number[]
-  onChange: (v: number) => void
-  ariaLabel: string
-}) {
-  const opts = options.includes(value)
-    ? options
-    : [...options, value].sort((a, b) => a - b)
-  return html`
-    <div class="set-seg" role="radiogroup" aria-label=${ariaLabel}>
-      ${opts.map((o) => html`
-        <button
-          type="button"
-          key=${o}
-          class=${`set-seg-b ${o === value ? 'on' : ''}`}
-          aria-pressed=${o === value ? 'true' : 'false'}
-          onClick=${() => onChange(o)}
-        >${o}</button>
-      `)}
-    </div>
-  `
-}
-
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
@@ -1434,37 +1387,6 @@ function PromptBlock({
         </div>
       `}>${title}</${SectionHeader}>
       <${LongText} text=${block.text} truncateAt=${null} />
-    </div>
-  `
-}
-
-// ── Inline editing components for runtime config ────────
-
-function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty = false }: {
-  label: string; value: number; onChange: (v: number) => void;
-  min?: number; max?: number; step?: number; suffix?: string; dirty?: boolean
-}) {
-  const [invalid, setInvalid] = useState(false)
-  return html`
-    <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
-      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
-      <div class="kcf-inline-control flex items-center gap-2">
-        <input type="number"
-          aria-label=${label}
-          class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${invalid ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
-          value=${value}
-          min=${min}
-          max=${max}
-          step=${step}
-          onInput=${(e: Event) => {
-            const input = e.target as HTMLInputElement
-            const v = parseFloat(input.value)
-            setInvalid(!input.checkValidity())
-            if (!isNaN(v)) onChange(v)
-          }}
-        />
-        ${suffix ? html`<span class="text-xs text-text-dim w-5">${suffix}</span>` : null}
-      </div>
     </div>
   `
 }
@@ -2005,24 +1927,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         onChange=${(value: string) => updateRuntimeDraft('compaction_profile', value)}
         dirty=${dirtyFlags.compaction_profile}
       />
-      <${SetRow} label="비율 게이트" hint="컨텍스트 사용률 %" dirty=${dirtyFlags.compaction_ratio_gate}>
-        <${SetSeg} ariaLabel="비율 게이트" value=${Math.round(rd.compaction_ratio_gate * 100)}
-          options=${[75, 80, 85, 90]}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)} />
-      </${SetRow}>
-      <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
-        min=${0} max=${500} step=${5}
-        dirty=${dirtyFlags.compaction_message_gate} />
-      <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} step=${1000} suffix="tok"
-        dirty=${dirtyFlags.compaction_token_gate} />
     ` : html`
       <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
-      <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
-      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
-      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
     `}
 
     <${SectionHeader} title="프로액티브" />

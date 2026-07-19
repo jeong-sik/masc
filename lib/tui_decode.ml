@@ -30,7 +30,6 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
   k_drift_enabled : bool;
@@ -221,7 +220,6 @@ let decode_keeper ~filename json =
              (Json_util.kind_name other))
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
-  let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
   let* k_trigger_mode = require_string_field json "trigger_mode" in
   let* k_context_budget = require_int_field json "context_budget" in
   let* k_drift_enabled = require_bool_field json "drift_enabled" in
@@ -249,7 +247,6 @@ let decode_keeper ~filename json =
       k_total_cost_usd;
       k_last_turn_ts;
       k_compaction_count;
-      k_compaction_ratio_gate;
       k_trigger_mode;
       k_context_budget;
       k_drift_enabled;

@@ -1353,12 +1353,11 @@ let test_invariant_terminal_absorbing () =
     | `Fiber -> { c with SM.fiber_alive = not c.SM.fiber_alive }
     | `Hb -> { c with heartbeat_healthy = not c.heartbeat_healthy }
     | `Turn -> { c with turn_healthy = not c.turn_healthy }
-    | `Ctx -> { c with context_within_budget = not c.context_within_budget }
     | `Hand_need -> { c with context_handoff_needed = not c.context_handoff_needed }
     | `Comp -> { c with compaction_active = not c.compaction_active }
     | `Hand -> { c with handoff_active = not c.handoff_active }
   in
-  let non_critical_fields = [ `Hb; `Turn; `Ctx; `Hand_need; `Comp; `Hand ] in
+  let non_critical_fields = [ `Hb; `Turn; `Hand_need; `Comp; `Hand ] in
   (* Dead: toggling non-critical fields should keep Dead *)
   List.iter
     (fun field ->
@@ -1369,7 +1368,7 @@ let test_invariant_terminal_absorbing () =
      TLA+ fix: compaction_active and handoff_active are NOW critical for
      Stopped — toggling them ON breaks the Stopped condition (→ Draining).
      This is correct: buffer ops block terminal entry. *)
-  let stopped_non_critical = [ `Hb; `Turn; `Ctx; `Hand_need ] in
+  let stopped_non_critical = [ `Hb; `Turn; `Hand_need ] in
   List.iter
     (fun field ->
        let mutated = toggle stopped_conds field in
@@ -1402,7 +1401,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; SM.fiber_alive = false
     ; heartbeat_healthy = false
     ; turn_healthy = false
-    ; context_within_budget = false
     ; context_handoff_needed = true
     ; compaction_active = true
     ; handoff_active = true
@@ -1442,7 +1440,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   (* Failure markers remain observations across a fiber start. *)
   check bool "credential_archived preserved" true updated.credential_archived;
   (* Untouched conditions stay as-is *)
-  check bool "context_within_budget unchanged" false updated.context_within_budget;
   check bool "context_handoff_needed unchanged" true updated.context_handoff_needed
 ;;
 
@@ -1703,7 +1700,6 @@ let test_invariant_priority_chain () =
     ; SM.fiber_alive = true
     ; heartbeat_healthy = true
     ; turn_healthy = true
-    ; context_within_budget = true
     ; context_handoff_needed = true
     ; compaction_active = true
     ; handoff_active = true
@@ -1768,7 +1764,6 @@ let test_setclear_coverage () =
     ; ("fiber_alive", fun c -> c.fiber_alive)
     ; ("heartbeat_healthy", fun c -> c.heartbeat_healthy)
     ; ("turn_healthy", fun c -> c.turn_healthy)
-    ; ("context_within_budget", fun c -> c.context_within_budget)
     ; ("context_handoff_needed", fun c -> c.context_handoff_needed)
     ; ("compaction_active", fun c -> c.compaction_active)
     ; ("handoff_active", fun c -> c.handoff_active)
@@ -1787,7 +1782,6 @@ let test_setclear_coverage () =
     ; fiber_alive = false
     ; heartbeat_healthy = false
     ; turn_healthy = false
-    ; context_within_budget = false
     ; context_handoff_needed = false
     ; compaction_active = false
     ; handoff_active = false
@@ -1806,7 +1800,6 @@ let test_setclear_coverage () =
     ; fiber_alive = true
     ; heartbeat_healthy = true
     ; turn_healthy = true
-    ; context_within_budget = true
     ; context_handoff_needed = true
     ; compaction_active = true
     ; handoff_active = true
@@ -1900,17 +1893,9 @@ let test_setclear_coverage () =
          fields)
     all_events;
   (* Fields managed outside the ordinary FSM event loop are exempt. *)
-  let exempt_from_clearer =
-    [ "context_within_budget"
-    ; (* external: never touched by update_conditions *)
-      "credential_archived"
-    ; "dead_tombstone_latched"
-    ]
-  in
+  let exempt_from_clearer = [ "credential_archived"; "dead_tombstone_latched" ] in
   let exempt_from_setter =
-    [ "context_within_budget"
-    ; (* external *)
-      "launch_pending"
+    [ "launch_pending"
     ; (* set externally before Fiber_started *)
       "dead_tombstone_latched"
       (* durable lifecycle store *)

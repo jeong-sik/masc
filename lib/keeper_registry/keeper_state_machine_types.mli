@@ -21,7 +21,6 @@ type conditions = {
   fiber_alive : bool;
   heartbeat_healthy : bool;
   turn_healthy : bool;
-  context_within_budget : bool;
   context_handoff_needed : bool;
   compaction_active : bool;
   handoff_active : bool;

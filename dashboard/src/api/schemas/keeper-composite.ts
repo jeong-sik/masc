@@ -84,7 +84,6 @@ const KeeperPhaseDiagnosisSchema = object({
     fiber_alive: boolean(),
     heartbeat_healthy: boolean(),
     turn_healthy: boolean(),
-    context_within_budget: boolean(),
     context_handoff_needed: boolean(),
     compaction_active: boolean(),
     handoff_active: boolean(),

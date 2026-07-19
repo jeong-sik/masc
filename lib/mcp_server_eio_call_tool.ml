@@ -597,25 +597,26 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let telemetry_operation_id = Json_util.get_string_nonempty arguments "operation_id" in
   let telemetry_worker_run_id = Json_util.get_string_nonempty arguments "worker_run_id" in
-  let error_detail =
-    if success then None
-    else
+  let failure_observation =
+    match result with
+    | Tool_result.Failed { class_; message; _ } ->
       let truncated =
         let error_preview_max = 200 in
         String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
       in
-      Some (Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
+      Some (class_, Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> None
+  in
+  let error_detail =
+    Option.map (fun (_failure_class, detail) -> detail) failure_observation
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
   Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
-  if not success then (
-    let failure_class =
-      match Tool_result.failure_class result with
-      | Some cls -> cls
-      | None -> Tool_result.Runtime_failure
-    in
+  (match failure_observation with
+   | None -> ()
+   | Some (failure_class, error_detail) ->
     Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)
       ~details:
         (`Assoc
@@ -631,10 +632,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
             ("attempts", `Int attempts);
-            ("error_detail", `String (Option.value ~default:"" error_detail));
+            ("error_detail", `String error_detail);
           ])
       (Printf.sprintf "tool call failed: %s — %s" name
-         (Option.value ~default:"(no detail)" error_detail)));
+         error_detail));
 
   (* Classify call source: Keeper_internal only when the resolved agent_name
      matches a keeper in the admission workspace.  A process-global lookup
@@ -667,12 +668,12 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      here so [track_tool_called] can fan out a paired
      [Error_occurred] event for the previously-dead ADT variant. *)
   let telemetry_error_kind =
-    if not success then
-      Some (Telemetry_eio.error_kind_of_string "tool_failure")
-    else None
+    match failure_observation with
+    | Some _ -> Some (Telemetry_eio.error_kind_of_string "tool_failure")
+    | None -> None
   in
   let telemetry_failure_class =
-    if success then None else Tool_result.failure_class result
+    Option.map (fun (failure_class, _detail) -> failure_class) failure_observation
   in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in

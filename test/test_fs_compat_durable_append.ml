@@ -572,6 +572,45 @@ let test_private_jsonl_transaction_accumulates_nested_close_failures () =
   check int "both nested descriptors closed" 2 !calls
 ;;
 
+let test_private_jsonl_rewrite_rejects_precondition_close_as_commit () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let origin = transaction_snapshot path ~after:None in
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  let result =
+    Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ~io
+      path
+      ~expected:origin.cursor
+      "{\"row\":2}\n"
+  in
+  (match result with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_precondition_succeeded observed)
+         ; cleanup_failures = [ cleanup_failure ]
+         }) ->
+     check bool
+       "precondition cursor preserved"
+       true
+       (Fs_compat.Private_jsonl_cursor.equal origin.cursor observed);
+     check_transaction_close_failure
+       ~label:"rewrite precondition descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure;
+     (match Fs_compat.private_jsonl_cursor_success_receipt result with
+      | Error _ -> ()
+      | Ok _ -> fail "precondition cursor was classified as a committed rewrite")
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite continued after precondition descriptor settlement failed");
+  check int "precondition and stable lock descriptors closed" 2 !calls;
+  check string
+    "failed precondition leaves target unchanged"
+    "{\"row\":1}\n"
+    (Fs_compat.load_file path)
+;;
+
 exception Requested_private_jsonl_cancellation
 
 type private_jsonl_append_cancellation_outcome =
@@ -1028,6 +1067,10 @@ let () =
             "private JSONL nested close failures accumulate"
             `Quick
             test_private_jsonl_transaction_accumulates_nested_close_failures
+        ; test_case
+            "private JSONL rewrite precondition close is not a commit"
+            `Quick
+            test_private_jsonl_rewrite_rejects_precondition_close_as_commit
         ; test_case
             "private JSONL append cancellation settles once with receipt"
             `Quick

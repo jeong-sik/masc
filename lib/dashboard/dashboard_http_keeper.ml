@@ -922,11 +922,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                  keeper_status.ml does, so keeper-store-normalize.ts reads a
                  populated last_compaction_decision instead of null. *)
               ( "last_compaction_decision",
-                let decision =
-                  Keeper_meta_contract.compaction_runtime_decision_to_string
-                    m.runtime.compaction_rt.last_decision
-                in
-                if String.trim decision = "" then `Null else `String decision );
+                Keeper_meta_contract.compaction_decision_json_or_null
+                  m.runtime.compaction_rt.last_decision );
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

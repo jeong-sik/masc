@@ -402,6 +402,10 @@ let poll_state st =
 		    end
 	  end
 
+let reap_tracked_states () =
+  with_reg (fun () -> Hashtbl.iter (fun _ state -> poll_state state) registry)
+;;
+
 let cleanup_failed_registered_spawn ~tid st =
   Safe_ops.protect ~default:() (fun () ->
     Process_eio.tree_kill ~pgid:st.handle.pgid ~signal:Sys.sigterm ~grace_sec:0.2);
@@ -412,6 +416,11 @@ let cleanup_failed_registered_spawn ~tid st =
   try_delete_pid_file st.pid_file
 
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
+  (* Spawning is the one operation every fire-and-forget producer repeats.
+     Preserve it as an opportunistic cleanup point even though it no longer
+     performs numeric admission: completed tasks still need their pipes and
+     PID sidecars reaped when callers never read their final snapshot. *)
+  reap_tracked_states ();
   let release_lifetime_guard =
     try Ok (acquire_lifetime_guard ()) with
     | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation

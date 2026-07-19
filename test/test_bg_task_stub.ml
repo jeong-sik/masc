@@ -359,6 +359,61 @@ let test_pid_file_created_and_cleaned () =
       ignore (poll_for_closed tid);
       check bool "pid file gone after close" false (Sys.file_exists pid_path))
 
+let test_next_spawn_reaps_unread_completed_task () =
+  with_temp_base "bg-task-opportunistic-reap" @@ fun base ->
+  let keeper = "kp-opportunistic-reap" in
+  let released = Atomic.make 0 in
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire = (fun () -> fun () -> Atomic.incr released) };
+  Fun.protect
+    ~finally:Bg_task.reset_lifetime_guard_for_testing
+    (fun () ->
+       let first =
+         match
+           Bg_task.spawn
+             ~base_path:base
+             ~keeper
+             ~argv:[ "/bin/true" ]
+             ~cwd:""
+             ~envp:(env_of_current ())
+             ~timeout_sec:0.0
+             ()
+         with
+         | Ok task_id -> task_id
+         | Error _ -> fail "first spawn failed"
+       in
+       let first_pid_path =
+         Filename.concat
+           (bg_dir_for ~base ~keeper)
+           (Bg_task.task_id_to_string first ^ ".pid")
+       in
+       check bool "first sidecar exists before exit" true (Sys.file_exists first_pid_path);
+       check bool "exit watcher observed first completion" true
+         (wait_until ~timeout_s:3.0 (fun () -> Atomic.get released = 1));
+       check bool "unread completion still awaits reap" true
+         (Sys.file_exists first_pid_path);
+       let second =
+         match
+           Bg_task.spawn
+             ~base_path:base
+             ~keeper
+             ~argv:[ "/bin/sleep"; "5" ]
+             ~cwd:""
+             ~envp:(env_of_current ())
+             ~timeout_sec:0.0
+             ()
+         with
+         | Ok task_id -> task_id
+         | Error _ -> fail "second spawn failed"
+       in
+       check bool "next spawn removes completed sidecar" false
+         (Sys.file_exists first_pid_path);
+       (match Bg_task.read first ~since_stdout:0 ~since_stderr:0 with
+        | Ok snapshot -> check bool "first task was closed by reap" true snapshot.closed
+        | Error _ -> fail "reaped task snapshot disappeared");
+       ignore (Bg_task.kill second ~signal:Sys.sigterm ~grace_sec:0.2);
+       ignore (poll_for_closed second))
+
 (* reap_orphans removes a stale pid file whose pid is no longer live
    and whose task_id is absent from the registry. *)
 let test_reap_orphans_removes_stale_file () =
@@ -508,6 +563,8 @@ let () =
         [
           test_case "pid file created and cleaned on close" `Quick
             test_pid_file_created_and_cleaned;
+          test_case "next spawn reaps unread completed task" `Quick
+            test_next_spawn_reaps_unread_completed_task;
           test_case "reap_orphans removes stale pid file" `Quick
             test_reap_orphans_removes_stale_file;
           test_case "pid file write failure is observed" `Quick

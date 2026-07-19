@@ -261,6 +261,26 @@ let failure_judgment_identity_equal left right =
        left.fj_provenance
        right.fj_provenance
 
+let fusion_terminal_equal left right =
+  match left, right with
+  | Fusion_succeeded left, Fusion_succeeded right
+  | Fusion_failed left, Fusion_failed right -> String.equal left right
+  | Fusion_cancelled, Fusion_cancelled -> true
+  | Fusion_succeeded _, (Fusion_failed _ | Fusion_cancelled)
+  | Fusion_failed _, (Fusion_succeeded _ | Fusion_cancelled)
+  | Fusion_cancelled, (Fusion_succeeded _ | Fusion_failed _) -> false
+
+let fusion_completion_identity_equal left right =
+  String.equal left.run_id right.run_id
+  && fusion_terminal_equal left.terminal right.terminal
+  && String.equal left.board_post_id right.board_post_id
+  (* The first durably committed row owns recipient authority. A replay after
+     that commit no longer has the consumed in-memory route and therefore
+     carries [Unrouted]; treating [channel] as event identity would turn an
+     exact result replay into a false conflict. [enqueue_external_decision]
+     retains the existing row, so excluding the channel here never overwrites
+     the authoritative recipient. *)
+
 let stimulus_identity_equal a b =
   String.equal a.post_id b.post_id
   && a.urgency = b.urgency
@@ -268,6 +288,8 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Failure_judgment left, Failure_judgment right ->
     failure_judgment_identity_equal left right
+  | Fusion_completed left, Fusion_completed right ->
+    fusion_completion_identity_equal left right
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =

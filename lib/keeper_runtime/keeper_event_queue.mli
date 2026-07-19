@@ -250,7 +250,11 @@ val enqueue : t -> stimulus -> t
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. *)
+    not create an unbounded backlog of otherwise identical stimuli. For a
+    [Fusion_completed] event, [channel] is also excluded: the first committed
+    row owns recipient authority, while a replay after route consumption is
+    expected to be [Unrouted]. Result, run, and Board evidence must still
+    match exactly. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)

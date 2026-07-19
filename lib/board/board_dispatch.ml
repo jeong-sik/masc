@@ -234,22 +234,47 @@ let routing_retry_callback : routing_callback option Atomic.t =
   Atomic.make None
 ;;
 
+(* The atomic flag is the routing-recovery obligation authority.  The
+   semaphore is only a level-triggered wake token.  Producers never wait on
+   the actor and duplicate requests coalesce without allocating queue items. *)
 let routing_retry_requested = Atomic.make false
-let routing_retry_inbox = Eio.Stream.create 1
+let routing_retry_wakeup = Eio.Semaphore.make 0
 
 let request_routing_retry () =
-  if Atomic.compare_and_set routing_retry_requested false true
-  then
-    try Eio.Stream.add routing_retry_inbox () with
-    | exn ->
+  if not (Atomic.compare_and_set routing_retry_requested false true)
+  then Ok ()
+  else
+    try
+      Eio.Semaphore.release routing_retry_wakeup;
+      Ok ()
+    with
+    | Sys_error detail ->
       Atomic.set routing_retry_requested false;
-      raise exn
+      Error
+        (Printf.sprintf
+           "Board routing retry wake-token release failed: %s"
+           detail)
 ;;
 
-let rec clear_routing_retry_inbox_for_test () =
-  match Eio.Stream.take_nonblocking routing_retry_inbox with
-  | Some () -> clear_routing_retry_inbox_for_test ()
-  | None -> ()
+let observe_routing_retry_request ~context =
+  match request_routing_retry () with
+  | Ok () -> ()
+  | Error detail -> Log.BoardLog.error "%s: %s" context detail
+;;
+
+let claim_routing_retry_request () =
+  if Atomic.exchange routing_retry_requested false
+  then Ok ()
+  else Error "Board routing retry actor acquired a wake token without an obligation"
+;;
+
+let rec clear_routing_retry_wakeup_for_test () =
+  if Eio.Semaphore.get_value routing_retry_wakeup <= 0
+  then ()
+  else begin
+    Eio.Semaphore.acquire routing_retry_wakeup;
+    clear_routing_retry_wakeup_for_test ()
+  end
 ;;
 
 type runtime_actor = Board_metrics_hooks.runtime_actor =
@@ -527,14 +552,16 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     let rec loop retry_at =
       (match retry_at with
        | None ->
-         Eio.Stream.take routing_retry_inbox;
-         Atomic.set routing_retry_requested false
+         Eio.Semaphore.acquire routing_retry_wakeup;
+         (match claim_routing_retry_request () with
+          | Ok () -> ()
+          | Error detail -> Log.BoardLog.error "%s" detail)
        | Some deadline ->
-         (match
-            await_until ~deadline (fun () -> Eio.Stream.take routing_retry_inbox)
-          with
-          | Wait_completed () -> Atomic.set routing_retry_requested false
-          | Deadline_reached -> ()));
+         (* A new producer request is already durable in the Board outbox.  It
+            must not pull a failed recovery deadline forward; the pending wake
+            token is claimed after recovery succeeds and provides a final
+            reconciliation pass for work that raced with that attempt. *)
+         Eio.Time.sleep_until clock deadline);
       let outcome =
         try
           match
@@ -759,7 +786,9 @@ let admit_routing_mutation mutation =
 let set_board_signal_hook hook =
   Atomic.set board_signal_hook (Some hook);
   match Atomic.get backend_state with
-  | Active (_, { routing_retry = Actor_started _; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = Actor_started _; _ }) ->
+    observe_routing_retry_request
+      ~context:"Board signal-hook recovery wake request failed"
   | Active (_, { routing_retry = (Actor_stopped | Actor_starting _); _ })
   | Uninitialized ->
     (match
@@ -867,7 +896,9 @@ let commit_routing_event ~event_id value =
 
 let drain_after_mutation () =
   match Atomic.get backend_state with
-  | Active (_, { routing_retry = Actor_started _; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = Actor_started _; _ }) ->
+    observe_routing_retry_request
+      ~context:"Board signal-outbox drain wake request failed"
   | Active (_, { routing_retry = (Actor_stopped | Actor_starting _); _ })
   | Uninitialized ->
     (match
@@ -931,7 +962,7 @@ let reset_for_test () =
   (* Dropping [Active] also drops the runtime-actor state. *)
   Atomic.set backend_state Uninitialized;
   Atomic.set routing_retry_requested false;
-  clear_routing_retry_inbox_for_test ();
+  clear_routing_retry_wakeup_for_test ();
   Atomic.set board_signal_hook None;
   Atomic.set board_sse_hook None;
   Stdlib.Mutex.protect routing_delivery_claim_mu (fun () ->

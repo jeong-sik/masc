@@ -165,7 +165,10 @@ val start_runtime_actors :
     Idempotent while the owning switch is available.  Switch release returns
     only that switch's actors to the stopped state, allowing a replacement root
     switch to start fresh actors without an unowned global lifecycle flag.
-    Concurrent callers cooperate through typed state without timing policy. *)
+    Concurrent callers cooperate through typed state without timing policy.
+    Routing producers coalesce against an atomic durable-recovery obligation;
+    its semaphore is only a domain-safe wake token, and producer activity does
+    not advance an already scheduled recovery deadline. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)

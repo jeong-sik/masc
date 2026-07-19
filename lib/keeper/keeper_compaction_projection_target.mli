@@ -20,6 +20,12 @@ val request :
   resolve_context_window:(Runtime.t -> context_window_resolution) ->
   request
 
+(** Capture the exact immutable runtime already selected for a provider turn.
+    This path performs no registry lookup, so a later runtime reload cannot
+    change the provider/model attributed to an overflow recovery. *)
+val exact_request :
+  runtime:Runtime.t -> effective_max_context:int -> request
+
 type unavailable =
   | Empty_assignment
   | Assignment_ambiguous of { assignment_id : string }

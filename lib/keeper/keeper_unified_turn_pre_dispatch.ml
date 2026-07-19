@@ -65,12 +65,9 @@ let build_runtime_execution
        log_pre_dispatch_error ~site:"ensure_local_discovery_ready" e;
        Error (Agent_sdk.Error.Internal e)
      | Ok () ->
-       (match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
-            ~requested_override:meta.max_context_override
-            ~runtime_id
-        with
-        | Error error ->
+       (match Runtime.get_runtime_by_id runtime_id with
+        | None ->
+          let error = Runtime_context_window_unavailable { runtime_id } in
           let detail =
             Keeper_context_runtime.max_context_resolution_error_to_string error
           in
@@ -79,20 +76,36 @@ let build_runtime_execution
             (Agent_sdk.Error.Config
                (Agent_sdk.Error.InvalidConfig
                   { field = "runtime.context_window"; detail }))
-        | Ok max_context_resolution ->
-          let max_context =
-            Keeper_turn_runtime_budget.resolved_max_context_for_turn
-              ~meta
-              max_context_resolution
-          in
-          let temperature =
-            Runtime_inference.resolve_temperature
-              ~runtime_id
-              ~fallback:Keeper_config.keeper_unified_temperature
-          in
-          Ok
-            { Keeper_turn_runtime_budget.runtime_id
-            ; max_context_resolution
-            ; max_context
-            ; temperature
-            }))
+        | Some runtime ->
+          (match
+             Keeper_context_runtime.resolve_max_context_resolution_for_runtime
+               ~requested_override:meta.max_context_override
+               runtime
+           with
+           | Error error ->
+             let detail =
+               Keeper_context_runtime.max_context_resolution_error_to_string error
+             in
+             log_pre_dispatch_error ~site:"resolve_context_window" detail;
+             Error
+               (Agent_sdk.Error.Config
+                  (Agent_sdk.Error.InvalidConfig
+                     { field = "runtime.context_window"; detail }))
+           | Ok max_context_resolution ->
+             let max_context =
+               Keeper_turn_runtime_budget.resolved_max_context_for_turn
+                 ~meta
+                 max_context_resolution
+             in
+             let temperature =
+               Runtime_inference.resolve_temperature
+                 ~runtime_id
+                 ~fallback:Keeper_config.keeper_unified_temperature
+             in
+             Ok
+               { Keeper_turn_runtime_budget.runtime_id
+               ; runtime
+               ; max_context_resolution
+               ; max_context
+               ; temperature
+               })))

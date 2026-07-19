@@ -436,6 +436,37 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
   check int "numeric field preserved" 15310
     (payload |> U.member "pr_number" |> U.to_int)
 
+let test_failure_observation_uses_typed_failed_payload () =
+  let failed : Tool_result.result =
+    Tool_result.Failed
+      { class_ = Tool_result.Policy_rejection
+      ; message = "operator denied"
+      ; data = `Null
+      ; tool_name = "restricted-tool"
+      ; duration_ms = 0.0
+      }
+  in
+  let completed : Tool_result.result =
+    Tool_result.Completed
+      { data = `Null
+      ; metadata = None
+      ; tool_name = "completed-tool"
+      ; duration_ms = 0.0
+      }
+  in
+  check
+    (option (pair (testable Tool_result.pp_tool_failure_class ( = )) string))
+    "failed payload is the sole class/detail source"
+    (Some (Tool_result.Policy_rejection, "duration_ms=42|detail=operator denied"))
+    (Masc.Mcp_server_eio_call_tool.For_testing.failure_observation
+       ~duration_ms:42 failed);
+  check
+    (option (pair (testable Tool_result.pp_tool_failure_class ( = )) string))
+    "completed result has no failure observation"
+    None
+    (Masc.Mcp_server_eio_call_tool.For_testing.failure_observation
+       ~duration_ms:42 completed)
+
 let test_records_mcp_server_operation_duration_metric () =
   let context =
     { Otel_dispatch_hook.jsonrpc_request_id = Some "metric-request-otel"
@@ -771,6 +802,8 @@ let () =
             test_threads_exact_mcp_invocation_identity;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
+          test_case "failure observation follows typed failed payload" `Quick
+            test_failure_observation_uses_typed_failed_payload;
           test_case "records MCP server operation duration metric" `Quick
             test_records_mcp_server_operation_duration_metric;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick

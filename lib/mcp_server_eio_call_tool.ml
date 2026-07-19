@@ -161,9 +161,23 @@ let arguments_of_params = function
   | _ -> `Null
 ;;
 
+let failure_observation ~duration_ms
+    : Tool_result.result -> (Tool_result.tool_failure_class * string) option
+  = function
+  | Tool_result.Failed { class_; message; _ } ->
+    let truncated =
+      let error_preview_max = 200 in
+      String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message
+      |> String_util.to_string
+    in
+    Some (class_, Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
+  | Tool_result.Completed _ | Tool_result.Deferred _ -> None
+;;
+
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
   let arguments_of_params = arguments_of_params
+  let failure_observation = failure_observation
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
     record_mcp_server_operation_duration_sample
@@ -597,16 +611,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let telemetry_operation_id = Json_util.get_string_nonempty arguments "operation_id" in
   let telemetry_worker_run_id = Json_util.get_string_nonempty arguments "worker_run_id" in
-  let failure_observation =
-    match result with
-    | Tool_result.Failed { class_; message; _ } ->
-      let truncated =
-        let error_preview_max = 200 in
-        String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
-      in
-      Some (class_, Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
-    | Tool_result.Completed _ | Tool_result.Deferred _ -> None
-  in
+  let failure_observation = failure_observation ~duration_ms result in
   let error_detail =
     Option.map (fun (_failure_class, detail) -> detail) failure_observation
   in

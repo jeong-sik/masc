@@ -30,9 +30,12 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
 let trajectory_duration_ms duration_ms =
-  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
-  then 0
-  else max 1 (int_of_float (Float.round duration_ms))
+  let rounded = Float.round duration_ms in
+  if (not (Float.is_finite rounded))
+     || Float.compare rounded 0.0 < 0
+     || Float.compare rounded (Float.of_int max_int) > 0
+  then Error (Trajectory.Invalid_field Trajectory.Duration_ms)
+  else Ok (int_of_float rounded)
 
 (* Inference telemetry redaction moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
@@ -330,7 +333,7 @@ let make_hooks
               only the final turn's thinking; turns 1..N-1 were merely counted
               by the log line above. *)
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~oas_turn:turn
              response.content
          | None -> ());
         (try
@@ -456,12 +459,6 @@ let make_hooks
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Ids.Execution_id.generate () in
-        (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
-           strictly before OAS publishes ToolCompleted for this call, so the
-           event bridge can stamp the same id onto the oas:tool_completed
-           row (insert happens-before publish happens-before drain). *)
-        Keeper_execution_join.record ~tool_use_id
-          ~execution_id:(Ids.Execution_id.to_string execution_id);
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -508,7 +505,7 @@ let make_hooks
            let trace_id = Trajectory.accumulator_trace_id acc in
            let masc_root = Trajectory.accumulator_masc_root acc in
            let trajectory_keeper = Trajectory.accumulator_keeper_name acc in
-           let turn = Agent_sdk.Tool.Invocation.turn invocation in
+           let keeper_turn_id = Trajectory.accumulator_keeper_turn_id acc in
            let safe_input =
              Observability_redact.redact_json_value input
            in
@@ -539,21 +536,18 @@ let make_hooks
            (match safe_input with
             | `Assoc arguments ->
                 let now = Time_compat.now () in
-                let round =
-                  Trajectory.next_round ~masc_root
-                    ~keeper_name:trajectory_keeper ~trace_id ~turn
-                in
                 let trajectory_outcome =
                   if outcome = Tool_result.Ok
                   then Trajectory.Tool_succeeded safe_output
                   else Trajectory.Tool_failed safe_output
                 in
                 (match
+                   let open Result.Syntax in
+                   let* duration_ms = trajectory_duration_ms duration_ms in
                    Trajectory.make_tool_call_entry ~ts:now
-                     ~ts_iso:(Masc_domain.iso8601_of_unix_seconds now) ~turn
-                     ~round ~tool_name ~arguments ~outcome:trajectory_outcome
-                     ~duration_ms:(trajectory_duration_ms duration_ms)
-                     ~execution_id:(Ids.Execution_id.to_string execution_id)
+                     ~ts_iso:(Masc_domain.iso8601_of_unix_seconds now)
+                     ~keeper_turn_id ~invocation ~tool_name ~arguments
+                     ~outcome:trajectory_outcome ~duration_ms ~execution_id
                  with
                  | Error error ->
                      report_trajectory_gap
@@ -561,7 +555,12 @@ let make_hooks
                        (Invalid_argument
                           (Trajectory.entry_decode_error_to_string error))
                  | Ok entry ->
-                     Trajectory.record_entry acc entry)
+                     (try Trajectory.record_entry acc entry with
+                      | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+                      | exn ->
+                        report_trajectory_gap
+                          ~stale_reason:"trajectory_entry_queue_failed"
+                          exn))
             | _ ->
                 let exn =
                   Invalid_argument

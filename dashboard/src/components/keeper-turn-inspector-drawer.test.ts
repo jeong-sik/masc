@@ -7,12 +7,11 @@ import '@testing-library/jest-dom'
 // component's self-fetch of turn records. Surfaces its anchor props as data
 // attributes for assertion.
 vi.mock('./keeper-turn-inspector', () => ({
-  KeeperTurnInspector: ({ keeperName, initialTurnRef, initialTurnTimestamp }: any) =>
+  KeeperTurnInspector: ({ keeperName, initialTurnRef }: any) =>
     h('div', {
       'data-testid': 'turn-inspector-inner',
       'data-keeper': keeperName,
       'data-initial-turn-ref': initialTurnRef ?? '',
-      'data-initial-turn-timestamp': initialTurnTimestamp ?? '',
     }),
 }))
 

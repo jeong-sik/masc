@@ -1,9 +1,6 @@
-(** Tests for RFC-0233 PR-2: the in-flight [tool_use_id ↔ execution_id]
-    join table ([Keeper_execution_join]) and the event bridge stamping
-    that consumes it ([Keeper_event_bridge.native_event_to_json]). *)
+(** Closed OAS Tool Invocation projection in [Keeper_event_bridge]. *)
 
 open Alcotest
-module Join = Masc.Keeper_execution_join
 module Bridge = Masc.Keeper_event_bridge
 module Error_json = Masc.Keeper_event_bridge_error_json
 
@@ -15,6 +12,9 @@ let member key json =
 let payload_member key json =
   Option.bind (member "payload" json) (member key)
 
+let schedule_member key json =
+  Option.bind (payload_member "schedule" json) (member key)
+
 let string_of_field = function
   | Some (`String s) -> Some s
   | _ -> None
@@ -23,36 +23,7 @@ let int_of_field = function
   | Some (`Int value) -> Some value
   | _ -> None
 
-(* ── Join table semantics ─────────────────────────────── *)
-
-let test_record_take_roundtrip () =
-  Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-1" ~execution_id:"exec-1-0001";
-  check (option string) "take returns the pair" (Some "exec-1-0001")
-    (Join.take ~tool_use_id:"tu-1");
-  check (option string) "take removes the entry" None
-    (Join.take ~tool_use_id:"tu-1");
-  check int "table empty after take" 0 (Join.For_testing.size ())
-
-let test_empty_tool_use_id_ignored () =
-  Join.For_testing.clear ();
-  Join.record ~tool_use_id:"" ~execution_id:"exec-1-0002";
-  check int "empty id records nothing" 0 (Join.For_testing.size ());
-  check (option string) "empty id lookup is None" None (Join.take ~tool_use_id:"")
-
-let test_missing_entry_is_none () =
-  Join.For_testing.clear ();
-  check (option string) "unknown id is None" None
-    (Join.take ~tool_use_id:"tu-unknown")
-
-let test_rerecord_overwrites () =
-  Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000a";
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000b";
-  check (option string) "last record wins" (Some "exec-1-000b")
-    (Join.take ~tool_use_id:"tu-2")
-
-(* ── Bridge stamping ──────────────────────────────────── *)
+(* ── Bridge projection ────────────────────────────────── *)
 
 let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   { meta =
@@ -76,7 +47,6 @@ let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
       }
 
 let test_tool_called_carries_tool_use_id () =
-  Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
@@ -93,15 +63,16 @@ let test_tool_called_carries_tool_use_id () =
   check (option int) "payload turn" (Some 0)
     (int_of_field (payload_member "turn" json));
   check (option int) "payload planned_index" (Some 0)
-    (int_of_field (payload_member "planned_index" json));
-  check bool "tool_called has no execution_id (mint happens after publish)"
+    (int_of_field (schedule_member "planned_index" json));
+  check (option int) "payload batch_index" (Some 0)
+    (int_of_field (schedule_member "batch_index" json));
+  check (option int) "payload batch_size" (Some 1)
+    (int_of_field (schedule_member "batch_size" json));
+  check bool "OAS event does not claim a MASC execution identity"
     true
     (payload_member "execution_id" json = None)
 
-let test_tool_completed_stamps_execution_id () =
-  Join.For_testing.clear ();
-  (* The hook records the pair before OAS publishes ToolCompleted. *)
-  Join.record ~tool_use_id:"tu-4" ~execution_id:"exec-2-0001";
+let test_tool_completed_preserves_invocation_without_execution_id () =
   let json =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
@@ -113,21 +84,19 @@ let test_tool_completed_stamps_execution_id () =
             }))
     |> Option.get
   in
-  check (option string) "payload execution_id" (Some "exec-2-0001")
-    (string_of_field (payload_member "execution_id" json));
+  check bool "payload has no foreign execution_id" true
+    (payload_member "execution_id" json = None);
   check (option string) "payload tool_use_id" (Some "tu-4")
     (string_of_field (payload_member "tool_use_id" json));
   check (option int) "payload exact turn" (Some 1)
     (int_of_field (payload_member "turn" json));
   check (option int) "payload exact planned_index" (Some 3)
-    (int_of_field (payload_member "planned_index" json));
+    (int_of_field (schedule_member "planned_index" json));
   check (option string) "envelope caused_by survives serialization"
     (Some "run-called-1")
-    (string_of_field (member "caused_by" json));
-  check int "entry consumed exactly once" 0 (Join.For_testing.size ())
+    (string_of_field (member "caused_by" json))
 
 let test_tool_completed_without_entry_omits_execution_id () =
-  Join.For_testing.clear ();
   (* Worker/eval lanes never record a pair — absence by domain. *)
   let json =
     Bridge.native_event_to_json
@@ -145,8 +114,7 @@ let test_tool_completed_without_entry_omits_execution_id () =
   check (option string) "tool_use_id still present" (Some "tu-5")
     (string_of_field (payload_member "tool_use_id" json))
 
-let test_empty_tool_use_id_omitted_from_payload () =
-  Join.For_testing.clear ();
+let test_empty_tool_use_id_is_preserved () =
   let json =
     Bridge.native_event_to_json
       (mk_event
@@ -158,8 +126,8 @@ let test_empty_tool_use_id_omitted_from_payload () =
             }))
     |> Option.get
   in
-  check bool "empty provider id is omitted" true
-    (payload_member "tool_use_id" json = None)
+  check (option string) "empty provider id remains exact evidence" (Some "")
+    (string_of_field (payload_member "tool_use_id" json))
 
 let test_agent_failed_matches_typed_sse_event () =
   let agent_name = "oas-r1" in
@@ -232,22 +200,16 @@ let test_authorization_errors_have_typed_projection () =
           { provider = "provider"; detail = "permission refused" }))
 
 let () =
-  run "keeper_execution_join"
-    [ ( "join_table"
-      , [ test_case "record/take roundtrip" `Quick test_record_take_roundtrip
-        ; test_case "empty tool_use_id ignored" `Quick test_empty_tool_use_id_ignored
-        ; test_case "missing entry is None" `Quick test_missing_entry_is_none
-        ; test_case "re-record overwrites" `Quick test_rerecord_overwrites
-        ] )
-    ; ( "bridge_stamping"
+  run "keeper_event_bridge"
+    [ ( "tool_invocation_projection"
       , [ test_case "tool_called carries tool_use_id" `Quick
             test_tool_called_carries_tool_use_id
-        ; test_case "tool_completed stamps execution_id" `Quick
-            test_tool_completed_stamps_execution_id
+        ; test_case "tool_completed keeps OAS occurrence separate" `Quick
+            test_tool_completed_preserves_invocation_without_execution_id
         ; test_case "non-keeper completion omits execution_id" `Quick
             test_tool_completed_without_entry_omits_execution_id
-        ; test_case "empty tool_use_id omitted" `Quick
-            test_empty_tool_use_id_omitted_from_payload
+        ; test_case "empty tool_use_id preserved" `Quick
+            test_empty_tool_use_id_is_preserved
         ; test_case "agent_failed matches typed constructor" `Quick
             test_agent_failed_matches_typed_sse_event
         ; test_case "authorization errors have typed projection" `Quick

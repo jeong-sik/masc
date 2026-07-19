@@ -2,6 +2,7 @@ import type {
   AgentTimelineResponse,
   ToolCallsResponse,
   TrajectoryResponse,
+  TrajectoryToolSchedule,
 } from '../api/dashboard'
 import type { KeeperRuntimeTraceResponse } from '../api/keeper'
 import { asNullableString, asRecord } from './common/normalize'
@@ -23,8 +24,10 @@ export interface JourneyWaterfallEntry {
   source: WaterfallEntrySource
   ts: number
   tsIso: string
-  turn: number | null
-  round: number | null
+  keeperTurnId: number | null
+  oasTurn: number | null
+  blockIndex: number | null
+  toolSchedule: TrajectoryToolSchedule | null
   summary: string
   toolName: string | null
   toolArgs: Record<string, unknown> | string | null
@@ -57,7 +60,7 @@ export interface JourneyWaterfallRuntimeEvidence {
 
 export interface JourneyWaterfallTurn {
   key: string
-  turn: number | null
+  keeperTurnId: number | null
   label: string
   startTs: number
   endTs: number
@@ -153,8 +156,10 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     source: traceEventSource(event),
     ts: event.ts,
     tsIso: event.ts_iso,
-    turn: event.turn ?? null,
-    round: event.round ?? null,
+    keeperTurnId: event.keeperTurnId ?? null,
+    oasTurn: event.oasTurn ?? null,
+    blockIndex: numberValue(event.detail.block_index),
+    toolSchedule: event.toolSchedule ?? null,
     summary: event.summary,
     toolName: event.toolName ?? asNullableString(event.detail.provenance_tool_name),
     toolArgs: event.toolArgs ?? null,
@@ -201,28 +206,73 @@ export function summarizeRuntimeTrace(
   }
 }
 
-function turnKey(turn: number | null): string {
-  return turn == null ? 'turn-unrecorded' : `turn-${turn}`
+function turnKey(keeperTurnId: number | null): string {
+  return keeperTurnId == null ? 'keeper-turn-unrecorded' : `keeper-turn-${keeperTurnId}`
 }
 
-function turnLabel(turn: number | null): string {
-  return turn == null ? 'Turn not recorded' : `Turn ${turn}`
+function turnLabel(keeperTurnId: number | null): string {
+  return keeperTurnId == null ? 'Keeper Turn not recorded' : `Keeper Turn ${keeperTurnId}`
+}
+
+function compareOptionalClock(left: number | null, right: number | null): number {
+  if (left === null) return right === null ? 0 : 1
+  if (right === null) return -1
+  return left - right
+}
+
+function compareWaterfallEntries(
+  left: JourneyWaterfallEntry,
+  right: JourneyWaterfallEntry,
+): number {
+  const oasTurnOrder = compareOptionalClock(left.oasTurn, right.oasTurn)
+  if (oasTurnOrder !== 0) return oasTurnOrder
+
+  // One OAS turn first receives the complete provider response, then executes
+  // its planned Tools. AfterTurn persists Thinking later in wall-clock time,
+  // so timestamps would reverse that causal order. Keep the two exact partial
+  // orders separate: provider block_index, then Tool schedule.
+  const phaseOrder = (entry: JourneyWaterfallEntry): number => {
+    if (entry.kind === 'thinking') return 0
+    if (entry.kind === 'tool_call') return 1
+    return 2
+  }
+  const phaseDifference = phaseOrder(left) - phaseOrder(right)
+  if (phaseDifference !== 0) return phaseDifference
+  if (left.kind === 'thinking' && right.kind === 'thinking') {
+    return compareOptionalClock(left.blockIndex, right.blockIndex)
+  }
+  if (left.toolSchedule && right.toolSchedule) {
+    const batchOrder = left.toolSchedule.batch_index - right.toolSchedule.batch_index
+    if (batchOrder !== 0) return batchOrder
+    const plannedOrder = left.toolSchedule.planned_index - right.toolSchedule.planned_index
+    if (plannedOrder !== 0) return plannedOrder
+    return 0
+  }
+  return left.ts - right.ts
 }
 
 function buildTurn(
   key: string,
-  turn: number | null,
+  keeperTurnId: number | null,
   entries: JourneyWaterfallEntry[],
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null,
 ): JourneyWaterfallTurn {
-  const sortedEntries = entries.slice().sort((left, right) => left.ts - right.ts)
-  const startTs = sortedEntries[0]?.ts ?? 0
-  const endTs = sortedEntries.at(-1)?.ts ?? startTs
+  const sortedEntries = entries.slice().sort(compareWaterfallEntries)
+  let startTs = 0
+  let endTs = 0
+  if (sortedEntries.length > 0) {
+    startTs = sortedEntries[0]!.ts
+    endTs = startTs
+    for (const entry of sortedEntries) {
+      startTs = Math.min(startTs, entry.ts)
+      endTs = Math.max(endTs, entry.ts)
+    }
+  }
   const toolEntries = sortedEntries.filter(entry => entry.kind === 'tool_call')
   return {
     key,
-    turn,
-    label: turnLabel(turn),
+    keeperTurnId,
+    label: turnLabel(keeperTurnId),
     startTs,
     endTs,
     entries: sortedEntries,
@@ -248,15 +298,15 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
 
   const runtimeEvidence = summarizeRuntimeTrace(input.runtimeTrace)
   const runtimeTurnKey = turnKey(runtimeEvidence?.keeperTurnId ?? null)
-  const groups = new Map<string, { turn: number | null; entries: JourneyWaterfallEntry[] }>()
+  const groups = new Map<string, { keeperTurnId: number | null; entries: JourneyWaterfallEntry[] }>()
 
   for (const entry of entries) {
-    const key = turnKey(entry.turn)
+    const key = turnKey(entry.keeperTurnId)
     const current = groups.get(key)
     if (current) {
       current.entries.push(entry)
     } else {
-      groups.set(key, { turn: entry.turn, entries: [entry] })
+      groups.set(key, { keeperTurnId: entry.keeperTurnId, entries: [entry] })
     }
   }
 
@@ -264,19 +314,31 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
     .map(([key, group]) =>
       buildTurn(
         key,
-        group.turn,
+        group.keeperTurnId,
         group.entries,
         runtimeEvidence && key === runtimeTurnKey ? runtimeEvidence : null,
       ),
     )
     .sort((left, right) => {
-      if (left.turn != null && right.turn != null && left.turn !== right.turn) {
-        return left.turn - right.turn
+      if (
+        left.keeperTurnId != null
+        && right.keeperTurnId != null
+        && left.keeperTurnId !== right.keeperTurnId
+      ) {
+        return left.keeperTurnId - right.keeperTurnId
       }
+      if (left.keeperTurnId == null) return right.keeperTurnId == null ? left.startTs - right.startTs : 1
+      if (right.keeperTurnId == null) return -1
       return left.startTs - right.startTs
     })
 
   const allTurnEntries = turns.flatMap(turn => turn.entries)
+  let timelineStartTs: number | null = null
+  let timelineEndTs: number | null = null
+  for (const entry of allTurnEntries) {
+    timelineStartTs = timelineStartTs === null ? entry.ts : Math.min(timelineStartTs, entry.ts)
+    timelineEndTs = timelineEndTs === null ? entry.ts : Math.max(timelineEndTs, entry.ts)
+  }
   return {
     keeper: input.keeper,
     turns,
@@ -288,8 +350,8 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
       failureCount: allTurnEntries.filter(entry => entry.status === 'failure').length,
       provenanceGapCount: allTurnEntries.filter(entry => entry.kind === 'provenance_gap').length,
       totalDurationMs: turns.reduce((sum, turn) => sum + turn.totalDurationMs, 0),
-      timelineStartTs: allTurnEntries[0]?.ts ?? null,
-      timelineEndTs: allTurnEntries.at(-1)?.ts ?? null,
+      timelineStartTs,
+      timelineEndTs,
       runtimeEvidence,
     },
   }

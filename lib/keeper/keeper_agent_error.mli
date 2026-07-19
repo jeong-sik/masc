@@ -55,9 +55,10 @@ val api_error_terminal_reason_code_typed
   :  Agent_sdk.Error.api_error
   -> Keeper_turn_terminal_code.t
 
-(** Receipt outcome for terminal SDK values. OAS turn-limit and execution-time
-    observations remain successful even if they reach this defensive bridge;
-    they are neither cancellation nor lifecycle-failure authority. *)
+(** Receipt outcome for terminal SDK errors. Provider wall-clock timeout and
+    the defensive typed-input-required branch become [Cancelled]; guardrail,
+    tripwire, and other SDK failures become [Error]. Normal [InputRequired]
+    execution is promoted to [Runtime_agent.stop_reason] before this bridge. *)
 val receipt_outcome_kind_of_sdk_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind

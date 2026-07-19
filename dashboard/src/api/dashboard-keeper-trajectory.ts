@@ -18,13 +18,25 @@ export type TrajectoryToolOutcome =
   | { status: 'succeeded'; output: string }
   | { status: 'failed'; error: string }
 
+export type TrajectoryExecutionMode = 'concurrent' | 'serial'
+
+export type TrajectoryToolSchedule = {
+  planned_index: number
+  batch_index: number
+  batch_size: number
+  execution_mode: TrajectoryExecutionMode
+}
+
 export type TrajectoryToolEntry = {
-  type?: undefined
+  schema: 'masc.keeper_trajectory.v1'
+  type: 'tool_call'
   ts: number
   ts_iso: string
-  turn: number
+  keeper_turn_id: number
+  oas_turn: number
+  schedule: TrajectoryToolSchedule
+  tool_use_id: string
   execution_id: string
-  round: number
   tool_name: string
   args: Record<string, unknown>
   outcome: TrajectoryToolOutcome
@@ -32,10 +44,12 @@ export type TrajectoryToolEntry = {
 }
 
 export type TrajectoryThinkingEntry = {
+  schema: 'masc.keeper_trajectory.v1'
   type: 'thinking'
   ts: number
   ts_iso: string
-  turn: number
+  keeper_turn_id: number
+  oas_turn: number
   block_index: number
   block: TrajectoryThinkingBlock
 }
@@ -55,6 +69,21 @@ export type TrajectoryLineDecode = {
   invalid_reasons: TrajectoryInvalidReasons
 }
 
+export type TrajectoryScanStop =
+  | 'reached_snapshot_start'
+  | 'reached_entry_limit'
+  | 'reached_physical_row_limit'
+  | 'reached_byte_limit'
+  | 'blocked_by_oversized_physical_row'
+  | 'rejected_cursor'
+  | 'read_error'
+
+export type TrajectoryScanObservation = {
+  physical_rows: number
+  bytes_read: number
+  stop: TrajectoryScanStop
+}
+
 export type TrajectoryResponse = {
   keeper: string
   trace_id: string
@@ -66,6 +95,8 @@ export type TrajectoryResponse = {
   showing: number
   decode: TrajectoryLineDecode
   io_errors: TrajectoryReadError[]
+  scan: TrajectoryScanObservation
+  next_cursor: string | null
   entries: TrajectoryEntry[]
 }
 
@@ -132,12 +163,18 @@ function decodeFiniteNumber(value: unknown): number | null {
   return decoded !== undefined && Number.isFinite(decoded) ? decoded : null
 }
 
+const TRAJECTORY_SCHEMA = 'masc.keeper_trajectory.v1' as const
 const TOOL_ENTRY_KEYS = new Set([
-  'ts', 'ts_iso', 'turn', 'round', 'tool_name', 'args', 'outcome',
-  'duration_ms', 'execution_id',
+  'schema', 'type', 'ts', 'ts_iso', 'keeper_turn_id', 'oas_turn',
+  'schedule', 'tool_use_id', 'tool_name', 'args', 'outcome', 'duration_ms',
+  'execution_id',
 ])
 const THINKING_ENTRY_KEYS = new Set([
-  'type', 'ts', 'ts_iso', 'turn', 'block_index', 'block',
+  'schema', 'type', 'ts', 'ts_iso', 'keeper_turn_id', 'oas_turn',
+  'block_index', 'block',
+])
+const TOOL_SCHEDULE_KEYS = new Set([
+  'planned_index', 'batch_index', 'batch_size', 'execution_mode',
 ])
 const INVALID_REASON_KEYS = new Set([
   'missing_required_field', 'invalid_field', 'unexpected_field',
@@ -148,10 +185,20 @@ const LINE_DECODE_KEYS = new Set([
   'tool_call_count', 'thinking_count', 'skipped_summary_count',
   'invalid_line_count', 'invalid_reasons',
 ])
+const SCAN_KEYS = new Set(['physical_rows', 'bytes_read', 'stop'])
+const SCAN_STOPS = new Set<TrajectoryScanStop>([
+  'reached_snapshot_start',
+  'reached_entry_limit',
+  'reached_physical_row_limit',
+  'reached_byte_limit',
+  'blocked_by_oversized_physical_row',
+  'rejected_cursor',
+  'read_error',
+])
 const TRAJECTORY_RESPONSE_KEYS = new Set([
   'keeper', 'trace_id', 'generation', 'total_entries', 'total_entries_scope',
   'total_entries_exact', 'tail_scan_entries', 'showing', 'decode', 'io_errors',
-  'entries',
+  'scan', 'next_cursor', 'entries',
 ])
 const SUCCEEDED_OUTCOME_KEYS = new Set(['status', 'output'])
 const FAILED_OUTCOME_KEYS = new Set(['status', 'error'])
@@ -205,12 +252,45 @@ function decodeThinkingBlock(raw: unknown): TrajectoryThinkingBlock | null {
   return null
 }
 
+function decodePositiveTrajectoryCount(value: unknown): number | null {
+  const decoded = decodeTrajectoryCount(value)
+  return decoded !== null && decoded > 0 ? decoded : null
+}
+
+function decodeToolSchedule(raw: unknown): TrajectoryToolSchedule | null {
+  if (!isRecord(raw) || !hasOnlyKeys(raw, TOOL_SCHEDULE_KEYS)) return null
+  const plannedIndex = decodeTrajectoryCount(raw.planned_index)
+  const batchIndex = decodeTrajectoryCount(raw.batch_index)
+  const batchSize = decodePositiveTrajectoryCount(raw.batch_size)
+  const executionMode = raw.execution_mode === 'concurrent' || raw.execution_mode === 'serial'
+    ? raw.execution_mode
+    : null
+  if (
+    plannedIndex === null
+    || batchIndex === null
+    || batchSize === null
+    || executionMode === null
+  ) return null
+  return {
+    planned_index: plannedIndex,
+    batch_index: batchIndex,
+    batch_size: batchSize,
+    execution_mode: executionMode,
+  }
+}
+
 function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | null {
-  if (raw.type !== undefined || !hasOnlyKeys(raw, TOOL_ENTRY_KEYS)) return null
+  if (
+    raw.schema !== TRAJECTORY_SCHEMA
+    || raw.type !== 'tool_call'
+    || !hasOnlyKeys(raw, TOOL_ENTRY_KEYS)
+  ) return null
   const ts = decodeFiniteNumber(raw.ts)
   const tsIso = decodeTrajectoryNonBlankString(raw.ts_iso)
-  const turn = decodeTrajectoryCount(raw.turn)
-  const round = decodeTrajectoryCount(raw.round)
+  const keeperTurnId = decodePositiveTrajectoryCount(raw.keeper_turn_id)
+  const oasTurn = decodeTrajectoryCount(raw.oas_turn)
+  const schedule = decodeToolSchedule(raw.schedule)
+  const toolUseId = decodeTrajectoryExactString(raw.tool_use_id)
   const toolName = decodeTrajectoryNonBlankString(raw.tool_name)
   const args = isRecord(raw.args) ? raw.args : null
   const outcome = decodeToolOutcome(raw.outcome)
@@ -219,8 +299,10 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
   if (
     ts === null
     || tsIso === null
-    || turn === null
-    || round === null
+    || keeperTurnId === null
+    || oasTurn === null
+    || schedule === null
+    || toolUseId === null
     || toolName === null
     || args === null
     || outcome === null
@@ -228,10 +310,14 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
     || executionId === null
   ) return null
   return {
+    schema: TRAJECTORY_SCHEMA,
+    type: 'tool_call',
     ts,
     ts_iso: tsIso,
-    turn,
-    round,
+    keeper_turn_id: keeperTurnId,
+    oas_turn: oasTurn,
+    schedule,
+    tool_use_id: toolUseId,
     tool_name: toolName,
     args,
     outcome,
@@ -241,24 +327,32 @@ function decodeToolEntry(raw: Record<string, unknown>): TrajectoryToolEntry | nu
 }
 
 function decodeThinkingEntry(raw: Record<string, unknown>): TrajectoryThinkingEntry | null {
-  if (raw.type !== 'thinking' || !hasOnlyKeys(raw, THINKING_ENTRY_KEYS)) return null
+  if (
+    raw.schema !== TRAJECTORY_SCHEMA
+    || raw.type !== 'thinking'
+    || !hasOnlyKeys(raw, THINKING_ENTRY_KEYS)
+  ) return null
   const ts = decodeFiniteNumber(raw.ts)
   const tsIso = decodeTrajectoryNonBlankString(raw.ts_iso)
-  const turn = decodeTrajectoryCount(raw.turn)
+  const keeperTurnId = decodePositiveTrajectoryCount(raw.keeper_turn_id)
+  const oasTurn = decodeTrajectoryCount(raw.oas_turn)
   const blockIndex = decodeTrajectoryCount(raw.block_index)
   const block = decodeThinkingBlock(raw.block)
   if (
     ts === null
     || tsIso === null
-    || turn === null
+    || keeperTurnId === null
+    || oasTurn === null
     || blockIndex === null
     || block === null
   ) return null
   return {
+    schema: TRAJECTORY_SCHEMA,
     type: 'thinking',
     ts,
     ts_iso: tsIso,
-    turn,
+    keeper_turn_id: keeperTurnId,
+    oas_turn: oasTurn,
     block_index: blockIndex,
     block,
   }
@@ -266,7 +360,9 @@ function decodeThinkingEntry(raw: Record<string, unknown>): TrajectoryThinkingEn
 
 function decodeTrajectoryEntry(raw: unknown): TrajectoryEntry | null {
   if (!isRecord(raw)) return null
-  return raw.type === 'thinking' ? decodeThinkingEntry(raw) : decodeToolEntry(raw)
+  if (raw.type === 'thinking') return decodeThinkingEntry(raw)
+  if (raw.type === 'tool_call') return decodeToolEntry(raw)
+  return null
 }
 
 function decodeLineDecode(raw: unknown): TrajectoryLineDecode | null {
@@ -293,6 +389,23 @@ function decodeLineDecode(raw: unknown): TrajectoryLineDecode | null {
   }
 }
 
+function decodeScanObservation(raw: unknown): TrajectoryScanObservation | null {
+  if (!isRecord(raw) || !hasOnlyKeys(raw, SCAN_KEYS)) return null
+  const physicalRows = decodeTrajectoryCount(raw.physical_rows)
+  const bytesRead = decodeTrajectoryCount(raw.bytes_read)
+  if (
+    physicalRows === null
+    || bytesRead === null
+    || typeof raw.stop !== 'string'
+    || !SCAN_STOPS.has(raw.stop as TrajectoryScanStop)
+  ) return null
+  return {
+    physical_rows: physicalRows,
+    bytes_read: bytesRead,
+    stop: raw.stop as TrajectoryScanStop,
+  }
+}
+
 function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
   if (
     !isRecord(raw)
@@ -307,6 +420,10 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
   const showing = decodeTrajectoryCount(raw.showing)
   const decode = decodeLineDecode(raw.decode)
   const ioErrors = decodeTrajectoryReadErrors(raw.io_errors)
+  const scan = decodeScanObservation(raw.scan)
+  const nextCursor = raw.next_cursor === null
+    ? null
+    : decodeTrajectoryNonBlankString(raw.next_cursor)
   if (
     keeper === null
     || traceId === null
@@ -319,6 +436,8 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
     || showing > totalEntries
     || decode === null
     || ioErrors === null
+    || scan === null
+    || (nextCursor === null && raw.next_cursor !== null)
   ) return null
   const entries: TrajectoryEntry[] = []
   for (const item of raw.entries) {
@@ -344,6 +463,8 @@ function decodeTrajectoryResponse(raw: unknown): TrajectoryResponse | null {
     showing,
     decode,
     io_errors: ioErrors,
+    scan,
+    next_cursor: nextCursor,
     entries,
   }
 }

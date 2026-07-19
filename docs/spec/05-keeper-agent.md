@@ -107,43 +107,34 @@ Generation semantics are operational, not genealogical: a successful rollover ke
 
 ### 3.2 working_context
 
-**소스**: `keeper_context_core.ml` (working_context type는 이 모듈에 inline됨; 구 `keeper_working_context.ml`은 #4393에서 제거)
+**형식 SSOT**: `lib/keeper_types/keeper_types.mli`
 
 ```ocaml
 type working_context = {
-  system_prompt : string;
-  messages : Agent_sdk.Types.message list;
-  token_count : int;
-  max_tokens : int;
-  importance_scores : (int * float) list;
-  oas_context : Agent_sdk.Context.t;
+  checkpoint : Agent_sdk.Checkpoint.t;
 }
 ```
 
-Keeper의 실행 중 대화 컨텍스트. `oas_context`는 OAS Context 모듈과 동기화된다(`sync_oas_context`).
-
-토큰 추정: `msg_tokens = (String.length text / 4) + 4` (문자 기반 근사치).
+Keeper의 실행 중 대화 컨텍스트는 OAS checkpoint 하나를 감싼다.
+`Keeper_context_core`의 accessor가 system prompt, exact messages와 OAS context를
+projection한다. 로컬 `token_count`, `max_tokens`, importance score, 문자 길이 기반
+token 추정치는 이 record에 존재하지 않는다. Provider usage token은 별도 telemetry다.
 
 ### 3.3 checkpoint / session_context
 
 ```ocaml
-type checkpoint = {
-  checkpoint_id : string;
-  timestamp : float;
-  generation : int;
-  message_count : int;
-  token_count : int;
-  serialized : string;      (* JSON-serialized working_context *)
-}
-
 type session_context = {
   session_id : string;
   session_dir : string;
-  mutable checkpoints : checkpoint list;
 }
 ```
 
-세션당 최대 3개 체크포인트가 유지된다(`max_checkpoints_retained = 3`). 세션 메시지는 `history.jsonl`에 영속화.
+별도 MASC checkpoint record나 mutable checkpoint list는 없다. Canonical 대화 상태는
+`Agent_sdk.Checkpoint.t`이고 `Keeper_checkpoint_store`가
+`session_dir/<session_id>.json`의 현재 checkpoint와 history archive를 관리한다.
+archive retention의 유일한 정의는
+`Keeper_checkpoint_store.max_oas_history_retained`이다. 가시 대화와 내부 이력은
+각각 `history.jsonl`, `history.internal.jsonl`에 append된다.
 
 ### 3.4 Workspace Boundary
 
@@ -246,9 +237,18 @@ typed 결과로 전달하며, MASC의 compaction profile이나 ratio/message/tok
 
 ### 4.4 Deliberation Pipeline
 
-Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute -> RecordDecision
+WorldObservation -> TypedSignalProjection -> ModelDeliberation -> TypedAction -> RecordDecision
 
-9가지 triage 트리거: `DirectMention`, `NewUnclaimedTask`, `FailedTask`, `AgentJoinedOrLeft`, `GoalDeadline`, `BoardActivity(string)`, `IdleTimeout`, `MetricsAnomaly(string)`, `StrategicReview`. 트리거가 없으면 Skip.
+`Keeper_deliberation` 모듈 안에서 `triage`는 admission gate가 아니라 model
+prompt용 typed signal projection이다. 모든 observation에 `Triggered triggers`를
+반환하며 `triggers=[]`도 유효한 model evaluation이다. Local token/cost/turn
+budget으로 deliberation을 Skip하는 경로는 없다.
+
+단, 이 모듈의 triage/prompt/parser/execution 함수는 현재 production Keeper cycle에
+연결되어 있지 않다. 따라서 위 흐름은 typed library contract이지 현재 heartbeat
+실행 흐름의 완료 증거가 아니다. 이를 연결하기 전에는 deterministic baseline이나
+문자열 heuristic이 model 판단을 대신한다고 주장할 수도, 반대로 매 cycle마다 model
+판단이 실행된다고 주장할 수도 없다.
 
 ---
 
@@ -352,7 +352,14 @@ turn, and latency values remain observations.
 
 ### 7.4 Trajectory (`lib/trajectory.ml`)
 
-Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, 결과/latency 관측, eval 입력. 모델 usage/cost는 OAS inference observation에서만 온다. 상세 `runtime_contract`와 `action_radius`의 영속 SSOT는 `Keeper_tool_call_log`이며 trajectory에 복제하지 않는다.
+OAS Invocation이 있는 Tool call을
+`.masc/keepers/{name}/trajectories/v1/{trace_id}.jsonl`에 JSONL 기록한다.
+MASC `keeper_turn_id`와 OAS `turn + schedule + tool_use_id`를 구분해 그대로
+보존하며, `execution_id`만 `Keeper_tool_call_log`와 공유하는 typed join key다.
+`tool_use_id`는 비어 있거나 반복될 수 있어 identity가 아니다. 용도는 replay,
+결과/latency 관측, eval 입력이다. 모델 usage/cost는 OAS inference
+observation에서만 오며 상세 `runtime_contract`와 `action_radius`의 영속 SSOT는
+`Keeper_tool_call_log`이므로 trajectory에 복제하지 않는다.
 
 ---
 
@@ -400,9 +407,9 @@ Typed Keeper configuration is defined by the owning modules under
 [`docs/runtime-tunables.md`](../runtime-tunables.md); this document does not
 duplicate knob names or defaults.
 
-Cost, turn-count, and Tool-round observations do not stop, pause, or budget a
-Keeper lifecycle. Provider context and output capacities describe runtime
-capabilities and invocation intent; they are not Keeper work gates.
+Cost, turn-count, and exact OAS Tool schedule observations do not stop, pause,
+or budget a Keeper lifecycle. Provider context and output capacities describe
+runtime capabilities and invocation intent; they are not Keeper work gates.
 
 **Context capacity**: compaction/handoff decisions are typed capacity signals. They do not classify model text or infer goals; semantic decisions remain at the model boundary.
 

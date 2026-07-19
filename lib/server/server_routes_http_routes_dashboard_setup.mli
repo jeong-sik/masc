@@ -23,10 +23,24 @@ val trimmed_query_param : Httpun.Request.t -> string -> string option
 val oas_telemetry_limit_param : Httpun.Request.t -> int
 val oas_telemetry_provider_param : Httpun.Request.t -> string option
 
-(** Effective entry limit for /api/v1/dashboard/telemetry. Absent or
-    unparseable [n_param] -> bounded default (windowed vs not); explicit
-    n=0 preserved. Exposed for the freeze-guard test. *)
-val resolve_telemetry_n : has_time_window:bool -> n_param:string option -> int
+type telemetry_limit_error =
+  | Telemetry_limit_not_an_integer of string
+  | Telemetry_limit_not_positive of int
+  | Telemetry_limit_exceeds_page_size of
+      { requested : int
+      ; maximum : int
+      }
+
+val telemetry_limit_error_to_string : telemetry_limit_error -> string
+
+(** Effective page size for /api/v1/dashboard/telemetry. Absent [n_param]
+    selects the bounded windowed/non-windowed default. A supplied malformed,
+    non-positive, or oversized value is an explicit error; unlimited reads and
+    silent clamps are not part of the HTTP contract. *)
+val resolve_telemetry_n :
+  has_time_window:bool ->
+  n_param:string option ->
+  (int, telemetry_limit_error) result
 
 val dashboard_dev_token_path : string -> string
 val ensure_dashboard_dev_token : string -> (string, string) result

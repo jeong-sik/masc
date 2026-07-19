@@ -3,51 +3,62 @@ rfc: "0233"
 title: "Typed turn observability: TurnRecord prompt-block provenance + canonical tool execution identity"
 status: Draft
 created: 2026-06-12
-updated: 2026-06-19
+updated: 2026-07-19
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0225", "0230", "0231", "0252"]
-implementation_prs: ["20968", "20975", "20985", "20995", "21000"]
+implementation_prs: ["20968", "20975", "20985", "20995", "21000", "25184"]
 ---
 
 # RFC-0233: TurnRecord + canonical execution identity
 
-Status: Draft · One tool execution must have one identity across every
-store and every view · A turn's assembled prompt must be recorded as
-typed blocks so consecutive turns are diffable.
+Status: Draft · One MASC tool execution has one typed identity across the
+MASC tool-call store and canonical Keeper trajectory · OAS invocation
+metadata remains exact OAS evidence, never a surrogate MASC identity · A
+turn's assembled prompt is recorded as typed blocks so consecutive turns are
+diffable.
 Drafted by: Claude (Fable 5), from the 2026-06-12 keeper pipeline
 diagnosis session (issues #20907–#20910).
 
 > Anchors marked **(verified)** were read against `origin/main`
 > (`589f8b560`) or live runtime stores on 2026-06-12.
+> The hard-cut contract in §1.1–§6 was re-verified against PR #25184 on
+> 2026-07-19; the older anchor records only the original diagnosis.
 
 ---
 
 ## §1 Problem
 
-### §1.1 One execution, three stores, three id vocabularies
+### §1.1 Two ownership domains, no cross-domain synthetic join
 
-A single `keeper_memory_search` call by keeper `sangsu` produced, in the
-same second:
+The current contract deliberately distinguishes MASC execution identity from
+OAS invocation evidence:
 
-| Store | Record shape | Identity carried |
+| Store | Canonical fields | Authority |
 |---|---|---|
-| `trajectories/<keeper>/<trace>.jsonl` | `{"turn":0,"round":4,"tool_name":...,"args":...}` **(verified)** | turn-relative `turn`/`round` |
-| `tool_calls/<YYYY-MM>/<DD>.jsonl` | full input/output + `runtime_contract.keeper_turn_id:718`, `trace_id`, `session_id` **(verified)** | absolute keeper turn + session |
-| `logs/system_log_<date>.jsonl` | `oas:tool_called` / `oas:tool_completed` pair, `correlation_id`, `run_id`, `turn:null` **(verified)** | OAS correlation ids |
+| `.masc/keepers/<keeper>/trajectories/v1/<trace>.jsonl` | `execution_id`, `keeper_turn_id`, `oas_turn`, exact `schedule`, `tool_use_id` | MASC Keeper observation of one OAS invocation |
+| `.masc/tool_calls/<YYYY-MM>/<DD>.jsonl` | full input/output, `execution_id`, `runtime_contract.keeper_turn_id`, `trace_id`, `session_id` | MASC dispatch/effect audit |
+| OAS event projection | `turn`, exact `schedule`, `tool_use_id`, OAS correlation/run fields | OAS lifecycle evidence projected by MASC |
 
-No field is shared across all three. The dashboard session-trace
-interleaves at least two of these sources and renders the same physical
-execution as two activity rows — `T${event.turn}R${event.round}`
-(`dashboard/src/components/session-trace/session-trace-entry.ts:776`
-**(verified)**) next to an absolute-turn row carrying the session id.
-Operators read this as double execution (issue #20910).
+The concrete producer/codec anchors are
+`lib/trajectory/trajectory.ml:139`, `lib/trajectory/trajectory.ml:307`,
+`lib/trajectory/trajectory.ml:698`, `lib/keeper/keeper_hooks_oas.ml:541`, and
+`lib/types/turn_record.ml:86` (verified 2026-07-19).
 
-Any view-side dedup (matching on tool name + args + timestamp) would be
-read-side repair — the workaround class this repo rejects
-(CLAUDE.md §워크어라운드, RFC-0042 precedent). The root is that no
-identity is minted at the execution boundary.
+```text
+MASC: execution_id  ->  tool_calls <-> canonical Keeper trajectory
+OAS:  Invocation    ->  turn + schedule + tool_use_id (exact evidence)
+```
+
+`execution_id` is the typed foreign key shared by the two MASC stores. The OAS
+event bridge does not stamp that key: OAS stays MASC-agnostic, and MASC does not
+maintain a global join table keyed by provider `tool_use_id`.
+
+`tool_use_id` is exact provider/OAS correlation evidence. It is required on
+the wire but may be blank or repeated, so it is never an identity or join key.
+Matching on tool name, arguments, timestamps, array position, or
+`tool_use_id` would be read-side repair and is forbidden.
 
 ### §1.2 The assembled prompt is not recorded anywhere
 
@@ -75,7 +86,7 @@ Consequences observed in the diagnosis session:
 
 ## §2 Design
 
-### §2.1 Canonical execution identity
+### §2.1 Canonical MASC execution identity and exact OAS schedule
 
 Mint `execution_id` exactly once, at the masc dispatch boundary where a
 keeper tool call enters execution (the same site that today stamps
@@ -85,23 +96,60 @@ convention:
 ```ocaml
 module Execution_id : sig
   type t
-  val mint : unit -> t            (* uuid-v7; sortable *)
+  val generate : unit -> t        (* exec-<milliseconds>-<sequence> *)
   val to_string : t -> string
-  val of_string : string -> t option
+  val of_string : string -> t
 end
 ```
 
 Propagation:
 
-- `tool_calls` store: new `execution_id` field.
-- trajectory writer: same field; `turn`/`round` stay as display
-  attributes.
-- OAS event bridge: masc already owns the consumer that turns OAS
-  stream events into `oas:tool_called`/`oas:tool_completed` log rows;
-  that consumer joins on the in-flight execution (it is masc-side, so
-  no OAS API change — OAS stays masc-agnostic per the boundary rule).
-- dashboard: one row per `execution_id`; turn-relative and absolute
-  labels become attributes of that row, not separate rows.
+- `tool_calls` store: typed `execution_id` minted at the MASC dispatch
+  boundary.
+- canonical Keeper trajectory: the same `execution_id`, plus the exact
+  `Agent_sdk.Tool.Invocation.t` coordinates supplied by OAS.
+- OAS event projection: exact invocation fields only. It does not consume or
+  copy a MASC `execution_id`.
+- dashboard: the canonical trajectory row may be enriched from tool-call log
+  data only by exact `execution_id`. An unmatched source remains an explicit
+  provenance gap; it is not silently dropped or synthesized.
+
+The canonical tool row is a closed wire record:
+
+```json
+{
+  "schema": "masc.keeper_trajectory.v1",
+  "type": "tool_call",
+  "ts": 123.0,
+  "ts_iso": "2026-07-19T00:00:00Z",
+  "keeper_turn_id": 412,
+  "oas_turn": 0,
+  "schedule": {
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 2,
+    "execution_mode": "concurrent"
+  },
+  "tool_use_id": "",
+  "tool_name": "Execute",
+  "args": {},
+  "outcome": { "status": "succeeded", "output": "..." },
+  "duration_ms": 17,
+  "execution_id": "exec-..."
+}
+```
+
+Validation is field-local and exact:
+
+- `keeper_turn_id > 0`, `oas_turn >= 0`;
+- `planned_index >= 0`, `batch_index >= 0`, `batch_size > 0`;
+- `execution_mode` uses the OAS closed codec;
+- `tool_use_id` is a required string; blank and repeated values are valid;
+- no cross-row inference adds constraints that OAS does not define.
+
+There is no allocator beside OAS scheduling metadata. `planned_index`,
+`batch_index`, `batch_size`, and `execution_mode` are observations, not MASC
+policy or retry gates.
 
 ### §2.2 TurnRecord — typed prompt-block provenance
 
@@ -116,19 +164,34 @@ type prompt_block =
   }
 
 type turn_record =
-  { execution_ids : Execution_id.t list   (* tool calls in this turn *)
-  ; keeper : string
+  { keeper : string
   ; trace_id : string
   ; absolute_turn : int
+  ; turn_ref : Turn_ref.t option
   ; blocks : prompt_block list            (* assembly order *)
   ; runtime_profile : string
+  ; model : string option
+  ; finish_reason : string option
+  ; context_window : int option
+  ; price_input_per_million : float option
+  ; price_output_per_million : float option
+  ; request_latency_ms : int option
+  ; ttfrc_ms : float option
   ; sampling : { temperature : float option
+               ; top_p : float option
+               ; max_tokens : int option
                ; thinking_budget : int option
                ; enable_thinking : bool option }
   ; usage : { input_tokens : int option; output_tokens : int option }
   ; ts : float
   }
 ```
+
+TurnRecord does not copy per-tool execution identifiers. Its exact turn-range
+coordinate is `(trace_id, absolute_turn)` / `turn_ref`; canonical tool rows
+carry `keeper_turn_id` and remain queryable from the trajectory store. Keeping
+an execution-id array in both records would make TurnRecord a second source of
+tool membership and allow the two stores to diverge.
 
 `Prompt_block_id.t` is a closed sum mirroring today's real assembly
 chain in `keeper_run_tools_hooks.ml` and `keeper_prompt.ml`
@@ -146,9 +209,10 @@ record; digests join against the existing prompt/receipt stores.
 ### §2.3 Views derive; no view-side repair
 
 - Dashboard turn inspector reads TurnRecord (blocks, sampling, usage)
-  and renders block-diff between turns.
-- OTel: per-turn span gets `masc.turn.blocks`, `masc.turn.profile`,
-  `masc.execution_id` attributes from the same record.
+  and renders block-diff between turns. Tool detail comes from canonical
+  trajectory rows for the exact Keeper turn, not a copied TurnRecord list.
+- OTel: per-turn span gets turn-level block/profile attributes. Tool execution
+  identity remains on the individual dispatch/tool span.
 - `keeper_context_status` gains nothing new to compute — but its
   blob-preview display problem disappears for operators because the
   turn inspector becomes the primary surface for ratio/usage. The blob
@@ -159,46 +223,59 @@ record; digests join against the existing prompt/receipt stores.
 
 - No new telemetry pipeline or transport — TurnRecord is one JSONL
   store next to the existing receipt store; views read it.
-- No OAS API change. The execution-id join happens in masc's own event
-  consumer. OAS continues to know nothing about MASC.
-- No backfill of historical stores; old rows render as today.
+- No OAS API change. OAS continues to know nothing about MASC.
+- No MASC identity injection into OAS events and no join by
+  `tool_use_id`/name/arguments/timestamp.
+- No decode, migration, or backfill from the retired
+  `.masc/trajectories/...` archive. It remains raw, untouched data and is not a
+  live input.
 - No prompt-text duplication into TurnRecord (digests only).
 
-## §4 Migration
+## §4 Hard cut
 
-1. PR-1: `Execution_id` + stamp at dispatch + `tool_calls` and
-   trajectory fields (additive, old readers unaffected).
-2. PR-2: OAS event consumer join + dashboard single-row render keyed by
-   `execution_id` (closes the #20910 double-row symptom at the root).
-3. PR-3: `Prompt_block_id` + TurnRecord writer at receipt site.
-4. PR-4: dashboard turn inspector (block diff) + OTel span attributes.
-
-Each PR lands with its harness (below); none is operable as a silent
-cap/dedup — if the id is missing, writers fail loudly in dev builds.
+1. Delete the independent call-order allocator and every direct trajectory
+   append fallback. Only OAS `Invocation.turn + Invocation.schedule` provides
+   occurrence coordinates.
+2. Write and decode only `masc.keeper_trajectory.v1` under
+   `.masc/keepers/<keeper>/trajectories/v1/<trace>.jsonl`; reject missing,
+   duplicate, unexpected, and invalid fields explicitly.
+3. Delete TurnRecord tool-membership duplication. A retired
+   `execution_ids` field is an unexpected field, not a compatibility input.
+4. Runtime MCP dispatch without an OAS Invocation does not fabricate a
+   canonical Keeper trajectory row. Its tool-call audit and SSE observations
+   remain in their own stores.
+5. Render hierarchy as Keeper turn → OAS turn → schedule batch, with
+   `planned_index` as presentation ordering metadata. No display label invents
+   a second occurrence coordinate.
 
 ## §5 Verification harness
 
 - Unit: minting uniqueness/sortability; `Prompt_block_id` round-trip;
   TurnRecord codec.
-- Behavioral: drive one fake tool execution through dispatch → assert
-  exactly one `execution_id` appears in tool_calls + trajectory + the
-  oas-event rows for that call (no orphan, no dup).
-- Dashboard: session-trace fixture with all three sources for one
-  execution → exactly one rendered row.
+- Behavioral: drive one fake OAS invocation through dispatch → assert the
+  same typed `execution_id` appears in tool_calls + canonical trajectory, and
+  the exact invocation schedule is preserved.
+- Boundary: bridge OAS events with blank/repeated `tool_use_id` → assert exact
+  projection and absence of a fabricated MASC `execution_id`.
+- Codec: missing/duplicate/unexpected fields, invalid schedule values, and an
+  unknown execution mode are explicit row-local failures.
+- Dashboard: canonical trajectory + matching tool-call fixture → one enriched
+  row; an unmatched source → one explicit provenance gap.
+- Runtime MCP: dispatch without an OAS Invocation → zero canonical Keeper
+  trajectory rows.
 - Block-diff: two synthetic TurnRecords → diff yields the exact
   added/removed block set (the "what entered/left context" question as
   a test).
 
 ## §6 Evidence trail
 
-Diagnosis session 2026-06-12 (issues #20907 #20908 #20909 #20910):
-duplicate rows and id vocabularies verified against live stores under
-the runtime base path (`tool_calls/2026-06/12.jsonl`,
-`trajectories/sangsu/trace-1780648779957-00000.jsonl`,
-`logs/system_log_2026-06-12.jsonl`); dashboard render site
-`session-trace-entry.ts:776`; receipt digest fields
-`keeper_agent_run_receipt.ml:121-123`; context assembly chain
-`keeper_run_tools_hooks.ml` (dynamic/temporal/nudge/retry/recall).
+Diagnosis session 2026-06-12 (issues #20907 #20908 #20909 #20910)
+established that multiple stores lacked a safe shared identity and that the
+dashboard was treating source-local ordering metadata as identity. The
+2026-07-19 hard cut narrows the shared identity to the two MASC-owned execution
+stores, preserves OAS invocation fields exactly, and rejects heuristic joins.
+Receipt digest fields remain in `keeper_agent_run_receipt.ml`; the context
+assembly chain remains in `keeper_run_tools_hooks.ml`.
 
 Ledger note: this RFC advances `.next-number` 0231→0234 in one commit —
 0231 and 0232 were de-facto allocated by the Memory OS series
@@ -215,34 +292,35 @@ renumbering shipped references.
 > PR-2a #20975, PR-2b #20985, PR-3 #20995, PR-4 #21000. The front-matter
 > `status: Draft` predates those merges and should be reconciled by the
 > author. This amendment extends that identity work to the chat and board
-> surfaces; it is **Proposed** (not yet implemented). Drafted 2026-06-19
+> surfaces. Its exact `turn_ref` propagation is implemented; the current
+> contract is a hard cut with no timestamp or legacy-row recovery. Drafted 2026-06-19
 > from the keeper-v2 "Keeper Agent v2" design hand-off (claude.ai/design
 > project `v2`, file `keeper-v2/Keeper Agent v2.html`). Linkage precedent:
 > RFC-0252 (fusion panel/judge → board post → chat block).
 
-### §7.1 Problem — the turn identity is minted but never reaches chat or board
+### §7.1 Historical root cause — turn identity stopped before chat and board
 
-§2 gave one keeper turn a real composite identity, `(trace_id,
+Before §7 was implemented, §2 gave one keeper turn a real composite identity, `(trace_id,
 absolute_turn)`, recorded on `Turn_record.t` (`lib/types/turn_record.mli:32-41`
 **(verified 2026-06-19)**) and materialized every turn at
 `lib/keeper/keeper_agent_run.ml:250-251` (`trace_id =
 Keeper_id.Trace_id.to_string meta.runtime.trace_id`; `absolute_turn =
-usage.total_turns + 1`) **(verified)**. That identity stops at the
-TurnRecord observability store. It is never threaded onto the two surfaces
+usage.total_turns + 1`) **(verified)**. That identity stopped at the
+TurnRecord observability store. It was not threaded onto the two surfaces
 operators navigate between — the keeper **chat** and the **board**:
 
-| Layer | turn identity today | state |
+| Layer | current turn identity | state |
 |---|---|---|
-| MASC turn record (§2.2) | `(trace_id, absolute_turn)` | present, isolated |
-| MASC chat persist | none — `chat_message` carries a per-message `msg-…` id + typed `surface : Surface_ref.t`, no turn id. The reply payload omits the turn id: `lib/keeper/keeper_turn.ml:927-965` **(verified)** emits `reply/outcome/model/turns/usage` only. | **broken (root)** |
-| MASC board post | none — `board_types` post has no originating-turn field; fusion alone smuggles `run_id` through untyped `meta_json`. | broken |
-| dashboard API | `/chat/history` carries no turn id; `TurnRecordEntry` is a disjoint feed with no shared wire key. | broken |
-| FE chat / turn inspector | matches a turn to a message by a 30-min timestamp window (`dashboard/src/components/keeper-turn-inspector.ts` **(verified 2026-06-19)**); the keeper-v2 prototype fabricates `traceId = 'trc_' + keeper.id + message.id.slice(-4)`. | broken |
-| FE board → chat | `author` (keeper) level only (`navigateToAuthor`); no turn anchor. chat → board exists for fusion only (post-level, one-way). | broken / partial |
+| MASC turn record (§2.2) | required typed `turn_ref`, validated against `(trace_id, absolute_turn)` | exact |
+| MASC chat persist | Keeper-turn replies carry the same `turn_ref`; out-of-turn rows remain explicitly unlinked | exact when linked |
+| MASC board post | typed `origin.turn_ref` when the post originates from a Keeper turn | exact when linked |
+| dashboard API | TurnRecord and transcript surfaces carry the persisted `turn_ref` unchanged | exact |
+| FE chat / turn inspector | opaque `turn_ref` equality only; no parsing, reconstruction, or timestamp window | exact |
+| FE board → chat | `origin.turn_ref` opens the precise retained TurnRecord; absence exposes no inferred link | exact when linked |
 
-Root: the turn id is dropped at the chat-persist producer→consumer seam
-(`keeper_turn.ml:927-965`). Everything above it has a real id; everything
-below has nothing to join on, so the board↔chat-turn link the keeper-v2
+Historical root: the turn id was dropped at the chat-persist producer→consumer seam
+(`keeper_turn.ml:927-965`). Everything above it had a real id; everything
+below had nothing to join on, so the board↔chat-turn link the keeper-v2
 design assumes is visual-only (`docs/design/keeper-v2-v12-gap-current.md`,
 final gap item).
 
@@ -335,9 +413,9 @@ deferred** to whoever wires the iMessage gate.
 ### §7.4 Non-goals
 
 - No OAS API change (per §3).
-- No backfill: legacy chat rows / posts decode `turn_ref = None`; the FE
-  30-min window survives only as an explicit, commented, removal-targeted
-  fallback for `None` rows.
+- No backfill or compatibility decoder. A TurnRecord without `turn_ref` is
+  invalid and counted as such. Chat rows/posts without a typed origin remain
+  explicitly unlinked; the frontend does not infer one from time or text.
 - `turn_ref` does not replace `Execution_id` (tool-call identity) or fusion
   `run_id` (run correlation); it is the turn-level join key between them.
 
@@ -369,11 +447,10 @@ foundational-record-field rule).
    → backend-minted `Turn_ref` only.
 2. `run_id` / `meta_json` substring or prefix match (`starts_with "fus-"`) —
    the RFC-0042 string-classifier anti-pattern. → typed `origin` + real index.
-3. 30-min timestamp-window join (already in `keeper-turn-inspector.ts`) — a
+3. 30-min timestamp-window join (removed from `keeper-turn-inspector.ts`) — a
    heuristic standing in for a missing key; mis-attributes under dense/sparse
-   turns or clock skew. → exact `(trace_id, absolute_turn)` join; keep the
-   window only as a commented, removal-targeted fallback for legacy
-   `turn_ref = None` rows.
+   turns or clock skew. → exact opaque `turn_ref` equality only; rows without
+   the key are invalid/unlinked and are never revived.
 4. Telemetry-as-fix ("count chat rows missing turn_ref") — a counter is a
    backfill metric, not a fix. → propagate the id so new rows never miss it.
 5. Collapsing `run_id` into `turn_ref` — distinct typed concepts (run

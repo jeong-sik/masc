@@ -691,14 +691,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
           ~trace_id
         |> fun read -> read.Trajectory.entries
       in
-      check int "trajectory row count" 1 (List.length trajectory_entries);
-      let trajectory_entry = List.hd trajectory_entries in
-      check string "trajectory tool" "tool_execute"
-        trajectory_entry.Trajectory.tool_name;
-      check int "trajectory turn" 1
-        trajectory_entry.Trajectory.turn;
-      check int "trajectory round" 1
-        trajectory_entry.Trajectory.round;
+      check int "runtime MCP cannot fabricate OAS trajectory rows" 0
+        (List.length trajectory_entries);
       let sse_payload =
         match !received_sse with
         | Some payload -> extract_json_from_text payload
@@ -737,16 +731,20 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         Trajectory.read_entries_result ~masc_root ~keeper_name ~trace_id
         |> fun read -> read.Trajectory.entries
       in
+      check int "runtime MCP remains outside canonical trajectory" 0
+        (List.length trajectory_entries);
+      let tool_log_rows =
+        Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:2 ()
+      in
       let persisted_full_output =
         List.find_map
-          (fun (trajectory_entry : Trajectory.tool_call_entry) ->
-             match trajectory_entry.outcome with
-             | Trajectory.Tool_succeeded output
-               when String.equal output full_output -> Some output
-             | Trajectory.Tool_succeeded _ | Trajectory.Tool_failed _ -> None)
-          trajectory_entries
+          (fun row ->
+             match row |> U.member "output" with
+             | `String output when String.equal output full_output -> Some output
+             | _ -> None)
+          tool_log_rows
       in
-      check (option string) "runtime MCP producer persists complete output"
+      check (option string) "runtime MCP tool log persists complete output"
         (Some full_output) persisted_full_output)
 
 let () =

@@ -52,7 +52,7 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 ```mermaid
 graph TB
   subgraph "MASC (Consumer)"
-    OW[oas_worker.ml]
+    OW[Runtime_agent]
     WO[worker_oas.ml]
     OE[oas_events.ml]
     OSB[oas_event_bridge.ml]
@@ -101,66 +101,60 @@ graph TB
 
 ---
 
-## 4. Oas_worker (Unified Agent Runner)
+## 4. Runtime_agent (Unified Agent Runner)
 
 ### 4.1 개요
 
-`oas_worker.ml`은 MASC에서 OAS Agent를 실행하는 단일 진입점이다. 모든 MASC 모듈이 OAS Agent를 필요로 할 때 이 모듈을 사용한다.
+`lib/runtime/runtime_agent.mli`는 MASC가 OAS Agent를 구성하고 실행하는 public
+facade다. Keeper의 provider 후보 순회는 `Keeper_turn_driver`, team-session worker
+adapter는 `Worker_oas`가 소유하며, 둘 다 OAS 실행 계약을 복제하지 않고
+`Runtime_agent`/`Agent_sdk.Agent.run`을 소비한다.
 
 ### 4.2 config 타입
 
-```ocaml
-type config = {
-  name : string;
-  provider : Agent_sdk.Provider.config;
-  model_id : string;
-  system_prompt : string;
-  tools : Agent_sdk.Tool.t list;
-  max_turns : int;
-  max_tokens : int;
-  temperature : float;
-  hooks : Agent_sdk.Hooks.hooks option;
-  guardrails : Agent_sdk.Guardrails.t option;
-  event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
-  session_id : string option;
-  description : string option;
-  initial_messages : Agent_sdk.Types.message list;
-  model_input_projection :
-    (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
-  raw_trace : Agent_sdk.Raw_trace.t option;
-  transport : Masc_grpc_transport.t;
-}
-```
+형식의 SSOT는 `Runtime_agent.config = Runtime_agent_context.config`다. 이 문서는
+record 정의를 복제하지 않고 의미만 분류한다.
+
+| 그룹 | 현재 계약 |
+|------|-----------|
+| 필수 실행 identity | `name`, `provider_cfg`, `model_id`, `system_prompt`, `tools` |
+| provider request 파라미터 | `temperature`, `top_p`, `top_k`, `min_p`, `max_tokens`는 모두 option이며 `None`은 wire field 자체를 생략 |
+| thinking | `enable_thinking`, `preserve_thinking`, `thinking_budget`는 provider/OAS typed option |
+| liveness | `stream_idle_timeout_s`, `body_timeout_s`는 호출자가 명시할 때만 적용하는 request-local I/O deadline |
+| continuity | `initial_messages`, `checkpoint_sidecar`, `checkpoint_sink`, `context`, `context_injector` |
+| observation | `hooks`, `event_bus`, `raw_trace`, `trace_link`, `on_run_complete` |
+| transport/projection | `transport`, `model_input_projection`, `cache_system_prompt`, `yield_on_tool` |
+
+`Runtime_agent.default_config`에는 turn-count limit가 없다. `max_tokens=None`이
+기본이며 Keeper core turn도 이를 명시적으로 유지한다. `Some n`은 non-Keeper
+caller가 의도적으로 요청한 provider output parameter일 뿐 Keeper Stop/Pause,
+recurrence, retry admission 권한이 아니다.
 
 ### 4.3 실행 흐름
 
 ```
-build(~net, ~config) -> Agent.t
+default_config -> caller-owned record projection -> Runtime_agent.run
   |
   v
-run(~sw, ~net, ~config, goal) -> run_result
-  1. session_id 생성 (없으면 "{name}-{timestamp}-{hash}")
+Agent_sdk.Agent.run / Agent_sdk.Agent.Advanced.run_until_boundary
+  1. session_id 생성 또는 caller identity 사용
   2. Event_bus에 "build" 이벤트 publish
   3. Builder 패턴으로 Agent.t 구성
-  4. Agent.run 또는 Agent.run_stream 호출
+  4. Agent.run 또는 typed cooperative-yield boundary 호출
   5. OAS turn boundary에서 caller-owned checkpoint_sink 호출
-  6. Event_bus에 "completed"/"failed" publish
-  7. Agent.close
+  6. typed stop reason과 runtime observation 구성
+  7. Event_bus에 "completed"/"failed" publish
+  8. Agent.close
 ```
 
 ### 4.4 run_result
 
-```ocaml
-type run_result = {
-  response : Agent_sdk.Types.api_response;
-  checkpoint : Agent_sdk.Checkpoint.t option;
-  session_id : string;
-  turns : int;
-  trace_ref : Agent_sdk.Raw_trace.run_ref option;
-  runtime_observation : runtime_observation option;
-}
-```
+형식의 SSOT는 `lib/runtime/runtime_agent.mli`다. 결과는 response와 optional
+checkpoint, session identity, observed turn count, raw-trace reference와
+validation, runtime observation, typed `stop_reason`을 함께 반환한다.
+
+`turns`는 완료 후의 관측값이다. 완료 조건이나 다음 Keeper cycle의 admission
+budget으로 읽지 않는다.
 
 ### 4.5 Runtime Execution
 
@@ -178,41 +172,39 @@ type run_result = {
 - `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
 - 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
-Runtime failsafe fallback (runtime.toml 없을 때):
-- `llama:{MASC_DEFAULT_MODEL}` (로컬)
-- `glm:auto` (ZAI_API_KEY 존재 시)
-
-이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/runtime.toml`
-기본값과 동일시하지 않는다.
+Runtime catalog는 configured default가 없거나 requested runtime id가 해석되지
+않으면 typed config error로 실패한다. 명시적 runtime intent를 다른 provider나
+default runtime으로 조용히 치환하지 않는다.
 
 ### 4.6 Termination Semantics
 
-OAS와 MASC는 "turn"과 "timeout"을 같은 layer에서 쓰지 않는다. Keeper
-호출은 OAS의 `max_turns = 0` 및 `max_idle_turns = 0` unbounded sentinel을
-사용한다. SDK가 외부의 명시적 유한 설정에서 execution-limit signal을 반환하더라도
-MASC는 이를 관측할 뿐 Keeper lifecycle 권한으로 사용하지 않는다.
+현재 OAS bridge에는 `MaxTurnsExceeded`, `AgentExecutionTimeout`,
+`AgentExecutionIdleTimeout`, `IdleDetected`, `ExitConditionMet` 계약이 없다.
+Keeper는 그런 값을 sentinel이나 성공 observation으로 되살리지 않는다.
 
-`lib/keeper/keeper_agent_error.ml`의 `sdk_termination_semantics`가 OAS
-error를 keeper receipt로 접기 전 layer-aware 의미를 먼저 고정한다:
+정상/협력적 중단은 `Runtime_agent.stop_reason`으로 분리된다:
 
-| OAS / SDK signal | MASC semantic | Receipt outcome |
-|------------------|---------------|-----------------|
-| `Retry.Timeout` | `provider_wall_clock_timeout` | `cancelled` |
-| `MaxTurnsExceeded` | `oas_turn_limit_observed` | `success` observation |
-| `AgentExecutionTimeout` / `AgentExecutionIdleTimeout` | `oas_execution_timeout_observed` | `success` observation |
-| `IdleDetected` | `oas_idle_detected_failure` | `error` |
-| `ExitConditionMet` | `oas_exit_condition_reached` | `cancelled` |
-| other SDK/API failure | `sdk_error_failure` or specific OAS failure semantic | `error` |
+| stop reason | 의미 | Keeper lifecycle 권한 |
+|-------------|------|-----------------------|
+| `Completed` | 정상 OAS 완료 | 현재 activity 결과 |
+| `Yielded_to_chat_waiting` | Tool boundary에서 대기 chat에 lane 양보 | checkpoint를 보존하고 후속 activity가 재개 |
+| `Yielded_to_durable_stimulus` | durable event에 lane 양보 | checkpoint를 보존하고 후속 activity가 재개 |
+| `InputRequired` | typed elicitation | 실패가 아닌 HITL/입력 대기 continuation |
 
-Execution-limit observations preserve the complete OAS replay checkpoint but
-create no Keeper blocker, retry, failure streak, or follow-up action. Token and
-cost counters remain telemetry only and do not participate in this terminal
-mapping.
+실제 SDK error는 `Keeper_agent_error.sdk_termination_semantics`의 닫힌 합으로
+receipt에 투영한다:
 
-Invariant: new OAS terminal variants must first be assigned a stable
-`sdk_termination_semantics` value, then mapped to keeper receipt outcome.
-Tests in `test/test_keeper_sdk_error_typed_bridge.ml` pin the semantic layer and
-the collapsed receipt outcome separately.
+| SDK error class | MASC semantic | Receipt outcome |
+|-----------------|---------------|-----------------|
+| API/provider typed timeout | `provider_wall_clock_timeout` | `cancelled` |
+| typed input-required의 defensive error path | `oas_input_required` | `cancelled` |
+| guardrail violation | `oas_guardrail_violation` | `error` |
+| tripwire violation | `oas_tripwire_violation` | `error` |
+| other SDK/API/provider failure | `sdk_error_failure` | `error` |
+
+일반 실행에서 `InputRequired`는 error receipt에 도달하기 전에 typed
+`Runtime_agent.stop_reason` 성공 결과로 승격된다. Token/cost/turn counters는
+관측값이며 이 terminal mapping이나 Keeper admission에 참여하지 않는다.
 
 ### 4.7 MASC Tool Bridge
 
@@ -240,7 +232,7 @@ MASC Types.tool_schema
 |-----------|---------|
 | `worker_container_meta.effective_model` | `Agent_sdk.Provider.config` model_id |
 | `runtime_backend` | description metadata + spawn/runtime routing |
-| `timeout_seconds` | worker-container lifecycle metadata; OAS `max_turns`와 독립 |
+| `timeout_seconds` | worker-container lifecycle metadata; OAS Agent turn-count limit가 아님 |
 | fixed `session_min` MCP surface + fixed shell surface | `Tool.t list` |
 | heartbeat | periodic callback |
 | team_session description | `Builder.with_description` metadata |
@@ -272,26 +264,18 @@ servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Runtime Inference Parameters
 
-`runtime_inference.ml`이 runtime.toml에서 per-runtime 추론 파라미터를 읽는다:
-
-```json
-{
-  "keeper_models": ["llama:qwen3.5", "glm-coding:glm-4.7"],
-  "keeper_temperature": 0.7,
-  "keeper_max_tokens": 4096,
-  "default_temperature": 0.5,
-  "default_max_tokens": 2048
-}
-```
+`Runtime_inference`는 loaded `runtime.toml`의 model declaration에서 sampling
+temperature와 typed thinking capability를 투영한다. `Runtime_adapter`는
+`top-p` 등 provider config 필드를 그대로 보존한다.
 
 Checked-in runtime defaults should prefer explicit `provider:model_id` labels.
 Provider-specific `auto` aliases are runtime convenience paths, not stable
 repository defaults.
 
-Resolution 순서:
-1. `{name}_temperature` / `{name}_max_tokens`
-2. `default_temperature` / `default_max_tokens`
-3. 호출자 제공 fallback 값
+MASC는 model capability의 `max-output-tokens` ceiling이나 임의 fallback에서
+request `max_tokens`를 합성하지 않는다. Keeper dispatch는 `None`을 전달하며,
+OAS가 provider/model capability validation을 소유한다. 이 ceiling과 실제
+usage token 관측값은 Keeper lifecycle budget이 아니다.
 
 ### 6.3 Model Label Resolution
 
@@ -433,12 +417,12 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 
 | 영역 | 상태 | 설명 |
 |------|------|------|
-| Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
+| Agent 실행 | Complete | `Runtime_agent`와 `Worker_oas`가 MODEL 호출을 OAS Agent.run으로 라우팅 |
 | Context compaction | Partial | Keeper compaction is MASC-owned and OAS receives exact messages without an implicit reducer; durable owner operation, source CAS, and reinjection proof remain |
 | Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
 | Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
-| Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
+| Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Runtime_agent` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
@@ -487,7 +471,7 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 
 | Surface | Classification | Notes |
 |---------|----------------|-------|
-| `oas_worker` / `worker_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
+| `Runtime_agent` / `Worker_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
 | `keeper_compact_policy` / `keeper_manual_compaction` | Correct owner, incomplete durability | MASC owns configured-LLM planning and checkpoint mutation; durable owner operation, source CAS, and reinjection proof remain |
 | keeper context/checkpoint continuity path | Open | exact checkpoint identity, durable operation references, and restart reconciliation remain incomplete |
 
@@ -516,19 +500,18 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 
 ## 14. Environment Variables
 
-| 변수 | 기본값 | 용도 |
-|------|--------|------|
-| `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | 0.25 | Event_bus -> SSE relay poll 간격 |
-| `MASC_CONTEXT_BUDGET_MAX` | 100,000 | Context budget 상한 |
-| `MASC_CONTEXT_ROUTER_MODE` | heuristic | Intent classification 모드 |
-| `ZAI_API_KEY` | (없음) | GLM Cloud runtime fallback 활성화 |
+활성 환경변수와 기본값의 SSOT는 생성된
+[`docs/runtime-tunables.md`](../runtime-tunables.md)와 이를 생성하는 typed config
+registry다. 이 통합 문서는 변수명이나 기본값을 복제하지 않는다.
 
-runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
+Provider/model credential binding은 `runtime.toml` catalog가 소유한다. 과거
+`MASC_CONTEXT_BUDGET_MAX`/`MASC_CONTEXT_ROUTER_MODE` 같은 MASC-side context budget
+또는 heuristic router 변수는 active runtime 계약이 아니다.
 
 ---
 
 ## 15. Future Work
 
 - Team-session swarm bridge fidelity 완성
-- keeper runtime state ownership을 OAS checkpoint/context 쪽으로 더 이동
+- provider별 structured thinking/tool/multimodal fidelity matrix를 fixture로 확장
 - marker/text leakage를 구조화된 metadata 또는 hook path로 축소

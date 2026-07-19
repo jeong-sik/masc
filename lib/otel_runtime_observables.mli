@@ -7,7 +7,11 @@
     HTTP pool occupancy (masc_pool_* from Pool_metrics.current_snapshot —
     this IS the pool export wiring), and on-disk telemetry store sizes
     (#20682: masc_store_bytes / masc_store_files, directory walks cached
-    for 60s).
+    for 60s per [masc_root]). Store scans also expose
+    [masc_store_scan_errors] and [masc_store_scan_partial]; a broken
+    Keeper path therefore remains visible without discarding samples from
+    healthy sibling Keepers. The cache is guarded for cross-domain exporter
+    and test calls.
 
     RFC-0217 observable pattern: the registered source is polled on each
     exporter tick, so every sample is present from process start — no

@@ -49,10 +49,10 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       entries: [
         {
           record: {
-            execution_ids: ['exec-cmp'],
             keeper: 'masc-improver',
             trace_id: 'trace-cmp',
             absolute_turn: 12,
+            turn_ref: 'trace-cmp#12',
             blocks: [
               { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
               { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },

@@ -1788,23 +1788,37 @@ let test_dashboard_bootstrap_omits_eager_goal_tree () =
    all sources and peg the single Eio domain -> keeper-fleet freeze. *)
 let test_telemetry_n_default_is_bounded () =
   let resolve = Server_routes_http_routes_dashboard_setup.resolve_telemetry_n in
-  Alcotest.(check int)
-    "windowed + no n -> bounded default, never 0"
-    2000 (resolve ~has_time_window:true ~n_param:None);
-  Alcotest.(check int)
+  let check_ok label expected = function
+    | Ok actual -> Alcotest.(check int) label expected actual
+    | Error _ -> Alcotest.failf "%s: expected a resolved page size" label
+  in
+  check_ok
+    "windowed + no n -> bounded default"
+    2000
+    (resolve ~has_time_window:true ~n_param:None);
+  check_ok
     "no window + no n -> small default"
-    100 (resolve ~has_time_window:false ~n_param:None);
-  Alcotest.(check int)
-    "unparseable n -> bounded default, never 0"
-    2000 (resolve ~has_time_window:true ~n_param:(Some "garbage"));
-  (* #20659 all-in-window contract: explicit n=0 is honoured (clamped
-     downstream), so an operator can still request the full window. *)
-  Alcotest.(check int)
-    "explicit n=0 preserved"
-    0 (resolve ~has_time_window:true ~n_param:(Some "0"));
-  Alcotest.(check int)
+    100
+    (resolve ~has_time_window:false ~n_param:None);
+  (match resolve ~has_time_window:true ~n_param:(Some "garbage") with
+   | Error
+       (Server_routes_http_routes_dashboard_setup.Telemetry_limit_not_an_integer
+          "garbage") -> ()
+   | _ -> Alcotest.fail "malformed n must not silently select a default");
+  (match resolve ~has_time_window:true ~n_param:(Some "0") with
+   | Error
+       (Server_routes_http_routes_dashboard_setup.Telemetry_limit_not_positive
+          0) -> ()
+   | _ -> Alcotest.fail "retired unlimited n=0 must be rejected");
+  (match resolve ~has_time_window:true ~n_param:(Some "2001") with
+   | Error
+       (Server_routes_http_routes_dashboard_setup.Telemetry_limit_exceeds_page_size
+          { requested = 2001; maximum = 2000 }) -> ()
+   | _ -> Alcotest.fail "oversized telemetry pages must be rejected");
+  check_ok
     "explicit positive n honoured"
-    500 (resolve ~has_time_window:true ~n_param:(Some "500"))
+    500
+    (resolve ~has_time_window:true ~n_param:(Some "500"))
 
 (* Issue #22071: lifecycle event classification was reverse-mapped by a raw
    string whitelist that bypassed compiler exhaustiveness, and the module

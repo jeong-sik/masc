@@ -169,10 +169,18 @@ let wrap_event
     removing the catch-all. *)
 let invocation_payload_fields invocation =
   let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+  let schedule = Agent_sdk.Tool.Invocation.schedule invocation in
   [ "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+  ; "schedule",
+    `Assoc
+      [ "planned_index", `Int schedule.planned_index
+      ; "batch_index", `Int schedule.batch_index
+      ; "batch_size", `Int schedule.batch_size
+      ; ( "execution_mode"
+        , Agent_sdk.Tool.execution_mode_to_yojson schedule.execution_mode )
+      ]
+  ; "tool_use_id", `String tool_use_id
   ]
-  @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
 
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
@@ -228,9 +236,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~error_detail:projection.error_detail
          ())
   | Agent_sdk.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
-    (* tool_called publishes before execution, so the keeper hook has not
-       minted an execution_id yet — this row carries the provider call id
-       only; the matching tool_completed row carries both. *)
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
@@ -238,24 +243,10 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_sdk.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
-    (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
-       tool_use_id ↔ execution_id pair before OAS published this event,
-       so the lookup is deterministic. A miss means the execution did not
-       go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
-    let execution_id_fields =
-      match
-        if tool_use_id = "" then None
-        else Keeper_execution_join.take ~tool_use_id
-      with
-      | Some execution_id -> [ "execution_id", `String execution_id ]
-      | None -> []
-    in
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-         @ invocation_payload_fields invocation
-         @ execution_id_fields)
+         @ invocation_payload_fields invocation)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->

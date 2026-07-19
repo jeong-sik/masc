@@ -456,7 +456,7 @@ function TurnInspectorDrawer({
   onClose: () => void
 }) {
   // Thin chat-specific wrapper over the shared TurnInspectorDrawer: maps the
-  // chat entry to the drawer's anchor props (turnRef + timestamp window) and
+  // chat entry to the drawer's exact turnRef anchor and
   // header label. The shared component owns the overlay markup so the board
   // surface (post-detail) reuses the identical drawer. testId is preserved so
   // existing chat tests keep their `kw-chat-turn-inspector-*` selectors.
@@ -471,7 +471,6 @@ function TurnInspectorDrawer({
           ? `메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
           : null}
         initialTurnRef=${triggerEntry?.turnRef ?? null}
-        initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
         open=${true}
         onClose=${onClose}
       />

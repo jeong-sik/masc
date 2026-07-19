@@ -26,6 +26,7 @@ import type {
   TrajectoryEntry,
   TrajectoryThinkingBlock,
   TrajectoryResponse,
+  TrajectoryToolSchedule,
 } from '../../api/dashboard'
 
 // ── Types ──────────────────────────────────────────────
@@ -63,11 +64,14 @@ export interface UnifiedTraceEvent {
   toolResult?: string | null
   duration_ms?: number
   turn?: number
-  round?: number
+  keeperTurnId?: number
+  oasTurn?: number
+  toolSchedule?: TrajectoryToolSchedule
+  toolUseId?: string
   cost_usd?: number
   error?: string | null
-  // RFC-0233: canonical execution identity — same id across trajectory,
-  // tool_call log, and oas-event rows for one physical execution.
+  // RFC-0233: canonical MASC execution identity — same id across Trajectory
+  // and tool_call log rows for one physical execution.
   // Source rows without this identity remain independent observations.
   executionId?: string
   // thinking fields
@@ -508,8 +512,7 @@ function markTimelineProvenanceGap(event: UnifiedTraceEvent): UnifiedTraceEvent 
 
 function toolCallEntryToProvenanceGap(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
   const ts = entry.ts * 1000
-  const identity = entry.execution_id
-    ?? `${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`
+  const identity = entry.execution_id ?? `row-${index}`
   return {
     id: `provenance-gap-tool-call-log-${identity}`,
     ts,
@@ -525,7 +528,8 @@ function toolCallEntryToProvenanceGap(entry: ToolCallEntry, index: number): Unif
     },
     agentName: entry.keeper,
     sessionId: entry.session_id ?? null,
-    turn: entry.turn ?? entry.keeper_turn_id,
+    turn: entry.turn,
+    keeperTurnId: entry.keeper_turn_id,
     executionId: entry.execution_id,
     error: 'tool-call provenance has no canonical Trajectory execution row',
   }
@@ -614,7 +618,12 @@ function trajectoryEntryToTrace(
 ): UnifiedTraceEvent {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = entry.ts * 1000
-  const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
+  const detail: Record<string, unknown> = {
+    ...(traceId ? { trace_id: traceId } : {}),
+    trace_origin: 'trajectory',
+    keeper_turn_id: entry.keeper_turn_id,
+    oas_turn: entry.oas_turn,
+  }
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
@@ -626,14 +635,15 @@ function trajectoryEntryToTrace(
         ? `Reasoning details (${entry.block.details.length})`
         : (content?.slice(0, 120) ?? '')
     return {
-      id: `tj-${ts}-thinking-T${entry.turn}-B${entry.block_index}-${index}`,
+      id: `tj-${ts}-thinking-K${entry.keeper_turn_id}-O${entry.oas_turn}-B${entry.block_index}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
       summary,
       detail: { ...detail, block_index: entry.block_index, block: entry.block },
-      turn: entry.turn,
+      keeperTurnId: entry.keeper_turn_id,
+      oasTurn: entry.oas_turn,
       thinkingContent: content,
       thinkingRedacted: redacted,
       thinkingBlock: entry.block,
@@ -641,6 +651,8 @@ function trajectoryEntryToTrace(
   }
 
   detail.execution_id = entry.execution_id
+  detail.schedule = entry.schedule
+  detail.tool_use_id = entry.tool_use_id
   const toolResult = entry.outcome.status === 'succeeded' ? entry.outcome.output : null
   const error = entry.outcome.status === 'failed' ? entry.outcome.error : null
 
@@ -650,14 +662,16 @@ function trajectoryEntryToTrace(
     ts_iso: entry.ts_iso,
     kind: 'tool_call',
     sourceLane: 'masc',
-    summary: entry.tool_name ?? 'unknown',
+    summary: entry.tool_name,
     detail,
     toolName: entry.tool_name,
     toolArgs: entry.args,
     toolResult,
     duration_ms: entry.duration_ms,
-    turn: entry.turn,
-    round: entry.round,
+    keeperTurnId: entry.keeper_turn_id,
+    oasTurn: entry.oas_turn,
+    toolSchedule: entry.schedule,
+    toolUseId: entry.tool_use_id,
     executionId: entry.execution_id,
     error,
   }

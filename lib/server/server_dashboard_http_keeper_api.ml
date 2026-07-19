@@ -1484,7 +1484,8 @@ let handle_keeper_get_subroutes state req request reqd =
               ("source", `String "trajectory_tool_call");
               ( "producer",
                 `String
-                  "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                  (Telemetry_unified.source_producer
+                     Telemetry_unified.Trajectory_tool_call) );
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
@@ -1617,7 +1618,8 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("source", `String "tool_call_io");
                 ( "producer",
                   `String
-                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                    (Telemetry_unified.source_producer
+                       Telemetry_unified.Tool_call_io) );
                 ("durable_store", `String (Filename.concat masc_root "tool_calls"));
                 ("dashboard_surface", `String dashboard_surface);
                 ("freshness_slo_s", `Float freshness_slo_s);
@@ -1863,11 +1865,13 @@ let handle_keeper_get_subroutes state req request reqd =
            Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                let masc_root = Workspace.masc_root_dir config in
-               let trajectory_read =
-                 Trajectory.read_recent_lines_result ~masc_root
-                   ~keeper_name:m.name
-                   ~trace_id ~max_entries:limit
+               let trajectory_page =
+                 Trajectory.read_recent_lines_page_result ~masc_root
+                   ~keeper_name:m.name ~trace_id
+                   ~scan_limits:Trajectory.standard_trajectory_scan_limits
+                   ~max_entries:limit ()
                in
+               let trajectory_read = trajectory_page.Trajectory.read in
                let lines = trajectory_read.Trajectory.lines in
                let total = List.length lines in
                `Assoc [
@@ -1885,6 +1889,25 @@ let handle_keeper_get_subroutes state req request reqd =
                  ( "io_errors",
                    Trajectory.trajectory_read_errors_to_json
                      trajectory_read.Trajectory.io_errors );
+                 ( "scan",
+                   `Assoc
+                     [ ( "physical_rows",
+                         `Int trajectory_page.Trajectory.scan.physical_rows )
+                     ; ( "bytes_read",
+                         `Intlit
+                           (Int64.to_string
+                              trajectory_page.Trajectory.scan.bytes_read) )
+                     ; ( "stop",
+                         `String
+                           (Trajectory.trajectory_scan_stop_to_string
+                              trajectory_page.Trajectory.scan.stop) )
+                     ] );
+                 ( "next_cursor",
+                   match trajectory_page.Trajectory.next_cursor with
+                   | None -> `Null
+                   | Some cursor ->
+                       `String
+                         (Trajectory.trajectory_byte_cursor_to_string cursor) );
                  ( "entries"
                  , `List (List.map Trajectory.trajectory_line_to_json lines) );
                ]))

@@ -499,6 +499,17 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
       ` : null}
       <${TraceContextLinks} links=${contextLinks} />
+      ${event.toolSchedule ? html`
+        <div>
+          <${SectionHeader} size="xs" class="mb-1">실행 스케줄</${SectionHeader}>
+          <${JsonViewerCard} title="실행 스케줄" data=${event.toolSchedule} />
+        </div>
+      ` : null}
+      ${event.toolUseId !== undefined ? html`
+        <div class="text-3xs text-[var(--color-fg-disabled)]">
+          tool_use_id: <span class="font-mono">${event.toolUseId === '' ? '(blank)' : event.toolUseId}</span>
+        </div>
+      ` : null}
       ${event.toolArgs ? html`
         <div>
           <${SectionHeader} size="xs" class="mb-1">인자</${SectionHeader}>
@@ -758,6 +769,20 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
+function structuralClockLabel(event: UnifiedTraceEvent): string | null {
+  if (event.keeperTurnId != null && event.oasTurn != null) {
+    const parts = [`K ${event.keeperTurnId}`, `OAS ${event.oasTurn + 1}`]
+    if (event.toolSchedule) {
+      parts.push(
+        `batch ${event.toolSchedule.batch_index + 1}/${event.toolSchedule.batch_size}`,
+        `plan ${event.toolSchedule.planned_index + 1}`,
+      )
+    }
+    return parts.join(' · ')
+  }
+  return event.turn == null ? null : `turn ${event.turn}`
+}
+
 export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceEvent; searchQuery?: string }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
@@ -771,6 +796,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     : durable ?? kindStyle
 
   const contextLinks = traceRouteLinks(event)
+  const structuralClock = structuralClockLabel(event)
 
   // Summary text
   let summaryText = event.summary
@@ -807,9 +833,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           <${TraceBadge} tone="neutral" wide>
             ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
           </${TraceBadge}>
-          ${event.turn != null ? html`
+          ${structuralClock !== null ? html`
             <span class="text-3xs text-[var(--color-fg-disabled)]">
-              T${event.turn}${event.round != null ? `R${event.round}` : ''}
+              ${structuralClock}
             </span>
           ` : null}
           ${event.sessionId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">S ${event.sessionId}</span>` : null}

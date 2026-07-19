@@ -104,6 +104,32 @@ describe('SessionTraceEntry', () => {
     expect(container.querySelector('.v2-monitoring-trace-detail')).not.toBeNull()
   })
 
+  it('renders the Keeper/OAS/batch/planned hierarchy and preserves raw schedule detail', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        keeperTurnId: 412,
+        oasTurn: 0,
+        toolSchedule: {
+          planned_index: 0,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
+        },
+        toolUseId: '',
+      }),
+    }))
+
+    expect(container.textContent).toContain('K 412 · OAS 1 · batch 2/2 · plan 1')
+    expect(container.textContent).not.toContain('T412R')
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+    const schedule = screen.getAllByTestId('json-viewer-card')
+      .find(card => card.getAttribute('data-title') === '실행 스케줄')
+    expect(schedule?.textContent).toContain('"planned_index":0')
+    expect(schedule?.textContent).toContain('"execution_mode":"concurrent"')
+    expect(container.textContent).toContain('tool_use_id: (blank)')
+  })
+
   it('links safe tool-call file args back to the Code IDE route', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleToolCallEvent({

@@ -38,14 +38,16 @@ let write_toml base_path content =
 (* Fake env: always returns None (env is "empty"). *)
 let empty_env _name = None
 
-(* Fake env with specific vars set. *)
-let env_with vars name = List.assoc_opt name vars
-
 (* Parse TOML content into a doc, or fail the test. *)
 let parse_or_fail content =
   match Keeper_toml_loader.parse_toml content with
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
+
+let resolve_or_fail ~env_lookup doc =
+  match Keeper_runtime_config.resolve_overrides ~env_lookup doc with
+  | Ok resolved -> resolved
+  | Error msg -> failf "Keeper runtime config resolution failed: %s" msg
 
 let with_clean_boot_overrides f =
   Config_boot_overrides.reset_for_tests ();
@@ -66,59 +68,36 @@ let test_missing_file_returns_zero () =
   | Error msg -> failf "unexpected error: %s" msg
 
 
-let test_applies_sleep_and_throttle_overrides () =
+let test_applies_heartbeat_overrides () =
   let doc = parse_or_fail
-    "[bootstrap]\n\
-     autoboot_max = 6\n\
-     [autonomous]\n\
-     fairness_cooldown_sec = 3\n\
-     [heartbeat]\n\
+    "[heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
-     board_wakeup_max = 6\n\
-     [turn]\n\
-     capacity_limit = 3\n\
-     batch_limit = 9\n"
+     board_wakeup_max = 6\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 6 count;
-  check (option string) "autoboot max canonical env"
-    (Some "6")
-    (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
-  check (option string) "autonomous fairness cooldown"
-    (Some "3")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);
+  check int "applied heartbeat overrides" 2 count;
   check (option string) "sleep chunk"
     (Some "1.5")
     (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
   check (option string) "board wakeup max"
     (Some "6")
-    (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides);
-  check (option string) "capacity limit"
-    (Some "3")
-    (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);
-  check (option string) "batch limit"
-    (Some "9")
-    (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides)
+    (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides)
 
 let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
      temperature = 0.65\n\
-     max_output_tokens = 8192\n\
      stream_idle_timeout_sec = 90\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
-  check int "applied 3" 3 count;
+  check int "applied 2" 2 count;
   check (option string) "temperature"
     (Some "0.65")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
-  check (option string) "max output tokens"
-    (Some "8192")
-    (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
@@ -130,7 +109,7 @@ let test_applies_health_overrides () =
        durable_queue_stale_sec = 45.5\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check int "applied health override count" 1 count;
   check (option string) "durable queue stale threshold"
@@ -151,7 +130,7 @@ let test_applies_lifecycle_enabled_overrides () =
      enabled = true\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check int "applied three lifecycle enabled overrides" 3 count;
   check (option string) "reactive enabled maps to canonical env"
@@ -175,7 +154,7 @@ let test_applies_memory_overrides () =
      llm_summary = true\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check int "applied 6" 6 count;
   check (option string) "memory max notes"
@@ -237,16 +216,41 @@ let test_memory_bank_reads_boot_override_knobs () =
     true
     (Keeper_memory_bank.memory_llm_summary_enabled ())
 
-let test_deprecated_autoboot_env_does_not_preempt_toml () =
-  let doc = parse_or_fail "[bootstrap]\nautoboot_max = 12\n" in
-  let fake_env = env_with [("MASC_KEEPER_AUTOBOT_MAX", "2")] in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:fake_env doc
+let removed_knobs_source =
+  "[bootstrap]\n\
+   autoboot_max = 6\n\
+   [autonomous]\n\
+   fairness_cooldown_sec = 3\n\
+   [heartbeat]\n\
+   max_silence_sec = 120\n\
+   [turn]\n\
+   capacity_limit = 3\n\
+   batch_limit = 9\n\
+   max_output_tokens = 8192\n"
+
+let removed_knobs_error =
+  "removed Keeper runtime TOML keys: bootstrap.autoboot_max, \
+   autonomous.fairness_cooldown_sec, heartbeat.max_silence_sec, \
+   turn.capacity_limit, turn.batch_limit, turn.max_output_tokens"
+
+let test_removed_keeper_runtime_knobs_fail_loud () =
+  let doc = parse_or_fail removed_knobs_source in
+  (match Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc with
+   | Ok _ -> fail "removed Keeper runtime knobs must not resolve"
+   | Error msg -> check string "pure resolver rejection" removed_knobs_error msg);
+  with_base_path @@ fun base_path ->
+  write_toml base_path removed_knobs_source;
+  let path =
+    Filename.concat
+      (Filename.concat base_path ".masc/config")
+      Config_dir_resolver.runtime_toml_filename
   in
-  check int "applied canonical TOML" 1 count;
-  check (option string) "deprecated typo env ignored"
-    (Some "12")
-    (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides)
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> fail "removed Keeper runtime knobs must fail startup config load"
+  | Error msg ->
+    check string "startup loader rejection"
+      (Printf.sprintf "validate %s: %s" path removed_knobs_error)
+      msg
 
 let test_parse_error_returns_error () =
   with_base_path @@ fun base_path ->
@@ -309,7 +313,7 @@ let test_float_value_round_trip () =
     "[turn]\nstream_idle_timeout_sec = 120.5\n"
   in
   let _, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check (option string) "float preserved"
     (Some "120.5")
@@ -465,16 +469,13 @@ let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
-        ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
+        ; test_case "applies heartbeat overrides" `Quick test_applies_heartbeat_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
-        ; test_case
-            "deprecated autoboot env does not preempt TOML"
-            `Quick
-            test_deprecated_autoboot_env_does_not_preempt_toml
+        ; test_case "removed Keeper runtime knobs fail loud" `Quick test_removed_keeper_runtime_knobs_fail_loud
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path

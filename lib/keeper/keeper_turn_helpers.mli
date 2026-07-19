@@ -33,6 +33,7 @@ val create_trajectory_accumulator :
   config:Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
+  keeper_turn_id:int ->
   generation:int ->
   Trajectory.accumulator
 (** Create the per-trace accumulator with one lane-level durable coverage-gap
@@ -75,7 +76,6 @@ val record_pre_dispatch_terminal_observation :
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->
-  trajectory_outcome:Trajectory.trajectory_outcome ->
   ?error_kind:Keeper_execution_receipt.error_kind ->
   ?error_message:string ->
   ?degraded_retry_applied:bool ->

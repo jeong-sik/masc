@@ -1,11 +1,8 @@
-(** RFC-0108: trajectory writer atomicity stress.
+(** RFC-0108: Keeper-lane trajectory queue atomicity stress.
 
-    Drives many concurrent OCaml threads against [Trajectory.record_tool_call]
-    for the same trace file (the contention surface that produced ~89
-    utf-8 multibyte-tear lines in
-    [.masc/trajectories/{analyst,imseonghan,sangsu,ramarama,issue_king,…}]
-    on 2026-05-17). Post-fix the file must contain every record exactly
-    once and every line must parse as JSON. *)
+    Drives many concurrent OCaml threads against one turn-scoped accumulator.
+    The durable queue must retain every multibyte Tool observation exactly once
+    and persist only complete JSONL rows. *)
 
 open Alcotest
 
@@ -49,13 +46,23 @@ let make_entry ~tid ~seq : Trajectory.tool_call_entry =
      where the pre-fix shared-channel buffer corrupted lines. *)
   let kor_count = 100 + (seq mod 300) in
   let kor = String.concat "" (List.init kor_count (fun _ -> "가")) in
+  let planned_index = (tid * 100) + seq in
+  let invocation =
+    Agent_sdk.Tool.Invocation.create ~tool_use_id:"" ~turn:0
+      ~schedule:
+        { planned_index
+        ; batch_index = tid
+        ; batch_size = 16
+        ; execution_mode = Agent_sdk.Tool.Concurrent
+        }
+  in
   match
     Trajectory.make_tool_call_entry ~ts:(Unix.gettimeofday ())
-      ~ts_iso:"2026-05-17T00:00:00Z" ~turn:tid ~round:(seq + 1)
+      ~ts_iso:"2026-05-17T00:00:00Z" ~keeper_turn_id:1 ~invocation
       ~tool_name:(Printf.sprintf "tool_%d" tid)
       ~arguments:[ ("k", `String kor); ("tid", `Int tid); ("seq", `Int seq) ]
       ~outcome:(Trajectory.Tool_succeeded "") ~duration_ms:0
-      ~execution_id:(Printf.sprintf "exec-%d-%d" tid seq)
+      ~execution_id:(Ids.Execution_id.of_string (Printf.sprintf "exec-%d-%d" tid seq))
   with
   | Ok entry -> entry
   | Error error ->
@@ -70,25 +77,22 @@ let test_concurrent_threads () =
   let trace_id = "trace-test-1" in
   let n_threads = 16 in
   let n_records_per_thread = 100 in
+  let accumulator =
+    Trajectory.create_accumulator ~masc_root ~keeper_name ~trace_id
+      ~keeper_turn_id:1 ~generation:0 ()
+  in
   let threads =
     List.init n_threads (fun tid ->
       Thread.create
         (fun () ->
           for seq = 0 to n_records_per_thread - 1 do
-            Trajectory.record_tool_call
-              ~masc_root
-              ~keeper_name
-              ~trace_id
-              (make_entry ~tid ~seq)
+            Trajectory.record_entry accumulator (make_entry ~tid ~seq)
           done)
         ())
   in
   List.iter Thread.join threads;
-  let path =
-    Filename.concat
-      (Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper_name))
-      (Printf.sprintf "%s.jsonl" trace_id)
-  in
+  Trajectory.flush_pending accumulator;
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
   let lines = read_lines path in
   check
     int
@@ -110,18 +114,20 @@ let test_concurrent_threads () =
             (Printexc.to_string e)
       in
       let open Yojson.Safe.Util in
-      let turn = json |> member "turn" |> to_int in
-      let round = json |> member "round" |> to_int in
-      let key = (turn, round) in
+      let keeper_turn_id = json |> member "keeper_turn_id" |> to_int in
+      let execution_id = json |> member "execution_id" |> to_string in
+      let key = execution_id in
       if Hashtbl.mem seen key
-      then failf "duplicate record: turn=%d round=%d" turn round;
+      then failf "duplicate record: execution_id=%s" execution_id;
+      check int "single Keeper turn" 1 keeper_turn_id;
       Hashtbl.add seen key ())
     lines;
   check
     int
-    "unique (turn, round) pairs"
+    "unique execution identities"
     (n_threads * n_records_per_thread)
-    (Hashtbl.length seen)
+    (Hashtbl.length seen);
+  Trajectory.finalize accumulator Trajectory.Completed |> ignore
 
 let () =
   Alcotest.run

@@ -13,10 +13,10 @@ export type TurnBlock = {
 }
 
 export type TurnRecordEntry = {
-  execution_ids: string[]
   keeper: string
   trace_id: string
   absolute_turn: number
+  turn_ref: string
   blocks: TurnBlock[]
   runtime_profile: string
   // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
@@ -287,40 +287,104 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly items: KeeperCompactionSnapshot[]
 }
 
+const TURN_BLOCK_FIELDS = new Set(['block', 'bytes', 'digest'])
+
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
   if (!isRecord(raw)) return null
-  const block = asString(raw.block)
-  const digest = asString(raw.digest)
-  const bytes = asNumber(raw.bytes)
-  if (!block || !digest || bytes == null) return null
+  if (!Object.keys(raw).every(field => TURN_BLOCK_FIELDS.has(field))) return null
+  const block = typeof raw.block === 'string' ? raw.block : null
+  const digest = typeof raw.digest === 'string' ? raw.digest : null
+  const bytes = Number.isSafeInteger(raw.bytes) && (raw.bytes as number) >= 0
+    ? raw.bytes as number
+    : null
+  if (block == null || digest == null || bytes == null) return null
   return { block, bytes, digest }
 }
 
-function decodeTurnBlockList(raw: unknown): TurnBlock[] {
-  return asRecordArray(raw)
-    .map(decodeTurnBlock)
-    .filter((block): block is TurnBlock => block !== null)
+function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
+  if (!Array.isArray(raw)) return null
+  const blocks: TurnBlock[] = []
+  for (const item of raw) {
+    const block = decodeTurnBlock(item)
+    if (!block) return null
+    blocks.push(block)
+  }
+  return blocks
 }
+
+const TURN_RECORD_ENTRY_FIELDS = new Set([
+  'keeper',
+  'trace_id',
+  'absolute_turn',
+  'turn_ref',
+  'blocks',
+  'runtime_profile',
+  'model',
+  'finish_reason',
+  'context_window',
+  'price_input_per_million',
+  'price_output_per_million',
+  'request_latency_ms',
+  'ttfrc_ms',
+  'temperature',
+  'top_p',
+  'max_tokens',
+  'thinking_budget',
+  'enable_thinking',
+  'input_tokens',
+  'output_tokens',
+  'ts',
+])
 
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  const trace_id = asString(raw.trace_id)
-  const absolute_turn = asNumber(raw.absolute_turn)
-  const runtime_profile = asString(raw.runtime_profile)
+  if (!Object.keys(raw).every(field => TURN_RECORD_ENTRY_FIELDS.has(field))) return null
+  const keeper = typeof raw.keeper === 'string' ? raw.keeper : null
+  const trace_id = typeof raw.trace_id === 'string' ? raw.trace_id : null
+  const absolute_turn = Number.isSafeInteger(raw.absolute_turn) && (raw.absolute_turn as number) > 0
+    ? raw.absolute_turn as number
+    : null
+  const turn_ref = typeof raw.turn_ref === 'string' && raw.turn_ref !== '' ? raw.turn_ref : null
+  const runtime_profile = typeof raw.runtime_profile === 'string' ? raw.runtime_profile : null
   const ts = asNumber(raw.ts)
-  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+  const blocks = decodeTurnBlockList(raw.blocks)
+  if (
+    keeper == null
+    || trace_id == null
+    || absolute_turn == null
+    || turn_ref == null
+    || runtime_profile == null
+    || ts == null
+    || blocks == null
+  ) {
     return null
   }
-  const execution_ids = Array.isArray(raw.execution_ids)
-    ? raw.execution_ids.filter((id): id is string => typeof id === 'string')
-    : []
+  const optionalStrings = ['model', 'finish_reason'] as const
+  if (optionalStrings.some(field => field in raw && typeof raw[field] !== 'string')) return null
+  const optionalFiniteNumbers = [
+    'temperature',
+    'top_p',
+    'price_input_per_million',
+    'price_output_per_million',
+    'ttfrc_ms',
+  ] as const
+  if (optionalFiniteNumbers.some(field => field in raw && asNumber(raw[field]) === undefined)) return null
+  const optionalIntegers = [
+    'max_tokens',
+    'thinking_budget',
+    'input_tokens',
+    'output_tokens',
+    'context_window',
+    'request_latency_ms',
+  ] as const
+  if (optionalIntegers.some(field => field in raw && !Number.isSafeInteger(raw[field]))) return null
+  if ('enable_thinking' in raw && typeof raw.enable_thinking !== 'boolean') return null
   return {
-    execution_ids,
     keeper,
     trace_id,
     absolute_turn,
-    blocks: decodeTurnBlockList(raw.blocks),
+    turn_ref,
+    blocks,
     runtime_profile,
     model: asString(raw.model),
     finish_reason: asString(raw.finish_reason),
@@ -340,29 +404,43 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   }
 }
 
-function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
-  if (!isRecord(raw)) return null
-  const changed = asRecordArray(raw.changed)
-    .map((pair) => {
-      const prev = decodeTurnBlock(pair.prev)
-      const next = decodeTurnBlock(pair.next)
-      return prev && next ? { prev, next } : null
-    })
-    .filter((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)
+const TURN_BLOCK_DIFF_FIELDS = new Set(['added', 'removed', 'changed'])
+const TURN_BLOCK_CHANGE_FIELDS = new Set(['prev', 'next'])
+
+function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null | undefined {
+  if (raw === null) return null
+  if (!isRecord(raw)) return undefined
+  if (!Object.keys(raw).every(field => TURN_BLOCK_DIFF_FIELDS.has(field))) return undefined
+  const added = decodeTurnBlockList(raw.added)
+  const removed = decodeTurnBlockList(raw.removed)
+  if (added == null || removed == null || !Array.isArray(raw.changed)) return undefined
+  const changed: { prev: TurnBlock; next: TurnBlock }[] = []
+  for (const item of raw.changed) {
+    if (!isRecord(item)) return undefined
+    if (!Object.keys(item).every(field => TURN_BLOCK_CHANGE_FIELDS.has(field))) return undefined
+    const prev = decodeTurnBlock(item.prev)
+    const next = decodeTurnBlock(item.next)
+    if (!prev || !next) return undefined
+    changed.push({ prev, next })
+  }
   return {
-    added: decodeTurnBlockList(raw.added),
-    removed: decodeTurnBlockList(raw.removed),
+    added,
+    removed,
     changed,
   }
 }
 
+const TURN_RECORD_ROW_FIELDS = new Set(['record', 'diff_vs_prev'])
+
 function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   if (!isRecord(raw)) return null
+  if (!Object.keys(raw).every(field => TURN_RECORD_ROW_FIELDS.has(field))) return null
   const record = decodeTurnRecordEntry(raw.record)
-  if (!record) return null
+  const diff = decodeTurnBlockDiff(raw.diff_vs_prev)
+  if (!record || diff === undefined) return null
   return {
     record,
-    diff_vs_prev: decodeTurnBlockDiff(raw.diff_vs_prev),
+    diff_vs_prev: diff,
   }
 }
 
@@ -547,15 +625,21 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
   if (!keeper) return null
+  if (!Array.isArray(raw.entries)) return null
+  const rawEntries = raw.entries
+  const entries: TurnRecordRow[] = []
+  for (const rawEntry of rawEntries) {
+    const entry = decodeTurnRecordRow(rawEntry)
+    if (!entry) return null
+    entries.push(entry)
+  }
   return {
     ...decodeTelemetryFreshnessMetadata(raw),
     keeper,
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
     memory_os: decodeMemoryOsSnapshot(raw.memory_os),
-    entries: asRecordArray(raw.entries)
-      .map(decodeTurnRecordRow)
-      .filter((row): row is TurnRecordRow => row !== null),
+    entries,
   }
 }
 

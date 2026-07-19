@@ -25,9 +25,11 @@
   unix
   eio
   yojson
+  base64
   agent_sdk
   fs_compat
   time_compat
   dated_jsonl
   masc_core
+  masc_types
   masc_log))

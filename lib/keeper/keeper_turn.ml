@@ -524,14 +524,6 @@ let run_keeper_invocation_turn_admitted
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
-      (* === Harness: trajectory accumulator + eval gate config === *)
-      let trajectory_acc =
-        Keeper_turn_helpers.create_trajectory_accumulator
-          ~config:ctx.config
-          ~keeper_name:meta.name
-          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.generation
-      in
       let effective_models =
         if direct_reply then
           Provider_runtime_projection.default_execution_model_strings
@@ -713,8 +705,19 @@ let run_keeper_invocation_turn_admitted
             let world_observation = direct_turn_observation ~config:ctx.config meta in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+	            (* Register only at the OAS dispatch boundary. Prompt and
+	               context preparation above cannot strand an active lane. *)
+	            let trajectory_acc =
+	              Keeper_turn_helpers.create_trajectory_accumulator
+	                ~config:ctx.config
+	                ~keeper_name:meta.name
+	                ~trace_id:
+	                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+	                ~keeper_turn_id
+	                ~generation:meta.runtime.generation
+	            in
 	            let run_result, latency_ms =
-	              Keeper_context_runtime.timed (fun () ->
+	              match Keeper_context_runtime.timed (fun () ->
 	                  match Eio_context.get_clock () with
 	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
 	                  | Ok clock ->
@@ -808,10 +811,6 @@ let run_keeper_invocation_turn_admitted
 		                                        fail_open_err))
 		                                ~activity_kind:
 		                                  "direct_no_progress_retry_setup"
-		                                ~trajectory_outcome:
-		                                  (Trajectory.Failed
-		                                     (Agent_sdk.Error.to_string
-		                                        fail_open_err))
 		                                ~error_kind:
 		                                  (Keeper_agent_error
 		                                   .sdk_error_kind_for_receipt
@@ -855,28 +854,40 @@ let run_keeper_invocation_turn_admitted
                                 ?event_bus
                                 ?continuation_channel
                                 ())
-		                         ()))
-		            in
+	                         ())) with
+	              | result -> result
+	              | exception exn ->
+	                let backtrace = Printexc.get_raw_backtrace () in
+	                let outcome =
+	                  match exn with
+	                  | Eio.Cancel.Cancelled _ -> Trajectory.Cancelled
+	                  | _ -> Trajectory.Failed (Printexc.to_string exn)
+	                in
+	                Keeper_turn_helpers.finalize_trajectory_acc
+	                  ~config:ctx.config
+	                  ~keeper_name:meta.name
+	                  trajectory_acc
+	                  outcome;
+	                Printexc.raise_with_backtrace exn backtrace
+	            in
 		            match run_result with
             | Error err ->
               let e_str = Agent_sdk.Error.to_string err in
               let user_message = Keeper_agent_error.user_message_of_sdk_error err in
-              (try
-                 let _ = Trajectory.finalize trajectory_acc
-                   (Trajectory.Failed e_str) in
-                 ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
-                 ~label:"trajectory finalize (agent_run error)" exn);
+              Keeper_turn_helpers.finalize_trajectory_acc
+                ~config:ctx.config
+                ~keeper_name:meta.name
+                trajectory_acc
+                (Trajectory.Failed e_str);
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
             | Ok (result, _) ->
-              (try
-                 let _ = Trajectory.finalize trajectory_acc
-                   Trajectory.Completed in
-                 ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
-                 ~label:"trajectory finalize (agent_run ok)" exn);
+              Keeper_turn_helpers.finalize_trajectory_acc
+                ~config:ctx.config
+                ~keeper_name:meta.name
+                trajectory_acc
+                Trajectory.Completed;
               let resilience_handles =
                 Keeper_turn_runtime_budget.post_turn_resilience_handles
                   ~config:ctx.config ~meta

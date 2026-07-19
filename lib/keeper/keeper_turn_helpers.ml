@@ -74,6 +74,7 @@ let create_trajectory_accumulator
       ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(trace_id : string)
+      ~(keeper_turn_id : int)
       ~(generation : int)
   : Trajectory.accumulator
   =
@@ -103,6 +104,7 @@ let create_trajectory_accumulator
     ~masc_root
     ~keeper_name
     ~trace_id
+    ~keeper_turn_id
     ~generation
     ()
 ;;
@@ -227,7 +229,6 @@ let record_pre_dispatch_terminal_observation
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
-      ~(trajectory_outcome : Trajectory.trajectory_outcome)
       ?error_kind
       ?error_message
       ?(degraded_retry_applied = false)
@@ -243,11 +244,6 @@ let record_pre_dispatch_terminal_observation
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
-  let trajectory_acc =
-    create_trajectory_accumulator ~config ~keeper_name:meta.name ~trace_id
-      ~generation
-  in
-  finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in
   let receipt : Keeper_execution_receipt.t =
     { keeper_name = meta.name

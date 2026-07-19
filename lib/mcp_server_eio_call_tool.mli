@@ -15,9 +15,6 @@
     [nonempty_string_opt], [json_nonempty_string_opt],
     [runtime_mcp_keeper_error_preview],
     [runtime_mcp_keeper_tool_call_sse_payload],
-    [runtime_mcp_masc_root],
-    [record_runtime_mcp_trajectory_coverage_gap],
-    [record_runtime_mcp_keeper_trajectory],
     [resolve_managed_agent_call]).
 
     [tool_profile] is referenced by {!handle_call_tool_eio}
@@ -73,8 +70,9 @@ type keeper_runtime_mcp_log_context = {
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context
-    captured at tool-call time.  Threaded into telemetry +
-    trajectory writers. *)
+    captured at tool-call time. Threaded into the runtime-MCP tool-call audit
+    row and its SSE projection. Runtime MCP has no OAS Invocation and therefore
+    cannot produce a canonical Keeper trajectory row. *)
 
 val runtime_mcp_keeper_log_context_of_entry :
   ?mcp_session_id:string ->
@@ -99,12 +97,12 @@ val record_runtime_mcp_keeper_tool_trace :
 (** Persists a single tool-call trace row for the keeper.
     Builds the {!keeper_runtime_mcp_log_context}
     internally (so callers do not need to pre-thread it),
-    appends to the runtime-MCP trajectory log, emits the
-    exact-disposition SSE payload, and bumps the trajectory-coverage
-    counter. Binary observation formats derive their [success]
-    projection only at this boundary. Errors during persistence are swallowed
-    with a [Log.Misc.warn] — telemetry must never abort
-    the tool call. *)
+    appends to the runtime-MCP tool-call audit store, and emits the
+    exact-disposition SSE payload. It deliberately does not write the canonical
+    Keeper trajectory store because this boundary has no OAS Invocation.
+    Binary observation formats derive their [success] projection only at this
+    boundary. Observation failures are logged explicitly without aborting the
+    already-completed tool call. *)
 
 (** {1 [tools/call] dispatcher} *)
 

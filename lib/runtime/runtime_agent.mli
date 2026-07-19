@@ -363,6 +363,7 @@ val run :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?execution_store:Agent_sdk.Agent.execution_store ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
@@ -381,6 +382,7 @@ val run_blocks :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?execution_store:Agent_sdk.Agent.execution_store ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   ?goal_detail:string ->
@@ -399,6 +401,7 @@ val run_with_masc_tools :
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?execution_store:Agent_sdk.Agent.execution_store ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
 (** Variant of {!run} that projects the supplied MASC schemas into exact inline

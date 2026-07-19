@@ -155,7 +155,7 @@ describe('KeeperToolTelemetry render', () => {
         {
           source: 'trajectory_tool_call',
           producer: 'keeper_hooks_oas.post_tool_use',
-          durable_store: '.masc/keepers/analyst/trajectories',
+          durable_store: '.masc/keepers/analyst/trajectories/v1',
           dashboard_surface: '/api/v1/keepers/:name/tool-stats',
           stale_reason: 'trajectory_append_failed',
           trace_id: 'trace-tool-stats-gap',
@@ -178,7 +178,7 @@ describe('KeeperToolTelemetry render', () => {
     expect(container.textContent).toContain('trajectory read failed · /trajectory/t.jsonl · permission denied')
     expect(container.textContent).toContain('reason trajectory_append_failed')
     expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')
-    expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories')
+    expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories/v1')
     expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-stats')
     expect(container.textContent).toContain('trace trace-tool-stats-gap')
     expect(container.textContent).toContain('error append denied')

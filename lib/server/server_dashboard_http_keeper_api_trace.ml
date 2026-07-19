@@ -36,7 +36,7 @@ let trajectory_line_to_chat_trace_step = function
     Some
       (Keeper_chat_blocks.Trace_tool
          { name = entry.tool_name
-         ; tool_call_id = Some entry.execution_id
+         ; tool_call_id = Some (Ids.Execution_id.to_string entry.execution_id)
          ; status = Some status
          ; dur = Some (Printf.sprintf "%dms" entry.duration_ms)
          ; args = Some (`Assoc entry.arguments)
@@ -85,10 +85,13 @@ let chat_trace_block_by_turn_ref ~max_lines
       match Hashtbl.find_opt cache trace_id with
       | Some lines -> Some lines
       | None ->
-        let trajectory_read =
-          Trajectory.read_recent_lines_result ~masc_root ~keeper_name ~trace_id
-            ~max_entries:max_lines
+        let trajectory_page =
+          Trajectory.read_recent_lines_page_result ~masc_root ~keeper_name
+            ~trace_id
+            ~scan_limits:Trajectory.standard_trajectory_scan_limits
+            ~max_entries:max_lines ()
         in
+        let trajectory_read = trajectory_page.read in
         log_trajectory_read_observation ~trace_id trajectory_read;
         let lines = trajectory_read.lines in
         Hashtbl.replace cache trace_id lines;
@@ -103,8 +106,10 @@ let chat_trace_block_by_turn_ref ~max_lines
       let trace =
         all_lines
         |> List.filter (function
-             | Trajectory.Thinking entry -> entry.turn = absolute_turn
-             | Trajectory.Tool_call entry -> entry.turn = absolute_turn)
+             | Trajectory.Thinking entry ->
+               entry.keeper_turn_id = absolute_turn
+             | Trajectory.Tool_call entry ->
+               entry.keeper_turn_id = absolute_turn)
         |> List.filter_map trajectory_line_to_chat_trace_step
       in
       (match trace with

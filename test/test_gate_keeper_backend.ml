@@ -892,7 +892,8 @@ let receipt_detail_of_provider_call
   ; output_fingerprint = None
   }
 
-let trajectory_entry_of_provider_call ~ts ~turn ~round
+let trajectory_entry_of_provider_call ~ts ~keeper_turn_id ~oas_turn
+    ~planned_index
     (call : Agent_sdk.Canonical_tool.provider_tool_call)
   : Trajectory.tool_call_entry =
   let arguments =
@@ -900,12 +901,22 @@ let trajectory_entry_of_provider_call ~ts ~turn ~round
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "canonical provider Tool input must be an object"
   in
+  let invocation =
+    Agent_sdk.Tool.Invocation.create ~tool_use_id:call.call_id ~turn:oas_turn
+      ~schedule:
+        { planned_index
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_sdk.Tool.Serial
+        }
+  in
   match
     Trajectory.make_tool_call_entry ~ts
-      ~ts_iso:(Types_core.iso8601_of_unix_seconds ts) ~turn ~round
+      ~ts_iso:(Types_core.iso8601_of_unix_seconds ts) ~keeper_turn_id
+      ~invocation
       ~tool_name:call.name ~arguments
       ~outcome:(Trajectory.Tool_succeeded {|{"ok":true}|}) ~duration_ms:1
-      ~execution_id:("exec-" ^ call.call_id)
+      ~execution_id:(Ids.Execution_id.of_string ("exec-" ^ call.call_id))
   with
   | Ok entry -> entry
   | Error error ->
@@ -1105,22 +1116,25 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
         (fun () ->
            let keeper_name = "interleave-keeper" in
            let trace_id = "trace-oas-masc-interleaving" in
-           let turn = 7 in
+           let keeper_turn_id = 7 in
+           let oas_turn = 0 in
            let acc =
              Trajectory.create_accumulator ~masc_root:base_dir ~keeper_name
-               ~trace_id ~generation:0 ()
+               ~trace_id ~keeper_turn_id ~generation:0 ()
            in
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name ~trajectory_acc:(Some acc) ~oas_turn
              [ thinking_before_read ];
            Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.1 ~turn ~round:1 first);
+             (trajectory_entry_of_provider_call ~ts:1.1 ~keeper_turn_id
+                ~oas_turn ~planned_index:0 first);
            Trajectory.flush_pending acc;
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name ~trajectory_acc:(Some acc) ~oas_turn
              [ thinking_before_done ];
            Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second);
+             (trajectory_entry_of_provider_call ~ts:1.3 ~keeper_turn_id
+                ~oas_turn ~planned_index:1 second);
            Trajectory.flush_pending acc;
            check (list string) "MASC trajectory JSONL keeps interleaved facts"
              [ "thinking:inspect board first"

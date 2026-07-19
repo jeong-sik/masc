@@ -13,15 +13,17 @@ type tool_call_outcome =
 type tool_call_entry = private {
   ts : float;
   ts_iso : string;
-  turn : int;
-  round : int;
+  keeper_turn_id : int;
+  oas_turn : int;
+  schedule : Agent_sdk.Tool.schedule;
+  tool_use_id : string;
   tool_name : string;
   arguments : (string * Yojson.Safe.t) list;
       (** Structured Tool arguments. The association-list type makes the JSON
           object invariant explicit and prevents a parallel string form. *)
   outcome : tool_call_outcome;
   duration_ms : int;
-  execution_id : string;
+  execution_id : Ids.Execution_id.t;
       (** RFC-0233 canonical join key shared with the tool_calls JSONL row
           for the same execution. Rows without this identity are rejected by
           the closed codec rather than matched heuristically. *)
@@ -53,16 +55,31 @@ type entries_read_result = {
 }
 
 type entry_field =
+  | Schema
   | Row_type
   | Timestamp
   | Timestamp_iso
-  | Turn
-  | Round
+  | Keeper_turn_id
+  | Oas_turn
+  | Schedule
+  | Planned_index
+  | Batch_index
+  | Batch_size
+  | Execution_mode
+  | Tool_use_id
   | Tool_name
   | Arguments
   | Tool_outcome
   | Duration_ms
   | Execution_id
+  | Keeper_name
+  | Trace_id
+  | Generation
+  | Observed_oas_turn_count
+  | Total_tool_calls
+  | Trajectory_outcome
+  | Started_at
+  | Ended_at
   | Block_index
   | Thinking_block
 
@@ -84,32 +101,32 @@ val entry_decode_error_to_string : entry_decode_error -> string
 val make_tool_call_entry :
   ts:float ->
   ts_iso:string ->
-  turn:int ->
-  round:int ->
+  keeper_turn_id:int ->
+  invocation:Agent_sdk.Tool.Invocation.t ->
   tool_name:string ->
   arguments:(string * Yojson.Safe.t) list ->
   outcome:tool_call_outcome ->
   duration_ms:int ->
-  execution_id:string ->
+  execution_id:Ids.Execution_id.t ->
   (tool_call_entry, entry_decode_error) result
 (** Construct a canonical Tool observation. Invalid timestamps, empty
-    identities/names, non-positive rounds, negative durations, duplicate
+    identities/names, invalid exact OAS schedule values, negative durations, duplicate
     argument keys, and empty failure payloads are rejected before persistence. *)
 
 type trajectory_outcome =
   | Completed
   | Failed of string
-  | Timeout
-  | Gated of string
+  | Input_required
+  | Cancelled
 
 type trajectory = {
   keeper_name : string;
   trace_id : string;
+  keeper_turn_id : int;
   generation : int;
   started_at : float;
   ended_at : float;
-  entries : tool_call_entry list;
-  total_turns : int;
+  observed_oas_turn_count : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
 }
@@ -123,7 +140,8 @@ type trajectory = {
 type thinking_entry = private {
   ts : float;
   ts_iso : string;
-  turn : int;
+  keeper_turn_id : int;
+  oas_turn : int;
   block_index : int;
   block : Agent_sdk.Types.content_block;
 }
@@ -131,7 +149,8 @@ type thinking_entry = private {
 val make_thinking_entry :
   ts:float ->
   ts_iso:string ->
-  turn:int ->
+  keeper_turn_id:int ->
+  oas_turn:int ->
   block_index:int ->
   block:Agent_sdk.Types.content_block ->
   (thinking_entry, entry_decode_error) result
@@ -157,13 +176,101 @@ type trajectory_lines_read_result = {
   io_errors : trajectory_read_error list;
 }
 
+type trajectory_scan_limit_error =
+  | Non_positive_physical_row_limit of int
+  | Non_positive_byte_limit of int64
+
+type trajectory_scan_limits = private {
+  max_physical_rows : int;
+  max_bytes : int64;
+}
+
+val make_trajectory_scan_limits :
+  max_physical_rows:int ->
+  max_bytes:int64 ->
+  (trajectory_scan_limits, trajectory_scan_limit_error) result
+(** Construct one transport-I/O scan contract. Both limits must be positive.
+    These limits bound work performed by one read/page request; they are not a
+    Keeper turn, cost, token, recurrence, pause, or stop policy. *)
+
+val trajectory_scan_limit_error_to_string :
+  trajectory_scan_limit_error -> string
+
+val standard_trajectory_scan_limits : trajectory_scan_limits
+(** Canonical bounded transport-I/O contract for server call sites that select
+    the standard page policy explicitly. It is process-local read protection
+    only and never gates a Keeper's behavior or lifecycle. *)
+
+type trajectory_scan_stop =
+  | Reached_snapshot_start
+  | Reached_entry_limit
+  | Reached_physical_row_limit
+  | Reached_byte_limit
+  | Blocked_by_oversized_physical_row
+  | Rejected_cursor
+  | Read_error
+
+type trajectory_scan_coverage =
+  | Scan_complete
+  | Scan_partial
+  | Scan_blocked
+
+val trajectory_scan_coverage : trajectory_scan_stop -> trajectory_scan_coverage
+(** Derive coverage from the single authoritative stop reason. *)
+
+val trajectory_scan_stop_to_string : trajectory_scan_stop -> string
+(** Canonical closed wire label for a page stop reason. *)
+
+type trajectory_scan_observation = {
+  physical_rows : int;
+      (** Complete newline-delimited rows inspected, including blank,
+          summary, and invalid rows. A partial oversized row is not counted. *)
+  bytes_read : int64;
+      (** Bytes actually returned by the underlying reads, including bytes
+          consumed before an explicit I/O error. *)
+  stop : trajectory_scan_stop;
+}
+
 type trajectory_byte_cursor
 (** Opaque position in one immutable trajectory-file prefix.  A cursor binds
-    its byte offset to the opened file identity and snapshot size, so a later
-    page cannot silently continue in a replaced or truncated trace. *)
+    its byte offset to the logical keeper/trace identity, opened file identity,
+    and snapshot size, so a later page cannot silently continue in a different,
+    replaced, or truncated trace. *)
+
+type trajectory_cursor_field =
+  | Cursor_schema
+  | Cursor_keeper_name
+  | Cursor_trace_id
+  | Cursor_snapshot_device
+  | Cursor_snapshot_inode
+  | Cursor_snapshot_size
+  | Cursor_before_byte
+
+type trajectory_cursor_decode_error =
+  | Cursor_base64_decode_failed
+  | Cursor_json_decode_failed
+  | Cursor_expected_object
+  | Cursor_missing_field of trajectory_cursor_field
+  | Cursor_invalid_field of trajectory_cursor_field
+  | Cursor_unexpected_field of string
+  | Cursor_duplicate_field of string
+
+val trajectory_cursor_decode_error_to_string :
+  trajectory_cursor_decode_error -> string
+
+val trajectory_byte_cursor_to_string : trajectory_byte_cursor -> string
+(** Encode a versioned closed cursor as unpadded URI-safe Base64. The token is
+    opaque transport state, not an authorization credential. *)
+
+val trajectory_byte_cursor_of_string :
+  string -> (trajectory_byte_cursor, trajectory_cursor_decode_error) result
+(** Decode the exact closed cursor schema. Malformed Base64/JSON, missing,
+    duplicate, unexpected, incorrectly typed, or out-of-range fields are
+    explicit typed errors. *)
 
 type trajectory_lines_page = {
   read : trajectory_lines_read_result;
+  scan : trajectory_scan_observation;
   next_cursor : trajectory_byte_cursor option;
 }
 
@@ -172,7 +279,6 @@ val trajectory_byte_cursor_offset : trajectory_byte_cursor -> int64
     produced this cursor. *)
 
 type persistence_operation =
-  | Append_tool_call
   | Flush_pending
 
 type persistence_error_cause =
@@ -188,18 +294,6 @@ type persistence_error = {
 exception Persistence_error of persistence_error
 
 val persistence_error_to_string : persistence_error -> string
-
-type round_hydration_error =
-  | Malformed_round_row of { trace_id : string; detail : string }
-  | Invalid_round_row of
-      { trace_id : string
-      ; error : entry_decode_error
-      }
-  | Round_store_error of { path : string; detail : string }
-
-exception Round_hydration_error of round_hydration_error
-
-val round_hydration_error_to_string : round_hydration_error -> string
 
 (** {1 JSON serialization} *)
 
@@ -224,6 +318,10 @@ val trajectory_read_errors_to_json :
 
 (** {1 Persistence} *)
 
+val trajectory_contract_version : string
+(** Canonical wire and store version segment. The current closed codec and
+    [trajectories_dir] both derive their [v1] identity from this value. *)
+
 val trajectories_dir : string -> string -> string
 val trajectory_path : string -> string -> string -> string
 
@@ -232,18 +330,9 @@ val read_entries_result :
   entries_read_result
 (** Read one trace without collapsing read failures or invalid rows into a
     false empty trajectory. Missing trace files are a legitimate empty result;
-    I/O failures are preserved in [io_errors]. *)
-
-(** Get the next round number for a (keeper_name, trace_id, turn) without
-    reading the entire trajectory file. A cold key finds the latest durable
-    Tool row by exact exponential tail search, then increments in-memory. *)
-val next_round :
-  masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
-  int
-
-val reset_round_counters_for_testing : unit -> unit
-(** Clear the in-memory round-counter cache. Test-only: lets tests start from a
-    known state and force re-hydration from disk. *)
+    I/O failures are preserved in [io_errors]. The file is decoded one physical
+    row at a time, so memory is bounded by the decoded result plus the largest
+    row rather than an additional full-file string and split-line list. *)
 
 val trajectory_lines_of_jsonl_lines :
   string list -> trajectory_lines_read_result
@@ -254,38 +343,40 @@ val trajectory_lines_of_jsonl_lines :
 val read_all_lines_result :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory_lines_read_result
-(** Read all entries (tool calls + thinking) from JSONL with decode and I/O
-    observations. *)
-
-val read_recent_lines_result :
-  masc_root:string -> keeper_name:string -> trace_id:string -> max_entries:int ->
-  trajectory_lines_read_result
-(** Read up to [max_entries] canonical entries (Tool calls + Thinking) from the
-    JSONL tail.  The bound counts decoded entries, not physical rows:
-    summaries and invalid rows are observed without consuming it.  [lines]
-    are chronological, oldest first; decode and I/O failures remain explicit
-    in the result. *)
+(** Read all entries (tool calls + thinking) from JSONL one physical row at a
+    time with decode and I/O observations. Memory is bounded by the decoded
+    result plus the largest row. *)
 
 val read_recent_lines_page_result :
   masc_root:string ->
   keeper_name:string ->
   trace_id:string ->
   ?before:trajectory_byte_cursor ->
+  scan_limits:trajectory_scan_limits ->
   max_entries:int ->
   unit ->
   trajectory_lines_page
-(** Cursor-driven form of {!read_recent_lines_result}.  Reads backwards from
-    [before], or from a stable end-of-file snapshot when omitted, and stops at
-    exactly [max_entries] canonical rows or the beginning of that snapshot.
-    [next_cursor] is present only when older bytes remain.  A file replacement,
-    truncation, or storage failure is reported in [read.io_errors]. *)
+(** Read backwards from [before], or from a stable end-of-file snapshot when
+    omitted. One page stops
+    at [max_entries], a physical-row/byte scan limit, or the beginning of the
+    snapshot. [max_entries] must be positive. [scan] reports exact work and the
+    typed stop reason; coverage is derived by {!trajectory_scan_coverage}.
+
+    A byte-limit stop occurs only at a verified newline boundary, so following
+    [next_cursor] neither skips nor duplicates a complete physical row. If one
+    physical row itself exceeds the byte contract before any safe boundary can
+    be established, the page is explicitly
+    [Blocked_by_oversized_physical_row] and does not fabricate a continuation.
+    File replacement, truncation, a cursor that is not on a verified newline
+    boundary, cursor rejection, and storage failures remain explicit in
+    [read.io_errors]. These are transport-I/O limits only, never Keeper
+    behavioral gates. *)
 
 (** {1 Accumulator}
 
-    Session-scoped mutable state whose queue, locks, and finalization flag stay
-    private to this module. Callers can observe identity/current entries but
-    cannot construct a second state representation or mutate persistence
-    internals. *)
+    Keeper-turn-scoped mutable state whose pending durable queue, locks, and
+    finalization flag stay private. Successfully flushed Tool payloads are not
+    retained in memory. *)
 
 type accumulator
 
@@ -294,6 +385,7 @@ type accumulator_registration_error =
       { masc_root : string
       ; keeper_name : string
       ; trace_id : string
+      ; keeper_turn_id : int
       }
 
 exception Accumulator_registration_error of accumulator_registration_error
@@ -304,24 +396,17 @@ val accumulator_registration_error_to_string :
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> unit -> accumulator
+  keeper_turn_id:int -> generation:int -> unit -> accumulator
 
 val accumulator_masc_root : accumulator -> string
 val accumulator_keeper_name : accumulator -> string
 val accumulator_trace_id : accumulator -> string
-val accumulator_entries : accumulator -> tool_call_entry list
+val accumulator_keeper_turn_id : accumulator -> int
 
 val record_entry : accumulator -> tool_call_entry -> unit
-(** Queue an already validated Tool observation.  Its [turn] must come from the
-    exact execution occurrence (for OAS, {!Agent_sdk.Tool.Invocation.turn});
-    the accumulator has no ambient or independently incremented turn state. *)
+(** Queue an already validated Tool observation. Its Keeper turn must equal
+    the accumulator and its OAS turn/schedule come from the exact Invocation. *)
 val record_thinking : accumulator -> thinking_entry -> unit
-val record_tool_call :
-  masc_root:string -> keeper_name:string -> trace_id:string ->
-  tool_call_entry -> unit
-(** Record through the active per-trace accumulator when one exists; otherwise
-    durably append through the same closed serializer. This is the only public
-    Tool-row persistence boundary. *)
 val finalize : accumulator -> trajectory_outcome -> trajectory
 
 val flush_pending : accumulator -> unit

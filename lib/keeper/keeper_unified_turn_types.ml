@@ -315,7 +315,6 @@ let record_streaming_cancelled_observation
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"
-    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
     ~keeper_turn_id
     ();
   Keeper_turn_fsm.emit_transition

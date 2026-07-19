@@ -186,6 +186,20 @@ function sourceLabel(entry: JourneyWaterfallEntry): string {
   }
 }
 
+function structuralClockLabel(entry: JourneyWaterfallEntry): string | null {
+  if (entry.keeperTurnId == null || entry.oasTurn == null) return null
+  const parts = [`K ${entry.keeperTurnId}`, `OAS ${entry.oasTurn + 1}`]
+  if (entry.blockIndex != null) {
+    parts.push(`response block ${entry.blockIndex + 1}`)
+  } else if (entry.toolSchedule) {
+    parts.push(
+      `batch ${entry.toolSchedule.batch_index + 1}/${entry.toolSchedule.batch_size}`,
+      `plan ${entry.toolSchedule.planned_index + 1}`,
+    )
+  }
+  return parts.join(' · ')
+}
+
 function MetricCell({
   label,
   value,
@@ -268,32 +282,40 @@ function WaterfallEntryRow({
   const isTool = entry.kind === 'tool_call'
   const isGap = entry.kind === 'provenance_gap'
   const style = toolCategory(entry.toolName ?? entry.summary)
+  let entryIcon = 'TH'
+  let entryLabel = 'thinking'
+  if (isTool) {
+    entryIcon = style.icon
+    entryLabel = normalizeToolName(entry.toolName ?? entry.summary)
+  } else if (isGap) {
+    entryIcon = 'GAP'
+    entryLabel = entry.toolName ?? entry.summary
+  }
   const widthPct = entry.durationMs && maxDurationMs > 0
     ? Math.max(8, Math.min(100, Math.round((entry.durationMs / maxDurationMs) * 100)))
     : 8
   const status = entry.status
   const resultPreview = entry.error ?? entry.toolResult ?? entry.thinkingContent ?? ''
+  const structuralClock = structuralClockLabel(entry)
 
   return html`
     <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
       <div class="flex flex-wrap items-center gap-2">
         <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs ${isTool ? style.color : 'text-[var(--color-info-fg)]'}">
-          ${isTool ? style.icon : isGap ? 'GAP' : 'TH'}
+          ${entryIcon}
         </span>
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg-secondary)]">
-          ${isTool
-            ? normalizeToolName(entry.toolName ?? entry.summary)
-            : isGap
-              ? entry.toolName ?? entry.summary
-              : 'thinking'}
+          ${entryLabel}
         </span>
         <${StatusChip} tone=${statusTone(entry)} uppercase=${false}>${status}<//>
         <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">
           ${sourceLabel(entry)}
         </span>
-        ${entry.round != null
-          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">round ${entry.round}</span>`
-          : null}
+        ${structuralClock !== null ? html`
+          <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">
+            ${structuralClock}
+          </span>
+        ` : null}
       </div>
 
       ${isTool

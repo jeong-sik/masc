@@ -267,8 +267,12 @@ export {
 
 export type {
   TrajectoryEntry,
+  TrajectoryExecutionMode,
   TrajectoryResponse,
   TrajectoryThinkingBlock,
+  TrajectoryThinkingEntry,
+  TrajectoryToolEntry,
+  TrajectoryToolSchedule,
 } from './dashboard-keeper-trajectory'
 export { fetchKeeperTrajectory } from './dashboard-keeper-trajectory'
 

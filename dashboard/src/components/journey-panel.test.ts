@@ -37,12 +37,23 @@ function trajectory(): TrajectoryResponse {
       },
     },
     io_errors: [],
+    scan: { physical_rows: 1, bytes_read: 1, stop: 'reached_entry_limit' },
+    next_cursor: null,
     entries: [
       {
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'tool_call',
         ts: 2,
         ts_iso: '2026-05-14T00:00:02.000Z',
-        turn: 1,
-        round: 1,
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        schedule: {
+          planned_index: 0,
+          batch_index: 0,
+          batch_size: 1,
+          execution_mode: 'serial',
+        },
+        tool_use_id: '',
         tool_name: 'fs_read',
         args: { path: '/tmp/old' },
         outcome: { status: 'succeeded', output: 'old result' },
@@ -215,8 +226,9 @@ describe('JourneyPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Keeper Turn Waterfall')).toBeInTheDocument()
-      expect(screen.getByText('Turn 1')).toBeInTheDocument()
+      expect(screen.getByText('Keeper Turn 1')).toBeInTheDocument()
       expect(screen.getByText('fs_read')).toBeInTheDocument()
+      expect(screen.getByText('K 1 · OAS 1 · batch 1/1 · plan 1')).toBeInTheDocument()
       expect(screen.getByText('agent turns 2')).toBeInTheDocument()
       expect(screen.getByText('trajectory + provenance')).toBeInTheDocument()
     })

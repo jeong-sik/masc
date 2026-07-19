@@ -757,25 +757,12 @@ let run_turn
            ~receipt_response_text_present_ref
            ()
        in
-       (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
-          receipt above. execution_ids come from the trajectory
-          accumulator (every entry of this run carries the id minted at
-          the dispatch boundary); sampling reads the last SDK turn's
-          effective values from the turn context cell. *)
+       (* TurnRecord uses the exact Keeper turn coordinate. Tool occurrences
+          remain in the canonical trajectory store and are not copied into an
+          unbounded per-turn identifier list. *)
        (let tctx =
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
-        in
-        let execution_ids =
-          match trajectory_acc with
-          | None -> []
-          | Some tacc ->
-            (* entries are prepended on record; rev restores call order *)
-            List.rev
-              (List.map
-                 (fun (e : Trajectory.tool_call_entry) ->
-                    Ids.Execution_id.of_string e.execution_id)
-                 (Trajectory.accumulator_entries tacc))
         in
         let usage : Turn_record.usage =
           match turn_result with
@@ -860,7 +847,6 @@ let run_turn
             ; enable_thinking = tctx.thinking_enabled
             }
           ~usage
-          ~execution_ids
           ~blocks:acc.prompt_blocks
           ();
         (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
@@ -868,8 +854,7 @@ let run_turn
            and direct "keeper_turn") keep their span open across this
            tail on the same fiber, so one add_attrs covers both. The
            OTel value type has no array — blocks serialize through the
-           Turn_record codec (single encoding SSOT), execution ids join
-           with commas. *)
+           Turn_record codec (single encoding SSOT). *)
         Otel_spans.add_attrs
           ~attrs:
             [ ( Otel_genai.Attr_key.masc_turn_blocks
@@ -880,10 +865,6 @@ let run_turn
                            acc.prompt_blocks))) )
             ; ( Otel_genai.Attr_key.masc_turn_profile
               , `String runtime_id_string )
-            ; ( Otel_genai.Attr_key.masc_turn_execution_ids
-              , `String
-                  (String.concat ","
-                     (List.map Ids.Execution_id.to_string execution_ids)) )
             ]
           ());
        receipt_result)

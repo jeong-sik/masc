@@ -225,17 +225,6 @@ let existing_file path =
 let home_dir_opt () =
   raw_value_opt "HOME" |> trim_opt
 
-(* RFC-0085 PR-11 — Env var deprecation mechanism removed.
-
-   The deprecation_warned Hashtbl + warn_deprecated + deprecated_opt +
-   resolve_deprecated + get_{float,int,bool}_deprecated cluster had a
-   single caller for the MASC_KEEPER_AUTOBOT_MAX typo legacy is gone. Per
-   memory/feedback_hardcoding_and_legacy_zero_tolerance.md, legacy env
-   support is deleted at the same time as the mechanism that hosts it;
-   the typo env is no longer recognised and operators using it must
-   migrate to MASC_KEEPER_AUTOBOOT_MAX. *)
-
-
 let default_http_port = Masc_network_defaults.masc_http_default_port_s
 let default_http_port_int = Masc_network_defaults.masc_http_default_port
 

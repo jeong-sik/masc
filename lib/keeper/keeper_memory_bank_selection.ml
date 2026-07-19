@@ -138,5 +138,4 @@ let is_meaningful_memory_text (s : string) : bool =
   not (List.mem key placeholders)
   && not (Keeper_synthetic_marker.contains_marker s)
   && not (has_inflated_consensus_marker s)
-  && not (String_util.contains_substring s "[turn budget exhausted")
   && String.length s <= max_memory_text_length ()

@@ -29,6 +29,7 @@ import {
   traceSlots,
 } from './session-trace-state'
 import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
+import type { TrajectoryThinkingEntry, TrajectoryToolEntry } from '../../api/dashboard-keeper-trajectory'
 
 // Reset trace slots before each test
 beforeEach(() => {
@@ -75,6 +76,48 @@ const ONE_TOOL_TRAJECTORY_OBSERVATION = {
     },
   },
   io_errors: [],
+  scan: { physical_rows: 1, bytes_read: 1, stop: 'reached_entry_limit' as const },
+  next_cursor: null,
+}
+
+function toolTrajectoryEntry(overrides: Partial<TrajectoryToolEntry> = {}): TrajectoryToolEntry {
+  return {
+    schema: 'masc.keeper_trajectory.v1' as const,
+    type: 'tool_call' as const,
+    ts: 1712397700,
+    ts_iso: '2024-04-06T10:01:40Z',
+    keeper_turn_id: 1,
+    oas_turn: 0,
+    schedule: {
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 1,
+      execution_mode: 'serial' as const,
+    },
+    tool_use_id: '',
+    tool_name: 'keeper_fs_read',
+    args: {},
+    outcome: { status: 'succeeded' as const, output: '' },
+    duration_ms: 0,
+    execution_id: 'exec-default',
+    ...overrides,
+  }
+}
+
+function thinkingTrajectoryEntry(
+  overrides: Partial<TrajectoryThinkingEntry> = {},
+): TrajectoryThinkingEntry {
+  return {
+    schema: 'masc.keeper_trajectory.v1' as const,
+    type: 'thinking' as const,
+    ts: 1,
+    ts_iso: '2026-07-18T00:00:01Z',
+    keeper_turn_id: 1,
+    oas_turn: 0,
+    block_index: 0,
+    block: { type: 'thinking' as const, thinking: '' },
+    ...overrides,
+  }
 }
 
 describe('appendLiveToolCall', () => {
@@ -264,14 +307,15 @@ describe('scheduleSessionTraceReload', () => {
         },
       },
       io_errors: [{ path: '/trajectory/trace-1.jsonl', message: 'read fault' }],
-      entries: [{
-        type: 'thinking',
+      scan: { physical_rows: 2, bytes_read: 128, stop: 'read_error' },
+      next_cursor: null,
+      entries: [thinkingTrajectoryEntry({
         ts: 1712400000,
         ts_iso: '2024-04-06T10:40:00Z',
-        turn: 12,
+        keeper_turn_id: 12,
         block_index: 0,
         block: { type: 'thinking', thinking: 'new keeper thought' },
-      }],
+      })],
     })
     dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
       keeper: 'keeper-a',
@@ -357,17 +401,15 @@ describe('buildTraceEvents', () => {
       {
         ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test', trace_id: 't1', generation: 1, total_entries: 1, showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/test.txt' },
           outcome: { status: 'succeeded', output: 'file contents' },
           duration_ms: 50,
           execution_id: 'exec-merge-1',
-        }],
+        })],
       },
     )
     expect(events.length).toBe(2)
@@ -400,17 +442,15 @@ describe('buildTraceEvents', () => {
   })
 
   it('preserves duplicate canonical identities as explicit conflicts', () => {
-    const duplicate = {
+    const duplicate = toolTrajectoryEntry({
       ts: 1712397700,
       ts_iso: '2024-04-06T10:01:40Z',
-      turn: 1,
-      round: 1,
       tool_name: 'keeper_fs_read',
       args: { file_path: '/tmp/a' },
       outcome: { status: 'succeeded' as const, output: 'a' },
       duration_ms: 1,
       execution_id: 'exec-duplicate',
-    }
+    })
     const events = buildTraceEvents(
       emptyTimeline('test'),
       {
@@ -420,7 +460,10 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 2,
         showing: 2,
-        entries: [duplicate, { ...duplicate, round: 2 }],
+        entries: [duplicate, {
+          ...duplicate,
+          schedule: { ...duplicate.schedule, planned_index: 1 },
+        }],
       },
     )
     expect(events).toHaveLength(2)
@@ -463,34 +506,30 @@ describe('buildTraceEvents', () => {
           },
         },
         io_errors: [],
+        scan: { physical_rows: 3, bytes_read: 256, stop: 'reached_snapshot_start' },
+        next_cursor: null,
         entries: [
-          {
-            type: 'thinking',
+          thinkingTrajectoryEntry({
             ts: 1,
             ts_iso: '2026-07-18T00:00:01Z',
-            turn: 1,
             block_index: 0,
             block: { type: 'thinking', thinking: 'signed thought', signature: 'sig-1' },
-          },
-          {
-            type: 'thinking',
+          }),
+          thinkingTrajectoryEntry({
             ts: 2,
             ts_iso: '2026-07-18T00:00:02Z',
-            turn: 1,
             block_index: 1,
             block: {
               type: 'reasoning_details',
               details: [{ text: 'detail-a' }, { raw: { kind: 'opaque' } }, { text: 'detail-b' }],
             },
-          },
-          {
-            type: 'thinking',
+          }),
+          thinkingTrajectoryEntry({
             ts: 3,
             ts_iso: '2026-07-18T00:00:03Z',
-            turn: 1,
             block_index: 2,
             block: { type: 'redacted_thinking', data: 'opaque-secret' },
-          },
+          }),
         ],
       },
     ).filter(event => event.kind === 'thinking')
@@ -569,17 +608,15 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: 'trajectory.txt' },
           outcome: { status: 'succeeded', output: 'trajectory result' },
           duration_ms: 50,
           execution_id: 'exec-preserve-1',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -607,7 +644,8 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'trajectory.txt' })
     expect(toolEvents[0]!.toolResult).toBe('trajectory result')
     expect(toolEvents[0]!.duration_ms).toBe(50)
-    expect(toolEvents[0]!.turn).toBe(1)
+    expect(toolEvents[0]!.keeperTurnId).toBe(1)
+    expect(toolEvents[0]!.oasTurn).toBe(0)
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
     expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
       lane: 'runtime_mcp',
@@ -633,17 +671,15 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: 'trajectory.txt' },
           outcome: { status: 'failed', error: 'trajectory failed' },
           duration_ms: 812,
           execution_id: 'exec-1712397700000-duration',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -672,7 +708,7 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'trajectory.txt' })
     expect(toolEvents[0]!.toolResult).toBeNull()
     expect(toolEvents[0]!.error).toBe('trajectory failed')
-    expect(toolEvents[0]!.turn).toBe(1)
+    expect(toolEvents[0]!.keeperTurnId).toBe(1)
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
     expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
       lane: 'runtime_mcp',
@@ -731,17 +767,24 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 0,
-          round: 5,
+          keeper_turn_id: 9,
+          oas_turn: 0,
+          schedule: {
+            planned_index: 5,
+            batch_index: 1,
+            batch_size: 2,
+            execution_mode: 'concurrent',
+          },
+          tool_use_id: 'toolu-002a',
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/trajectory.txt' },
           outcome: { status: 'succeeded', output: 'trajectory result' },
           duration_ms: 50,
           execution_id: 'exec-1712397700000-002a',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -768,9 +811,15 @@ describe('buildTraceEvents', () => {
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]!.executionId).toBe('exec-1712397700000-002a')
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
-    // Trace-relative T/R pair stays on the badge; absolute turn remains a detail attribute.
-    expect(toolEvents[0]!.turn).toBe(0)
-    expect(toolEvents[0]!.round).toBe(5)
+    expect(toolEvents[0]!.keeperTurnId).toBe(9)
+    expect(toolEvents[0]!.oasTurn).toBe(0)
+    expect(toolEvents[0]!.toolSchedule).toEqual({
+      planned_index: 5,
+      batch_index: 1,
+      batch_size: 2,
+      execution_mode: 'concurrent',
+    })
+    expect(toolEvents[0]!.toolUseId).toBe('toolu-002a')
     expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
       turn: 4064,
       keeper_turn_id: 9,
@@ -794,17 +843,16 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/a.txt' },
           outcome: { status: 'succeeded', output: 'a' },
           duration_ms: 50,
+          tool_use_id: 'shared-tool-use-id',
           execution_id: 'exec-1712397700000-0001',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -822,6 +870,7 @@ describe('buildTraceEvents', () => {
           turn: 1,
           keeper_turn_id: 1,
           lane: 'runtime_mcp',
+          tool_use_id: 'shared-tool-use-id',
           execution_id: 'exec-1712397700001-0002',
         }],
       },
@@ -846,17 +895,15 @@ describe('buildTraceEvents', () => {
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/trajectory.txt' },
           outcome: { status: 'succeeded', output: 'trajectory' },
           duration_ms: 50,
           execution_id: 'exec-trajectory-only-1',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -879,8 +926,9 @@ describe('buildTraceEvents', () => {
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
-    expect(events.find(event => event.detail.observation_kind === 'provenance_gap')?.detail.tool_call_log)
-      .toMatchObject({ trace_id: 'trace-1' })
+    const gap = events.find(event => event.detail.observation_kind === 'provenance_gap')
+    expect(gap?.id).toBe('provenance-gap-tool-call-log-row-0')
+    expect(gap?.detail.tool_call_log).toMatchObject({ trace_id: 'trace-1' })
   })
 
   it('uses execution_id as the stable provenance-gap row id when present', () => {

@@ -111,19 +111,6 @@ let keeper_bootstrap_retry_interval_sec_rp =
 let keeper_bootstrap_retry_interval_sec () : int =
   Runtime_params.get keeper_bootstrap_retry_interval_sec_rp
 
-let keeper_batch_limit_rp =
-  _rp_int ~key:"keeper.turn.batch_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BATCH_LIMIT"
-                          ~default:200 ~min_v:10 ~max_v:2000)
-    ~min_v:10 ~max_v:2000
-    ~description:"Max batch size per keeper cycle" ()
-let keeper_batch_limit () : int =
-  Runtime_params.get keeper_batch_limit_rp
-
-
-
-
-
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)
 (* ================================================================ *)

@@ -33,9 +33,8 @@ let print_summary () =
   Log.Env.info "KeeperKeepalive: interval=%ds sleep_chunk=%.1fs"
     Env_config_keeper.KeeperKeepalive.interval_sec
     Env_config_keeper.KeeperKeepalive.sleep_chunk_sec;
-  Log.Env.info "WorkAsHeartbeat: enabled=%b max_silence=%.0fs"
-    Env_config_keeper.WorkAsHeartbeat.enabled
-    Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
+  Log.Env.info "WorkAsHeartbeat: enabled=%b"
+    Env_config_keeper.WorkAsHeartbeat.enabled;
   Log.Env.info "KeeperGrpc: reconnect_backoff=%.1fs"
     Env_config_keeper.KeeperGrpc.reconnect_backoff_sec;
   Log.Env.info "KeeperProactive: timing_ring=%d"

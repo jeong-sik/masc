@@ -472,7 +472,7 @@ module KeeperGeneratedMedia = struct
   ;;
 end
 
-(** Shared keepalive interval, read early so WorkAsHeartbeat can reference it.
+(** Shared keepalive interval.
     Any positive interval is valid; the scheduler must not silently rewrite an
     operator-selected cadence.
 
@@ -491,17 +491,8 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Workspace.heartbeat after a
-      unified turn counts as presence proof, allowing the next cycle to skip
-      the full ensure_keeper_workspace_presence call. *)
+  (** Master switch for the post-turn Workspace.heartbeat refresh. *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
-
-  (** Maximum seconds since last successful workspace heartbeat before presence
-      sync is required again. Floor = keepalive interval (dynamic). *)
-  let max_silence_sec =
-    let floor = Float.of_int keepalive_interval_sec_ in
-    Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
-  ;;
 end
 
 (** {1 Keeper health policy} *)

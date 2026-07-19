@@ -162,8 +162,10 @@ val start_runtime_actors :
 (** Attach the Board flusher and durable routing retry actors to the explicit
     runtime root switch.  Each actor is attempted independently and failures
     are aggregated, so one actor's startup failure does not suppress the other.
-    Idempotent after success; concurrent callers cooperate through typed state
-    without timing policy. *)
+    Idempotent while the owning switch is available.  Switch release returns
+    only that switch's actors to the stopped state, allowing a replacement root
+    switch to start fresh actors without an unowned global lifecycle flag.
+    Concurrent callers cooperate through typed state without timing policy. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)

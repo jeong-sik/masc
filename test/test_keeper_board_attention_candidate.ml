@@ -637,7 +637,7 @@ let test_pending_has_no_wall_clock_expiry () =
     Alcotest.fail "durable pending candidate did not reach judgment"
 ;;
 
-let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
+let test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence () =
   with_temp_base "board-attention-partial" @@ fun base_path ->
   let keeper_name = "sangsu" in
   let first = record_or_fail ~base_path (candidate ~keeper_name ()) in
@@ -662,18 +662,29 @@ let test_batch_verdict_missing_candidate_stays_pending_without_failure () =
     | Error detail -> Alcotest.failf "partial drain failed: %s" detail
   in
   Alcotest.(check int) "both attempted" 2 report.attempted;
-  Alcotest.(check int) "one consumed" 1 report.consumed;
-  Alcotest.(check int) "one remains" 1 report.remaining;
+  Alcotest.(check int) "partial response consumes nothing" 0 report.consumed;
+  Alcotest.(check int) "whole batch remains" 2 report.remaining;
   match A.load_candidates ~base_path ~keeper_name with
   | Ok candidates ->
-    (match
-       List.find_opt
-         (fun (c : A.candidate) -> String.equal c.candidate_id second.candidate_id)
-         candidates
-     with
-     | Some { status = A.Pending { last_failure = None }; _ } -> ()
-     | Some _ -> Alcotest.fail "unjudged candidate gained failure evidence"
-     | None -> Alcotest.fail "unjudged candidate vanished from the ledger")
+    List.iter
+      (fun (target : A.candidate) ->
+         match
+           List.find_opt
+             (fun (c : A.candidate) -> String.equal c.candidate_id target.candidate_id)
+             candidates
+         with
+         | Some
+             { status =
+                 A.Pending
+                   { last_failure =
+                       Some { kind = A.Response_contract_unavailable; _ }
+                   }
+             ; _
+             } ->
+           ()
+         | Some _ -> Alcotest.fail "partial response lacked contract-failure evidence"
+         | None -> Alcotest.fail "partial-response candidate vanished")
+      [ first; second ]
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
@@ -736,6 +747,30 @@ let test_batch_failure_aborts_round_and_records_evidence () =
      | Some { status = A.Pending { last_failure = None }; _ } -> ()
      | Some _ -> Alcotest.fail "deferred batch gained failure evidence"
      | None -> Alcotest.fail "deferred candidate vanished")
+;;
+
+let test_batch_failure_evidence_write_error_propagates () =
+  with_temp_base "board-attention-failure-write" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  ignore (record_or_fail ~base_path (candidate ~keeper_name ()) : A.candidate);
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "provider unavailable"
+    ; failed_at = 100.0
+    }
+  in
+  match
+    A.For_testing.drain_pending_with_judge_batch
+      ~base_path
+      ~keeper_name
+      ~judge_batch:(fun _ ->
+        Sys.remove path;
+        Unix.mkdir path 0o700;
+        Error failure)
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted"
 ;;
 
 let test_removed_expired_status_is_rejected () =
@@ -875,13 +910,17 @@ let () =
             `Quick
             test_pending_has_no_wall_clock_expiry
         ; Alcotest.test_case
-            "missing verdict keeps candidate pending"
+            "missing verdict fails whole batch with evidence"
             `Quick
-            test_batch_verdict_missing_candidate_stays_pending_without_failure
+            test_batch_verdict_missing_candidate_fails_whole_batch_with_evidence
         ; Alcotest.test_case
             "batch failure aborts round with evidence"
             `Quick
             test_batch_failure_aborts_round_and_records_evidence
+        ; Alcotest.test_case
+            "batch failure evidence write error propagates"
+            `Quick
+            test_batch_failure_evidence_write_error_propagates
         ; Alcotest.test_case
             "removed expired status is rejected"
             `Quick

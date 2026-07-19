@@ -708,20 +708,30 @@ let update_ledger ~base_path ~keeper_name decide =
      made every update O(n^2) because the durable transaction re-parses the whole
      ledger before writing. Rewriting keeps the file bounded to the number of
      distinct candidates. *)
-  match
-    Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
-      match load_candidates_from_content content with
-      | Error detail -> None, Error detail
-      | Ok candidates ->
-        (match decide candidates with
-         | Error _ as error -> None, error
-         | Ok (None, result) -> None, Ok result
-         | Ok (Some candidate, result) ->
-           let compacted = latest_candidates (candidates @ [ candidate ]) in
-           Some (serialize_candidates compacted), Ok result))
+  try
+    match
+      Fs_compat.rewrite_private_file_durable_locked_result path (fun content ->
+        match load_candidates_from_content content with
+        | Error detail -> None, Error detail
+        | Ok candidates ->
+          (match decide candidates with
+           | Error _ as error -> None, error
+           | Ok (None, result) -> None, Ok result
+           | Ok (Some candidate, result) ->
+             let compacted = latest_candidates (candidates @ [ candidate ]) in
+             Some (serialize_candidates compacted), Ok result))
+    with
+    | Error error -> Error error
+    | Ok result -> result
   with
-  | Error error -> Error error
-  | Ok result -> result
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "Board attention ledger update failed keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
 ;;
 
 let find_candidate candidates candidate_id =
@@ -1126,14 +1136,51 @@ let chunks_of size items =
 
 let record_batch_failure ~base_path candidate failure =
   match record_retryable_failure ~base_path candidate failure with
-  | Ok _ -> ()
+  | Ok _ -> Ok ()
   | Error detail ->
-    Log.Keeper.error
-      "Board attention batch failure evidence could not be persisted keeper=%s \
-       candidate=%s: %s"
-      candidate.keeper_name
-      candidate.candidate_id
-      detail
+    Error
+      (Printf.sprintf
+         "Board attention batch failure evidence could not be persisted keeper=%s \
+          candidate=%s: %s"
+         candidate.keeper_name
+         candidate.candidate_id
+         detail)
+;;
+
+let record_batch_failures ~base_path candidates failure =
+  List.fold_left
+    (fun result candidate ->
+       let* () = result in
+       record_batch_failure ~base_path candidate failure)
+    (Ok ())
+    candidates
+;;
+
+let validate_batch_coverage candidates judgments =
+  let requested =
+    List.fold_left
+      (fun ids candidate -> Id_set.add candidate.candidate_id ids)
+      Id_set.empty
+      candidates
+  in
+  let returned =
+    Candidate_map.fold
+      (fun candidate_id _ ids -> Id_set.add candidate_id ids)
+      judgments
+      Id_set.empty
+  in
+  if Id_set.equal requested returned
+  then Ok ()
+  else
+    let missing = Id_set.diff requested returned |> Id_set.elements in
+    let unknown = Id_set.diff returned requested |> Id_set.elements in
+    Error
+      (failure
+         ~kind:Response_contract_unavailable
+         (Printf.sprintf
+            "batch verdict identity mismatch missing=[%s] unknown=[%s]"
+            (String.concat "," missing)
+            (String.concat "," unknown)))
 ;;
 
 let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
@@ -1170,50 +1217,59 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   let rec loop report = function
     | [] -> Ok report
     | batch :: rest ->
+      let deferred =
+        List.fold_left
+          (fun count rest_batch -> count + List.length rest_batch)
+          (List.length batch)
+          rest
+      in
       (match judge_batch batch with
        | Error failure ->
-         List.iter
-           (fun candidate -> record_batch_failure ~base_path candidate failure)
-           batch;
-         let deferred =
-           List.fold_left
-             (fun count rest_batch -> count + List.length rest_batch)
-             (List.length batch)
-             rest
-         in
+         let* () = record_batch_failures ~base_path batch failure in
          Ok
            { report with
              attempted = report.attempted + List.length batch
            ; remaining = report.remaining + deferred
            }
        | Ok map ->
-         (match
-            List.fold_left
-              (fun result candidate ->
-                 match result with
-                 | Error _ -> result
-                 | Ok (consumed, remaining) ->
-                   (match Candidate_map.find_opt candidate.candidate_id map with
-                    | None -> Ok (consumed, remaining + 1)
-                    | Some judgment ->
-                      (match apply_judgment ~base_path candidate judgment with
-                       | Ok current ->
-                         (match current.status with
-                          | Consumed _ -> Ok (consumed + 1, remaining)
-                          | Pending _ | Judged _ ->
-                            Ok (consumed, remaining + 1))
-                       | Error detail -> Error detail)))
-              (Ok (0, 0))
-              batch
-          with
-          | Error detail -> Error detail
-          | Ok (consumed, remaining) ->
-            loop
-              { attempted = report.attempted + List.length batch
-              ; consumed = report.consumed + consumed
-              ; remaining = report.remaining + remaining
+         (match validate_batch_coverage batch map with
+          | Error failure ->
+            let* () = record_batch_failures ~base_path batch failure in
+            Ok
+              { report with
+                attempted = report.attempted + List.length batch
+              ; remaining = report.remaining + deferred
               }
-              rest))
+          | Ok () ->
+            (match
+               List.fold_left
+                 (fun result candidate ->
+                    match result with
+                    | Error _ -> result
+                    | Ok (consumed, remaining) ->
+                      (match Candidate_map.find_opt candidate.candidate_id map with
+                       | None ->
+                         Error
+                           "validated batch verdict disappeared before application"
+                       | Some judgment ->
+                         (match apply_judgment ~base_path candidate judgment with
+                          | Ok current ->
+                            (match current.status with
+                             | Consumed _ -> Ok (consumed + 1, remaining)
+                             | Pending _ | Judged _ ->
+                               Ok (consumed, remaining + 1))
+                          | Error detail -> Error detail)))
+                 (Ok (0, 0))
+                 batch
+             with
+             | Error detail -> Error detail
+             | Ok (consumed, remaining) ->
+               loop
+                 { attempted = report.attempted + List.length batch
+                 ; consumed = report.consumed + consumed
+                 ; remaining = report.remaining + remaining
+                 }
+                 rest)))
   in
   let* batch_report = loop { attempted = 0; consumed = 0; remaining = 0 } batches in
   Ok

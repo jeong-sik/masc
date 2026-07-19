@@ -324,14 +324,20 @@ let deterministic_floor_runtime_id = "deterministic_floor"
    protected window itself exceeds the provider limit (e.g. 12 individually large
    recent units) the floor commits an over-limit checkpoint, because the
    downstream guard only asserts after < before. The proper fix is an ADAPTIVE
-   tail (drop into the tail until the kept set fits the budget carried by
-   Compaction_trigger.Provider_overflow.limit_tokens), which shrinks the residual
-   to head+goal+one-recent-unit; that is a correctness follow-up, not a quality
-   one. The absolute residual — a single unit larger than the window — needs
+   tail (drop into the tail until the kept set fits the budget), but it is BLOCKED,
+   not merely a follow-up: deciding "does the kept set fit" needs the prospective
+   checkpoint's actual token count, and masc has no prospective token estimator
+   (the window is tokens, the guards are bytes; n/input_tokens are provider-
+   reported usage after a call). The only bridges are a byte-heuristic estimate
+   (which the codebase refuses as a capacity guess — #25092/#25130, CLAUDE.md
+   workaround bar) or the actual-wire fit authority OAS #2667 (unresolved). So the
+   adaptive tail is tracked against #2667, not attempted with a heuristic. The
+   absolute residual — a single unit larger than the window — needs
    message-content truncation, which no keep/drop plan (LLM or deterministic) can
    do. As shipped the floor breaks the common spiral (each overflow drops the
    newly accumulated middle, so it converges on non-pathological input) but does
-   not guarantee one-shot fit; #25281 stays Draft until the adaptive tail lands. *)
+   not guarantee one-shot fit when the protected window is over-sized; that
+   residual is documented rather than closed with a heuristic. *)
 let floor_protected_head_units = 3
 let floor_protected_tail_units = 12
 

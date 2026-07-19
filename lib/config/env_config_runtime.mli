@@ -132,6 +132,9 @@ module Board : sig
   val backend_of_string : string -> backend
   val backend_to_string : backend -> string
   val flush_interval_sec : float
+  (** Positive finite Board persistence and autonomous flush-retry cadence.
+      Invalid configured values raise {!Env_config_core.Config_error} during
+      configuration initialization. *)
   val flusher_inbox_capacity : int
   val backend_opt : unit -> backend option
 end

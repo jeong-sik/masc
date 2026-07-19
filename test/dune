@@ -2090,6 +2090,16 @@
  (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))
 
+; Board flusher recovery uses the production persistence interval SSOT.  This
+; focused executable shortens only that interval so a real failure/recovery
+; cycle stays fast without changing the shared test environment.
+(test
+ (name test_board_flusher_autonomous_retry)
+ (modules test_board_flusher_autonomous_retry)
+ (libraries masc_test_deps)
+ (action
+  (setenv MASC_BOARD_FLUSH_INTERVAL_SEC 0.01 (run %{test}))))
+
 (test
  (name test_provider_prefix_boundary)
  (modules test_provider_prefix_boundary)

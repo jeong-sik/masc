@@ -267,6 +267,13 @@ type runtime_actor_start_failures =
   | Both_actors_start_failed of
       runtime_actor_start_error * runtime_actor_start_error
 
+type dirty_projection_flush_failure =
+  | Flush_rejected of Board_types.board_error
+  | Flush_raised of {
+      cause : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+
 exception Runtime_actor_start_failure of runtime_actor_start_failures
 
 let runtime_actor_to_string = function
@@ -306,19 +313,43 @@ let () =
 ;;
 
 let spawn_runtime_actor_on_switch ~sw ~clock store actor =
+  let flush_attempt () =
+    try
+      match Board.flush_dirty store with
+      | Ok () -> Ok ()
+      | Error error -> Error (Flush_rejected error)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | (Out_of_memory | Stack_overflow) as exn -> raise exn
+    | exn ->
+      Error
+        (Flush_raised
+           { cause = exn; backtrace = Printexc.get_raw_backtrace () })
+  in
+  let rec settle_dirty_projection ~recovering =
+    match flush_attempt () with
+    | Ok () ->
+      if recovering
+      then Log.BoardLog.info "Board dirty projection autonomous retry recovered"
+    | Error failure ->
+      (match failure with
+       | Flush_rejected error ->
+         Log.BoardLog.error
+           "Board dirty projection flush failed; autonomous retry remains active: %s"
+           (Board.show_board_error error)
+       | Flush_raised { cause; backtrace } ->
+         Log.BoardLog.error
+           "Board dirty projection flush raised; autonomous retry remains active: %s\n%s"
+           (Printexc.to_string cause)
+           (Printexc.raw_backtrace_to_string backtrace));
+      Eio.Time.sleep clock Board.flush_interval_sec;
+      settle_dirty_projection ~recovering:true
+  in
   let flusher_loop () =
     Log.BoardLog.info "Board flusher actor started";
     while true do
       match Eio.Stream.take store.Board.flusher_inbox with
-      | Board_types.Flush ->
-          (try
-             match Board.flush_dirty store with
-             | Ok () -> ()
-             | Error error ->
-               Log.BoardLog.error "Flush failed: %s" (Board.show_board_error error)
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
+      | Board_types.Flush -> settle_dirty_projection ~recovering:false
       | Board_types.Sweep ->
           (try
              with_routing_mutation_lock (fun () ->

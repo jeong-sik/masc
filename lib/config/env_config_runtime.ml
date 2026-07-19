@@ -275,9 +275,26 @@ module Board = struct
     | Pg -> "pg"
     | Unknown_backend value -> value
 
-  (** Flush interval for board persistence (seconds). Default: 30. *)
+  (** Flush interval for board persistence (seconds). Default: 30.
+      Once a dirty projection fails, this value becomes the autonomous retry
+      cadence, so zero, negative, and non-finite values would create either a
+      hot loop or an obligation that can never make progress.  Reject those at
+      the configuration boundary instead of coercing them. *)
   let flush_interval_sec =
-    get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
+    let key = "MASC_BOARD_FLUSH_INTERVAL_SEC" in
+    match raw_value_opt key |> trim_opt with
+    | None -> 30.0
+    | Some raw ->
+      (match Safe_ops.float_of_string_safe raw with
+       | Some value when Float.is_finite value && Float.compare value 0.0 > 0 -> value
+       | Some value ->
+         raise
+           (Config_error
+              (Printf.sprintf "%s must be a positive finite float; got %g" key value))
+       | None ->
+         raise
+           (Config_error
+              (Printf.sprintf "%s must be a positive finite float; got %S" key raw)))
 
   (** Capacity of the board flusher inbox (scheduled sweep/flush messages
       enqueued by the sweeper). Single source of truth shared by the

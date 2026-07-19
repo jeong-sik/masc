@@ -460,8 +460,13 @@ let validate_settlement = function
     Error "external-input failure judgment must not enqueue a successor"
 ;;
 
-let validate_settlement_for_lease settlement (lease : lease) =
-  match settlement, lease.stimuli with
+(* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
+   path (via [validate_settlement_for_lease]) and the persist decode boundary
+   (via [outbox_entry_of_yojson]) enforce the same rule: a [No_compaction]
+   settlement is only well-formed when paired with exactly one
+   manual-compaction request stimulus. *)
+let validate_settlement_for_stimuli settlement stimuli =
+  match settlement, stimuli with
   | No_compaction _,
     [ { Keeper_event_queue.payload =
           Keeper_event_queue.Manual_compaction_requested
@@ -472,6 +477,10 @@ let validate_settlement_for_lease settlement (lease : lease) =
     Error
       "no-compaction settlement requires one manual-compaction request stimulus"
   | (Ack | Requeue _ | Escalate _), _ -> Ok ()
+;;
+
+let validate_settlement_for_lease settlement (lease : lease) =
+  validate_settlement_for_stimuli settlement lease.stimuli
 ;;
 
 let receipt_for_lease ~settled_at ~settlement (lease : lease) =
@@ -980,6 +989,10 @@ let outbox_entry_of_yojson json =
   let* stimuli =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
+  (* Re-enforce the settle-time receipt-vs-stimuli invariant at the decode
+     boundary: a persisted [No_compaction] receipt paired with a non-manual or
+     mismatched stimulus is rejected as Error, not silently accepted as Ok. *)
+  let* () = validate_settlement_for_stimuli receipt.settlement stimuli in
   Ok { receipt; stimuli }
 ;;
 

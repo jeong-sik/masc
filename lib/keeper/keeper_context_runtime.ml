@@ -159,6 +159,8 @@ let apply_post_turn_lifecycle_with_resilience_handles =
   Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
 let recover_latest_checkpoint_for_compaction =
   Keeper_post_turn.recover_latest_checkpoint_for_compaction
+let prepare_compaction = Keeper_post_turn.prepare_compaction
+let commit_prepared_compaction = Keeper_post_turn.commit_prepared_compaction
 
 let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
   Otel_metric_store.inc_counter

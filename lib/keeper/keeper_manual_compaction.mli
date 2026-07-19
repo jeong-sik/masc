@@ -41,16 +41,15 @@ val run_admitted
      | `Compaction_failed of failure
      | `Busy of Keeper_turn_admission.autonomous_block
      ]
-(** [run] inside the keeper's turn slot via
-    [Keeper_turn_admission.run_compaction_if_free], releasing the slot the
-    moment the compaction commits (manifest observation included).
-
-    This is the single sanctioned caller of that admission variant, and the
-    critical section is exactly the checkpoint recovery — a deterministic
-    file/FSM operation, never a provider turn — so bypassing the
-    chat-backlog yield cannot park queued chat behind long work. Any
-    follow-up turn must re-enter through the standard [run_if_free] lane,
-    where a chat backlog wins (#24865 review). *)
+(** The provider call runs OUTSIDE the keeper admission: [run_admitted]
+    first performs a state-free availability preflight, then splits into
+    [prepare_compaction] (durable load + policy + LLM plan, no slot held and no
+    active lifecycle) and one admitted lifecycle section owning request +
+    start + source-CAS commit + completion/failure. The lane stays runnable
+    while the LLM works; a failed final admission cannot strand
+    [compaction_active], and interleaved checkpoint changes fail the exact
+    source CAS. This is the single sanctioned caller of that admission
+    variant. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit

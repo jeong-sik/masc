@@ -131,20 +131,20 @@ let test_save_file_atomic_returns_temp_creation_failure () =
   Fs_compat.clear_fs ();
   with_tmp_dir
   @@ fun base ->
-  let blocked = Filename.concat base "blocked" in
-  let target = Filename.concat blocked "out.json" in
-  Unix.mkdir blocked 0o700;
-  Unix.chmod blocked 0o500;
-  let result =
-    Fun.protect
-      ~finally:(fun () -> Unix.chmod blocked 0o700)
-      (fun () -> Fs_compat.save_file_atomic target "new")
-  in
+  (* Force temp-file creation to fail without relying on DAC write-blocking.
+     The target's parent directory does not exist, so Filename.temp_file fails
+     with ENOENT (a path-resolution error, not a permission check) for every
+     UID, root included. The previous approach used Unix.chmod blocked 0o500,
+     but chmod is a no-op for root (UID 0): under a root sandbox temp_file
+     succeeded and the regression assertion could not run. See masc#25210. *)
+  let missing = Filename.concat base "does_not_exist" in
+  let target = Filename.concat missing "out.json" in
+  let result = Fs_compat.save_file_atomic target "new" in
   match result with
   | Error message ->
     check bool "temp creation error names the atomic operation" true
       (String.starts_with message ~prefix:"save_file_atomic ")
-  | Ok () -> fail "atomic save unexpectedly wrote into a non-writable directory"
+  | Ok () -> fail "atomic save unexpectedly wrote into a missing directory"
 ;;
 
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =

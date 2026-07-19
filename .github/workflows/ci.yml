@@ -1001,7 +1001,7 @@ jobs:
         run: scripts/dashboard-drift-check.sh
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 

@@ -171,6 +171,16 @@ val recover_latest_checkpoint_for_compaction
   -> trigger:Compaction_trigger.t
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
+val prepare_compaction
+  :  base_dir:string
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> trigger:Compaction_trigger.t
+  -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
+
+val commit_prepared_compaction
+  :  Keeper_post_turn.prepared_compaction
+  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
+
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string

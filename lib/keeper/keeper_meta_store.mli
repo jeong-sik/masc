@@ -233,3 +233,20 @@ val write_meta_with_merge_for_lifecycle :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+(** [persist_compaction_decision config ~keeper_name ~decision] stamps [decision]
+    onto the durable on-disk [compaction_rt.last_decision], the field the
+    status and dashboard read paths surface as [last_compaction_decision].
+
+    Used by the reactive provider-overflow failure path, whose registry stamp is
+    in-memory only and whose turn-failure meta flush persists a pre-overflow meta
+    without the decision. Reads the current on-disk meta, stamps only
+    [last_decision], and writes back via {!write_meta_with_merge} so a CAS race
+    with a concurrent heartbeat/turn write re-applies the stamp. [`No_durable_meta]
+    reports that no on-disk meta exists to stamp (non-fatal); [Error] carries a
+    read/write failure. *)
+val persist_compaction_decision :
+  Workspace.config ->
+  keeper_name:string ->
+  decision:Keeper_meta_contract.compaction_runtime_decision ->
+  ([ `Persisted | `No_durable_meta ], string) result

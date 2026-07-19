@@ -72,28 +72,29 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
       ()
     |> Keeper_runtime_manifest.append config
 ;;
-let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let dispatch event =
-    Keeper_context_runtime.dispatch_keeper_phase_event_result
-      ~config
-      ~origin:Keeper_registry.Operator_compact
-      ~keeper_name:meta.name
-      event
-  in
-  let dispatch_failed reason =
-    Keeper_context_runtime.dispatch_keeper_phase_event_result
-      ~config
-      ~origin:Keeper_registry.Operator_compact
-      ~keeper_name:meta.name
-      (Keeper_state_machine.Compaction_failed { reason })
-  in
-  match dispatch Keeper_state_machine.Operator_compact_requested with
+let dispatch_event ~config ~meta event =
+  Keeper_context_runtime.dispatch_keeper_phase_event_result
+    ~config
+    ~origin:Keeper_registry.Operator_compact
+    ~keeper_name:meta.name
+    event
+;;
+let dispatch_failed ~config ~meta reason =
+  Keeper_context_runtime.dispatch_keeper_phase_event_result
+    ~config
+    ~origin:Keeper_registry.Operator_compact
+    ~keeper_name:meta.name
+    (Keeper_state_machine.Compaction_failed { reason })
+;;
+
+let run_start_lifecycle ~config ~meta =
+  match dispatch_event ~config ~meta Keeper_state_machine.Operator_compact_requested with
   | Error error ->
     Error (Lifecycle { stage = Operator_request; checkpoint_applied = false; error })
   | Ok () ->
-    (match dispatch Keeper_state_machine.Compaction_started with
+    (match dispatch_event ~config ~meta Keeper_state_machine.Compaction_started with
      | Error error ->
-       let failure_dispatch = dispatch_failed "compaction_start_rejected" in
+       let failure_dispatch = dispatch_failed ~config ~meta "compaction_start_rejected" in
        Error
          (Lifecycle_with_failure_dispatch
             { stage = Compaction_started
@@ -101,46 +102,121 @@ let run ~(config : Workspace.config) ~(meta : keeper_meta) =
             ; error
             ; failure_dispatch
             })
+     | Ok () -> Ok ())
+;;
+
+let run_commit ~config ~base_dir ~meta prepared =
+  match Keeper_context_runtime.commit_prepared_compaction prepared with
+  | Error error ->
+    let failure_dispatch =
+      dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    Error (Recovery (error, failure_dispatch))
+  | Ok recovery ->
+    let manifest = append_manifest ~config ~base_dir ~meta recovery in
+    (match
+       Keeper_context_runtime.dispatch_compaction_completed
+         ~config
+         ~keeper_name:meta.name
+         ~origin:Keeper_registry.Operator_compact
+     with
+     | Error error ->
+       Error
+         (Lifecycle
+            { stage = Compaction_completed
+            ; checkpoint_applied = true
+            ; error
+            })
      | Ok () ->
-       let base_dir = Keeper_types_profile.session_base_dir config in
-       (match
-          Keeper_context_runtime.recover_latest_checkpoint_for_compaction
-            ~base_dir
-            ~meta
-            ~trigger:Compaction_trigger.Manual
-        with
-        | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-          let failure_dispatch =
-            dispatch_failed (Keeper_post_turn.compaction_recovery_error_to_tag error)
-          in
-          (match failure_dispatch with
-           | Ok () -> Ok (No_compaction no_compaction)
-           | Error _ -> Error (Recovery (error, failure_dispatch)))
-        | Error error ->
-          let failure_dispatch =
-            dispatch_failed (Keeper_post_turn.compaction_recovery_error_to_tag error)
-          in
-          Error (Recovery (error, failure_dispatch))
-        | Ok recovery ->
-          let manifest = append_manifest ~config ~base_dir ~meta recovery in
-          (match
-             Keeper_context_runtime.dispatch_compaction_completed
-               ~config
-               ~keeper_name:meta.name
-               ~origin:Keeper_registry.Operator_compact
-           with
-           | Error error ->
-             Error
-               (Lifecycle
-                  { stage = Compaction_completed
-                  ; checkpoint_applied = true
-                  ; error
-                  })
-           | Ok () ->
-             Keeper_unified_metrics.broadcast_compaction
-               ~name:meta.name
-               recovery;
-             Ok (Compacted { recovery; manifest }))))
+       Keeper_unified_metrics.broadcast_compaction
+         ~name:meta.name
+         recovery;
+       Ok (Compacted { recovery; manifest }))
+;;
+
+let finish_preparation ~config ~base_dir ~meta = function
+  | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+    let failure_dispatch =
+      dispatch_failed
+        ~config
+        ~meta
+        (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    (match failure_dispatch with
+     | Ok () -> Ok (No_compaction no_compaction)
+     | Error _ -> Error (Recovery (error, failure_dispatch)))
+  | Error error ->
+    let failure_dispatch =
+      dispatch_failed
+        ~config
+        ~meta
+        (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    Error (Recovery (error, failure_dispatch))
+  | Ok prepared -> run_commit ~config ~base_dir ~meta prepared
+;;
+
+let prepare ~config ~meta =
+  let base_dir = Keeper_types_profile.session_base_dir config in
+  ( base_dir
+  , Keeper_context_runtime.prepare_compaction
+      ~base_dir
+      ~meta
+      ~trigger:Compaction_trigger.Manual )
+;;
+
+let run ~(config : Workspace.config) ~(meta : keeper_meta) =
+  (* Planning is outside the lifecycle. Only the deterministic lifecycle and
+     source-CAS commit may set [compaction_active], and they close in this
+     single synchronous section. *)
+  let base_dir, preparation = prepare ~config ~meta in
+  match run_start_lifecycle ~config ~meta with
+  | Error _ as error -> error
+  | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
+;;
+
+let observe_manifest ~keeper_name = function
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name
+      "manual compaction manifest append failed after durable checkpoint: %s"
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
+      ()
+;;
+
+let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
+  (* Reject work that is already fenced before spending a provider call. This
+     preflight owns no lifecycle state and releases immediately. A turn can
+     still enter while planning; the final admission and source CAS close that
+     race without stranding [compaction_active]. *)
+  match
+    Keeper_turn_admission.run_compaction_if_free
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      (fun () -> ())
+  with
+  | `Busy block -> `Busy block
+  | `Ran () ->
+    let base_dir, preparation = prepare ~config ~meta in
+    (match
+       Keeper_turn_admission.run_compaction_if_free
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         (fun () ->
+           match run_start_lifecycle ~config ~meta with
+           | Error failure -> Error failure
+           | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+     with
+     | `Busy block -> `Busy block
+     | `Ran (Error failure) -> `Compaction_failed failure
+     | `Ran (Ok (Compacted success)) ->
+       observe_manifest ~keeper_name:meta.name success.manifest;
+       `Applied success
+     | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
 ;;
 
 let lifecycle_stage_to_string = function
@@ -175,37 +251,4 @@ let failure_to_string = function
       "recovery_error=%s failure_dispatch=%s"
       (Keeper_post_turn.compaction_recovery_error_to_string error)
       (failure_dispatch_to_string failure_dispatch)
-;;
-
-let observe_manifest ~keeper_name = function
-  | Ok () -> ()
-  | Error detail ->
-    Log.Keeper.error
-      ~keeper_name
-      "manual compaction manifest append failed after durable checkpoint: %s"
-      detail;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
-      ()
-;;
-
-(* Single sanctioned caller of [Keeper_turn_admission.run_compaction_if_free]:
-   the admitted section is exactly [run] (checkpoint recovery + manifest
-   observation), never a provider turn, and the slot releases as soon as it
-   returns. A follow-up turn re-enters the standard admission lane where a
-   chat backlog wins (#24865 review). *)
-let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
-  match
-    Keeper_turn_admission.run_compaction_if_free
-      ~base_path:config.base_path
-      ~keeper_name:meta.name
-      (fun () -> run ~config ~meta)
-  with
-  | `Busy block -> `Busy block
-  | `Ran (Error failure) -> `Compaction_failed failure
-  | `Ran (Ok (Compacted success)) ->
-    observe_manifest ~keeper_name:meta.name success.manifest;
-    `Applied success
-  | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction
 ;;

@@ -203,9 +203,9 @@ and goal_assignment = {
 
 
 val fusion_completion_post_id : fusion_completion -> post_id
-(** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
-    sink created a board evidence post, otherwise falls back to
-    ["fusion-run:<run_id>"]. *)
+(** Canonical dedup/correlation id for [Fusion_completed], always
+    ["fusion-run:<run_id>"]. Board projection availability is not event
+    identity. *)
 
 val bg_job_completion_post_id : bg_job_completion -> post_id
 (** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
@@ -251,10 +251,10 @@ val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
     not create an unbounded backlog of otherwise identical stimuli. For a
-    [Fusion_completed] event, [channel] is also excluded: the first committed
-    row owns recipient authority, while a replay after route consumption is
-    expected to be [Unrouted]. Result, run, and Board evidence must still
-    match exactly. *)
+    [Fusion_completed] event, [board_post_id] and [channel] are also excluded:
+    the first committed row owns those projections, while a retry may observe
+    Board recovery or route consumption. Result and run must still match
+    exactly. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)

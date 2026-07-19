@@ -178,9 +178,7 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
-let fusion_completion_post_id (fc : fusion_completion) =
-  if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
-  else fc.board_post_id
+let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
@@ -273,13 +271,11 @@ let fusion_terminal_equal left right =
 let fusion_completion_identity_equal left right =
   String.equal left.run_id right.run_id
   && fusion_terminal_equal left.terminal right.terminal
-  && String.equal left.board_post_id right.board_post_id
-  (* The first durably committed row owns recipient authority. A replay after
-     that commit no longer has the consumed in-memory route and therefore
-     carries [Unrouted]; treating [channel] as event identity would turn an
-     exact result replay into a false conflict. [enqueue_external_decision]
-     retains the existing row, so excluding the channel here never overwrites
-     the authoritative recipient. *)
+  (* The first durably committed row owns optional Board evidence and recipient
+     authority. A retry may observe a recovered Board sink or a consumed
+     in-memory route; neither changes the Fusion result identity.
+     [enqueue_external_decision] retains the existing row, so excluding these
+     projections never overwrites their first committed values. *)
 
 let stimulus_identity_equal a b =
   String.equal a.post_id b.post_id

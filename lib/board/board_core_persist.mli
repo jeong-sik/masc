@@ -60,9 +60,7 @@ val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
-val save_reactions_jsonl : string -> unit
-val rewrite_reactions_unlocked : store -> unit
-val rewrite_reactions : store -> unit
+val save_reactions_jsonl_result : string -> (unit, board_error) result
 val append_post : post -> (unit, board_error) result
 val append_comment : comment -> (unit, board_error) result
 

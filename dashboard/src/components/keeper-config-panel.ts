@@ -1236,12 +1236,9 @@ function KcfAssemblyTrace({ config }: { config: KeeperConfig }) {
   `
 }
 
-// .set-* inline controls — keeper-v2 primitives (SetRow / Toggle / Segmented),
-// styled by the vendored surfaces.css. Used for the editable boolean toggles and
-// the bounded percentage gates so they read like the prototype. The numeric
-// gates (token/message/cooldown/idle) stay as free number inputs — the
-// prototype renders those as fixed presets or read-only, which would drop the
-// live editor's arbitrary-value capability.
+// .set-* inline controls — keeper-v2 primitives (SetRow / Toggle),
+// styled by the vendored surfaces.css. Used for the editable boolean toggles
+// so they read like the prototype.
 function SetRow({
   label,
   hint,

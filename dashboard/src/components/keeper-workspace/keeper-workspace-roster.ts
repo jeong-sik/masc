@@ -325,8 +325,12 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
   return actions
 }
 
-async function runRosterKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
-  await runKeeperAction(name, action)
+async function runRosterKeeperAction(keeper: Keeper, action: KeeperActionKey): Promise<void> {
+  if (action === 'resume') {
+    await runKeeperAction(keeper.name, action, keeper.generation)
+  } else {
+    await runKeeperAction(keeper.name, action)
+  }
 }
 
 function rosterActivityText(activity: KeeperActivityDisplay): string | null {
@@ -405,7 +409,7 @@ function KeeperRosterMenu({
             class=${`kw-kp-menu-item${copy.danger ? ' danger' : ''}`}
             title=${copy.title}
             onClick=${() => {
-              void runRosterKeeperAction(keeper.name, action)
+              void runRosterKeeperAction(keeper, action)
               onClose()
             }}
             data-testid=${`kw-roster-menu-${action}`}

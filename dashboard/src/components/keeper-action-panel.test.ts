@@ -18,7 +18,7 @@ vi.mock('../store', () => ({
   refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
 }))
 
-import { pauseKeeper } from '../api/keeper'
+import { pauseKeeper, resumeKeeper } from '../api/keeper'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
 import { applyOptimisticKeeperDirective, refreshKeeperRuntimeStatus } from '../store'
 import { runKeeperAction } from './keeper-action-panel'
@@ -152,5 +152,13 @@ describe('runKeeperAction', () => {
 
     expect(applyOptimisticKeeperDirective).toHaveBeenCalledWith('rondo', 'pause')
     expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
+  })
+
+  it('forwards the observed owner generation for typed resume', async () => {
+    vi.mocked(resumeKeeper).mockResolvedValueOnce({ ok: true })
+
+    await runKeeperAction('rondo', 'resume', 7)
+
+    expect(resumeKeeper).toHaveBeenCalledWith('rondo', 7)
   })
 })

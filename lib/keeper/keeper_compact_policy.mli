@@ -84,4 +84,18 @@ module For_testing : sig
       initialized) is omitted rather than failing the whole list. Empty only
       when neither source resolves. *)
   val compaction_runtime_ids : Keeper_meta_contract.keeper_meta -> string list
+
+  (** Units protected at the head (setup: system prompt / first goal) and tail
+      (recent context) of the compactable prefix by the deterministic floor. *)
+  val floor_protected_head_units : int
+
+  val floor_protected_tail_units : int
+
+  (** Run the deterministic structural floor directly, returning the kept
+      messages (including the protected suffix) and the dropped message count, or
+      [None] when the compactable prefix has no middle span to drop. *)
+  val deterministic_floor_for_testing
+    :  units:Keeper_compaction_unit.closed_unit list
+    -> protected_suffix:Agent_sdk.Types.message list
+    -> (Agent_sdk.Types.message list * int) option
 end

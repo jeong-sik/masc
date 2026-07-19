@@ -493,6 +493,95 @@ let test_apply_preserves_protected_units_and_source_order () =
     Alcotest.(check bool) "protected source constructors and order are exact" true
       (C.apply plan = expected)
 
+(* Deterministic structural floor (RFC-compaction-deterministic-floor PR-2). *)
+let floor_head = Compact_policy.For_testing.floor_protected_head_units
+let floor_tail = Compact_policy.For_testing.floor_protected_tail_units
+let floor_unit_text i = Printf.sprintf "u%d" i
+let floor_units n = List.init n (fun i -> ordinary (text T.Assistant (floor_unit_text i)))
+
+let floor_message_text (m : T.message) =
+  match m.content with
+  | [ T.Text value ] -> value
+  | _ -> "<non-text>"
+
+let test_floor_drops_middle_protects_head_and_tail () =
+  let total = floor_head + floor_tail + 5 in
+  let units = floor_units total in
+  match
+    Compact_policy.For_testing.deterministic_floor_for_testing
+      ~units
+      ~protected_suffix:[]
+  with
+  | None -> Alcotest.fail "floor must engage when the prefix has a middle span"
+  | Some (kept, dropped) ->
+    Alcotest.(check int)
+      "dropped count equals the middle span"
+      (total - floor_head - floor_tail)
+      dropped;
+    let expected =
+      List.init floor_head (fun i -> floor_unit_text i)
+      @ List.init floor_tail (fun i -> floor_unit_text (total - floor_tail + i))
+    in
+    Alcotest.(check (list string))
+      "head and tail units survive in order; the middle is dropped"
+      expected
+      (List.map floor_message_text kept)
+
+let test_floor_preserves_protected_suffix () =
+  let total = floor_head + floor_tail + 3 in
+  let units = floor_units total in
+  let suffix = [ text T.User "suffix-marker" ] in
+  match
+    Compact_policy.For_testing.deterministic_floor_for_testing
+      ~units
+      ~protected_suffix:suffix
+  with
+  | None -> Alcotest.fail "floor must engage"
+  | Some (kept, _dropped) ->
+    (match List.rev kept with
+     | last :: _ ->
+       Alcotest.(check string)
+         "the protected suffix is appended after the kept units"
+         "suffix-marker"
+         (floor_message_text last)
+     | [] -> Alcotest.fail "kept messages must be non-empty")
+
+let test_floor_noop_without_middle_span () =
+  let units = floor_units (floor_head + floor_tail) in
+  Alcotest.(check bool)
+    "floor does not engage when there is no middle span to drop"
+    true
+    (Compact_policy.For_testing.deterministic_floor_for_testing
+       ~units
+       ~protected_suffix:[]
+     = None)
+
+(* Evidence-safety: the floor must never drop a tool cycle or a System unit,
+   because Keeper_compaction_evidence requires invariant tool counts and system
+   instructions are foundational. Only the middle User/Assistant unit is dropped. *)
+let test_floor_preserves_tool_cycles_and_system () =
+  let head = floor_units floor_head in
+  let tail =
+    List.init floor_tail (fun i -> ordinary (text T.Assistant (Printf.sprintf "t%d" i)))
+  in
+  let middle = [ closed_cycle "cyc"; ordinary (text T.System "sys"); ordinary (text T.User "usr") ] in
+  let units = head @ middle @ tail in
+  match
+    Compact_policy.For_testing.deterministic_floor_for_testing
+      ~units
+      ~protected_suffix:[]
+  with
+  | None -> Alcotest.fail "floor must engage with a droppable middle unit"
+  | Some (kept, dropped) ->
+    Alcotest.(check int) "only the middle User message is dropped" 1 dropped;
+    let kept_texts = List.map floor_message_text kept in
+    Alcotest.(check bool) "middle User unit is dropped" false (List.mem "usr" kept_texts);
+    Alcotest.(check bool) "middle System unit is preserved" true (List.mem "sys" kept_texts);
+    Alcotest.(check bool)
+      "tool cycle is preserved (a Tool-role message remains)"
+      true
+      (List.exists (fun (m : T.message) -> m.role = T.Tool) kept)
+
 let () =
   Alcotest.run "compaction_llm_summarizer"
     [ ( "provider"
@@ -502,6 +591,16 @@ let () =
             test_provider_for_plan_preserves_temperature_omission
         ; Alcotest.test_case "lane candidates keep declared order" `Quick
             test_lane_candidates_keep_declared_order
+        ] )
+    ; ( "deterministic_floor"
+      , [ Alcotest.test_case "drops the middle, protects head and tail" `Quick
+            test_floor_drops_middle_protects_head_and_tail
+        ; Alcotest.test_case "preserves the protected suffix" `Quick
+            test_floor_preserves_protected_suffix
+        ; Alcotest.test_case "no-op without a middle span" `Quick
+            test_floor_noop_without_middle_span
+        ; Alcotest.test_case "preserves tool cycles and system units" `Quick
+            test_floor_preserves_tool_cycles_and_system
         ] )
     ; ( "structured_judge_lane_split_25051"
       , [ Alcotest.test_case "ineligible chat runtime alone has no candidate" `Quick

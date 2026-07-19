@@ -267,49 +267,154 @@ let selected_message_count units selected =
     0
     selected
 ;;
+
+let messages_of_unit = function
+  | Keeper_compaction_unit.Ordinary_message message -> [ message ]
+  | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
+;;
+
+let requested_of_plan ~units ~protected_suffix plan =
+  { messages = Keeper_compaction_llm_summarizer.apply plan @ protected_suffix
+  ; selected_runtime_id = Keeper_compaction_llm_summarizer.selected_runtime_id plan
+  ; summarized_message_count =
+      selected_message_count
+        units
+        (Keeper_compaction_llm_summarizer.summarized_indices plan)
+  ; dropped_message_count =
+      selected_message_count
+        units
+        (Keeper_compaction_llm_summarizer.dropped_indices plan)
+  }
+;;
+
+(* Deterministic structural floor (RFC-compaction-deterministic-floor, PR-2).
+   The LLM plan path can only reduce eligible (pure-text Assistant) units, and it
+   fails entirely when no schema-capable model is available or the provider is
+   rate-limited — at which point the reactive overflow path requeues the same
+   over-limit context forever (the death spiral). This produces a reduction
+   WITHOUT an LLM by dropping whole units from the middle of the compactable
+   prefix while protecting a head window (the conversation's setup: system prompt
+   / first goal) and a tail window (recent context).
+
+   Safety: units are the tool-cycle-safe granularity from
+   [Keeper_compaction_unit.partition] (a Closed_tool_cycle is one unit), so
+   whole-unit drops never orphan a tool_result. The head window protects the
+   leading setup that [partition] otherwise places in [closed_prefix] (partition
+   only protects a trailing OPEN cycle, not the leading system message). The
+   downstream reduction guards in [compact_for_request_typed]
+   ([Structurally_unchanged] / [Checkpoint_not_reduced]) still reject a floor
+   that does not actually shrink the checkpoint, so engaging it is never worse
+   than the current fail-closed behaviour. *)
+let deterministic_floor_runtime_id = "deterministic_floor"
+
+(* Units protected at each end of the compactable prefix. A follow-up may derive
+   these from the token budget (RFC S6); for now they are a fixed window. *)
+let floor_protected_head_units = 3
+let floor_protected_tail_units = 12
+
+(* Only Ordinary User/Assistant units may be dropped by the floor.
+   [Keeper_compaction_evidence.create] requires the tool_use and tool_result
+   counts to be invariant across compaction (the LLM path only ever touches
+   tool-free eligible units), so dropping a [Closed_tool_cycle] would be rejected
+   as Invalid_structural_evidence. [Keeper_compaction_unit.partition] groups every
+   tool cycle into a [Closed_tool_cycle], so an [Ordinary_message] carries no tool
+   blocks and dropping it leaves the tool counts invariant. System units are
+   preserved as foundational instructions. This still targets the dominant
+   accumulation — the world-state User messages — while staying evidence-valid. *)
+let unit_is_floor_droppable = function
+  | Keeper_compaction_unit.Closed_tool_cycle _ -> false
+  | Keeper_compaction_unit.Ordinary_message
+      { role = Agent_sdk.Types.User | Agent_sdk.Types.Assistant; _ } -> true
+  | Keeper_compaction_unit.Ordinary_message _ -> false
+;;
+
+let deterministic_floor_requested ~units ~protected_suffix =
+  let total = List.length units in
+  if total <= floor_protected_head_units + floor_protected_tail_units
+  then None (* no middle to drop; let the original LLM rejection stand *)
+  else (
+    let drop_lo = floor_protected_head_units in
+    let drop_hi = total - floor_protected_tail_units (* exclusive *) in
+    let kept_rev, dropped_count =
+      units
+      |> List.mapi (fun index unit_ -> index, unit_)
+      |> List.fold_left
+           (fun (kept_rev, dropped) (index, unit_) ->
+             if index >= drop_lo
+                && index < drop_hi
+                && unit_is_floor_droppable unit_
+             then kept_rev, dropped + unit_message_count unit_
+             else unit_ :: kept_rev, dropped)
+           ([], 0)
+    in
+    if dropped_count = 0
+    then None
+    else (
+      let kept_messages = List.concat_map messages_of_unit (List.rev kept_rev) in
+      Some
+        { messages = kept_messages @ protected_suffix
+        ; selected_runtime_id = deterministic_floor_runtime_id
+        ; summarized_message_count = 0
+        ; dropped_message_count = dropped_count
+        }))
+;;
+
+(* Reject reasons that mean "the LLM produced no usable reduction" — the exact
+   cases the deterministic floor exists to cover. Kept as an explicit,
+   exhaustive classifier so a new [compaction_rejection] variant forces a
+   compile-time decision about whether the floor should engage. *)
+let floor_should_engage = function
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_provider_unavailable
+  | Invalid_compaction_plan
+  | No_eligible_history -> true
+  (* A successful LLM plan that deliberately kept everything, or a genuine
+     structural error, is respected — the floor does not override it. *)
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+  | Invalid_structure _
+  | Invalid_structural_evidence _ -> false
+;;
+
+let llm_requested (meta : keeper_meta) ~units ~protected_suffix =
+  if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
+  then Error No_eligible_history
+  else
+    match compaction_runtime_ids meta with
+    | [] -> Error Runtime_identity_unavailable
+    | runtime_ids ->
+      (match
+         Keeper_compaction_llm_summarizer.make
+           ~runtime_ids
+           ~keeper_name:meta.name
+           ()
+       with
+       | None -> Error Summarizer_unavailable
+       | Some summarize ->
+         (match summarize ~units with
+          | Error Keeper_compaction_llm_summarizer.Provider_unavailable ->
+            Error Plan_provider_unavailable
+          | Error Keeper_compaction_llm_summarizer.Invalid_plan ->
+            Error Invalid_compaction_plan
+          | Ok plan ->
+            if not (Keeper_compaction_llm_summarizer.has_changes plan)
+            then Error Structurally_unchanged
+            else Ok (requested_of_plan ~units ~protected_suffix plan)))
+;;
+
 let requested_messages (meta : keeper_meta) messages =
   match Keeper_compaction_unit.partition messages with
   | Error error -> Error (Invalid_structure error)
   | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
-    if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
-    then Error No_eligible_history
-    else
-      (match compaction_runtime_ids meta with
-       | [] -> Error Runtime_identity_unavailable
-       | runtime_ids ->
-         (match
-            Keeper_compaction_llm_summarizer.make
-              ~runtime_ids
-              ~keeper_name:meta.name
-              ()
-          with
-          | None -> Error Summarizer_unavailable
-          | Some summarize ->
-            (match summarize ~units with
-             | Error Keeper_compaction_llm_summarizer.Provider_unavailable ->
-               Error Plan_provider_unavailable
-             | Error Keeper_compaction_llm_summarizer.Invalid_plan ->
-               Error Invalid_compaction_plan
-             | Ok plan ->
-               if not (Keeper_compaction_llm_summarizer.has_changes plan)
-               then Error Structurally_unchanged
-               else
-                 Ok
-                   { messages =
-                       Keeper_compaction_llm_summarizer.apply plan
-                       @ protected_suffix
-                   ; selected_runtime_id =
-                       Keeper_compaction_llm_summarizer.selected_runtime_id plan
-                   ; summarized_message_count =
-                       selected_message_count
-                         units
-                         (Keeper_compaction_llm_summarizer.summarized_indices plan)
-                   ; dropped_message_count =
-                       selected_message_count
-                         units
-                         (Keeper_compaction_llm_summarizer.dropped_indices plan)
-                   })))
+    (match llm_requested meta ~units ~protected_suffix with
+     | Ok _ as ok -> ok
+     | Error reason when floor_should_engage reason ->
+       (match deterministic_floor_requested ~units ~protected_suffix with
+        | Some requested -> Ok requested
+        | None -> Error reason)
+     | Error reason -> Error reason)
 ;;
 
 let tool_block_counts messages =
@@ -452,4 +557,11 @@ let compact_for_request_typed
 
 module For_testing = struct
   let compaction_runtime_ids = compaction_runtime_ids
+  let floor_protected_head_units = floor_protected_head_units
+  let floor_protected_tail_units = floor_protected_tail_units
+
+  let deterministic_floor_for_testing ~units ~protected_suffix =
+    Option.map
+      (fun (r : requested_compaction) -> r.messages, r.dropped_message_count)
+      (deterministic_floor_requested ~units ~protected_suffix)
 end

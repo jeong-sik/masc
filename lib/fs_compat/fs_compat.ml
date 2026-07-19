@@ -1906,7 +1906,7 @@ let private_jsonl_snapshot_success_receipt = function
        Ok { value; settlement_error = Some settlement_error }
      | Some
          ( (Cursor_succeeded _ | Cursor_precondition_succeeded _)
-         , _settlement_error )
+         , _ )
      | None -> Error error)
 ;;
 
@@ -1918,7 +1918,7 @@ let private_jsonl_cursor_success_receipt = function
        Ok { value; settlement_error = Some settlement_error }
      | Some
          ( (Snapshot_succeeded _ | Cursor_precondition_succeeded _)
-         , _settlement_error )
+         , _ )
      | None -> Error error)
 ;;
 

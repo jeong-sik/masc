@@ -1,11 +1,11 @@
 (** Durable Board-attention judgment boundary.
 
     A candidate is persisted before any model call. Its lifecycle is
-    [Pending -> Judged -> Consumed], with [Pending -> Expired] as the terminal
-    path for rows that outlived their relevance window. Relevant judgments
-    become normal Keeper-lane events only after an exact candidate-id durable
-    queue commit; failures retain the latest retryable evidence and never
-    consume the candidate. *)
+    [Pending -> Judged -> Consumed]. Relevant judgments become normal
+    Keeper-lane events only after an exact candidate-id durable queue commit;
+    failures retain the latest retryable evidence and never consume the
+    candidate. Pending work has no wall-clock expiry: it remains durable until
+    judgment and delivery succeed. *)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -43,13 +43,10 @@ type consumed_state =
   ; consumed_at : float
   }
 
-type expired_state = { expired_at : float }
-
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
-  | Expired of expired_state
 
 type candidate =
   { candidate_id : string
@@ -149,21 +146,14 @@ val drain_pending_on_owner_lane :
     dashboard/producer domain may call it.
 
     Semantics:
-    - Pending rows older than {!candidate_ttl_sec} transition to [Expired]
-      first; the durable backlog dies even while the provider is unavailable.
     - Already-judged verdicts deliver without new model calls.
-    - Fresh pending rows are judged in batches of up to
+    - Pending rows are judged in batches of up to
       {!batch_max_candidates} per model call. A failed batch aborts the round:
       the next keepalive turn owns the retry cadence, so provider outages
       cannot turn the drain into a hot retry loop.
     - Verdicts referencing unknown or duplicate candidate identities are
       rejected as response-contract failures. Candidates absent from a
-      successful batch verdict stay [Pending] without failure evidence.
-    [drain_report.consumed] includes expired rows. *)
-
-val candidate_ttl_sec : float
-(** Operational policy constant: a pending candidate older than this many
-    seconds (24h) is expired by the next drain. *)
+      successful batch verdict stay [Pending] without failure evidence. *)
 
 val batch_max_candidates : int
 (** Maximum candidates judged per model call. *)
@@ -174,7 +164,6 @@ module For_testing : sig
   val drain_pending_with_judge :
     base_path:string ->
     keeper_name:string ->
-    now:float ->
     judge:(candidate -> (judgment, retryable_failure) result) ->
     (drain_report, string) result
   (** Per-candidate judging adapter over the batch engine. *)
@@ -182,7 +171,6 @@ module For_testing : sig
   val drain_pending_with_judge_batch :
     base_path:string ->
     keeper_name:string ->
-    now:float ->
     judge_batch:(candidate list -> (judgment Candidate_map.t, retryable_failure) result) ->
     (drain_report, string) result
 end

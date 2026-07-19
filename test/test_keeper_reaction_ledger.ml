@@ -317,6 +317,8 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
   check bool "turn reaction absent" false stimulus_only.turn_started_seen;
   check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
+  check bool "event queue cancellation absent" false
+    stimulus_only.event_queue_cancelled_seen;
   check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
   Keeper_reaction_ledger.record_event_queue_turn_started
     ~base_path
@@ -332,6 +334,8 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check bool "exact stimulus still seen" true reacted.stimulus_seen;
   check bool "turn reaction seen" true reacted.turn_started_seen;
   check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
+  check bool "event queue cancellation still absent" false
+    reacted.event_queue_cancelled_seen;
   check int "two exact rows after reaction" 2 reacted.matched_record_count;
   ignore
     (persist_transition_outbox
@@ -351,6 +355,8 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     |> require_complete_evidence "acknowledged evidence"
   in
   check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
+  check bool "ack is not cancellation" false
+    acknowledged.event_queue_cancelled_seen;
   check int "three exact rows after ack" 3 acknowledged.matched_record_count;
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
@@ -369,6 +375,7 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   check bool "missing stimulus absent" false missing.stimulus_seen;
   check bool "missing reaction absent" false missing.turn_started_seen;
   check bool "missing ack absent" false missing.event_queue_ack_seen;
+  check bool "missing cancellation absent" false missing.event_queue_cancelled_seen;
   check int "missing exact rows" 0 missing.matched_record_count;
   match
     Keeper_reaction_ledger.event_queue_reaction_evidence_result
@@ -1224,11 +1231,37 @@ let test_cancelled_transition_is_projected_as_typed_history () =
     ~base_path
     ~keeper_name
   |> require_ok "project cancellation receipt";
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+    |> require_complete_evidence "accepted cancellation evidence"
+  in
+  check bool "accepted cancellation is exact terminal evidence" true
+    evidence.event_queue_cancelled_seen;
+  check bool "accepted cancellation is not ack evidence" false
+    evidence.event_queue_ack_seen;
+  check bool "accepted cancellation keeps its timestamp" true
+    (Option.is_some evidence.event_queue_cancelled_recorded_at);
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check int "summary counts accepted cancellation" 1
     (summary |> member "event_queue_cancelled_count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet counts accepted cancellation" 1
+    (fleet |> member "event_queue_cancelled_count" |> to_int);
+  check int "unavailable fleet preserves cancellation field" 0
+    (Keeper_reaction_ledger.unavailable_fleet_summary_json ()
+     |> member "event_queue_cancelled_count"
+     |> to_int);
   check int "typed cancellation row is current" 0
     (summary |> member "quarantined_row_count" |> to_int)
 ;;

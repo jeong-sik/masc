@@ -991,9 +991,11 @@ type event_queue_reaction_evidence =
   ; stimulus_seen : bool
   ; turn_started_seen : bool
   ; event_queue_ack_seen : bool
+  ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
   ; event_queue_ack_recorded_at : float option
+  ; event_queue_cancelled_recorded_at : float option
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
@@ -1030,9 +1032,11 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   let stimulus_seen = ref false in
   let turn_started_seen = ref false in
   let event_queue_ack_seen = ref false in
+  let event_queue_cancelled_seen = ref false in
   let stimulus_recorded_at = ref None in
   let turn_started_recorded_at = ref None in
   let event_queue_ack_recorded_at = ref None in
+  let event_queue_cancelled_recorded_at = ref None in
   let latest_recorded_at = ref None in
   let matched_record_count = ref 0 in
   let quarantined_record_count = ref 0 in
@@ -1083,10 +1087,14 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
            event_queue_ack_seen := true;
            event_queue_ack_recorded_at
              := max_recorded_at !event_queue_ack_recorded_at recorded_at
+         | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+           event_queue_cancelled_seen := true;
+           event_queue_cancelled_recorded_at
+             := max_recorded_at !event_queue_cancelled_recorded_at recorded_at
          | Current_reaction
              { reaction_kind =
-                 ( Event_queue_no_compaction | Event_queue_cancelled
-                 | Event_queue_requeued | Event_queue_escalated | Cursor_ack )
+                 ( Event_queue_no_compaction | Event_queue_requeued
+                 | Event_queue_escalated | Cursor_ack )
              ; _
              }
          | Current_cursor_ack _ -> ())
@@ -1112,9 +1120,11 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
       ; stimulus_seen = !stimulus_seen
       ; turn_started_seen = !turn_started_seen
       ; event_queue_ack_seen = !event_queue_ack_seen
+      ; event_queue_cancelled_seen = !event_queue_cancelled_seen
       ; stimulus_recorded_at = !stimulus_recorded_at
       ; turn_started_recorded_at = !turn_started_recorded_at
       ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
+      ; event_queue_cancelled_recorded_at = !event_queue_cancelled_recorded_at
       ; latest_recorded_at = !latest_recorded_at
       ; matched_record_count = !matched_record_count
       ; quarantined_record_count = !quarantined_record_count
@@ -1570,6 +1580,7 @@ let unavailable_fleet_summary_json () =
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
     ; "event_queue_no_compaction_count", `Int 0
+    ; "event_queue_cancelled_count", `Int 0
     ; "event_queue_requeue_count", `Int 0
     ; "event_queue_escalation_count", `Int 0
     ; "event_queue_external_input_count", `Int 0
@@ -1837,6 +1848,8 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
     ; ( "event_queue_no_compaction_count"
       , `Int (total_int "event_queue_no_compaction_count") )
+    ; ( "event_queue_cancelled_count"
+      , `Int (total_int "event_queue_cancelled_count") )
     ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
     ; ( "event_queue_escalation_count"
       , `Int (total_int "event_queue_escalation_count") )

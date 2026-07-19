@@ -57,7 +57,11 @@ let wake_enqueue_counts_of_dispatches dispatches =
           | Error _ -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
-                { occurrence_status = Consumers.Keeper_wake_already_acked; _ }) ->
+                { occurrence_status =
+                    ( Consumers.Keeper_wake_already_acked
+                    | Consumers.Keeper_wake_already_cancelled )
+                ; _
+                }) ->
             counts
           | Ok
               (Consumers.Keeper_wake_enqueued

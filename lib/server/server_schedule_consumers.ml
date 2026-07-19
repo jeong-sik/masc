@@ -117,15 +117,18 @@ let keeper_wake_reaction_ledger_status_json_fields = function
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_cancelled
 
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
   | Keeper_wake_already_acked -> "already_acked"
+  | Keeper_wake_already_cancelled -> "already_cancelled"
 ;;
 
 let keeper_wake_occurrence_status_of_string = function
   | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
   | "already_acked" -> Ok Keeper_wake_already_acked
+  | "already_cancelled" -> Ok Keeper_wake_already_cancelled
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
 
@@ -250,7 +253,8 @@ let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
 
 type keeper_wake_acceptance =
   | Wake_required
-  | Already_drained
+  | Already_acked
+  | Already_cancelled
 
 let retryable_dispatch_failure detail =
   Error (Schedule_runner.Retryable_dispatch_failure detail)
@@ -292,11 +296,23 @@ let accept_keeper_wake_occurrence
          stimulus_id
          (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason))
   | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
+    when evidence.event_queue_ack_seen && evidence.event_queue_cancelled_seen ->
+    retryable_dispatch_failure
+      (Printf.sprintf
+         "keeper reaction ledger has conflicting terminal settlements for occurrence %s"
+         stimulus_id)
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
+    when evidence.event_queue_cancelled_seen ->
+    (* The transition projector appends this exact-id cancellation before
+       retiring its outbox entry. Producer recovery must therefore preserve
+       the terminal operator disposition instead of recreating the wake. *)
+    Ok Already_cancelled
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence)
     when evidence.event_queue_ack_seen ->
     (* The transition projector appends this exact-id ACK before retiring its
        outbox entry. It is therefore the durable terminal occurrence fence,
        independent of pending/lease/outbox retention. *)
-    Ok Already_drained
+    Ok Already_acked
   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
     (match
        Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -364,10 +380,11 @@ let dispatch_keeper_wake
   let occurrence_status =
     match acceptance with
     | Wake_required -> Keeper_wake_awaiting_ack
-    | Already_drained -> Keeper_wake_already_acked
+    | Already_acked -> Keeper_wake_already_acked
+    | Already_cancelled -> Keeper_wake_already_cancelled
   in
   (match acceptance with
-   | Already_drained -> ()
+   | Already_acked | Already_cancelled -> ()
    | Wake_required ->
      let wakeup_outcome =
        Keeper_registry.wakeup_running

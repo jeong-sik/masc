@@ -11,18 +11,12 @@ include Board_core_classify
 include Board_core_payload
 
 let flush_interval_sec = Env_config.Board.flush_interval_sec
-let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
 
-(** Monotonic count of sweep/flush schedule messages skipped because the
-    bounded flusher inbox had no room for the whole batch. *)
-let flusher_schedule_dropped = Atomic.make 0
-let flusher_schedule_dropped_count () = Atomic.get flusher_schedule_dropped
-
-let record_flusher_schedule_drop scheduled_count =
-  (* Single atomic add instead of N increments, so a concurrent reader cannot
-     observe a partial count. [scheduled_count] is a [List.length], so it is
-     non-negative. *)
-  Atomic.fetch_and_add flusher_schedule_dropped scheduled_count |> ignore
+let no_flusher_requests =
+  { flush_requested = false
+  ; sweep_requested = false
+  ; wakeup_released = false
+  }
 ;;
 
 (** Monotonic counter of persist failures (disk full, permission errors, etc.). *)
@@ -69,8 +63,8 @@ let create_store () =
   ; pending_reaction_durability = Hashtbl.create 64
   ; pending_parent_projection_repairs = Hashtbl.create 64
   ; last_flush = Time_compat.now ()
-  ; flusher_inbox = Eio.Stream.create flusher_inbox_capacity
-  ; flusher_producer_mutex = Eio.Mutex.create ()
+  ; flusher_requests = Atomic.make no_flusher_requests
+  ; flusher_wakeup = Eio.Semaphore.make 0
   ; sub_boards = Hashtbl.create 64
   ; sub_boards_by_slug = Hashtbl.create 64
   ; posts_by_turn_ref = Hashtbl.create 256
@@ -299,77 +293,62 @@ let sweep ?(protected_post_ids = []) ?(protected_comment_ids = []) store =
     !removed_posts, !removed_comments)
 ;;
 
-(** Auto-sweep if needed, delegates to flusher actor inbox *)
-type scheduled_flusher_msg =
-  { msg : flusher_msg
-  ; previous_ts : float
-  ; reserved_ts : float
-  }
-
-let rollback_scheduled_msg store scheduled =
-  with_lock store (fun () ->
-    match scheduled.msg with
-    | Sweep ->
-      if Stdlib.Float.equal store.last_sweep scheduled.reserved_ts
-      then store.last_sweep <- scheduled.previous_ts
-    | Flush ->
-      if Stdlib.Float.equal store.last_flush scheduled.reserved_ts
-      then store.last_flush <- scheduled.previous_ts)
+(** Merge flusher work into one immutable operation set.  The atomic record is
+    the authority; the semaphore is only a level-triggered wake token. *)
+let with_flusher_request requests = function
+  | Flush -> { requests with flush_requested = true }
+  | Sweep -> { requests with sweep_requested = true }
 ;;
 
-let enqueue_scheduled_msg store scheduled =
-  try Eio.Stream.add store.flusher_inbox scheduled.msg
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    let bt = Printexc.get_raw_backtrace () in
-    rollback_scheduled_msg store scheduled;
-    Printexc.raise_with_backtrace exn bt
-;;
-
-let enqueue_scheduled_msgs store scheduled =
-  Eio.Mutex.use_rw ~protect:true store.flusher_producer_mutex (fun () ->
-    let scheduled_count = List.length scheduled in
-    let inbox_len = Eio.Stream.length store.flusher_inbox in
-    if scheduled_count = 0
-    then ()
-    else if scheduled_count > flusher_inbox_capacity - inbox_len
-    then (
-      record_flusher_schedule_drop scheduled_count;
-      List.iter (rollback_scheduled_msg store) scheduled;
-      Log.BoardLog.warn
-        "board flusher inbox full; skipped scheduling sweep/flush messages \
-         (queued=%d, requested=%d, capacity=%d)"
-        inbox_len scheduled_count flusher_inbox_capacity)
+let rec request_flusher_operations store operations =
+  match operations with
+  | [] -> Ok ()
+  | _ ->
+    let current = Atomic.get store.flusher_requests in
+    let merged = List.fold_left with_flusher_request current operations in
+    if
+      current.wakeup_released
+      && current.flush_requested = merged.flush_requested
+      && current.sweep_requested = merged.sweep_requested
+    then Ok ()
     else
-      (* Every producer holds [flusher_producer_mutex] across capacity
-         observation and admission. [Eio.Stream.add] therefore has room and
-         does not suspend while this mutex is held. *)
-      List.iter (enqueue_scheduled_msg store) scheduled)
+      let next = { merged with wakeup_released = true } in
+      if not (Atomic.compare_and_set store.flusher_requests current next)
+      then request_flusher_operations store operations
+      else if current.wakeup_released
+      then Ok ()
+      else
+        (try
+           Eio.Semaphore.release store.flusher_wakeup;
+           Ok ()
+         with
+         | Sys_error detail ->
+           Error
+             (Printf.sprintf
+                "Board flusher wake-token release failed while obligations remain published: %s"
+                detail))
 ;;
 
-let request_flush store =
-  Eio.Mutex.use_rw ~protect:true store.flusher_producer_mutex (fun () ->
-    let inbox_len = Eio.Stream.length store.flusher_inbox in
-    if inbox_len >= flusher_inbox_capacity
-    then (
-      record_flusher_schedule_drop 1;
-      Error
-        (Printf.sprintf
-           "board flusher inbox is full (queued=%d, capacity=%d)"
-           inbox_len
-           flusher_inbox_capacity))
+let request_flush store = request_flusher_operations store [ Flush ]
+
+let rec claim_flusher_requests store =
+  let current = Atomic.get store.flusher_requests in
+  if not current.wakeup_released
+  then Error "Board flusher acquired a wake token without wake ownership"
+  else
+    let operations =
+      match current.flush_requested, current.sweep_requested with
+      | true, true -> [ Flush; Sweep ]
+      | true, false -> [ Flush ]
+      | false, true -> [ Sweep ]
+      | false, false -> []
+    in
+    if not (Atomic.compare_and_set store.flusher_requests current no_flusher_requests)
+    then claim_flusher_requests store
     else
-      try
-        Eio.Stream.add store.flusher_inbox Flush;
-        Ok ()
-      with
-      | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-      | cause ->
-        Error
-          (Printf.sprintf
-             "board flush admission failed: %s"
-             (Printexc.to_string cause)))
+      match operations with
+      | _ :: _ -> Ok operations
+      | [] -> Error "Board flusher acquired a wake token without obligations"
 ;;
 
 let settle_unknown_durable_snapshot
@@ -409,22 +388,22 @@ let maybe_sweep store =
             (Stdlib.Float.of_int Limits.sweeper_interval_sec)
           > 0
         then (
-          let previous_ts = store.last_sweep in
           store.last_sweep <- now;
-          { msg = Sweep; previous_ts; reserved_ts = now } :: scheduled)
+          Sweep :: scheduled)
         else scheduled
       in
       let scheduled =
         if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
         then (
-          let previous_ts = store.last_flush in
           store.last_flush <- now;
-          { msg = Flush; previous_ts; reserved_ts = now } :: scheduled)
+          Flush :: scheduled)
         else scheduled
       in
       List.rev scheduled)
   in
-  enqueue_scheduled_msgs store scheduled
+  match request_flusher_operations store scheduled with
+  | Ok () -> ()
+  | Error detail -> Log.BoardLog.error "%s" detail
 ;;
 
 let reset_sweep_schedule_for_test store =

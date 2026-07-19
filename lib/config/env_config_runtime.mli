@@ -135,7 +135,6 @@ module Board : sig
   (** Positive finite Board persistence and autonomous flush-retry cadence.
       Invalid configured values raise {!Env_config_core.Config_error} during
       configuration initialization. *)
-  val flusher_inbox_capacity : int
   val backend_opt : unit -> backend option
 end
 

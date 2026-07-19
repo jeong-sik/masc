@@ -287,8 +287,8 @@ type flusher_retry_obligations = {
   sweep_retry_at : float option;
 }
 
-type 'a inbox_wait =
-  | Inbox_item of 'a
+type 'a deadline_wait =
+  | Wait_completed of 'a
   | Deadline_reached
 
 type routing_retry_failure =
@@ -337,16 +337,16 @@ let () =
 ;;
 
 let spawn_runtime_actor_on_switch ~sw ~clock store actor =
-  let await_inbox_until ~deadline inbox =
+  let await_until ~deadline await =
     let remaining = deadline -. Eio.Time.now clock in
     if Float.compare remaining 0.0 <= 0
     then Deadline_reached
     else
       match
         Eio.Time.with_timeout clock remaining (fun () ->
-          Ok (Eio.Stream.take inbox))
+          Ok (await ()))
       with
-      | Ok item -> Inbox_item item
+      | Ok item -> Wait_completed item
       | Error `Timeout -> Deadline_reached
   in
   let flush_attempt () =
@@ -433,6 +433,21 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     in
     with_retry_at obligations operation retry_at
   in
+  let merge_claimed_requests obligations =
+    match Board.claim_flusher_requests store with
+    | Error detail ->
+      Log.BoardLog.error "%s" detail;
+      obligations
+    | Ok operations ->
+      let requested_at = Eio.Time.now clock in
+      List.fold_left
+        (fun obligations operation ->
+           match retry_deadline obligations operation with
+           | Some _ -> obligations
+           | None -> with_retry_at obligations operation requested_at)
+        obligations
+        operations
+  in
   let rec await_operation obligations =
     let now = Eio.Time.now clock in
     match earliest_retry obligations with
@@ -441,19 +456,15 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     | retry ->
       (match retry with
        | None ->
-         let operation = Eio.Stream.take store.Board.flusher_inbox in
-         let recovering =
-           Option.is_some (retry_deadline obligations operation)
-         in
-         operation, recovering, without_retry obligations operation
+         Eio.Semaphore.acquire store.Board.flusher_wakeup;
+         await_operation (merge_claimed_requests obligations)
        | Some (retry_at, _) ->
-         (match await_inbox_until ~deadline:retry_at store.Board.flusher_inbox with
-          | Inbox_item message ->
-            let operation = message in
-            let recovering =
-              Option.is_some (retry_deadline obligations operation)
-            in
-            operation, recovering, without_retry obligations operation
+         (match
+            await_until ~deadline:retry_at (fun () ->
+              Eio.Semaphore.acquire store.Board.flusher_wakeup)
+          with
+          | Wait_completed () ->
+            await_operation (merge_claimed_requests obligations)
           | Deadline_reached -> await_operation obligations))
   in
   let log_attempt_failure ~operation ~retry_operation = function
@@ -519,8 +530,10 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
          Eio.Stream.take routing_retry_inbox;
          Atomic.set routing_retry_requested false
        | Some deadline ->
-         (match await_inbox_until ~deadline routing_retry_inbox with
-          | Inbox_item () -> Atomic.set routing_retry_requested false
+         (match
+            await_until ~deadline (fun () -> Eio.Stream.take routing_retry_inbox)
+          with
+          | Wait_completed () -> Atomic.set routing_retry_requested false
           | Deadline_reached -> ()));
       let outcome =
         try

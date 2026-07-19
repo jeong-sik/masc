@@ -300,6 +300,12 @@ type flusher_msg =
   | Flush
   | Sweep
 
+type flusher_requests = {
+  flush_requested : bool;
+  sweep_requested : bool;
+  wakeup_released : bool;
+}
+
 (** {1 Karma Ledger Contract} *)
 
 (** A single attributed karma event.  One event is generated per upvote
@@ -350,8 +356,8 @@ type store = {
   pending_reaction_durability: (string, string) Hashtbl.t;  (** reaction key -> original commit-unknown detail *)
   pending_parent_projection_repairs: (string, unit) Hashtbl.t; (** comment_id -> parent rewrite required *)
   mutable last_flush: float;
-  flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
-  flusher_producer_mutex: Eio.Mutex.t;                    (** Serializes non-blocking inbox admission *)
+  flusher_requests: flusher_requests Atomic.t;             (** Coalesced operation set + wake ownership *)
+  flusher_wakeup: Eio.Semaphore.t;                         (** Single logical wake token *)
   sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)
   sub_boards_by_slug: (string, string) Hashtbl.t;          (** slug -> sub_board_id *)
   (* RFC-0233 §7 guard #2: real secondary indexes for origin lookup, mirroring

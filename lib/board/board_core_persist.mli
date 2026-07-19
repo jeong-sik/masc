@@ -18,14 +18,6 @@ end
 (** Canonical cadence for deferred flush scheduling and failed flusher
     obligation retry. *)
 val flush_interval_sec : float
-val flusher_inbox_capacity : int
-(** Capacity of {!store.flusher_inbox}. The scheduler reserves room for a whole
-    sweep/flush batch before enqueueing. *)
-
-val flusher_schedule_dropped_count : unit -> int
-(** Count of sweep/flush schedule messages skipped because the flusher inbox was
-    full. *)
-
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 val persist_io_error : where:string -> string -> ('a, board_error) result
@@ -50,8 +42,12 @@ val sweep :
 val maybe_sweep : store -> unit
 
 val request_flush : store -> (unit, string) result
-(** Enqueue an explicit dirty-state flush without blocking on a full inbox.
-    Capacity observation and admission are serialized across all producers. *)
+(** Merge an explicit dirty-state flush into the immutable flusher obligation
+    set and release at most one wake token. *)
+
+val claim_flusher_requests : store -> (flusher_msg list, string) result
+(** Atomically claim every coalesced operation after acquiring
+    {!store.flusher_wakeup}. *)
 val settle_unknown_durable_snapshot :
   store ->
   initial_detail:string ->

@@ -156,19 +156,17 @@ let sweep_schedule_timestamps_for_test =
 
 let maybe_sweep_for_test = Masc_board_handlers.Board_core_persist.maybe_sweep
 
-let flusher_inbox_capacity_for_test =
-  Masc_board_handlers.Board_core_persist.flusher_inbox_capacity
+let request_flush_for_test =
+  Masc_board_handlers.Board_core_persist.request_flush
 
-let flusher_schedule_dropped_count_for_test =
-  Masc_board_handlers.Board_core_persist.flusher_schedule_dropped_count
+let claim_flusher_requests_for_test =
+  Masc_board_handlers.Board_core_persist.claim_flusher_requests
 
-let drain_flusher_inbox store =
-  let rec loop acc =
-    match Eio.Stream.take_nonblocking store.flusher_inbox with
-    | None -> List.rev acc
-    | Some msg -> loop (msg :: acc)
-  in
-  loop []
+let claim_flusher_requests store =
+  Eio.Semaphore.acquire store.flusher_wakeup;
+  match claim_flusher_requests_for_test store with
+  | Ok operations -> operations
+  | Error detail -> Alcotest.fail detail
 
 let check_one_sweep_and_flush label messages =
   let sweep_count, flush_count =
@@ -194,7 +192,9 @@ let test_maybe_sweep_updates_schedule_once () =
   let second_sweep, second_flush = sweep_schedule_timestamps_for_test store in
   Alcotest.(check (float 0.0)) "sweep timestamp unchanged" first_sweep second_sweep;
   Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush second_flush;
-  check_one_sweep_and_flush "sequential" (drain_flusher_inbox store)
+  Alcotest.(check int) "one coalesced wake token" 1
+    (Eio.Semaphore.get_value store.flusher_wakeup);
+  check_one_sweep_and_flush "sequential" (claim_flusher_requests store)
 
 let test_maybe_sweep_concurrent_schedules_once () =
   let store = create_store () in
@@ -206,32 +206,31 @@ let test_maybe_sweep_concurrent_schedules_once () =
       (fun _ -> maybe_sweep_for_test store)
       callers
   in
-  check_one_sweep_and_flush "concurrent" (drain_flusher_inbox store)
+  Alcotest.(check int) "one concurrent wake token" 1
+    (Eio.Semaphore.get_value store.flusher_wakeup);
+  check_one_sweep_and_flush "concurrent" (claim_flusher_requests store)
 
-let test_maybe_sweep_full_inbox_rolls_back_schedule () =
+let test_concurrent_flush_requests_coalesce () =
   let store = create_store () in
-  reset_sweep_schedule_for_test store;
-  for _ = 1 to flusher_inbox_capacity_for_test do
-    Eio.Stream.add store.flusher_inbox Flush
-  done;
-  let dropped_before = flusher_schedule_dropped_count_for_test () in
-  maybe_sweep_for_test store;
-  let dropped_after = flusher_schedule_dropped_count_for_test () in
-  let sweep_ts, flush_ts = sweep_schedule_timestamps_for_test store in
-  Alcotest.(check int) "full inbox dropped scheduled messages" 2
-    (dropped_after - dropped_before);
-  Alcotest.(check (float 0.0))
-    "sweep timestamp rolled back"
-    schedule_reset_timestamp_for_test
-    sweep_ts;
-  Alcotest.(check (float 0.0))
-    "flush timestamp rolled back"
-    schedule_reset_timestamp_for_test
-    flush_ts;
-  Alcotest.(check int)
-    "full inbox length unchanged"
-    flusher_inbox_capacity_for_test
-    (Eio.Stream.length store.flusher_inbox)
+  let producers =
+    List.init 4 (fun _ ->
+      Domain.spawn (fun () -> request_flush_for_test store))
+  in
+  List.iter
+    (fun producer ->
+       match Domain.join producer with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail)
+    producers;
+  Alcotest.(check int) "one wake token for all producers" 1
+    (Eio.Semaphore.get_value store.flusher_wakeup);
+  Alcotest.(check (list string))
+    "one coalesced flush obligation"
+    [ "flush" ]
+    (claim_flusher_requests store
+     |> List.map (function Flush -> "flush" | Sweep -> "sweep"));
+  Alcotest.(check int) "wake token claimed" 0
+    (Eio.Semaphore.get_value store.flusher_wakeup)
 
 let test_post_kind_direct_default () =
   let store = create_store () in
@@ -289,8 +288,8 @@ let () =
             (with_eio test_maybe_sweep_updates_schedule_once);
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick
             (with_eio test_maybe_sweep_concurrent_schedules_once);
-          Alcotest.test_case "maybe_sweep full inbox rolls back schedule" `Quick
-            (with_eio test_maybe_sweep_full_inbox_rolls_back_schedule);
+          Alcotest.test_case "concurrent flush requests coalesce" `Quick
+            test_concurrent_flush_requests_coalesce;
         ] );
       ( "visibility_ssot",
         [

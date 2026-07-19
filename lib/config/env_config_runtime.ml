@@ -296,15 +296,6 @@ module Board = struct
            (Config_error
               (Printf.sprintf "%s must be a positive finite float; got %S" key raw)))
 
-  (** Capacity of the board flusher inbox (scheduled sweep/flush messages
-      enqueued by the sweeper). Single source of truth shared by the
-      persistence layer, its [.mli] doc, and the stream creation site.
-      Default: 1000.
-      @category Concurrency
-      @ops_class operator *)
-  let flusher_inbox_capacity =
-    get_int ~default:1000 "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
-
   (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
   let backend_opt () =
     Sys.getenv_opt "MASC_BOARD_BACKEND"

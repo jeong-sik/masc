@@ -253,6 +253,12 @@ type flusher_msg =
   | Flush
   | Sweep
 
+type flusher_requests = {
+  flush_requested : bool;
+  sweep_requested : bool;
+  wakeup_released : bool;
+}
+
 type store = {
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
@@ -290,9 +296,11 @@ type store = {
   (** Comment ids whose durable row exists but whose parent projection still
       requires an idempotent rewrite. *)
   mutable last_flush : float;
-  flusher_inbox : flusher_msg Eio.Stream.t;
-  flusher_producer_mutex : Eio.Mutex.t;
-  (** Serializes capacity observation and non-blocking inbox admission. *)
+  flusher_requests : flusher_requests Atomic.t;
+  (** Immutable coalesced operation set and wake-token ownership. *)
+  flusher_wakeup : Eio.Semaphore.t;
+  (** Single logical wake token; operation authority remains in
+      {!flusher_requests}. *)
   sub_boards : (string, sub_board) Hashtbl.t;
   (** Sub-board id -> sub_board record. *)
   sub_boards_by_slug : (string, string) Hashtbl.t;

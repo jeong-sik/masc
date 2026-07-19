@@ -69,8 +69,8 @@ val flush_interval_sec : float
 
 (** Builds a fresh empty store with default Hashtbl capacities
     (1024 posts / 4096 comments / 2048 vote-log entries),
-    fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
-    [flusher_inbox] capped by the persistence-layer flusher inbox capacity. *)
+    fresh [Eio.Mutex], cold caches, and a coalesced flusher obligation mailbox
+    with a single logical wake token. *)
 val create_store : unit -> store
 
 (** {1 Locking + cache invalidation} *)

@@ -7,10 +7,15 @@ and `lib/pulse/` already practice.
 
 ## TL;DR
 
-The pattern is: **one bounded `Eio.Stream` mailbox + one fiber that
-loops on `Stream.take` + a record of immutable state threaded through
-the loop**. Cross-fiber callers send messages by `Stream.add` and
-optionally await a `Promise` resolver bundled into the message.
+Two mailbox shapes are canonical:
+
+- **Lossless request queue:** one bounded `Eio.Stream` + one consumer fiber.
+  Each distinct message must be retained, and request-response messages may
+  carry a `Promise` resolver.
+- **Coalesced obligation set:** one immutable record in `Atomic.t` + one
+  level-triggered `Eio.Semaphore` wake token. Idempotent operations such as
+  Board `Flush`/`Sweep` merge by operation identity instead of accumulating
+  duplicate queue entries or dropping work at a capacity boundary.
 
 ```
 producer fiber ─── Stream.add ──▶  [bounded mailbox]
@@ -19,6 +24,10 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
                             consumer fiber: let rec loop state =
                               let msg = Stream.take mb in
                               loop (process state msg)
+
+producer/domain ─── Atomic CAS ──▶ {flush; sweep; wake_released}
+                         │                        │
+                         └── Semaphore.release ──┘──▶ consumer claims set
 ```
 
 ## Existing examples
@@ -26,7 +35,7 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 | File | Mailbox | Pattern shape |
 |------|---------|---------------|
 | `lib/session.ml:56,90,271-278` | `registry.mailbox` (Eio.Stream, cap 10000) + per-session notification queue (cap 1000) | **Request-response.** Each message carries an `Eio.Promise` resolver; consumer resolves it to return data to the caller. |
-| `lib/board_dispatch.ml:35,71-89` | `store.flusher_inbox` (cap 1000), commands `Flush` / `Sweep` | **Fire-and-forget.** No resolver — caller does not block on the consumer's progress. |
+| `lib/board/board_dispatch.ml` | `store.flusher_requests` + `store.flusher_wakeup` | **Coalesced obligations.** Cross-domain producers OR-merge `Flush` / `Sweep`; one semaphore token wakes the owner without queue growth or loss. |
 | `lib/pulse/pulse.ml` | Adaptive tick + per-consumer registration | **Pub-sub-with-tick.** Consumers register first-class modules, receive each beat. |
 | `lib/sse.ml:304` | per-client `event_stream` (cap 64) | **Per-subscriber broadcast.** A snapshot of the registry is taken, each subscriber receives via its own stream. |
 
@@ -34,6 +43,8 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 
 - **Cross-fiber state synchronization** where the state owns a single
   fiber and other fibers must not touch it directly.
+- **Idempotent level-triggered work** should use the coalesced obligation
+  shape when repeated requests do not carry distinct payloads.
 - **Backpressure** is required and an unbounded queue would risk
   memory exhaustion (see #10777 — unbounded streams have already cost
   us a heap blow-up).
@@ -57,8 +68,9 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 
 ## Anti-patterns observed in this repo
 
-1. **Unbounded streams** (`Eio.Stream.create 0`). #10777 — heap
-   exhaustion. Always pick a bound, even if it is large.
+1. **Effectively unbounded streams** (`Eio.Stream.create max_int`). #10777 —
+   heap exhaustion. Pick a finite bound for distinct-message queues. Capacity
+   `0` is a rendezvous channel, not an unbounded queue.
 2. **Split atomic increment then read** — `Atomic.incr; Atomic.get`
    produces duplicate IDs under contention. Use
    `Atomic.fetch_and_add` / `Atomic.compare_and_set` instead. See

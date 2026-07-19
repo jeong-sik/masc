@@ -47,6 +47,31 @@ type error =
   | Identity_mismatch of identity
   | Registration_conflict of registration
   | Durable_append_failed of Fs_compat.durable_append_error
+
+let error_to_string = function
+  | Empty_keeper -> "keeper identity is empty"
+  | Empty_run_id -> "run identity is empty"
+  | Invalid_started_at value -> Printf.sprintf "started_at is not finite: %g" value
+  | Empty_abort_detail -> "abort detail is empty"
+  | Empty_cancellation_detail -> "cancellation detail is empty"
+  | Partial_tail -> "authority journal has a partial tail"
+  | Unsupported_schema_version { line; found } ->
+    Printf.sprintf "authority journal line %d has unsupported schema version %d" line found
+  | Invalid_record { line; detail } ->
+    Printf.sprintf "authority journal line %d is invalid: %s" line detail
+  | Empty_authority_record -> "authority journal is empty"
+  | Evidence_question_mismatch { expected; found } ->
+    Printf.sprintf "authority evidence question mismatch: expected=%S found=%S" expected found
+  | Invalid_transition { event_index; state; event } ->
+    Printf.sprintf "authority event %d cannot apply %s to %s"
+      event_index (show_event_kind event) (show_state_kind state)
+  | Identity_mismatch identity ->
+    Printf.sprintf "authority identity mismatch: %s" (show_identity identity)
+  | Registration_conflict registration ->
+    Printf.sprintf "authority registration conflict: %s" (show_registration registration)
+  | Durable_append_failed error -> Fs_compat.durable_append_error_to_string error
+;;
+
 type register_outcome =
   | Registered
   | Already_registered of recovered_run

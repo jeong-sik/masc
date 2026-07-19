@@ -34,6 +34,7 @@ type error =
   | Identity_mismatch of identity
   | Registration_conflict of registration
   | Durable_append_failed of Fs_compat.durable_append_error
+val error_to_string : error -> string
 type register_outcome =
   | Registered
   | Already_registered of recovered_run

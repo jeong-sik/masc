@@ -110,5 +110,14 @@ val to_string : t -> string
 
 val parse_error_to_string : parse_error -> string
 
+val parse_date_value : string -> (date, parse_error) result
+(** Parse and validate an RFC 5545 DATE value ([YYYYMMDD]). Exposed for
+    property layers (DTSTART, RECURRENCE-ID, RDATE/EXDATE) that share the
+    same value grammar. *)
+
+val parse_time_of_day_value : string -> (time_of_day, parse_error) result
+(** Parse and validate an RFC 5545 TIME value ([HHMMSS], leap second
+    admitted). *)
+
 val freq_to_string : freq -> string
 val weekday_to_string : weekday -> string

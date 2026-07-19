@@ -132,6 +132,9 @@ let parse_time_of_day raw =
   end
   else Error (Invalid_time raw)
 
+let parse_date_value = parse_date
+let parse_time_of_day_value = parse_time_of_day
+
 let parse_until raw =
   let n = String.length raw in
   if n = 8 then

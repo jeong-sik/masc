@@ -655,6 +655,10 @@ let () =
             `Quick
             test_private_jsonl_append_rejects_incomplete_suffix
         ; test_case
+            "private JSONL stable lock contention is typed"
+            `Quick
+            test_private_jsonl_transaction_lock_contention_is_typed
+        ; test_case
             "private JSONL append respects execution context"
             `Quick
             test_private_jsonl_append_respects_execution_context
@@ -682,10 +686,6 @@ let () =
             "private JSONL stable lock rejects symlink aliases"
             `Quick
             test_private_jsonl_transaction_rejects_symlink_lock_without_chmod
-        ; test_case
-            "private JSONL stable lock contention is typed"
-            `Quick
-            test_private_jsonl_transaction_lock_contention_is_typed
         ] )
     ]
 ;;

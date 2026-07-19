@@ -2096,6 +2096,7 @@ let private_jsonl_open_existing path flags =
 ;;
 
 let rec private_jsonl_read_byte fd byte offset =
+  (* See POSIX lseek: no exception confirms the requested absolute offset. *)
   ignore (Unix.lseek fd offset Unix.SEEK_SET : int);
   match Unix.read fd byte 0 1 with
   | 1 -> Bytes.get byte 0
@@ -2123,6 +2124,7 @@ let private_jsonl_read_exact fd ~from ~end_offset =
   private_jsonl_capture Read_transaction_data (fun () ->
     let length = end_offset - from in
     let bytes = Bytes.create length in
+    (* See POSIX lseek: no exception confirms the requested absolute cursor. *)
     ignore (Unix.lseek fd from Unix.SEEK_SET : int);
     let rec read_all offset =
       if offset = length
@@ -2333,6 +2335,7 @@ let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =
                      | Error failure ->
                        Error (Private_jsonl_operation_failed failure)
                      | Ok () ->
+                       (* See POSIX lseek: O_APPEND owns writes; this resets reads. *)
                        ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
                        (match
                           append_fd_durable

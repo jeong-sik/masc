@@ -645,7 +645,7 @@
   test_board_context_inference_resolution)
  (libraries
   masc_test_deps masc.keeper_chat_delivery_identity masc_schedule multimodal
-  bigstringaf))
+  bigstringaf masc.keeper_checkpoint_ref))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test

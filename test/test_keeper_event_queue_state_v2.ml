@@ -159,6 +159,72 @@ let test_no_compaction_rejects_scheduled_product_work () =
   | Ok _ -> Alcotest.fail "no-compaction consumed a non-compaction product event"
 ;;
 
+let test_no_compaction_decode_rejects_mismatched_stimulus () =
+  (* Persist decode boundary re-enforces the settle-time receipt-vs-stimuli
+     invariant (parse, don't validate). A persisted state whose No_compaction
+     outbox receipt is paired with a non-manual stimulus must decode to Error,
+     not silently Ok. Counterfactual: without the decode-boundary call the same
+     tampered JSON decodes Ok. *)
+  let request =
+    stimulus
+      ~payload:Queue.Manual_compaction_requested
+      Queue.manual_compaction_post_id
+      1.0
+  in
+  let claimed, lease =
+    State.with_pending (queue [ request ]) State.empty |> claim_head
+  in
+  let lease = require_some "no-compaction lease" lease in
+  let terminal = no_compaction ~turn_count:7 State.No_eligible_history in
+  let settled, _ =
+    State.settle
+      ~settled_at:11.0
+      ~lease
+      ~settlement:(State.No_compaction terminal)
+      claimed
+    |> require_ok "settle no-compaction terminal"
+  in
+  let json = State.to_yojson settled in
+  (* The untampered persisted state decodes cleanly. *)
+  ignore (State.of_yojson json |> require_ok "untampered no-compaction decode");
+  let substitute =
+    Queue.stimulus_to_yojson (stimulus ~payload:Queue.Bootstrap "peer-work" 2.0)
+  in
+  let tamper_outbox_entry = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "stimuli"
+              then key, `List [ substitute ]
+              else key, value)
+           fields)
+    | other -> other
+  in
+  let tampered =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "transition_outbox", `List entries ->
+                key, `List (List.map tamper_outbox_entry entries)
+              | _ -> key, value)
+           fields)
+    | other -> other
+  in
+  match State.of_yojson tampered with
+  | Error message ->
+    Alcotest.(check string)
+      "decode boundary rejects mismatched no-compaction stimulus"
+      "no-compaction settlement requires one manual-compaction request stimulus"
+      message
+  | Ok _ ->
+    Alcotest.fail
+      "decode accepted a No_compaction receipt paired with a non-manual stimulus"
+;;
+
 let test_claim_codec_ack_idempotency () =
   let first = stimulus "first" 1.0 in
   let state = State.with_pending (queue [ first ]) State.empty in
@@ -1430,6 +1496,10 @@ let () =
             "lane write fault isolation"
             `Quick
             test_failed_owner_write_does_not_block_peer_lane
+        ; Alcotest.test_case
+            "no-compaction decode rejects mismatched stimulus"
+            `Quick
+            test_no_compaction_decode_rejects_mismatched_stimulus
         ] )
     ]
 ;;

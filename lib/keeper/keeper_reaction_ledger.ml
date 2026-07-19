@@ -1549,6 +1549,7 @@ let unavailable_fleet_summary_json () =
     ; "reaction_count", `Int 0
     ; "turn_started_count", `Int 0
     ; "event_queue_ack_count", `Int 0
+    ; "event_queue_no_compaction_count", `Int 0
     ; "event_queue_requeue_count", `Int 0
     ; "event_queue_escalation_count", `Int 0
     ; "event_queue_external_input_count", `Int 0
@@ -1814,6 +1815,8 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "reaction_count", `Int (total_int "reaction_count")
     ; "turn_started_count", `Int (total_int "turn_started_count")
     ; "event_queue_ack_count", `Int (total_int "event_queue_ack_count")
+    ; ( "event_queue_no_compaction_count"
+      , `Int (total_int "event_queue_no_compaction_count") )
     ; "event_queue_requeue_count", `Int (total_int "event_queue_requeue_count")
     ; ( "event_queue_escalation_count"
       , `Int (total_int "event_queue_escalation_count") )

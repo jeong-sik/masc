@@ -38,6 +38,57 @@ let limit_type schema =
      | _ -> Alcotest.failf "%s: properties not an Assoc" schema.name)
   | _ -> Alcotest.failf "%s: input_schema not an Assoc" schema.name
 
+let limit_description schema =
+  match schema.Masc_domain.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt "limit" props with
+        | Some (`Assoc limit_fields) ->
+          (match List.assoc_opt "description" limit_fields with
+           | Some (`String d) -> d
+           | Some _ | None ->
+             Alcotest.failf "%s: limit field missing string 'description'" schema.name)
+        | _ -> Alcotest.failf "%s: limit field missing in properties" schema.name)
+     | _ -> Alcotest.failf "%s: properties not an Assoc" schema.name)
+  | _ -> Alcotest.failf "%s: input_schema not an Assoc" schema.name
+
+let contains ~substr s =
+  let n = String.length s and m = String.length substr in
+  if m = 0 then true
+  else if m > n then false
+  else begin
+    let rec go i =
+      if i + m > n then false
+      else if String.equal (String.sub s i m) substr then true
+      else go (i + 1)
+    in
+    go 0
+  end
+
+(* #25274 P2 (codex): under a strict integer [limit] schema,
+   Tool_input_validation rejects a numeric-string [limit] before dispatch,
+   so a description that tells keepers numeric strings are accepted steers
+   them straight into the #18472 crash class. Pin the prose: it must ask
+   for a bare integer and must not claim strings are accepted. *)
+let check_limit_description name desc =
+  let d = String.lowercase_ascii desc in
+  check bool
+    (Printf.sprintf "%s: limit description mentions integer" name)
+    true
+    (contains ~substr:"integer" d);
+  check bool
+    (Printf.sprintf "%s: limit description does not mention numeric string" name)
+    false
+    (contains ~substr:"numeric string" d);
+  check bool
+    (Printf.sprintf "%s: limit description does not claim strings accepted" name)
+    false
+    (contains ~substr:"accepted" d)
+
+let desc_case tools name () =
+  check_limit_description name (limit_description (find_tool_schema tools name))
+
 (* A [type] array with more than one non-null member is exactly what OAS
    #2343 fail-closed rejects. Assert every [limit] is a single scalar. *)
 let check_single_type name type_value =
@@ -84,5 +135,19 @@ let () =
             "keeper_board_search"
             `Quick
             (case Tool_shard_types.board_tools "keeper_board_search")
+        ] )
+    ; ( "limit description asks for a bare integer, not a numeric string"
+      , [ test_case
+            "keeper_memory_search"
+            `Quick
+            (desc_case Tool_shard_types.base_tools "keeper_memory_search")
+        ; test_case
+            "keeper_board_list"
+            `Quick
+            (desc_case Tool_shard_types.board_tools "keeper_board_list")
+        ; test_case
+            "keeper_board_search"
+            `Quick
+            (desc_case Tool_shard_types.board_tools "keeper_board_search")
         ] )
     ]

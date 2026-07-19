@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: []
 related: ["0042", "0257", "worldstate-observation-channel-split"]
-implementation_prs: []
+implementation_prs: [25270, 25281]
 ---
 
 # RFC-compaction-deterministic-floor
@@ -131,41 +131,80 @@ when the window is already exceeded). They are complementary, not alternatives.
 keep/drop/summarize decision over these units; the policy validates it
 (`Structurally_unchanged`, `Checkpoint_not_reduced`) and commits it.
 
-Add a **deterministic plan builder** over the same units:
+Add a **deterministic reduction** over the same units (implemented in PR #25281
+as `deterministic_floor_requested` in `keeper_compact_policy.ml`):
 
-- Always keep: system/prompt-role units and the most recent `K` units (K a
-  typed config knob, e.g. `compaction_floor_keep_units`).
-- Elide the contiguous middle span of droppable units, replacing it with **one**
-  deterministic marker unit: `[N earlier messages elided to fit the context
-  window; full span preserved in <ref>]` (the `<ref>` ties into #25194
-  before-state preservation).
-- Respect unit boundaries: a `Closed_tool_cycle` is kept or dropped whole (the
-  unit type exists precisely to prevent half-dropped tool cycles).
+- Protect a **head window** (`floor_protected_head_units`, the conversation's
+  setup: system prompt / first goal) and a **tail window**
+  (`floor_protected_tail_units`, recent context).
+- Drop whole units from the **middle** — but only `Ordinary_message` units whose
+  role is `User` or `Assistant`. `Closed_tool_cycle` and `System` units are never
+  dropped (see §2.1.1). Because it drops User messages, it targets the dominant
+  accumulation (the world-state `User` block), not just Assistant text — which is
+  what the LLM path is limited to.
+- Whole-unit drops keep tool cycles intact (a `Closed_tool_cycle` is one unit),
+  so a `tool_result` is never orphaned.
+- No summary is produced — this is lossy (drop, not summarize), a last resort
+  when the LLM is unavailable. #25194 (before-state preservation) is the
+  complement for recovering the dropped span; a marker unit naming the elided
+  span is a possible follow-up.
 
-Because the deterministic builder emits the **same plan structure** the LLM
-emits, it flows through the identical validation + `commit_prepared_after_save`
-path. It is an alternative plan source, not a new bypass — blast radius is the
+The result is the **same `requested_compaction`** the LLM path produces (message
+list + selected-runtime-id + summarized/dropped counts), so it flows through the
+identical evidence + reduction-guard + `commit_prepared_after_save` path. It is
+an alternative reduction source, not a new bypass — blast radius is the
 plan-production boundary only.
+
+### 2.1.1 The tool-count invariant constrains what the floor may drop
+
+`Keeper_compaction_evidence.create` (`lib/keeper_compaction_evidence/…ml:200-209`)
+rejects any compaction where `after_tool_use_count <> before_tool_use_count` or
+`after_tool_result_count <> before_tool_result_count` (`Invalid_transition`). The
+LLM path only ever touches eligible units (pure-text `Assistant` messages with no
+tool blocks), so its tool counts are invariant by construction. The floor must
+honour the same invariant, so it **cannot drop `Closed_tool_cycle` units**
+(that would reduce the tool counts and be rejected as
+`Invalid_structural_evidence`). Since `Keeper_compaction_unit.partition` groups
+every tool cycle into a `Closed_tool_cycle`, an `Ordinary_message` carries no tool
+blocks, so dropping User/Assistant ordinary units keeps the tool counts invariant
+and passes evidence. This is why the floor's drop set is exactly
+"middle `Ordinary_message` User/Assistant units".
+
+### 2.1.2 Why positional head protection is required
+
+`partition` only protects a trailing *open* tool cycle as `protected_suffix`; the
+entire rest of the conversation, **including the leading system prompt / first
+goal at index 0**, lands in `closed_prefix`. A naive "drop the oldest units"
+floor would therefore drop the foundational setup. The head window protects it
+positionally without needing role classification of the leading messages.
 
 ### 2.2 Where the floor engages
 
-Resolution order inside `compact_for_request_typed` (or the summarizer lane
-resolver):
+Resolution order inside `requested_messages` (`keeper_compact_policy.ml`), gated
+by the exhaustive `floor_should_engage` classifier:
 
-1. Try the LLM plan (existing path) when a schema-capable candidate exists.
-2. If no eligible candidate, or the LLM returns
-   `Plan_provider_unavailable | Summarizer_unavailable | Invalid_compaction_plan`,
-   build the **deterministic floor plan** and commit it.
-3. Genuinely-nothing-to-do rejections (`No_eligible_history`,
-   `Structurally_unchanged`, `Checkpoint_not_reduced`) remain terminal — the
-   floor must not manufacture a reduction where none is structurally possible
-   (that would be a fake success). If even the floor cannot reduce (already at
-   `K` units and still over limit), that is a real terminal state and must be
-   surfaced (§2.3), not spun on.
+1. Try the LLM plan (existing path).
+2. Engage the floor when the LLM path yields a "no usable reduction" reject:
+   `Runtime_identity_unavailable | Summarizer_unavailable |
+   Plan_provider_unavailable | Invalid_compaction_plan | No_eligible_history`.
+   `No_eligible_history` is included deliberately: the LLM cannot summarize a
+   conversation with no eligible Assistant-text units, but the floor can still
+   drop middle User units (exactly the world-state-bloat case).
+3. Do **not** engage the floor on a *successful* LLM decision that kept
+   everything (`Structurally_unchanged`) or on a genuine structural error
+   (`Invalid_structure`, `Checkpoint_not_reduced`, `Invalid_structural_evidence`)
+   — these are respected, not overridden. `floor_should_engage` is an exhaustive
+   match over `compaction_rejection`, so a new reject variant forces a
+   compile-time decision.
+4. If the floor finds no middle span to drop (`total <= head + tail`, or the
+   middle is all tool cycles / System units), it returns `None` and the original
+   LLM reject stands. The downstream reduction guards
+   (`Structurally_unchanged` / `Checkpoint_not_reduced`) still reject a floor
+   that fails to shrink the checkpoint. Either way the outcome is surfaced
+   (§2.3), never spun on.
 
-This preserves fail-closed for the cases that *should* fail closed (nothing to
-compact) while removing the deadlock for the case that must not (a capable model
-is temporarily unavailable).
+This removes the deadlock for the case that must not fail closed (a capable model
+is temporarily unavailable) while never manufacturing a fake reduction.
 
 ### 2.3 Typed compaction outcome (observability)
 
@@ -208,17 +247,22 @@ decided on quality grounds, not liveness pressure.
 |---|---|
 | world-state-observation-channel-split RFC (#25246) | Upstream: reduces accumulation so overflow is rarer. This RFC: guarantees recovery once overflow happens. |
 | RFC-0042 / #25051 (compaction runtime coupling, native-schema gate) | This RFC removes the *liveness* dependency on that gate; #25051 remains for summary-quality/candidate breadth. No duplication. |
+| #25266 (structured-output wire format) | Complementary *quality* fix: masc always sends `json_schema` strict, so only `ollama`-native (minimax) qualifies; sending `json_object` to json_object-only providers (GLM/DeepSeek/Kimi) would widen the good path. That widens *which models can plan*; this RFC guarantees liveness when *none* can. |
 | #25062 (compaction death spiral, live) | This RFC is the structural fix for that spiral. |
-| #25194 (pre-compaction before-state preservation) | The floor's elision marker references the preserved span; #25194 provides the store. |
+| #25194 (pre-compaction before-state preservation) | The floor is lossy (it drops the middle span without a summary); #25194 preserves that span for recovery. A marker unit naming the elided span (§6) would reference #25194's store. |
 
 ## 4. Phases
 
-1. **PR-1 (observability, harness-first)**: persist the specific compaction
-   rejection reason where it is currently dropped, and read it in the dashboard.
-   No behavior change to compaction itself. This lands first because the floor
-   (PR-2) cannot be validated without seeing outcomes. Tests pin: reactive
-   rejection populates a compaction-specific status field with the specific
-   reason (regression against the current drop-to-generic behavior).
+1. **PR-1 (observability, harness-first)** — **DONE, merged as #25270.** Shipped
+   option (a): a `Keeper_registry.set_compaction_decision` meta-updater, stamped
+   from the reactive `record_overflow_failure` path onto the existing
+   `compaction_rt.last_decision` (`provider_overflow_recovery_failed: <reason>`),
+   plus the dashboard read/render of `last_compaction_decision`. The post_turn
+   `Rejected` stamp (`keeper_post_turn.ml:599`) and the richer typed
+   `compaction_outcome` of §2.3 were deferred — the floor (#25281) makes itself
+   observable through the sentinel `selected_runtime_id = "deterministic_floor"`
+   (which flows to evidence/manifest) and, on failure, through this same
+   `last_decision`.
 
    **Plumbing sub-decision (found during scoping — do not re-derive):** the
    reactive path (`record_overflow_failure`, `keeper_turn_runtime_budget.ml:411`)
@@ -242,13 +286,15 @@ decided on quality grounds, not liveness pressure.
    attempt sites converge on one observable. The frontend read
    (`keeper-store-normalize.ts` already emits `last_compaction_decision` from
    the backend but the normalizer does not consume it) is a small addition.
-2. **PR-2 (deterministic floor)**: deterministic plan builder over
-   `Keeper_compaction_unit`; engage per §2.2; `Applied_floor` outcome. Tests
-   pin: with no schema-capable candidate, an over-limit checkpoint is reduced
-   (not `Provider_overflow_retry_without_checkpoint`), unit boundaries respected,
-   and a genuinely-irreducible checkpoint yields `Failed_terminal` (no spin).
-   Acceptance: a keeper with the structured-judge lane forced unavailable no
-   longer loops on `compaction_started`.
+2. **PR-2 (deterministic floor)** — **implemented as #25281 (in review).**
+   `deterministic_floor_requested` over `Keeper_compaction_unit`, engaged per
+   §2.2, dropping middle `Ordinary_message` User/Assistant units while preserving
+   tool cycles and System units (§2.1.1). Tests pin: middle drop with head/tail
+   protection, protected-suffix preservation, no-op without a middle span, and
+   tool-cycle/System preservation. The `Applied_floor` typed outcome was folded
+   into the sentinel `selected_runtime_id`; a live acceptance test (a keeper with
+   the structured-judge lane forced unavailable no longer loops on
+   `compaction_started`) is the remaining validation once deployed.
 3. **PR-3 (candidate breadth, coordinate with #25051)**: only if #25051 has not
    already covered it — operator-configurable schema-capable lanes. Quality, not
    liveness.

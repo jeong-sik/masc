@@ -373,6 +373,14 @@ let wake_keeper_on_fusion_completion
 
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
     (unit, string) result =
+  let ( let* ) = Result.bind in
+  let* delivery_key =
+    Keeper_chat_delivery_identity.Request_id.of_string run_id
+    |> Result.map (fun request_id ->
+      Keeper_chat_delivery_identity.Async_request request_id)
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
+  in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -454,10 +462,18 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
     let origin : Board.post_origin =
       { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
     in
-    let board_result =
-      Board_dispatch.create_post ~author:keeper ~content:board_headline
-        ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-        ~ttl_hours:board_post_ttl_hours ~origin ()
+    let* board_result =
+      match
+        Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
+          ~author:keeper ~content:board_headline
+          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+          ~ttl_hours:board_post_ttl_hours ~origin ()
+      with
+      | Error (Board.Already_exists detail) ->
+        Error (Printf.sprintf "Fusion Board projection identity conflict: %s" detail)
+      | Ok (Board.Post_created post | Board.Post_already_present post) ->
+        Ok (Ok post)
+      | Error error -> Ok (Error error)
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
@@ -500,13 +516,14 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
          surface한다. 성공한 경우에만 broadcast한다. *)
       match
-        Keeper_chat_store.append_assistant_message_result ~base_dir
-          ~keeper_name:keeper ~content ?blocks ()
+        Keeper_chat_store.append_assistant_message_once ~base_dir
+          ~keeper_name:keeper ~delivery_key ~content ?blocks ()
       with
-      | Ok () ->
+      | Ok (Keeper_chat_store.Appended _) ->
         Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
           ~source:"fusion" ~content ();
         Ok ()
+      | Ok (Keeper_chat_store.Already_present _) -> Ok ()
       | Error _ as e -> e
     in
     (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*

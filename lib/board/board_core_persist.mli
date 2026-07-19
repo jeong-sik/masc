@@ -92,6 +92,27 @@ val create_post :
   unit ->
   (post, board_error) result
 
+type create_post_once_result =
+  | Post_created of post
+  | Post_already_present of post
+
+val create_post_once_by_fusion_run_id :
+  store ->
+  fusion_run_id:string ->
+  author:string ->
+  content:string ->
+  post_kind:post_kind ->
+  ?meta_json:Yojson.Safe.t ->
+  visibility:visibility ->
+  ttl_hours:int ->
+  origin:post_origin ->
+  unit ->
+  (create_post_once_result, board_error) result
+(** Serialize exact-origin create attempts with a fiber-aware store mutex.
+    An exact normalized payload replay for the same typed Fusion run returns
+    the committed post instead of appending another row. A conflicting replay
+    returns [Already_exists]. The regular create path remains unchanged. *)
+
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid

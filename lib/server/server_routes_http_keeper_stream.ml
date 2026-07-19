@@ -1682,8 +1682,10 @@ let process_single_turn ~user_row_origin ~queued_turn
     match queued_turn, delivery_key with
     | true, Some (Keeper_chat_delivery_identity.Queue_receipts _ as key) ->
       Ok key
-    | true, Some (Keeper_chat_delivery_identity.Direct_request _) ->
-      Error "queued Keeper turn received a direct-request delivery identity"
+    | true, Some
+        (Keeper_chat_delivery_identity.Direct_request _
+        | Keeper_chat_delivery_identity.Async_request _) ->
+      Error "queued Keeper turn received a non-queue delivery identity"
     | true, None ->
       Error "queued Keeper turn is missing its receipt delivery identity"
     | false, _ -> Error "non-queued Keeper turn requested queue delivery identity"

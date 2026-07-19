@@ -88,6 +88,50 @@ let save_ok ~session_dir ckpt label =
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
+let test_run_context_binds_generation_before_oas_checkpoint () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> cleanup_dir base_dir);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "generation-context" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail ("meta fixture failed: " ^ detail)
+  in
+  let shared_context = Agent_sdk.Context.create () in
+  let run_context =
+    Keeper_run_context.prepare_run_context
+      ~config:(Workspace.default_config base_dir)
+      ~meta
+      ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~base_dir
+      ~runtime_id:"unconfigured-test-runtime"
+      ~shared_context
+      ~generation:7
+      ()
+  in
+  check bool "caller-owned context remains the OAS context" true
+    (run_context.shared_context == shared_context);
+  let agent =
+    Agent_sdk.Agent.create
+      ~net:(Eio.Stdenv.net env)
+      ~config:(Agent_sdk.Agent.default_config ~model:"test-model")
+      ~context:run_context.shared_context
+      ()
+  in
+  let checkpoint = Agent_sdk.Agent.checkpoint agent in
+  match
+    Agent_sdk.Context.get_scoped checkpoint.context Agent_sdk.Context.Session
+      Keeper_checkpoint_store.keeper_generation_context_key
+  with
+  | Some (`Int generation) ->
+    check int "OAS checkpoint carries current keeper generation" 7 generation
+  | _ -> fail "OAS checkpoint omitted the bound keeper generation"
+
 let test_forward_equal_and_stale () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -678,6 +722,8 @@ let () =
     [
       ( "checkpoint transaction",
         [
+          test_case "run context binds generation before OAS checkpoint" `Quick
+            test_run_context_binds_generation_before_oas_checkpoint;
           test_case "forward and equal saves pass, stale save is no-op" `Quick
             test_forward_equal_and_stale;
           test_case "canonical disk is the watermark SSOT" `Quick

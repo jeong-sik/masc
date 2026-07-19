@@ -85,6 +85,32 @@ let require_ok label = function
   | Error message -> failf "%s: %s" label message
 ;;
 
+let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
+  { post_id = Keeper_event_queue.manual_compaction_post_id
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload = Keeper_event_queue.Manual_compaction_requested
+  }
+;;
+
+let no_compaction_settlement ~turn_count reason :
+  Keeper_event_queue_state.settlement
+  =
+  let trace_id =
+    Keeper_id.Trace_id.of_string "trace-ledger-no-compaction"
+    |> require_ok "parse no-compaction trace"
+  in
+  let source =
+    Keeper_checkpoint_ref.of_persisted
+      ~trace_id
+      ~generation:3
+      ~turn_count
+      ~sha256:(String.make 64 'a')
+    |> Result.get_ok
+  in
+  Keeper_event_queue_state.No_compaction { source; reason }
+;;
+
 let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
   Keeper_event_queue_persistence.update_result
     ~base_path
@@ -1380,6 +1406,51 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
 ;;
 
+let test_fleet_summary_aggregates_no_compaction_count () =
+  with_temp_base
+  @@ fun base_path ->
+  let record_no_compaction keeper_name =
+    let stimulus = manual_compaction_stimulus () in
+    ignore
+      (persist_transition_outbox
+         ~base_path
+         ~keeper_name
+         ~settlement:
+           (no_compaction_settlement
+              ~turn_count:7
+              Keeper_event_queue_state.No_eligible_history)
+         [ stimulus ]);
+    Keeper_reaction_ledger.record_event_queue_stimulus
+      ~base_path
+      ~keeper_name
+      stimulus;
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+    |> require_ok "project no-compaction transition"
+  in
+  let keeper_a = "no-compaction-keeper-a" in
+  let keeper_b = "no-compaction-keeper-b" in
+  record_no_compaction keeper_a;
+  record_no_compaction keeper_b;
+  List.iter
+    (fun keeper_name ->
+      let summary =
+        Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+      in
+      check int "per-keeper no-compaction count" 1
+        (summary |> member "event_queue_no_compaction_count" |> to_int))
+    [ keeper_a; keeper_b ];
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_a; keeper_b ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet summary aggregates no-compaction across keepers" 2
+    (fleet |> member "event_queue_no_compaction_count" |> to_int)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -1480,6 +1551,10 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "fleet summary aggregates no-compaction count across keepers"
+            `Quick
+            test_fleet_summary_aggregates_no_compaction_count
         ] )
     ]
 ;;

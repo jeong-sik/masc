@@ -802,31 +802,45 @@ let test_batch_failure_evidence_write_error_propagates () =
 let test_successful_drain_runs_one_provider_batch_per_admission () =
   with_temp_base "board-attention-one-quantum" @@ fun base_path ->
   let keeper_name = "sangsu" in
-  List.iter
-    (fun index ->
-       let post_id = Printf.sprintf "post-%d" index in
-       ignore
-         (record_or_fail
-            ~base_path
-            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
-    (List.init (A.batch_max_candidates + 1) (fun index -> index + 1));
-  let calls = ref 0 in
-  let report =
-    match
-      A.For_testing.drain_pending_with_judge_batch
-        ~base_path
-        ~keeper_name
-        ~judge_batch:(fun candidates ->
-          incr calls;
-          all_not_relevant candidates)
-    with
-    | Ok report -> report
-    | Error detail -> Alcotest.failf "one-quantum drain failed: %s" detail
-  in
-  Alcotest.(check int) "one provider call" 1 !calls;
-  Alcotest.(check int) "one batch attempted" A.batch_max_candidates report.attempted;
-  Alcotest.(check int) "one batch consumed" A.batch_max_candidates report.consumed;
-  Alcotest.(check int) "next admission owns remainder" 1 report.remaining
+  let entry = Registry.register ~base_path keeper_name (meta keeper_name) in
+  Fun.protect
+    ~finally:(fun () -> Registry.unregister ~base_path keeper_name)
+    (fun () ->
+       List.iter
+         (fun index ->
+            let post_id = Printf.sprintf "post-%d" index in
+            ignore
+              (record_or_fail
+                 ~base_path
+                 (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
+         (List.init (A.batch_max_candidates + 1) (fun index -> index + 1));
+       let calls = ref 0 in
+       let report =
+         match
+           A.For_testing.drain_pending_with_judge_batch
+             ~base_path
+             ~keeper_name
+             ~judge_batch:(fun candidates ->
+               incr calls;
+               all_not_relevant candidates)
+         with
+         | Ok report -> report
+         | Error detail -> Alcotest.failf "one-quantum drain failed: %s" detail
+       in
+       Alcotest.(check int) "one provider call" 1 !calls;
+       Alcotest.(check int)
+         "one batch attempted"
+         A.batch_max_candidates
+         report.attempted;
+       Alcotest.(check int)
+         "one batch consumed"
+         A.batch_max_candidates
+         report.consumed;
+       Alcotest.(check int) "next admission owns remainder" 1 report.remaining;
+       Alcotest.(check bool)
+         "successful partial drain schedules continuation"
+         true
+         (Atomic.get entry.fiber_wakeup))
 ;;
 
 let test_successful_batch_uses_two_candidate_ledger_rewrites () =

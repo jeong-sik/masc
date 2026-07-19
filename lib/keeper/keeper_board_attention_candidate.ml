@@ -1442,10 +1442,27 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
           | Ok () ->
             let* judged = record_batch_judgments ~base_path batch judgments in
             let* consumed, remaining = consume_judged_batch ~base_path judged in
+            let remaining = remaining + List.length deferred in
+            let continuation_candidate =
+              match deferred with
+              | candidate :: _ -> Some candidate
+              | [] when remaining > 0 -> List.hd_opt judged
+              | [] -> None
+            in
+            (match continuation_candidate with
+             | None -> ()
+             | Some candidate ->
+               let (_ : Keeper_registry.wakeup_outcome) =
+                 request_owner_wake
+                   ~site:"successful_batch_continuation"
+                   ~base_path
+                   candidate
+               in
+               ());
             Ok
               { attempted = List.length batch
               ; consumed
-              ; remaining = remaining + List.length deferred
+              ; remaining
               }))
   in
   Ok

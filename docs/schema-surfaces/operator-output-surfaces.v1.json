@@ -142,7 +142,7 @@
         "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
       ],
       "validator": "OAS integration bridge tests",
-      "tests": ["test/test_keeper_execution_join.ml"],
+      "tests": ["test/test_keeper_event_bridge.ml"],
       "stability": "operator_internal",
       "version_field": null,
       "external_refs": ["oas.event_bus.v1", "oas.runtime_protocol.v1"],

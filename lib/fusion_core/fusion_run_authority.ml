@@ -3,18 +3,28 @@ type identity =
   ; run_id : string
   }
 [@@deriving yojson, show, eq]
+type replay =
+  { topology : Fusion_types.fusion_topology
+  ; request : Fusion_types.fusion_request
+  }
+[@@deriving yojson, show, eq]
 type registration =
-  { identity : identity
-  ; preset : string
+  { replay : replay
   ; started_at : float
   }
 [@@deriving yojson, show, eq]
-type terminal =
-  | Deliberated of Fusion_types.deliberation_evidence
-  | Aborted of string
+type uncommitted_stop =
+  | Denied of Fusion_types.deny_reason
   | Cancelled of string
-  | Interrupted_after_restart
+  | Aborted of string
+  | Interrupted_without_computation_restart
 [@@deriving yojson, show, eq]
+type phase =
+  | Computation_committed of Fusion_types.deliberation_evidence
+  | Stopped_without_computation of uncommitted_stop
+[@@deriving yojson, show, eq]
+type state_kind = Empty_state | Registered_state | Phase_committed_state [@@deriving show]
+type event_kind = Registration_event | Computation_event | Uncommitted_stop_event [@@deriving show]
 type error =
   | Empty_keeper
   | Empty_run_id
@@ -27,26 +37,24 @@ type error =
       { line : int
       ; detail : string
       }
-  | Orphan_terminal
-  | Reversed_records
-  | Unexpected_sequence of int
+  | Empty_authority_record
+  | Evidence_question_mismatch of { expected : string; found : string }
+  | Invalid_transition of
+      { event_index : int
+      ; state : state_kind
+      ; event : event_kind
+      }
   | Identity_mismatch of identity
   | Registration_conflict of registration
   | Durable_append_failed of Fs_compat.durable_append_error
 type register_outcome =
   | Registered
-  | Already_running
-  | Already_settled of terminal
-type claim_outcome =
-  | First_committed
-  | Already_same
-  | Conflict of terminal
-type recovered_run =
-  | Running_run of registration
-  | Settled_run of
-      { registration : registration
-      ; terminal : terminal
-      }
+  | Already_registered of recovered_run
+and recovered_run =
+  | Registered_run of registration
+  | Computation_committed_run of registration * Fusion_types.deliberation_evidence
+  | Stopped_without_computation_run of registration * uncommitted_stop
+type claim_outcome = First_committed | Already_same | Conflict of phase
 type scan_entry_error =
   | Invalid_entry_name of string
   | Entry_disappeared
@@ -71,14 +79,14 @@ type scan_error =
   | Directory_inspection_failed of directory_io_failure
   | Directory_inventory_failed of directory_io_failure
   | Directory_identity_changed
-type terminal_record =
+type phase_record =
   { identity : identity
-  ; terminal : terminal
+  ; phase : phase
   }
 [@@deriving yojson]
 type persisted_event =
   | Run_registered of registration
-  | Terminal_committed of terminal_record
+  | Phase_committed of phase_record
 [@@deriving yojson]
 type persisted_record =
   { schema_version : int
@@ -87,8 +95,8 @@ type persisted_record =
 [@@deriving yojson]
 type persisted_state =
   | Empty
-  | Running of registration
-  | Settled of registration * terminal
+  | Registered_state_value of registration
+  | Phase_committed_state_value of registration * phase
 type t = { root : string }
 let create ~directory = { root = directory }
 let identity_key identity =
@@ -110,22 +118,33 @@ let validate_identity = function
   | _ -> Ok ()
 ;;
 let validate_registration (registration : registration) =
-  match validate_identity registration.identity with
+  let request = registration.replay.request in
+  match validate_identity { keeper = request.keeper; run_id = request.run_id } with
   | Error _ as error -> error
   | Ok () ->
     if Float.is_finite registration.started_at
     then Ok ()
     else Error (Invalid_started_at registration.started_at)
 ;;
-let validate_terminal = function
-  | Deliberated _ -> Ok ()
-  | Aborted "" -> Error Empty_abort_detail
-  | Aborted _ -> Ok ()
+let validate_stop = function
   | Cancelled "" -> Error Empty_cancellation_detail
-  | Cancelled _ -> Ok ()
-  | Interrupted_after_restart -> Ok ()
+  | Aborted "" -> Error Empty_abort_detail
+  | Cancelled _ | Aborted _ -> Ok ()
+  | Denied _ | Interrupted_without_computation_restart -> Ok ()
 ;;
-let schema_version = 2
+let identity_of_registration registration =
+  let request = registration.replay.request in
+  { keeper = request.keeper; run_id = request.run_id }
+;;
+let validate_phase registration = function
+  | Computation_committed evidence ->
+    let expected = registration.replay.request.prompt in
+    if String.equal expected evidence.Fusion_types.question
+    then Ok ()
+    else Error (Evidence_question_mismatch { expected; found = evidence.question })
+  | Stopped_without_computation stop -> validate_stop stop
+;;
+let schema_version = 3
 let event_line event =
   Yojson.Safe.to_string (persisted_record_to_yojson { schema_version; event }) ^ "\n"
 ;;
@@ -165,52 +184,64 @@ let parse_events content =
 let check_identity expected actual =
   if equal_identity expected actual then Ok () else Error (Identity_mismatch actual)
 ;;
-let state_of_events expected events =
+let event_kind = function
+  | Run_registered _ -> Registration_event
+  | Phase_committed { phase = Computation_committed _; _ } -> Computation_event
+  | Phase_committed { phase = Stopped_without_computation _; _ } ->
+    Uncommitted_stop_event
+;;
+let state_kind = function
+  | Empty -> Empty_state
+  | Registered_state_value _ -> Registered_state
+  | Phase_committed_state_value _ -> Phase_committed_state
+;;
+let identity_of_event = function
+  | Run_registered registration -> identity_of_registration registration
+  | Phase_committed record -> record.identity
+;;
+let apply_event expected event_index state event =
   let ( let* ) = Result.bind in
-  match events with
-  | [] -> Ok Empty
-  | [ Run_registered registration ] ->
+  let* () = check_identity expected (identity_of_event event) in
+  match state, event with
+  | Empty, Run_registered registration ->
     let* () = validate_registration registration in
-    let* () = check_identity expected registration.identity in
-    Ok (Running registration)
-  | [ Run_registered registration; Terminal_committed terminal_record ] ->
-    let* () = validate_registration registration in
-    let* () = check_identity expected registration.identity in
-    let* () = check_identity expected terminal_record.identity in
-    let* () = validate_terminal terminal_record.terminal in
-    Ok (Settled (registration, terminal_record.terminal))
-  | [ Terminal_committed terminal_record ] ->
-    let* () = check_identity expected terminal_record.identity in
-    Error Orphan_terminal
-  | [ Terminal_committed terminal_record; Run_registered registration ] ->
-    let* () = check_identity expected terminal_record.identity in
-    let* () = validate_registration registration in
-    let* () = check_identity expected registration.identity in
-    Error Reversed_records
-  | events -> Error (Unexpected_sequence (List.length events))
+    Ok (Registered_state_value registration)
+  | Registered_state_value registration, Phase_committed record ->
+    let* () = validate_phase registration record.phase in
+    Ok (Phase_committed_state_value (registration, record.phase))
+  | _ ->
+    Error
+      (Invalid_transition
+         { event_index; state = state_kind state; event = event_kind event })
+;;
+let state_of_events expected events =
+  let rec loop index state = function
+    | [] -> Ok state
+    | event :: rest ->
+      Result.bind (apply_event expected index state event) (fun state ->
+        loop (index + 1) state rest)
+  in
+  loop 1 Empty events
 ;;
 let state_of_content expected content =
   Result.bind (parse_events content) (state_of_events expected)
-;;
-
-let identity_of_event = function
-  | Run_registered registration -> registration.identity
-  | Terminal_committed terminal_record -> terminal_record.identity
 ;;
 
 let recovered_run_of_content content =
   let ( let* ) = Result.bind in
   let* events = parse_events content in
   match events with
-  | [] -> Error (Unexpected_sequence 0)
+  | [] -> Error Empty_authority_record
   | first :: _ ->
     let identity = identity_of_event first in
     let* state = state_of_events identity events in
     (match state with
-     | Empty -> Error (Unexpected_sequence 0)
-     | Running registration -> Ok (identity, Running_run registration)
-     | Settled (registration, terminal) ->
-       Ok (identity, Settled_run { registration; terminal }))
+     | Empty -> Error Empty_authority_record
+     | Registered_state_value registration -> Ok (identity, Registered_run registration)
+     | Phase_committed_state_value (registration, Computation_committed evidence) ->
+       Ok (identity, Computation_committed_run (registration, evidence))
+     | Phase_committed_state_value (registration, Stopped_without_computation stop) ->
+       Ok (identity, Stopped_without_computation_run (registration, stop)))
 ;;
 
 let directory_io_failure_of_unix error function_name argument =
@@ -289,45 +320,58 @@ let transact path decide =
   | Ok result -> result
   | Error error -> Error (Durable_append_failed error)
 ;;
-let register t ~keeper ~run_id ~preset ~started_at =
+let register t ~topology ~request ~started_at =
   if not (Float.is_finite started_at)
   then Error (Invalid_started_at started_at)
   else
-    let identity = { keeper; run_id } in
-    let requested = { identity; preset; started_at } in
+    let identity = { keeper = request.Fusion_types.keeper; run_id = request.run_id } in
+    let requested = { replay = { topology; request }; started_at } in
     match validate_identity identity with
     | Error error -> Error error
     | Ok () ->
-      transact (run_file t ~keeper ~run_id) (fun content ->
+      transact (run_file t ~keeper:identity.keeper ~run_id:identity.run_id) (fun content ->
+        let retry existing recovered =
+          if equal_replay existing.replay requested.replay
+          then None, Ok (Already_registered recovered)
+          else None, Error (Registration_conflict existing)
+        in
         match state_of_content identity content with
         | Error error -> None, Error error
         | Ok Empty -> Some (event_line (Run_registered requested)), Ok Registered
-        | Ok (Running existing) ->
-          if equal_registration existing requested
-          then None, Ok Already_running
-          else None, Error (Registration_conflict existing)
-        | Ok (Settled (existing, terminal)) ->
-          if equal_registration existing requested
-          then None, Ok (Already_settled terminal)
-          else None, Error (Registration_conflict existing))
+        | Ok (Registered_state_value registration) -> retry registration (Registered_run registration)
+        | Ok (Phase_committed_state_value (registration, Computation_committed evidence)) ->
+          retry registration (Computation_committed_run (registration, evidence))
+        | Ok (Phase_committed_state_value (registration, Stopped_without_computation stop)) ->
+          retry registration (Stopped_without_computation_run (registration, stop)))
 ;;
-let claim_terminal t ~keeper ~run_id terminal =
-  match validate_terminal terminal with
+let commit_phase t ~keeper ~run_id phase =
+  let identity = { keeper; run_id } in
+  let phase_validation =
+    match phase with
+    | Computation_committed _ -> Ok ()
+    | Stopped_without_computation stop -> validate_stop stop
+  in
+  match Result.bind (validate_identity identity) (fun () -> phase_validation) with
   | Error error -> Error error
   | Ok () ->
-    let identity = { keeper; run_id } in
-    (match validate_identity identity with
-     | Error error -> Error error
-     | Ok () ->
-       transact (run_file t ~keeper ~run_id) (fun content ->
-         match state_of_content identity content with
+    transact (run_file t ~keeper ~run_id) (fun content ->
+      match state_of_content identity content with
+      | Error error -> None, Error error
+      | Ok Empty ->
+        ( None
+        , Error
+            (Invalid_transition
+               { event_index = 1; state = Empty_state; event = event_kind (Phase_committed { identity; phase }) }) )
+      | Ok (Registered_state_value registration) ->
+        (match validate_phase registration phase with
          | Error error -> None, Error error
-         | Ok Empty -> None, Error Orphan_terminal
-         | Ok (Running _) ->
-           let record = { identity; terminal } in
-           Some (event_line (Terminal_committed record)), Ok First_committed
-         | Ok (Settled (_, winner)) ->
-           if equal_terminal winner terminal
+         | Ok () ->
+           Some (event_line (Phase_committed { identity; phase })), Ok First_committed)
+      | Ok (Phase_committed_state_value (registration, winner)) ->
+        (match validate_phase registration phase with
+         | Error error -> None, Error error
+         | Ok () ->
+           if equal_phase winner phase
            then None, Ok Already_same
            else None, Ok (Conflict winner)))
 ;;

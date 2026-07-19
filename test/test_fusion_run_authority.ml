@@ -60,72 +60,86 @@ let failed_evidence () : Fusion_types.deliberation_evidence =
   }
 ;;
 
-let deliberated evidence = A.Deliberated evidence
+let deliberated evidence = A.Computation_committed evidence
 let run_file directory keeper run_id =
   let key = Printf.sprintf "%d:%s%d:%s" (String.length keeper) keeper (String.length run_id) run_id in
   let digest = Digestif.SHA256.(digest_string key |> to_hex) in
   Filename.concat directory (digest ^ ".jsonl")
 ;;
+let register ?(topology = Refine) store ~keeper ~run_id ~preset ~started_at =
+  let request : Fusion_types.fusion_request =
+    { run_id; keeper; prompt = (successful_evidence ()).question; preset
+    ; web_tools = true; depth = Fusion_depth.Top; trigger = Operator_requested }
+  in
+  A.register store ~topology ~request ~started_at
+;;
 let test_exact_lifecycle_and_validation () =
   let base_path = fresh_base () in
   let store = A.create ~directory:(Filename.concat base_path "runs") in
-  (match A.register store ~keeper:"" ~run_id:"r" ~preset:"p" ~started_at:1. with
+  (match register store ~keeper:"" ~run_id:"r" ~preset:"p" ~started_at:1. with
    | Error A.Empty_keeper -> ()
    | _ -> fail "empty keeper identity was accepted");
-  (match A.register store ~keeper:"k" ~run_id:"" ~preset:"p" ~started_at:1. with
+  (match register store ~keeper:"k" ~run_id:"" ~preset:"p" ~started_at:1. with
    | Error A.Empty_run_id -> ()
    | _ -> fail "empty run identity was accepted");
-  (match A.register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:Float.nan with
+  (match register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:Float.nan with
    | Error (A.Invalid_started_at _) -> ()
    | _ -> fail "non-finite start time was accepted");
-  (match A.register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:1. with
+  (match register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:1. with
    | Ok A.Registered -> ()
    | _ -> fail "first registration must be durable");
   let restarted = A.create ~directory:(Filename.concat base_path "runs") in
-  (match A.register restarted ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:1. with
-   | Ok A.Already_running -> ()
-   | _ -> fail "exact registration retry must be idempotent");
+  (match register ~topology:Simple restarted ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:2. with
+   | Error (A.Registration_conflict _) -> ()
+   | _ -> fail "changed replay envelope did not conflict");
   let winner = deliberated (successful_evidence ()) in
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"r" winner with
+  (match A.commit_phase store ~keeper:"k" ~run_id:"r" winner with
    | Ok A.First_committed -> ()
    | _ -> fail "first terminal must commit");
-  (match A.register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:1. with
-   | Ok (A.Already_settled terminal) ->
-     check bool "settled retry returns winner" true (A.equal_terminal winner terminal)
+  (match register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:3. with
+   | Ok (A.Already_registered (A.Computation_committed_run (_, phase))) ->
+     check bool "settled retry returns winner" true (A.equal_phase winner phase)
    | _ -> fail "settled registration retry could start another run");
-  (match A.claim_terminal restarted ~keeper:"k" ~run_id:"r" winner with
+  (match A.commit_phase restarted ~keeper:"k" ~run_id:"r" winner with
    | Ok A.Already_same -> ()
    | _ -> fail "restart must retain the winner");
+  (match A.commit_phase store ~keeper:"k" ~run_id:"r" (deliberated (failed_evidence ())) with
+   | Error (A.Evidence_question_mismatch _) -> () | _ -> fail "foreign question was accepted");
   (match
-     A.claim_terminal store ~keeper:"k" ~run_id:"r"
-       (deliberated (failed_evidence ()))
+     A.commit_phase store ~keeper:"k" ~run_id:"r"
+       (deliberated { (failed_evidence ()) with question = (successful_evidence ()).question })
    with
    | Ok (A.Conflict terminal) ->
-     check bool "conflict returns exact winner" true (A.equal_terminal winner terminal)
+     check bool "conflict returns exact winner" true (A.equal_phase winner terminal)
    | _ -> fail "different terminal must conflict");
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"other" (A.Cancelled "") with
+  (match A.commit_phase store ~keeper:"k" ~run_id:"other"
+           (A.Stopped_without_computation (A.Cancelled "")) with
    | Error A.Empty_cancellation_detail -> ()
    | _ -> fail "empty cancellation detail was accepted");
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"other" (A.Aborted "") with
+  (match A.commit_phase store ~keeper:"k" ~run_id:"other"
+           (A.Stopped_without_computation (A.Aborted "")) with
    | Error A.Empty_abort_detail -> ()
    | _ -> fail "empty abort detail was accepted");
   (match
-     A.register store ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:2.
+     register store ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:2.
    with
    | Ok A.Registered -> ()
    | _ -> fail "typed-failure registration failed");
-  let typed_failure = deliberated (failed_evidence ()) in
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"typed-failure" typed_failure with
+  let typed_failure =
+    deliberated { (failed_evidence ()) with question = (successful_evidence ()).question }
+  in
+  (match A.commit_phase store ~keeper:"k" ~run_id:"typed-failure" typed_failure with
    | Ok A.First_committed -> ()
    | _ -> fail "typed failure terminal did not commit");
   (match
-     A.register restarted ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:2.
+     register restarted ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:4.
    with
-   | Ok (A.Already_settled terminal) ->
-     check bool "typed failure survives restart" true (A.equal_terminal typed_failure terminal)
+   | Ok (A.Already_registered (A.Computation_committed_run (_, phase))) ->
+     check bool "typed failure survives restart" true (A.equal_phase typed_failure phase)
    | _ -> fail "typed failure terminal was not reloaded exactly");
-  match A.claim_terminal store ~keeper:"k" ~run_id:"missing" (A.Cancelled "shutdown") with
-  | Error A.Orphan_terminal -> ()
+  match A.commit_phase store ~keeper:"k" ~run_id:"missing"
+          (A.Stopped_without_computation (A.Cancelled "shutdown")) with
+  | Error (A.Invalid_transition { state = A.Empty_state; _ }) -> ()
   | _ -> fail "terminal without durable registration must be rejected"
 ;;
 let test_corruption_is_per_run_and_semantic () =
@@ -133,7 +147,7 @@ let test_corruption_is_per_run_and_semantic () =
   let directory = Filename.concat base_path "runs" in
   let store = A.create ~directory in
   let register run_id =
-    match A.register store ~keeper:"k" ~run_id ~preset:"p" ~started_at:1. with
+    match register store ~keeper:"k" ~run_id ~preset:"p" ~started_at:1. with
     | Ok A.Registered -> ()
     | _ -> fail (run_id ^ " registration failed")
   in
@@ -141,12 +155,12 @@ let test_corruption_is_per_run_and_semantic () =
   let bad_path = run_file directory "k" "bad" in
   let registered = Fs_compat.load_file bad_path in
   Fs_compat.save_file bad_path (String.sub registered 0 (String.length registered - 1));
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"bad" (deliberated (successful_evidence ())) with
+  (match A.commit_phase store ~keeper:"k" ~run_id:"bad" (deliberated (successful_evidence ())) with
    | Error A.Partial_tail -> ()
    | _ -> fail "partial tail must fail explicitly");
   register "peer";
   (match
-     A.claim_terminal store ~keeper:"k" ~run_id:"peer"
+     A.commit_phase store ~keeper:"k" ~run_id:"peer"
        (deliberated (successful_evidence ()))
    with
    | Ok A.First_committed -> ()
@@ -158,14 +172,14 @@ let test_corruption_is_per_run_and_semantic () =
   in
   Fs_compat.save_file bad_path (Yojson.Safe.to_string versioned ^ "\n");
   (match
-     A.claim_terminal store ~keeper:"k" ~run_id:"bad"
+     A.commit_phase store ~keeper:"k" ~run_id:"bad"
        (deliberated (successful_evidence ()))
    with
    | Error (A.Unsupported_schema_version { found = 1; _ }) -> ()
    | _ -> fail "unsupported schema version must fail explicitly");
   register "order";
   (match
-     A.claim_terminal store ~keeper:"k" ~run_id:"order"
+     A.commit_phase store ~keeper:"k" ~run_id:"order"
        (deliberated (successful_evidence ()))
    with
    | Ok A.First_committed -> ()
@@ -175,32 +189,35 @@ let test_corruption_is_per_run_and_semantic () =
    | [ registration; terminal; "" ] ->
      Fs_compat.save_file order_path (terminal ^ "\n");
      (match
-        A.claim_terminal store ~keeper:"k" ~run_id:"order"
+        A.commit_phase store ~keeper:"k" ~run_id:"order"
           (deliberated (successful_evidence ()))
       with
-      | Error A.Orphan_terminal -> ()
+      | Error (A.Invalid_transition { state = A.Empty_state; _ }) -> ()
       | _ -> fail "orphan terminal must fail explicitly");
      Fs_compat.save_file order_path (terminal ^ "\n" ^ registration ^ "\n");
      (match
-        A.claim_terminal store ~keeper:"k" ~run_id:"order"
+        A.commit_phase store ~keeper:"k" ~run_id:"order"
           (deliberated (successful_evidence ()))
       with
-      | Error A.Reversed_records -> ()
+      | Error (A.Invalid_transition { state = A.Empty_state; _ }) -> ()
       | _ -> fail "reversed records must fail explicitly")
    | _ -> fail "expected exact register/terminal JSONL pair");
   let foreign_path = run_file directory "k" "foreign" in
   Fs_compat.save_file foreign_path
     (Fs_compat.load_file (run_file directory "k" "peer"));
   match
-    A.claim_terminal store ~keeper:"k" ~run_id:"foreign"
+    A.commit_phase store ~keeper:"k" ~run_id:"foreign"
       (deliberated (successful_evidence ()))
   with
   | Error (A.Identity_mismatch _) -> ()
   | _ -> fail "hashed path must still verify persisted identity"
 ;;
 let identity_of_recovered = function
-  | A.Running_run registration -> registration.identity
-  | A.Settled_run { registration; _ } -> registration.identity
+  | A.Registered_run registration
+  | A.Computation_committed_run (registration, _)
+  | A.Stopped_without_computation_run (registration, _) ->
+    { A.keeper = registration.replay.request.keeper
+    ; run_id = registration.replay.request.run_id }
 ;;
 
 let test_restart_scan_preserves_valid_peers_and_corruption () =
@@ -208,16 +225,20 @@ let test_restart_scan_preserves_valid_peers_and_corruption () =
   let directory = Filename.concat base_path "runs" in
   let store = A.create ~directory in
   let register run_id started_at =
-    match A.register store ~keeper:"keeper-a" ~run_id ~preset:"p" ~started_at with
+    match register store ~keeper:"keeper-a" ~run_id ~preset:"p" ~started_at with
     | Ok A.Registered -> ()
     | _ -> fail (run_id ^ " registration failed")
   in
   register "running" 1.;
   register "settled" 2.;
   register "corrupt" 3.;
+  (match A.commit_phase store ~keeper:"keeper-a" ~run_id:"corrupt"
+           (A.Stopped_without_computation (A.Denied Fusion_types.Disabled)) with
+   | Ok A.First_committed -> ()
+   | _ -> fail "typed uncommitted stop did not commit");
   let winner = deliberated (successful_evidence ()) in
   (match
-     A.claim_terminal store ~keeper:"keeper-a" ~run_id:"settled"
+     A.commit_phase store ~keeper:"keeper-a" ~run_id:"settled"
        winner
    with
    | Ok A.First_committed -> ()
@@ -253,10 +274,10 @@ let test_restart_scan_preserves_valid_peers_and_corruption () =
   check bool "settled terminal survives scan" true
     (List.exists
        (function
-         | A.Settled_run { registration; terminal } ->
-           String.equal registration.identity.run_id "settled"
-           && A.equal_terminal winner terminal
-         | A.Running_run _ -> false)
+         | A.Computation_committed_run (registration, phase) ->
+           String.equal registration.replay.request.run_id "settled"
+           && A.equal_phase winner phase
+         | A.Registered_run _ | A.Stopped_without_computation_run _ -> false)
        valid_runs)
 ;;
 let () =

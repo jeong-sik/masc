@@ -3,17 +3,18 @@ type identity =
   { keeper : string
   ; run_id : string
   }
-type registration =
-  { identity : identity
-  ; preset : string
-  ; started_at : float
+type replay =
+  { topology : Fusion_types.fusion_topology
+  ; request : Fusion_types.fusion_request
   }
-type terminal =
-  | Deliberated of Fusion_types.deliberation_evidence
-  | Aborted of string
+type registration = { replay : replay; started_at : float }
+type uncommitted_stop =
+  | Denied of Fusion_types.deny_reason
   | Cancelled of string
-  | Interrupted_after_restart
-val equal_terminal : terminal -> terminal -> bool
+  | Aborted of string
+  | Interrupted_without_computation_restart
+type state_kind = Empty_state | Registered_state | Phase_committed_state
+type event_kind = Registration_event | Computation_event | Uncommitted_stop_event
 type error =
   | Empty_keeper
   | Empty_run_id
@@ -23,27 +24,28 @@ type error =
   | Partial_tail
   | Unsupported_schema_version of { line : int; found : int }
   | Invalid_record of { line : int; detail : string }
-  | Orphan_terminal
-  | Reversed_records
-  | Unexpected_sequence of int
+  | Empty_authority_record
+  | Evidence_question_mismatch of { expected : string; found : string }
+  | Invalid_transition of
+      { event_index : int
+      ; state : state_kind
+      ; event : event_kind
+      }
   | Identity_mismatch of identity
   | Registration_conflict of registration
   | Durable_append_failed of Fs_compat.durable_append_error
 type register_outcome =
   | Registered
-  | Already_running
-  | Already_settled of terminal
-type claim_outcome =
-  | First_committed
-  | Already_same
-  | Conflict of terminal
-
-type recovered_run =
-  | Running_run of registration
-  | Settled_run of
-      { registration : registration
-      ; terminal : terminal
-      }
+  | Already_registered of recovered_run
+and recovered_run =
+  | Registered_run of registration
+  | Computation_committed_run of registration * Fusion_types.deliberation_evidence
+  | Stopped_without_computation_run of registration * uncommitted_stop
+type phase =
+  | Computation_committed of Fusion_types.deliberation_evidence
+  | Stopped_without_computation of uncommitted_stop
+val equal_phase : phase -> phase -> bool
+type claim_outcome = First_committed | Already_same | Conflict of phase
 
 type scan_entry_error =
   | Invalid_entry_name of string
@@ -85,14 +87,13 @@ val scan : t -> (scan_outcome, scan_error) result
 
 val register
   :  t
-  -> keeper:string
-  -> run_id:string
-  -> preset:string
+  -> topology:Fusion_types.fusion_topology
+  -> request:Fusion_types.fusion_request
   -> started_at:float
   -> (register_outcome, error) result
-val claim_terminal
+val commit_phase
   :  t
   -> keeper:string
   -> run_id:string
-  -> terminal
+  -> phase
   -> (claim_outcome, error) result

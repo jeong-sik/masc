@@ -2306,11 +2306,10 @@ let light_runtime_resolution_json (config : Workspace.config) =
       @ fleet_fields )
 ;;
 
-(* The existing tools projection cache owns one coherent response generation:
-   inventory, usage, schedule, and Keeper waiting evidence all carry their
-   captured [generated_at]. The timestamp is data, not freshness authority, so
-   clients can display cache age without inventing a second store revision. The
-   per-actor key continues to isolate permission-dependent inventory. *)
+(* Tool inventory and usage are cached because they are comparatively stable.
+   Schedule and Keeper waiting projections remain live: both are derived from
+   one request observation below, so they share a coherent capture without
+   hiding schedule or queue mutations behind this 30-second cache. *)
 let dashboard_tools_cache_ttl_sec = 30.0
 
 let dashboard_tools_cache_key ~base_path ~actor =
@@ -3413,39 +3412,54 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Workspace.masc_root_dir config))
     in
-    let observation =
-      run Tools_compute (fun () ->
-        Server_keeper_waiting_inventory.capture_request_observation
-          ~additional_queue_keeper_names:scheduled_automation_queue_keeper_names
-          config)
-    in
-    let scheduled_automation =
-      run Tools_compute (fun () ->
-        scheduled_automation_dashboard_json_of_observation observation)
-    in
-    let keeper_waiting_inventory =
-      run Tools_compute (fun () ->
-        Server_keeper_waiting_inventory.dashboard_json_of_observation observation)
-    in
     `Assoc
-      [ ( "generated_at"
-        , `String (Server_keeper_waiting_inventory.generated_at observation) )
+      [ "generated_at", `String (Masc_domain.now_iso ())
       ; "config_resolution", config_resolution
       ; "runtime_resolution", runtime_resolution
       ; "tool_inventory", inventory
       ; "tool_usage", usage
-      ; "scheduled_automation", scheduled_automation
-      ; "keeper_waiting_inventory", keeper_waiting_inventory
       ]
   in
-  match timing with
-  | None ->
-    Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
-      compute
-  | Some t ->
-    Server_timing.measure t Cache_lookup (fun () ->
-      Dashboard_cache.get_or_compute cache_key
-        ~ttl:dashboard_tools_cache_ttl_sec compute)
+  let cached =
+    match timing with
+    | None ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
+        compute
+    | Some t ->
+      Server_timing.measure t Cache_lookup (fun () ->
+        Dashboard_cache.get_or_compute cache_key
+          ~ttl:dashboard_tools_cache_ttl_sec compute)
+  in
+  let observation =
+    run Tools_compute (fun () ->
+      Server_keeper_waiting_inventory.capture_request_observation
+        ~additional_queue_keeper_names:scheduled_automation_queue_keeper_names
+        config)
+  in
+  let scheduled_automation =
+    run Tools_compute (fun () ->
+      scheduled_automation_dashboard_json_of_observation observation)
+  in
+  let keeper_waiting_inventory =
+    run Tools_compute (fun () ->
+      Server_keeper_waiting_inventory.dashboard_json_of_observation observation)
+  in
+  match cached with
+  | `Assoc fields ->
+    let fields =
+      fields
+      |> List.remove_assoc "generated_at"
+      |> List.remove_assoc "scheduled_automation"
+      |> List.remove_assoc "keeper_waiting_inventory"
+    in
+    `Assoc
+      (( "generated_at"
+       , `String (Server_keeper_waiting_inventory.generated_at observation) )
+       :: fields
+       @ [ "scheduled_automation", scheduled_automation
+         ; "keeper_waiting_inventory", keeper_waiting_inventory
+         ])
+  | other -> other
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

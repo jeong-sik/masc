@@ -27,7 +27,7 @@
 
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
-  | Rate_limited  (** soft 429 throttle; rotation keeps the credential-pool filter *)
+  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
       (** typed provider overload / capacity-exhausted pools *)

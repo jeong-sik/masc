@@ -1,4 +1,4 @@
-(** Owner-fenced terminal cancellation for one accepted event on a paused
+(** Owner-fenced terminal cancellation for one leased accepted event on a paused
     Keeper lane.
 
     The transaction reserves the Keeper lifecycle generation, verifies both

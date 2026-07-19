@@ -370,3 +370,22 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;
+
+let cancel_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~lease
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~lease
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;

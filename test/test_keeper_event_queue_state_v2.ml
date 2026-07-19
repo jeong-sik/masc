@@ -1199,6 +1199,113 @@ let test_settlement_wal_commit_replay_and_owner_fence () =
     | Ok _ -> Alcotest.fail "another Keeper owner's WAL receipt was replayed")
 ;;
 
+let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
+  with_temp_dir "keeper-event-queue-accepted-cancellation" (fun base_path ->
+    let keeper_name = "cancel_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "cancel-source" 1.0))
+    |> require_ok "seed cancellation owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim cancellation source"
+      |> require_some "cancellation lease"
+    in
+    let source_revision =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load cancellation revision"
+      |> State.revision
+    in
+    let cancellation : Persistence.accepted_cancellation =
+      { source_revision
+      ; owner_generation = 7
+      ; operator_operation_id = "cancel-operation-1"
+      ; reason = "operator rejected paused work"
+      }
+    in
+    let cancel () =
+      Persistence.cancel_accepted_result
+        ~base_path
+        ~keeper_name
+        ~current_owner_generation:7
+        ~settled_at:3.0
+        ~lease
+        ~cancellation
+        ()
+      |> require_ok "commit accepted cancellation"
+    in
+    let receipt =
+      match cancel () with
+      | Persistence.Settled receipt -> receipt
+      | Persistence.Already_settled _ ->
+        Alcotest.fail "first accepted cancellation was already settled"
+      | Persistence.Committed_followup_failed { receipt; _ } -> receipt
+    in
+    (match cancel () with
+     | Persistence.Already_settled replayed ->
+       Alcotest.(check bool)
+         "same operation replays the canonical receipt"
+         true
+         (State.transition_receipt_equal receipt replayed)
+     | Persistence.Settled _ | Persistence.Committed_followup_failed _ ->
+       Alcotest.fail "accepted cancellation retry committed twice");
+    let settled =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load cancelled owner"
+    in
+    Alcotest.(check int) "cancelled lease removed" 0 (List.length (State.leases settled));
+    Alcotest.(check int)
+      "cancelled source retained for projection"
+      1
+      (List.length (State.transition_outbox settled));
+    let stale_keeper = "stale_cancel_owner" in
+    Persistence.update_result ~base_path ~keeper_name:stale_keeper (fun pending ->
+      Queue.enqueue pending (stimulus "stale-cancel-source" 4.0))
+    |> require_ok "seed stale cancellation owner";
+    let stale_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name:stale_keeper
+        ~claimed_at:5.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim stale cancellation source"
+      |> require_some "stale cancellation lease"
+    in
+    let stale_revision =
+      Persistence.load_state_result ~base_path ~keeper_name:stale_keeper
+      |> require_ok "load stale cancellation revision"
+      |> State.revision
+    in
+    let stale_cancellation : Persistence.accepted_cancellation =
+      { cancellation with source_revision = Int64.pred stale_revision }
+    in
+    (match
+       Persistence.cancel_accepted_result
+         ~base_path
+         ~keeper_name:stale_keeper
+         ~current_owner_generation:7
+         ~settled_at:6.0
+         ~lease:stale_lease
+         ~cancellation:stale_cancellation
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "stale queue revision committed cancellation");
+    let unchanged =
+      Persistence.load_state_result ~base_path ~keeper_name:stale_keeper
+      |> require_ok "load rejected stale cancellation"
+    in
+    Alcotest.(check int)
+      "stale rejection retains active lease"
+      1
+      (List.length (State.leases unchanged)))
+;;
+
 let test_context_compaction_retry_is_durable_and_lane_local () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
@@ -1614,6 +1721,10 @@ let () =
             "settlement WAL commit replay and owner fence"
             `Quick
             test_settlement_wal_commit_replay_and_owner_fence
+        ; Alcotest.test_case
+            "accepted cancellation persistence is atomic and idempotent"
+            `Quick
+            test_accepted_cancellation_persistence_is_atomic_and_idempotent
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick

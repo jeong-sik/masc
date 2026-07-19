@@ -133,6 +133,7 @@ let save_oas_checkpoint_if_source
   | Ok checkpoint ->
     (match
        Keeper_checkpoint_store.save_oas_if_source
+         ~generation_fallback:generation
          ~session_dir:session.session_dir
          ~expected_source_ref
          checkpoint

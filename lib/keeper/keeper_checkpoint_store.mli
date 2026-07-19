@@ -159,24 +159,34 @@ val exact_snapshot_reference :
 val exact_snapshot_canonical_bytes : exact_checkpoint_snapshot -> string
 
 (** Strictly decode exact canonical bytes and derive their reference without
-    re-encoding. *)
+    re-encoding. [generation_fallback] recovers identity for a pre-#25046
+    checkpoint whose persisted context lacks [keeper_generation]: it is used
+    only when the key is absent ([Generation_missing]), never when it is
+    present-but-malformed, and never on the save path (#25217). *)
 val exact_snapshot_of_canonical_bytes :
+  ?generation_fallback:int ->
   expected_session_id:Keeper_id.Trace_id.t ->
   string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
-(** Load an exact canonical checkpoint snapshot under the session lock. *)
+(** Load an exact canonical checkpoint snapshot under the session lock.
+    See {!exact_snapshot_of_canonical_bytes} for [generation_fallback]. *)
 val load_oas_exact_snapshot :
+  ?generation_fallback:int ->
   session_dir:string ->
   session_id:string ->
+  unit ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
 (** Load one canonical checkpoint and its exact source identity from the same
     locked byte snapshot. No size, mtime, timestamp, or process cache
-    participates in the identity. *)
+    participates in the identity. See {!exact_snapshot_of_canonical_bytes}
+    for [generation_fallback]. *)
 val load_oas_with_ref :
+  ?generation_fallback:int ->
   session_dir:string ->
   session_id:string ->
+  unit ->
   ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
   , checkpoint_ref_load_error )
   result
@@ -219,7 +229,12 @@ type checkpoint_cas_error =
     payload-store commit is not an operation terminal fact; the Keeper operation
     journal owns that authority. *)
 val save_oas_if_source :
+  ?generation_fallback:int ->
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
   Agent_sdk.Checkpoint.t ->
   (Keeper_checkpoint_ref.t, checkpoint_cas_error) result
+(** [generation_fallback] is used for the CAS source reread of a pre-#25046
+    checkpoint (no [keeper_generation]); it must match the fallback used to
+    build [expected_source_ref]. The candidate is always built strictly from
+    its own generation, so the write invariant is unchanged (#25217). *)

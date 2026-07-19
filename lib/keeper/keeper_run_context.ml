@@ -105,6 +105,11 @@ let prepare_run_context
     | Some ctx -> ctx
     | None -> Agent_sdk.Context.create ()
   in
+  (* OAS uses the caller-supplied context as the checkpoint context for both
+     new and resumed agents. Bind MASC's generation before dispatch so every
+     OAS-produced checkpoint carries the current keeper identity. *)
+  Agent_sdk.Context.set_scoped shared_context Agent_sdk.Context.Session
+    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   (* 1. Ensure session directory tree exists *)
   let session_dir =
     Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id)

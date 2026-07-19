@@ -567,43 +567,12 @@ let checkpoint_generation_strict (checkpoint : Agent_sdk.Checkpoint.t) =
      | None -> Error Generation_not_integer)
   | Some _ -> Error Generation_not_integer
 
-(* [generation_fallback] closes the pre-#25046 checkpoint gap (#25217): a
-   keeper's OAS turn-persist path serializes the live context, which does not
-   carry [keeper_generation] in its Session scope, so its primary checkpoint
-   is written without the key that #25046's strict identity requires. On the
-   load side the keeper's own [meta.runtime.generation] is the authoritative
-   generation SSOT — using it when (and only when) the persisted key is
-   absent recovers identity from an equally-authoritative source rather than
-   fabricating one. Only [Generation_missing] is recovered; a present-but-
-   malformed value ([Generation_not_integer]) stays a hard error. The save
-   path never passes a fallback, so the write invariant "a freshly built
-   checkpoint must carry its own generation" is unchanged. *)
-let checkpoint_generation_with_fallback ?generation_fallback checkpoint =
-  match checkpoint_generation_strict checkpoint, generation_fallback with
-  | Ok generation, _ -> Ok generation
-  | Error Generation_missing, Some fallback ->
-    Log.Keeper.warn
-      "checkpoint generation key absent; recovering from meta SSOT \
-       generation=%d (pre-#25046 checkpoint, #25217)"
-      fallback;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
-      ~labels:
-        [ ( "phase"
-          , Keeper_oas_execution_error_phase.(
-              to_label Compaction_checkpoint_load) )
-        ; "kind", "generation_recovered_from_meta"
-        ]
-      ();
-    Ok fallback
-  | Error _ as error, _ -> error
-
-let checkpoint_ref_of_canonical_bytes ?generation_fallback canonical_bytes
+let checkpoint_ref_of_canonical_bytes canonical_bytes
     (checkpoint : Agent_sdk.Checkpoint.t) =
   match Keeper_id.Trace_id.of_string checkpoint.Agent_sdk.Checkpoint.session_id with
   | Error reason -> Error (Session_id_invalid reason)
   | Ok trace_id ->
-    (match checkpoint_generation_with_fallback ?generation_fallback checkpoint with
+    (match checkpoint_generation_strict checkpoint with
      | Error _ as error -> error
      | Ok generation ->
        Keeper_checkpoint_ref.create
@@ -613,12 +582,8 @@ let checkpoint_ref_of_canonical_bytes ?generation_fallback canonical_bytes
          ~canonical_checkpoint_bytes:canonical_bytes
        |> Result.map_error (fun error -> Ref_create_failed error))
 
-let exact_snapshot_of_checkpoint ?generation_fallback ~expected_session_id
-    ~canonical_bytes checkpoint =
-  match
-    checkpoint_ref_of_canonical_bytes ?generation_fallback canonical_bytes
-      checkpoint
-  with
+let exact_snapshot_of_checkpoint ~expected_session_id ~canonical_bytes checkpoint =
+  match checkpoint_ref_of_canonical_bytes canonical_bytes checkpoint with
   | Error error -> Error (Ref_identity_invalid error)
   | Ok reference
     when not
@@ -630,19 +595,17 @@ let exact_snapshot_of_checkpoint ?generation_fallback ~expected_session_id
   | Ok reference -> Ok { checkpoint; reference; canonical_bytes }
 ;;
 
-let exact_snapshot_of_canonical_bytes ?generation_fallback ~expected_session_id
-    canonical_bytes =
+let exact_snapshot_of_canonical_bytes ~expected_session_id canonical_bytes =
   match decode_checkpoint_off_scheduler canonical_bytes with
   | Error error -> Error (Ref_read_failed (classify_sdk_error error))
   | Ok checkpoint ->
     exact_snapshot_of_checkpoint
-      ?generation_fallback
       ~expected_session_id
       ~canonical_bytes
       checkpoint
 ;;
 
-let load_ref_locked ?generation_fallback ~session_dir ~expected_session_id () =
+let load_ref_locked ~session_dir ~expected_session_id =
   let canonical_path =
     oas_checkpoint_path
       ~session_dir
@@ -653,24 +616,23 @@ let load_ref_locked ?generation_fallback ~session_dir ~expected_session_id () =
   | Ok None -> Error Ref_not_found
   | Ok (Some (canonical_bytes, checkpoint)) ->
     exact_snapshot_of_checkpoint
-      ?generation_fallback
       ~expected_session_id
       ~canonical_bytes
       checkpoint
 
-let load_oas_exact_snapshot ?generation_fallback ~session_dir ~session_id () =
+let load_oas_exact_snapshot ~session_dir ~session_id =
   match Keeper_id.Trace_id.of_string session_id with
   | Error reason -> Error (Ref_identity_invalid (Session_id_invalid reason))
   | Ok expected_session_id ->
     (match
        with_session_lock ~session_dir (fun session_dir ->
-         load_ref_locked ?generation_fallback ~session_dir ~expected_session_id ())
+         load_ref_locked ~session_dir ~expected_session_id)
      with
      | Ok result -> result
      | Error detail -> Error (Ref_lock_failed detail))
 
-let load_oas_with_ref ?generation_fallback ~session_dir ~session_id () =
-  load_oas_exact_snapshot ?generation_fallback ~session_dir ~session_id ()
+let load_oas_with_ref ~session_dir ~session_id =
+  load_oas_exact_snapshot ~session_dir ~session_id
   |> Result.map (fun snapshot ->
     exact_snapshot_checkpoint snapshot, exact_snapshot_reference snapshot)
 ;;
@@ -699,7 +661,6 @@ let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
                   (File_lock_eio.durable_lock_error_to_string error)))))
 
 let save_oas_if_source
-    ?generation_fallback
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_sdk.Checkpoint.t) =
@@ -735,17 +696,7 @@ let save_oas_if_source
   | Ok candidate_ref ->
     let expected_session_id = expected_source_ref.trace_id in
     with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
-      (* The CAS source reread re-reads the EXISTING installed checkpoint (not
-         the freshly built candidate) to detect a concurrent change. For a
-         pre-#25046 source that checkpoint lacks [keeper_generation], so it
-         needs the same [generation_fallback] the initial recovery load used —
-         and [expected_source_ref] was itself built with that fallback, so a
-         strict reread would both fail closed AND disagree with the ref it is
-         compared against. The candidate above is still built strictly from
-         [~generation], preserving the write invariant. *)
-      match
-        load_ref_locked ?generation_fallback ~session_dir ~expected_session_id ()
-      with
+      match load_ref_locked ~session_dir ~expected_session_id with
       | Error error -> Error (Source_unavailable error)
       | Ok snapshot
         when not

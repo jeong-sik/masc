@@ -488,7 +488,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       "CAS seed save";
     let source_ref =
       match
-        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id ()
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
       with
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS source load failed"
@@ -516,7 +516,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
     check int "exactly one writer commits" 1 (List.length committed);
     check int "the competing source is rejected" 1 changed;
     match committed,
-      Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id ()
+      Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
     with
     | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
       check bool "committed ref identifies installed canonical bytes" true
@@ -538,7 +538,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
       "CAS watermark seed save";
     let source_ref =
       match
-        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id ()
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
       with
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS watermark source load failed"
@@ -571,109 +571,13 @@ let test_checkpoint_ref_requires_generation () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-ref-generation" in
     save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:1 ~marker:"legacy")
+      (make_checkpoint ~session_id ~turn_count:1 ~marker:"missing-generation")
       "generation-less seed";
-    match Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id () with
+    match Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id with
     | Error
         (Keeper_checkpoint_store.Ref_identity_invalid
            Keeper_checkpoint_store.Generation_missing) -> ()
     | _ -> fail "generation-less checkpoint acquired an exact ref")
-
-(* #25217: a pre-#25046 checkpoint (no [keeper_generation] key, as written by
-   the OAS turn-persist path) must load through [load_oas_with_ref] when the
-   keeper supplies its own [meta.runtime.generation] as [generation_fallback]
-   — the authoritative generation SSOT — and the recovered ref must carry
-   exactly that generation. Without the fallback the same checkpoint still
-   fails closed (test above), and the save path never passes one, so the
-   write invariant is unchanged. *)
-let test_generation_fallback_recovers_pre_25046_checkpoint () =
-  let session_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let session_id = "sess-generation-fallback" in
-    save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:1 ~marker:"pre-25046")
-      "generation-less seed";
-    match
-      Keeper_checkpoint_store.load_oas_with_ref
-        ~generation_fallback:7 ~session_dir ~session_id ()
-    with
-    | Ok (_checkpoint, reference) ->
-      check int "ref generation recovered from meta SSOT" 7
-        reference.Keeper_checkpoint_ref.generation
-    | Error _ ->
-      fail "generation fallback did not recover the pre-25046 checkpoint")
-
-(* #25217 review P0: the initial recovery load is only half the path. The
-   compaction CAS commit re-reads the same generation-less source under the
-   lock; that reread must use the same fallback, or the very checkpoint just
-   recovered is rejected again and the wedge persists. This drives the full
-   cycle — fallback recovery load -> CAS commit of a forward candidate -> the
-   candidate installs — over a pre-#25046 source. *)
-let test_generation_fallback_permits_cas_commit_over_legacy_source () =
-  let session_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let session_id = "sess-generation-cas" in
-    (* Legacy source: no keeper_generation key, turn_count=8. *)
-    save_ok ~session_dir
-      (make_checkpoint ~session_id ~turn_count:8 ~marker:"legacy-source")
-      "legacy source seed";
-    let source_ref =
-      match
-        Keeper_checkpoint_store.load_oas_with_ref
-          ~generation_fallback:5 ~session_dir ~session_id ()
-      with
-      | Ok (_, reference) -> reference
-      | Error _ -> fail "recovery load of legacy source failed"
-    in
-    check int "recovered source ref carries the fallback generation" 5
-      source_ref.Keeper_checkpoint_ref.generation;
-    (* Forward candidate at the same recovered generation must commit — the
-       CAS source reread has to recover the legacy source with the same
-       fallback for the ref comparison to match. *)
-    (match
-       Keeper_checkpoint_store.save_oas_if_source
-         ~generation_fallback:5
-         ~session_dir
-         ~expected_source_ref:source_ref
-         (make_checkpoint ~session_id ~turn_count:9 ~marker:"forward"
-          |> with_generation 5)
-     with
-     | Ok installed_ref ->
-       check int "installed candidate advanced the turn" 9
-         installed_ref.Keeper_checkpoint_ref.turn_count
-     | Error _ -> fail "CAS commit over a recovered legacy source failed");
-    (* And a stale expected_source_ref must still be rejected: concurrent-change
-       detection is not weakened by the fallback. *)
-    match
-      Keeper_checkpoint_store.save_oas_if_source
-        ~generation_fallback:5
-        ~session_dir
-        ~expected_source_ref:source_ref (* now stale: disk is at turn 9 *)
-        (make_checkpoint ~session_id ~turn_count:10 ~marker:"racing"
-         |> with_generation 5)
-    with
-    | Error (Keeper_checkpoint_store.Source_changed _) -> ()
-    | _ -> fail "stale source ref was not rejected after the source advanced")
-
-(* A present-but-malformed generation is a corruption, not an absence: the
-   fallback must NOT paper over it. *)
-let test_generation_fallback_rejects_malformed_generation () =
-  let session_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
-    let session_id = "sess-generation-malformed" in
-    let checkpoint = make_checkpoint ~session_id ~turn_count:1 ~marker:"bad" in
-    let context = Agent_sdk.Context.copy ~eio:false checkpoint.context in
-    Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-      Keeper_checkpoint_store.keeper_generation_context_key (`String "not-an-int");
-    save_ok ~session_dir { checkpoint with context } "malformed generation seed";
-    match
-      Keeper_checkpoint_store.load_oas_with_ref
-        ~generation_fallback:7 ~session_dir ~session_id ()
-    with
-    | Error
-        (Keeper_checkpoint_store.Ref_identity_invalid
-           Keeper_checkpoint_store.Generation_not_integer) -> ()
-    | _ -> fail "malformed generation must not be recovered by the fallback")
 
 let test_exact_snapshot_preserves_locked_canonical_bytes () =
   let session_dir = temp_dir () in
@@ -694,7 +598,6 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
       Keeper_checkpoint_store.load_oas_exact_snapshot
         ~session_dir
         ~session_id
-        ()
     with
     | Error _ -> fail "exact snapshot load failed"
     | Ok snapshot ->
@@ -750,12 +653,6 @@ let () =
             test_exact_source_cas_updates_canonical_watermark;
           test_case "checkpoint refs require keeper generation" `Quick
             test_checkpoint_ref_requires_generation;
-          test_case "generation fallback recovers pre-25046 checkpoint" `Quick
-            test_generation_fallback_recovers_pre_25046_checkpoint;
-          test_case "generation fallback permits CAS commit over legacy source" `Quick
-            test_generation_fallback_permits_cas_commit_over_legacy_source;
-          test_case "generation fallback rejects malformed generation" `Quick
-            test_generation_fallback_rejects_malformed_generation;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
         ] );

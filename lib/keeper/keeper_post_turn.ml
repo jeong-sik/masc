@@ -524,10 +524,8 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
   in
   match
     Keeper_checkpoint_store.load_oas_with_ref
-      ~generation_fallback:meta.runtime.generation
       ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ()
   with
   | Error Keeper_checkpoint_store.Ref_not_found ->
     Log.Keeper.debug

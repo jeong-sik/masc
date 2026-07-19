@@ -45,10 +45,20 @@ type accepted_cancellation = State.accepted_cancellation =
   ; reason : string
   }
 
+type accepted_transfer = State.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
 type settlement = State.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -626,6 +636,35 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
+let accounted_stimuli state =
+  Keeper_event_queue.to_list (State.pending state)
+  @ List.concat_map (fun (lease : lease) -> lease.stimuli) (State.leases state)
+  @ List.concat_map
+      (fun (entry : outbox_entry) -> entry.stimuli)
+      (State.transition_outbox state)
+;;
+
+let enqueue_exact_stimulus_if_absent_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      stimulus
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    let matching =
+      accounted_stimuli state
+      |> List.filter (fun candidate ->
+        Keeper_event_queue.stimulus_identity_equal candidate stimulus)
+    in
+    match matching with
+    | [] ->
+      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+      Ok (State.with_pending pending state, Enqueued)
+    | [ existing ] when existing = stimulus -> Ok (state, Already_present)
+    | [ _ ] -> Error "exact stimulus identity exists with a different source snapshot"
+    | _ :: _ :: _ -> Error "exact stimulus identity is duplicated in durable target state")
+;;
+
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
@@ -838,6 +877,42 @@ let cancel_pending_accepted_result
        Error
          (Printf.sprintf
             "event queue pending accepted cancellation raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let transfer_pending_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_generation
+      ~settled_at
+      ~transfer
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.transfer_pending_accepted
+                ~current_owner_generation
+                ~settled_at
+                ~transfer)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted transfer raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

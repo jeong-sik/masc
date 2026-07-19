@@ -52,6 +52,19 @@ type accepted_cancellation =
     [source_revision] and [owner_generation] fence the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
+type accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+(** Exact causal authority for terminally transferring one accepted event.
+    The durable disposition receipt retains the target continuation binding;
+    this settlement links the source queue terminal effect to that receipt by
+    stable operator operation ID. *)
+
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 
@@ -64,6 +77,7 @@ type settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -169,6 +183,17 @@ val cancel_pending_accepted :
     generation are checked before removal. This pure transition is committed
     through a source-bearing WAL outbox entry by persistence. *)
 
+val transfer_pending_accepted :
+  current_owner_generation:int ->
+  settled_at:float ->
+  transfer:accepted_transfer ->
+  t ->
+  (t * settle_result, string) result
+(** Atomically create and terminally settle a synthetic single-event lease for
+    the exact pending transfer source. The source revision and owner generation
+    are checked before removal, and the source-bearing WAL remains the replay
+    authority until the target projection completes. *)
+
 val accepted_cancellation_replay :
   lease ->
   accepted_cancellation ->
@@ -183,6 +208,13 @@ val accepted_pending_cancellation_replay :
   t ->
   (transition_receipt option, string) result
 (** Look up an already committed pending cancellation by its stable operator
+    operation ID and exact source-bearing settlement. *)
+
+val accepted_pending_transfer_replay :
+  accepted_transfer ->
+  t ->
+  (transition_receipt option, string) result
+(** Look up an already committed pending transfer by its stable operator
     operation ID and exact source-bearing settlement. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result

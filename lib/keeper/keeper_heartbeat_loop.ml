@@ -415,7 +415,8 @@ let settle_claimed_lease
 let settlement_is_ack = function
   | Keeper_registry_event_queue.Ack
   | Keeper_registry_event_queue.No_compaction _
-  | Keeper_registry_event_queue.Cancel_accepted _ -> true
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false

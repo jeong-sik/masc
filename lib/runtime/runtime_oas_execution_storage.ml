@@ -30,8 +30,11 @@ let fsync_directory dir =
       | Some path -> path
       | None -> raise (Storage_error "directory has no native fsync representation")
     in
-    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
+    Eio_unix.run_in_systhread
+      ~label:"runtime-oas-execution-dir-fsync"
+      (fun () ->
+         let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+         Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)))
 ;;
 
 let require_ok = function
@@ -45,7 +48,11 @@ let open_verified_directory ~sw path =
     (match Eio.Path.native dir with
      | None -> ()
      | Some native ->
-       let stat = Unix.lstat native in
+       let stat =
+         Eio_unix.run_in_systhread
+           ~label:"runtime-oas-execution-dir-lstat"
+           (fun () -> Unix.lstat native)
+       in
        if stat.Unix.st_kind <> Unix.S_DIR
        then raise (Storage_error (Printf.sprintf "directory changed identity: %s" native)));
     dir)
@@ -85,24 +92,17 @@ let create_private_child ~sw parent leaf =
     require_ok (open_verified_directory ~sw path))
 ;;
 
-let load_json ~max_bytes path =
+let load_json path =
   match Eio.Path.kind ~follow:false path with
   | `Not_found -> Ok None
   | `Regular_file ->
-    protect (fun () ->
-      (match Eio.Path.native path with
-       | Some native ->
-         let stat = Unix.lstat native in
-         if stat.Unix.st_size > max_bytes
-         then raise (Storage_error "recovery slot exceeds the maximum record size")
-       | None -> ());
-      Some (Eio.Path.load path |> Yojson.Safe.from_string))
+    protect (fun () -> Some (Eio.Path.load path |> Yojson.Safe.from_string))
   | kind ->
     Error
       (Printf.sprintf "refusing non-regular recovery slot (%s)" (file_kind_label kind))
 ;;
 
-let persist_exclusive ~max_bytes ~parent ~path payload =
+let persist_exclusive ~parent ~path payload =
   let temp_leaf = Random_id.prefixed ~prefix:".slot-" ~bytes:16 ^ ".tmp" in
   let temp_path = Eio.Path.(parent / temp_leaf) in
   let cleanup_temp reason =
@@ -111,7 +111,9 @@ let persist_exclusive ~max_bytes ~parent ~path payload =
       Log.Misc.warn "OAS recovery slot %s temp has no native cleanup representation" reason
     | Some native ->
       (try
-         Unix.unlink native;
+         Eio_unix.run_in_systhread
+           ~label:"runtime-oas-execution-temp-unlink"
+           (fun () -> Unix.unlink native);
          (match fsync_directory parent with
           | Ok () -> ()
           | Error detail ->
@@ -127,37 +129,36 @@ let persist_exclusive ~max_bytes ~parent ~path payload =
            reason
            (Printexc.to_string cleanup_exn))
   in
-  if String.length payload > max_bytes
-  then Error "recovery record exceeds the maximum durable record size"
-  else
-    try
-      Eio.Switch.run
-      @@ fun file_sw ->
-      let file = Eio.Path.open_out ~sw:file_sw ~create:(`Exclusive 0o600) temp_path in
-      Eio.Flow.copy_string payload file;
-      Eio.File.sync file;
-      let temp_native, path_native =
-        match Eio.Path.native temp_path, Eio.Path.native path with
-        | Some temp_native, Some path_native -> temp_native, path_native
-        | _ ->
-          raise
-            (Storage_error "recovery slot has no native publication representation")
-      in
-      Unix.link temp_native path_native;
-      (match fsync_directory parent with
-       | Error _ as error ->
-         cleanup_temp "publication failure";
-         error
-       | Ok () ->
-         cleanup_temp "published";
-         Ok ())
-    with
-    | Eio.Cancel.Cancelled _ as exn ->
-      cleanup_temp "cancellation";
-      raise exn
-    | exn ->
-      cleanup_temp "failure";
-      Error (error_detail exn)
+  try
+    Eio.Switch.run
+    @@ fun file_sw ->
+    let file = Eio.Path.open_out ~sw:file_sw ~create:(`Exclusive 0o600) temp_path in
+    Eio.Flow.copy_string payload file;
+    Eio.File.sync file;
+    let temp_native, path_native =
+      match Eio.Path.native temp_path, Eio.Path.native path with
+      | Some temp_native, Some path_native -> temp_native, path_native
+      | _ ->
+        raise
+          (Storage_error "recovery slot has no native publication representation")
+    in
+    Eio_unix.run_in_systhread
+      ~label:"runtime-oas-execution-slot-link"
+      (fun () -> Unix.link temp_native path_native);
+    (match fsync_directory parent with
+     | Error _ as error ->
+       cleanup_temp "publication failure";
+       error
+     | Ok () ->
+       cleanup_temp "published";
+       Ok ())
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    Eio.Cancel.protect (fun () -> cleanup_temp "cancellation");
+    raise exn
+  | exn ->
+    cleanup_temp "failure";
+    Error (error_detail exn)
 ;;
 
 let remove_file ~parent path =
@@ -168,14 +169,7 @@ let remove_file ~parent path =
 
 let remove_empty_directory ~parent dir =
   protect (fun () ->
-    let native =
-      match Eio.Path.native dir with
-      | Some native -> native
-      | None ->
-        raise
-          (Storage_error "unused execution scope has no native cleanup representation")
-    in
-    Unix.rmdir native;
+    Eio.Path.rmdir dir;
     require_ok (fsync_directory parent))
 ;;
 
@@ -202,15 +196,7 @@ let remove_directory_tree ~parent dir =
      | `Not_found -> ()
      | `Directory ->
        remove_children dir;
-       let native =
-         match Eio.Path.native dir with
-         | Some native -> native
-         | None ->
-           raise
-             (Storage_error
-                "settled execution scope has no native cleanup representation")
-       in
-       Unix.rmdir native;
+       Eio.Path.rmdir dir;
        require_ok (fsync_directory parent)
      | kind ->
        raise

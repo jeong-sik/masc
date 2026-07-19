@@ -59,7 +59,6 @@ let require_ok = function
 let lifecycle = Atomic.make Never_initialized
 let context_key = "masc.oas_execution.v1"
 let record_schema = "masc.oas-execution-recovery.v1"
-let max_record_bytes = 1024 * 1024
 
 let init_error_to_string = function
   | Already_initialized { base_path } ->
@@ -219,7 +218,7 @@ let slot_leaf recovery_key =
 ;;
 
 let load_slot slot_path =
-  match Storage.load_json ~max_bytes:max_record_bytes slot_path with
+  match Storage.load_json slot_path with
   | Error _ as error -> error
   | Ok None -> Ok None
   | Ok (Some json) -> Result.map Option.some (parse_record json)
@@ -227,11 +226,7 @@ let load_slot slot_path =
 
 let persist_slot slots_root slot_path record =
   let payload = Yojson.Safe.to_string (record_json record) ^ "\n" in
-  Storage.persist_exclusive
-    ~max_bytes:max_record_bytes
-    ~parent:slots_root
-    ~path:slot_path
-    payload
+  Storage.persist_exclusive ~parent:slots_root ~path:slot_path payload
 ;;
 
 let remove_slot slots_root slot_path =

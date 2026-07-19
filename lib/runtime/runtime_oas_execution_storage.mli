@@ -18,12 +18,10 @@ val open_verified_directory :
   (Eio.Fs.dir_ty Eio.Path.t, string) result
 
 val load_json :
-  max_bytes:int ->
   Eio.Fs.dir_ty Eio.Path.t ->
   (Yojson.Safe.t option, string) result
 
 val persist_exclusive :
-  max_bytes:int ->
   parent:Eio.Fs.dir_ty Eio.Path.t ->
   path:Eio.Fs.dir_ty Eio.Path.t ->
   string ->

@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
 - The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
 - Keeper context-metrics projection now reads its JSONL ledger through `Dated_jsonl.read_recent_result` and exposes typed storage or malformed-row unavailability instead of silently falling back to metadata. `Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files` now returns a `result`; there is no compatibility wrapper for the former `option` signature.

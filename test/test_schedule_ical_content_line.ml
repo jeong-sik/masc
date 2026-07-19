@@ -165,6 +165,11 @@ let test_parse_rejects_unquoted_dquote () =
   | C.Invalid_quoted_string _ -> ()
   | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
+let test_parse_rejects_quote_after_nested_equals () =
+  match parse_error "PROP;P=a=\"b\":v" with
+  | C.Invalid_quoted_string _ -> ()
+  | e -> failf "wrong error: %s" (C.parse_error_to_string e)
+
 let test_parse_control_character () =
   match parse_error "A:has\001control" with
   | C.Control_character _ -> ()
@@ -241,6 +246,8 @@ let () =
             test_parse_open_quote_hides_colon
         ; test_case "unquoted DQUOTE rejected" `Quick
             test_parse_rejects_unquoted_dquote
+        ; test_case "quote after nested equals rejected" `Quick
+            test_parse_rejects_quote_after_nested_equals
         ; test_case "control character" `Quick test_parse_control_character
         ; test_case "utf8 value allowed" `Quick test_parse_utf8_value_allowed
         ; test_case "invalid utf8 rejected" `Quick

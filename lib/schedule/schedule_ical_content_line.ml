@@ -83,11 +83,14 @@ let unfold_numbered input =
   match split_physical input with
   | Error _ as error -> error
   | Ok physical ->
+    let finish (fragments_rev, start_line) =
+      String.concat "" (List.rev fragments_rev), start_line
+    in
     let rec join acc current = function
       | [] -> (
         match current with
         | None -> Ok (List.rev acc)
-        | Some pair -> Ok (List.rev (pair :: acc)))
+        | Some fragments -> Ok (List.rev (finish fragments :: acc)))
       | (line, line_no) :: rest ->
         if String.length line = 0 then
           Error (Empty_physical_line { line = line_no })
@@ -95,15 +98,15 @@ let unfold_numbered input =
           let fragment = String.sub line 1 (String.length line - 1) in
           match current with
           | None -> Error (Orphan_continuation { line = line_no })
-          | Some (text, start_line) ->
-            join acc (Some (text ^ fragment, start_line)) rest)
+          | Some (fragments_rev, start_line) ->
+            join acc (Some (fragment :: fragments_rev, start_line)) rest)
         else
           let acc =
             match current with
             | None -> acc
-            | Some pair -> pair :: acc
+            | Some fragments -> finish fragments :: acc
           in
-          join acc (Some (line, line_no)) rest
+          join acc (Some ([ line ], line_no)) rest
     in
     join [] None physical
 
@@ -180,8 +183,7 @@ let value_separator ~line text =
           None
       | '"' ->
         (match first_equals with
-         | Some eq
-           when i > 0 && (text.[i - 1] = '=' || text.[i - 1] = ',') ->
+         | Some eq when i = eq + 1 || (i > eq + 1 && text.[i - 1] = ',') ->
           let param = String.sub text param_start (eq - param_start) in
           loop (i + 1) true param_start first_equals (Some param)
          | _ -> Error (Invalid_quoted_string { line; position = i }))

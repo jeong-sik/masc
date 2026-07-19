@@ -300,12 +300,12 @@ let broadcast_run_status ~registry ~run_id =
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
-  let ( let* ) = Result.bind in
-  let* channel =
-    match Fusion_wake_route.peek ~run_id with
-    | Some channel -> Ok channel
-    | None ->
-      Ok (Keeper_continuation_channel.unrouted "no originating connector")
+  let route = Fusion_wake_route.peek ~keeper ~run_id in
+  let channel =
+    match route with
+    | Some { Fusion_wake_route.channel = Some channel; _ } -> channel
+    | Some { channel = None; _ } | None ->
+      Keeper_continuation_channel.unrouted "no originating connector"
   in
   let terminal =
     if ok
@@ -338,30 +338,44 @@ let wake_keeper_on_fusion_completion
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
   | Ok () ->
-    ignore (Fusion_wake_route.take ~run_id);
+    (match Fusion_wake_route.take ~keeper ~run_id with
+     | Some _ | None -> ());
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
     (try
-       match
-         Keeper_registry.wakeup_running
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path:base_dir
-           keeper
-       with
-       | Keeper_registry.Signaled -> ()
-       | Keeper_registry.Deferred_unregistered ->
+       match Option.bind route (fun route -> route.Fusion_wake_route.owner) with
+       | None ->
          Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: keeper is no longer registered run_id=%s"
+           "fusion completion exact wake deferred: no owner captured run_id=%s"
            run_id
-       | Keeper_registry.Deferred_not_running phase ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: phase=%s run_id=%s"
-           (Keeper_state_machine.phase_to_string phase)
-           run_id
-       | Keeper_registry.Deferred_lifecycle denial ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred by lifecycle: reason=%s run_id=%s"
-           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-           run_id
+       | Some owner ->
+         (match
+            Keeper_registry.wakeup_running_exact
+              ~intent:Keeper_registry.Reactive_signal
+              owner
+          with
+          | Keeper_registry.Exact_wake_signaled -> ()
+          | Keeper_registry.Exact_wake_missing ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: owner missing run_id=%s"
+              run_id
+          | Keeper_registry.Exact_wake_replaced ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: owner replaced run_id=%s"
+              run_id
+          | Keeper_registry.Exact_wake_not_running phase ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: phase=%s run_id=%s"
+              (Keeper_state_machine.phase_to_string phase)
+              run_id
+          | Keeper_registry.Exact_wake_lifecycle_denied denial ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred by lifecycle: reason=%s run_id=%s"
+              (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+              run_id
+          | Keeper_registry.Exact_wake_lifecycle_reserved _ ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: lifecycle reserved run_id=%s"
+              run_id)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

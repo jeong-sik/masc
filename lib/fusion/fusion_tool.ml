@@ -142,9 +142,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
          tracks the run. [register] drops [Unrouted] itself; the completion
          wake ([Fusion_sink.wake_keeper_on_fusion_completion], success AND
          failure paths) consumes it exactly once. *)
-      Option.iter
-        (fun channel -> Fusion_wake_route.register ~run_id channel)
-        continuation_channel;
+      Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id continuation_channel;
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
@@ -182,7 +180,7 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
             ~failure_code:"cancelled" ~ok:false ();
           (* No completion wake fires on this path, so drop the reply route
              here or it leaks for the process lifetime. *)
-          Fusion_wake_route.discard ~run_id;
+          Fusion_wake_route.discard ~keeper ~run_id;
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"

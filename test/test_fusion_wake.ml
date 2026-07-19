@@ -637,39 +637,87 @@ let discord_channel =
 ;;
 
 let test_wake_route_register_take_discard () =
+  let base_path = Filename.get_temp_dir_name () in
+  let keeper = "fusion-route-keeper" in
   let run_id = Printf.sprintf "fus-route-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~run_id discord_channel;
-  (match Fusion_wake_route.take ~run_id with
-   | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> ()
-   | Some other ->
+  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
+  (match Fusion_wake_route.take ~keeper ~run_id with
+   | Some
+       { Fusion_wake_route.channel =
+           Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
+       ; _
+       } ->
+     ()
+   | Some { channel = Some other; _ } ->
      fail
        (Printf.sprintf "unexpected route: %s"
           (Keeper_continuation_channel.describe other))
+   | Some { channel = None; _ } -> fail "registered route lost its channel"
    | None -> fail "registered route must be takeable");
-  check bool "take removes the route" true (Fusion_wake_route.take ~run_id = None);
+  check bool "take removes the route" true
+    (Fusion_wake_route.take ~keeper ~run_id = None);
   (* Unrouted is never stored: the wake-side default already says so. *)
-  Fusion_wake_route.register ~run_id
-    (Keeper_continuation_channel.unrouted "not a connector turn");
-  check bool "unrouted is not registered" true (Fusion_wake_route.take ~run_id = None);
-  Fusion_wake_route.register ~run_id discord_channel;
-  Fusion_wake_route.discard ~run_id;
-  check bool "discard drops the route" true (Fusion_wake_route.take ~run_id = None)
+  Fusion_wake_route.register ~base_path ~keeper ~run_id
+    (Some (Keeper_continuation_channel.unrouted "not a connector turn"));
+  check bool "unrouted is not registered" true
+    (Fusion_wake_route.take ~keeper ~run_id = None);
+  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
+  Fusion_wake_route.discard ~keeper ~run_id;
+  check bool "discard drops the route" true
+    (Fusion_wake_route.take ~keeper ~run_id = None)
 ;;
 
 (* P1-A: [peek] reads the route without consuming it, so the completion wake can
    build+commit the stimulus before the destructive [take]. *)
 let test_wake_route_peek_is_non_destructive () =
+  let base_path = Filename.get_temp_dir_name () in
+  let keeper = "fusion-peek-keeper" in
   let run_id = Printf.sprintf "fus-peek-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~run_id discord_channel;
+  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
   let is_chan9 = function
-    | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> true
+    | Some
+        { Fusion_wake_route.channel =
+            Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
+        ; _
+        } ->
+      true
     | _ -> false
   in
-  check bool "peek returns the registered route" true (is_chan9 (Fusion_wake_route.peek ~run_id));
+  check bool "peek returns the registered route" true
+    (is_chan9 (Fusion_wake_route.peek ~keeper ~run_id));
   check bool "peek is non-destructive (second peek still sees it)" true
-    (is_chan9 (Fusion_wake_route.peek ~run_id));
-  check bool "take still consumes after peeks" true (is_chan9 (Fusion_wake_route.take ~run_id));
-  check bool "route gone after take" true (Fusion_wake_route.peek ~run_id = None)
+    (is_chan9 (Fusion_wake_route.peek ~keeper ~run_id));
+  check bool "take still consumes after peeks" true
+    (is_chan9 (Fusion_wake_route.take ~keeper ~run_id));
+  check bool "route gone after take" true
+    (Fusion_wake_route.peek ~keeper ~run_id = None)
+;;
+
+let test_wake_route_isolates_keeper_run_identity () =
+  let base_path = Filename.get_temp_dir_name () in
+  let run_id = Printf.sprintf "fus-shared-%d" (Random.bits ()) in
+  let other_channel =
+    Keeper_continuation_channel.discord
+      ~guild_id:(Some "g-1")
+      ~channel_id:"chan-10"
+      ~parent_channel_id:None
+      ~thread_id:None
+      ~user_id:"user-4"
+    |> Result.get_ok
+  in
+  Fusion_wake_route.register ~base_path ~keeper:"keeper-a" ~run_id
+    (Some discord_channel);
+  Fusion_wake_route.register ~base_path ~keeper:"keeper-b" ~run_id
+    (Some other_channel);
+  ignore (Fusion_wake_route.take ~keeper:"keeper-a" ~run_id);
+  match Fusion_wake_route.peek ~keeper:"keeper-b" ~run_id with
+  | Some
+      { Fusion_wake_route.channel =
+          Some (Keeper_continuation_channel.Discord { channel_id = "chan-10"; _ })
+      ; _
+      } ->
+    Fusion_wake_route.discard ~keeper:"keeper-b" ~run_id
+  | _ -> fail "one Keeper consuming a shared run_id removed its peer route"
 ;;
 
 (* P1-A: the completion wake commits the channel-carrying stimulus through the
@@ -680,14 +728,14 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
   with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
-    Fusion_wake_route.register ~run_id discord_channel;
+    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
         ~resolved_answer:"WAKE-DURABLE-ANSWER" ~board_post_id:"post-wake-1"
     in
     check bool "wake commits durably" true (Result.is_ok result);
     check bool "route consumed only after the durable commit" true
-      (Fusion_wake_route.peek ~run_id = None);
+      (Fusion_wake_route.peek ~keeper ~run_id = None);
     match
       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
       |> Keeper_event_queue.dequeue
@@ -727,15 +775,46 @@ let test_wake_fail_closed_preserves_route () =
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
-    Fusion_wake_route.register ~run_id discord_channel;
+    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
         ~resolved_answer:"REAL-ANSWER" ~board_post_id
     in
     check bool "conflicting durable commit fails the wake" true (Result.is_error result);
-    match Fusion_wake_route.peek ~run_id with
-    | Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ }) -> ()
+    match Fusion_wake_route.peek ~keeper ~run_id with
+    | Some
+        { Fusion_wake_route.channel =
+            Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
+        ; _
+        } ->
+      ()
     | _ -> fail "route must survive a failed durable commit (peek, not take)")
+;;
+
+let test_completion_wake_does_not_signal_replacement_lane () =
+  with_isolated_base_path "fusion-wake-exact-owner" (fun base_dir ->
+    Keeper_registry.clear ();
+    Fun.protect
+      ~finally:Keeper_registry.clear
+      (fun () ->
+         let keeper = Printf.sprintf "fusion-exact-%d" (Random.bits ()) in
+         let run_id = Printf.sprintf "fus-exact-%d" (Random.bits ()) in
+         let meta = make_meta ~name:keeper () in
+         let captured = Keeper_registry.register ~base_path:base_dir keeper meta in
+         Atomic.set captured.fiber_wakeup false;
+         Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id None;
+         let replacement = Keeper_registry.register ~base_path:base_dir keeper meta in
+         Atomic.set replacement.fiber_wakeup false;
+         let result =
+           Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+             ~resolved_answer:"EXACT-OWNER-ANSWER" ~board_post_id:"post-exact-owner"
+         in
+         check bool "completion commits despite replaced live owner" true
+           (Result.is_ok result);
+         check bool "captured stale lane is not signaled" false
+           (Atomic.get captured.fiber_wakeup);
+         check bool "replacement lane is not signaled" false
+           (Atomic.get replacement.fiber_wakeup)))
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
@@ -968,6 +1047,10 @@ let () =
             `Quick
             test_wake_route_peek_is_non_destructive
         ; test_case
+            "wake route: keeper/run identity isolates equal run ids"
+            `Quick
+            test_wake_route_isolates_keeper_run_identity
+        ; test_case
             "wake durably commits the channel and consumes the route on Ok"
             `Quick
             test_wake_durable_commit_carries_channel_and_consumes_route
@@ -975,6 +1058,10 @@ let () =
             "wake fail-closed: a failed durable commit preserves the route"
             `Quick
             test_wake_fail_closed_preserves_route
+        ; test_case
+            "completion wake never signals a replacement Keeper lane"
+            `Quick
+            test_completion_wake_does_not_signal_replacement_lane
         ; test_case
             "completion stimulus persists without live registry"
             `Quick

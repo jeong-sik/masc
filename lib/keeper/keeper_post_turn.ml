@@ -60,14 +60,17 @@ type compaction_recovery = {
   turn_generation : int;
 }
 
+type no_compaction = Keeper_event_queue_state.no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : Keeper_event_queue_state.no_compaction_reason
+  }
+
 type compaction_recovery_error =
   | Checkpoint_ref_load_failed of Keeper_checkpoint_store.checkpoint_ref_load_error
   | Checkpoint_cas_failed of Keeper_checkpoint_store.checkpoint_cas_error
-  | Checkpoint_structure_invalid of Keeper_compaction_unit.structural_error
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
-  | Compaction_evidence_missing
-  | Unexpected_compaction_decision of Keeper_compact_policy.compaction_decision
+  | No_compaction of no_compaction
 
 let compaction_recovery_error_to_tag = function
   | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
@@ -89,12 +92,11 @@ let compaction_recovery_error_to_tag = function
     "checkpoint_commit_durability_unknown"
   | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
     "checkpoint_transaction_outcome_unknown"
-  | Checkpoint_structure_invalid _ -> "checkpoint_structure_invalid"
   | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
-  | Compaction_evidence_missing -> "compaction_evidence_missing"
-  | Unexpected_compaction_decision _ -> "unexpected_compaction_decision"
+  | No_compaction { reason; _ } ->
+    "no_compaction:" ^ Keeper_event_queue_state.no_compaction_reason_label reason
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
@@ -174,18 +176,18 @@ let checkpoint_cas_error_detail = function
 let compaction_recovery_error_to_string = function
   | Checkpoint_ref_load_failed error -> checkpoint_ref_load_error_detail error
   | Checkpoint_cas_failed error -> checkpoint_cas_error_detail error
-  | Checkpoint_structure_invalid error ->
-    "checkpoint structure invalid: "
-    ^ Keeper_compaction_unit.show_structural_error error
   | Checkpoint_candidate_failed detail -> detail
   | Compaction_rejected reason ->
     "compaction rejected: "
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
-  | Compaction_evidence_missing ->
-    "prepared compaction did not carry structural evidence"
-  | Unexpected_compaction_decision decision ->
-    "unexpected compaction decision: "
-    ^ Keeper_compact_policy.compaction_decision_to_string decision
+  | No_compaction { source; reason } ->
+    Printf.sprintf
+      "no compaction for trace_id=%s generation=%d turn_count=%d sha256=%s: %s"
+      (Keeper_id.Trace_id.to_string source.trace_id)
+      source.generation
+      source.turn_count
+      source.sha256
+      (Keeper_event_queue_state.no_compaction_reason_label reason)
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and
@@ -486,6 +488,19 @@ let commit_prepared_after_save ~trigger ~save =
   | Ok checkpoint -> Ok (checkpoint, trigger)
 ;;
 
+let terminal_reason_of_rejection = function
+  | Keeper_compact_policy.No_eligible_history ->
+    Some Keeper_event_queue_state.No_eligible_history
+  | Invalid_structure _ -> Some Invalid_structural_source
+  | Structurally_unchanged -> Some Structurally_unchanged
+  | Checkpoint_not_reduced -> Some Checkpoint_not_reduced
+  | Invalid_compaction_plan
+  | Invalid_structural_evidence _
+  | Runtime_identity_unavailable
+  | Summarizer_unavailable
+  | Plan_provider_unavailable -> None
+;;
+
 let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -534,7 +549,13 @@ let recover_latest_checkpoint_for_compaction
     in
     (match preparation.decision, preparation.evidence with
      | Keeper_compact_policy.Prepared _, None ->
-       Error Compaction_evidence_missing
+       (* Prepared-without-evidence is a planner invariant violation (a bug),
+          not a deterministic no-op: it must surface as a visible failure,
+          never settle as a durable terminal no-compaction. *)
+       Error
+         (Checkpoint_candidate_failed
+            "compaction preparation completed without structural evidence \
+             (planner invariant violation)")
      | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
        (try
           match
@@ -551,8 +572,11 @@ let recover_latest_checkpoint_for_compaction
                   ~expected_source_ref:source_ref
                 |> Result.map fst
                 |> Result.map_error (function
-                  | Tool_history_invalid error ->
-                    Checkpoint_structure_invalid error
+                  | Tool_history_invalid _ ->
+                    No_compaction
+                      { source = source_ref
+                      ; reason = Keeper_event_queue_state.Invalid_structural_source
+                      }
                   | Persistence_error error -> Checkpoint_cas_failed error))
           with
           | Ok (saved_checkpoint, trigger) ->
@@ -597,8 +621,17 @@ let recover_latest_checkpoint_for_compaction
             exn;
           Error (Checkpoint_candidate_failed detail))
      | Keeper_compact_policy.Rejected (_, reason), _ ->
-       Error (Compaction_rejected reason)
+       (match terminal_reason_of_rejection reason with
+        | Some reason -> Error (No_compaction { source = source_ref; reason })
+        | None -> Error (Compaction_rejected reason))
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
        | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
-       Error (Unexpected_compaction_decision decision))
+       (* Reaching recovery with a non-preparation decision is an invariant
+          violation: surface it as a visible failure with the decision
+          detail, never as a hidden terminal no-compaction. *)
+       Error
+         (Checkpoint_candidate_failed
+            (Printf.sprintf
+               "compaction recovery reached a non-preparation decision: %s"
+               (Keeper_compact_policy.compaction_decision_to_string decision))))

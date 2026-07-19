@@ -651,7 +651,7 @@
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
- (libraries alcotest masc_test_deps))
+ (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
  (name test_keeper_current_operations)

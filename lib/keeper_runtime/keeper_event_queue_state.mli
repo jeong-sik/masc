@@ -30,6 +30,20 @@ type escalation_reason =
       ; rationale : string
       }
 
+type no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+
+type no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
+val no_compaction_reason_label : no_compaction_reason -> string
+val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
+
 val escalation_reason_requests_external_input : escalation_reason -> bool
 (** [true] only when the LLM judgment explicitly reports that the Keeper must
     await unavailable external input. A judgment-boundary failure remains a
@@ -37,6 +51,7 @@ val escalation_reason_requests_external_input : escalation_reason -> bool
 
 type settlement =
   | Ack
+  | No_compaction of no_compaction
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -113,8 +128,10 @@ val settle :
 
     [Retry_after_observed] and [Context_compaction_retry] retain the exact
     leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. Non-finite settlement times
-    are rejected. *)
+    can proceed before another provider attempt. [No_compaction] is accepted
+    only for a lease containing exactly one typed
+    [Manual_compaction_requested] stimulus; it cannot retire product work whose
+    provider turn failed. Non-finite settlement times are rejected. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying

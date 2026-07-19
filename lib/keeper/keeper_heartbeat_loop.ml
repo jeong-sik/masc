@@ -379,6 +379,8 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
   | Some (Cycle.Manual_compaction_failed _) ->
     Keeper_registry_event_queue.Requeue
       Keeper_registry_event_queue.Context_compaction_retry
+  | Some (Cycle.Manual_compaction_not_applied { no_compaction = { source; reason }; _ }) ->
+    Keeper_registry_event_queue.No_compaction { source; reason }
   | None ->
     if stop_requested
     then Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -411,7 +413,8 @@ let settle_claimed_lease
 ;;
 
 let settlement_is_ack = function
-  | Keeper_registry_event_queue.Ack -> true
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.No_compaction _ -> true
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -473,6 +476,7 @@ let run_keepalive_unified_turn
           | Cycle.Busy _
           | Cycle.Judgment_settled _
           | Cycle.Manual_compaction_failed _
+          | Cycle.Manual_compaction_not_applied _
           | Cycle.Manual_compaction_applied _ )
       | None ->
         record_crashed_cycle_failure
@@ -841,6 +845,9 @@ let run_keepalive_unified_turn
           | Some (Cycle.Manual_compaction_failed _) ->
             record_settlement_failure
               "manual compaction failed without an owning event queue lease"
+          | Some (Cycle.Manual_compaction_not_applied _) ->
+            record_settlement_failure
+              "manual no-compaction terminal has no owning event queue lease"
           | Some (Cycle.Manual_compaction_applied _) ->
             record_settlement_failure
               "manual compaction completed without an owning event queue lease"

@@ -111,11 +111,9 @@ let compaction_recovery_error_data ?dispatch_error error =
       Outcome_unknown, `Null
     | Checkpoint_ref_load_failed _
     | Checkpoint_cas_failed _
-    | Checkpoint_structure_invalid _
     | Checkpoint_candidate_failed _
     | Compaction_rejected _
-    | Compaction_evidence_missing
-    | Unexpected_compaction_decision _ ->
+    | No_compaction _ ->
       Not_installed, `Bool false
   in
   let recovery_code =
@@ -126,14 +124,13 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Compaction_rejected (Invalid_structure _)
     | Compaction_rejected No_eligible_history
     | Compaction_rejected Structurally_unchanged
-    | Compaction_rejected Checkpoint_not_reduced ->
+    | Compaction_rejected Checkpoint_not_reduced
+    | No_compaction _ ->
       Precondition_failed
     | Compaction_rejected Summarizer_unavailable
     | Compaction_rejected Plan_provider_unavailable
     | Compaction_rejected Invalid_compaction_plan
     | Compaction_rejected (Invalid_structural_evidence _)
-    | Compaction_evidence_missing
-    | Unexpected_compaction_decision _
     | Checkpoint_ref_load_failed _
     | Checkpoint_cas_failed (Source_unavailable _)
     | Checkpoint_cas_failed (Candidate_identity_invalid _)
@@ -141,7 +138,6 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Checkpoint_cas_failed (Candidate_generation_mismatch _)
     | Checkpoint_cas_failed (Candidate_turn_regressed _)
     | Checkpoint_cas_failed (Commit_not_installed _)
-    | Checkpoint_structure_invalid _
     | Checkpoint_candidate_failed _ -> Internal_error
     | Checkpoint_cas_failed (Source_changed _)
     | Checkpoint_cas_failed (Commit_durability_unknown _)

@@ -28,8 +28,20 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       ; rationale : string
       }
 
+type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+
+type no_compaction = Keeper_event_queue_persistence.no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
+  | No_compaction of no_compaction
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason

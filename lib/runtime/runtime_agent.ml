@@ -220,17 +220,9 @@ let observed_http_transport
   let project_request
       (request : Llm_provider.Llm_transport.completion_request)
     =
-    let messages =
-      match model_input_projection with
-      | None -> request.messages
-      | Some project -> project request.messages
-    in
-    (* #25278: never emit a request whose assistant tool_calls lack matching
-       tool results — the provider rejects it and the keeper wedges every turn.
-       No-op on well-formed lists; applied at the single outgoing-request
-       chokepoint so no assembly path can leak an orphan. *)
-    let messages = Runtime_orphan_tool_calls.drop messages in
-    { request with messages }
+    match model_input_projection with
+    | None -> request
+    | Some project -> { request with messages = project request.messages }
   in
   provider_http_observation_transport
     { complete_sync =

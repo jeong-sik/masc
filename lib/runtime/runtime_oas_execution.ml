@@ -25,7 +25,7 @@ type active =
   ; runtime : Agent_sdk.Agent.execution_runtime
   ; runs_root : Eio.Fs.dir_ty Eio.Path.t
   ; slots_root : Eio.Fs.dir_ty Eio.Path.t
-  ; state_mu : Eio.Mutex.t
+  ; state_mu : Stdlib.Mutex.t
   ; active_keys : (string, unit) Hashtbl.t
   }
 
@@ -43,6 +43,7 @@ type prepared =
   ; record : recovery_record option ref
   ; ready : bool ref
   ; finished : bool ref
+  ; mu : Eio.Mutex.t
   ; store : Agent_sdk.Agent.execution_store
   }
 
@@ -127,7 +128,7 @@ let initialize ~sw ~domain_mgr ~fs ~base_path ~domain_count =
             ; runtime
             ; runs_root
             ; slots_root
-            ; state_mu = Eio.Mutex.create ()
+            ; state_mu = Stdlib.Mutex.create ()
             ; active_keys = Hashtbl.create 17
             }
           in
@@ -237,21 +238,29 @@ let remove_slot slots_root slot_path =
   Storage.remove_file ~parent:slots_root slot_path
 ;;
 
-let release_key prepared =
-  Eio.Mutex.use_rw ~protect:true prepared.owner.state_mu (fun () ->
-    Hashtbl.remove prepared.owner.active_keys prepared.recovery_key)
+let release_owned_key owner recovery_key =
+  Stdlib.Mutex.protect owner.state_mu (fun () ->
+    Hashtbl.remove owner.active_keys recovery_key)
+;;
+
+let release_key prepared = release_owned_key prepared.owner prepared.recovery_key
+
+let claim_key owner recovery_key =
+  Stdlib.Mutex.protect owner.state_mu (fun () ->
+    if Hashtbl.mem owner.active_keys recovery_key
+    then Error Recovery_key_already_active
+    else (
+      Hashtbl.add owner.active_keys recovery_key ();
+      Ok ()))
 ;;
 
 let prepare_active ~sw ~recovery_key agent owner =
   if String.equal recovery_key ""
   then Error Invalid_recovery_key
-  else
-    Eio.Mutex.use_rw ~protect:true owner.state_mu
-    @@ fun () ->
-    if Hashtbl.mem owner.active_keys recovery_key
-    then Error Recovery_key_already_active
-    else (
-      Hashtbl.add owner.active_keys recovery_key ();
+  else (
+    match claim_key owner recovery_key with
+    | Error _ as error -> error
+    | Ok () ->
       try
         let context = Agent_sdk.Agent.context agent in
         let agent_name = (Agent_sdk.Agent.state agent).config.name in
@@ -385,17 +394,18 @@ let prepare_active ~sw ~recovery_key agent owner =
           ; record = record_ref
           ; ready
           ; finished = ref false
+          ; mu = Eio.Mutex.create ()
           ; store
           }
       with
       | Eio.Cancel.Cancelled _ as exn ->
-        Hashtbl.remove owner.active_keys recovery_key;
+        release_owned_key owner recovery_key;
         raise exn
       | Operation_failed detail ->
-        Hashtbl.remove owner.active_keys recovery_key;
+        release_owned_key owner recovery_key;
         Error (Recovery_state_failed detail)
       | exn ->
-        Hashtbl.remove owner.active_keys recovery_key;
+        release_owned_key owner recovery_key;
         Error (Recovery_state_failed (Printexc.to_string exn)))
 ;;
 
@@ -420,33 +430,34 @@ let cleanup_unused_fresh_scope prepared =
 ;;
 
 let retain_failure prepared =
-  if not !(prepared.finished)
-  then (
-    (match cleanup_unused_fresh_scope prepared with
-     | Ok () -> ()
-     | Error detail ->
-       Log.Misc.warn
-         "OAS unused fresh execution scope cleanup failed while retaining failure: %s"
-         detail);
-    prepared.finished := true;
-    release_key prepared)
+  Eio.Mutex.use_rw ~protect:true prepared.mu (fun () ->
+    if not !(prepared.finished)
+    then (
+      (match cleanup_unused_fresh_scope prepared with
+       | Ok () -> ()
+       | Error detail ->
+         Log.Misc.warn
+           "OAS unused fresh execution scope cleanup failed while retaining failure: %s"
+           detail);
+      prepared.finished := true;
+      release_key prepared))
 ;;
 
 let finish prepared =
+  Eio.Mutex.use_rw ~protect:true prepared.mu
+  @@ fun () ->
   if !(prepared.finished)
   then Ok ()
   else if not !(prepared.ready)
-  then
+  then (
     let cleanup = cleanup_unused_fresh_scope prepared in
     prepared.finished := true;
     release_key prepared;
-    Result.map_error (fun detail -> Recovery_cleanup_failed detail) cleanup
+    Result.map_error (fun detail -> Recovery_cleanup_failed detail) cleanup)
   else
-    Eio.Mutex.use_rw ~protect:true prepared.owner.state_mu
-    @@ fun () ->
     let fail detail =
       prepared.finished := true;
-      Hashtbl.remove prepared.owner.active_keys prepared.recovery_key;
+      release_key prepared;
       Error (Recovery_cleanup_failed detail)
     in
     (match !(prepared.record) with
@@ -472,7 +483,7 @@ let finish prepared =
                     Agent_sdk.Context.Session
                     context_key;
                   prepared.finished := true;
-                  Hashtbl.remove prepared.owner.active_keys prepared.recovery_key;
+                  release_key prepared;
                   (* Reclaim the execution scope (its OAS effect journal) now
                      that the recovery slot and checkpoint record are gone.
                      Recovery correctness is already satisfied by the slot and

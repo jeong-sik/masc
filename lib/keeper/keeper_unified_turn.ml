@@ -54,6 +54,22 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
+let is_incomplete_tool_transcript_error error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some (Keeper_internal_error.Incomplete_tool_transcript _) -> true
+  | Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
+  | None ->
+    false
+;;
+
 type turn_success =
   | Turn_completed of keeper_meta
   | Turn_cancelled of keeper_meta
@@ -1135,34 +1151,40 @@ dominant source of the observed CAS race exhaustion after
                      same durable event-queue transaction. *)
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:Keeper_runtime_failure_route.Oas_execution
-                      err
-                  in
-                  let overflow_recovery =
-                    (* The checkpoint helper reports [Ok] only after the
-                       compacted checkpoint is durably saved. The heartbeat
-                       settles the owning lease after this cycle returns, so
-                       no source stimulus is acknowledged ahead of it. *)
-                    recover_provider_context_overflow_in_lane
-                      ~config
-                      ~base_dir
-                      ~meta
-                      ~projection_request:
-                        (Keeper_compaction_projection_target.request
-                           ~assignment_id:final_execution.runtime_id
-                           ~resolve_context_window:(fun _ ->
-                             Keeper_compaction_projection_target.Resolved_context_window
-                               final_execution.max_context_resolution.effective_budget))
+                      ~boundary:
+                        (if is_incomplete_tool_transcript_error err
+                         then Keeper_runtime_failure_route.Masc_execution
+                         else Keeper_runtime_failure_route.Oas_execution)
                       err
                   in
                   let source_lease_disposition, turn_state =
-                    append_provider_overflow_manifest
-                      ~config
-                      ~runtime_manifest_context
-                      ~turn_start
-                      ~turn_state
-                      ~base_dir
-                      overflow_recovery
+                    if is_incomplete_tool_transcript_error err
+                    then Acknowledge_after_in_turn_handling, turn_state
+                    else (
+                      (* The checkpoint helper reports [Ok] only after the
+                         compacted checkpoint is durably saved. The heartbeat
+                         settles the owning lease after this cycle returns, so
+                         no source stimulus is acknowledged ahead of it. *)
+                      let overflow_recovery =
+                        recover_provider_context_overflow_in_lane
+                          ~config
+                          ~base_dir
+                          ~meta
+                          ~projection_request:
+                            (Keeper_compaction_projection_target.request
+                               ~assignment_id:final_execution.runtime_id
+                               ~resolve_context_window:(fun _ ->
+                                 Keeper_compaction_projection_target.Resolved_context_window
+                                   final_execution.max_context_resolution.effective_budget))
+                          err
+                      in
+                      append_provider_overflow_manifest
+                        ~config
+                        ~runtime_manifest_context
+                        ~turn_start
+                        ~turn_state
+                        ~base_dir
+                        overflow_recovery)
                   in
                   exact_failure_execution :=
                     Some

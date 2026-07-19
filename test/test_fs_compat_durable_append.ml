@@ -504,6 +504,40 @@ let test_private_jsonl_transaction_lock_is_private () =
   check int "stable lock permissions" 0o600 permissions
 ;;
 
+let test_private_jsonl_transaction_rejects_data_aliases () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let hardlink = path ^ ".hardlink" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present hardlink)
+    (fun () ->
+       Unix.link path hardlink;
+       match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+       | Error (Fs_compat.Ambiguous_transaction_file_identity { link_count; _ }) ->
+         check int "hard-link count" 2 link_count
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "hard-linked transaction data was accepted")
+;;
+
+let test_private_jsonl_transaction_rejects_symlink_lock_without_chmod () =
+  with_transaction_jsonl None @@ fun path ->
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let external_path =
+    Filename.temp_file "masc_private_jsonl_external_lock_" ".lock"
+  in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present external_path)
+    (fun () ->
+       Unix.chmod external_path 0o644;
+       Unix.symlink external_path lock_path;
+       (match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+        | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK) -> ()
+        | Error error ->
+          fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+        | Ok _ -> fail "symbolic-link stable lock was accepted");
+       let permissions = (Unix.stat external_path).Unix.st_perm land 0o777 in
+       check int "external target permissions unchanged" 0o644 permissions)
+;;
+
 let test_private_jsonl_transaction_lock_contention_is_typed () =
   with_transaction_jsonl None @@ fun path ->
   ignore (transaction_snapshot path ~after:None);
@@ -640,6 +674,14 @@ let () =
             "private JSONL stable lock is private"
             `Quick
             test_private_jsonl_transaction_lock_is_private
+        ; test_case
+            "private JSONL transaction rejects data aliases"
+            `Quick
+            test_private_jsonl_transaction_rejects_data_aliases
+        ; test_case
+            "private JSONL stable lock rejects symlink aliases"
+            `Quick
+            test_private_jsonl_transaction_rejects_symlink_lock_without_chmod
         ; test_case
             "private JSONL stable lock contention is typed"
             `Quick

@@ -785,6 +785,8 @@ type private_jsonl_snapshot =
 
 type private_jsonl_transaction_operation =
   | Create_parent_directory
+  | Canonicalize_parent_directory
+  | Inspect_stable_lock
   | Open_stable_lock
   | Set_stable_lock_permissions
   | Sync_stable_lock_parent
@@ -792,6 +794,7 @@ type private_jsonl_transaction_operation =
   | Open_transaction_data
   | Set_transaction_data_permissions
   | Inspect_transaction_data
+  | Inspect_transaction_path
   | Read_transaction_data
   | Create_rewrite_stage
   | Set_rewrite_stage_permissions
@@ -816,12 +819,21 @@ type private_jsonl_transaction_error =
       ; actual : Private_jsonl_cursor.t
       }
   | Unexpected_transaction_file_kind of Unix.file_kind
+  | Ambiguous_transaction_file_identity of
+      { path : string
+      ; link_count : int
+      }
+  | Transaction_path_binding_changed of { path : string }
   | Incomplete_transaction_tail of { end_offset : int }
   | Invalid_transaction_suffix
   | Private_jsonl_operation_failed of private_jsonl_operation_failure
   | Rewrite_stage_failed of
       { failure : private_jsonl_operation_failure
       ; cleanup_failures : private_jsonl_operation_failure list
+      }
+  | Rewrite_published_durability_unknown of
+      { cursor : Private_jsonl_cursor.t option
+      ; failure : private_jsonl_operation_failure
       }
   | Transaction_append_failed of durable_append_error
 

@@ -1226,6 +1226,37 @@ let test_finalize_retries_complete_batch_after_write_failure () =
     Alcotest.(check string) "summary follows Tool row" "trajectory_summary"
       (List.nth rows 1 |> member "type" |> to_string))
 
+let test_flush_error_observer_reserved_exception_propagates () =
+  with_tmpdir (fun dir ->
+    let blocked_parent = Filename.concat dir "keepers" in
+    let oc = open_out blocked_parent in
+    close_out oc;
+    let acc =
+      Trajectory.create_accumulator
+        ~on_flush_error:(fun _ -> raise Sys.Break)
+        ~masc_root:dir ~keeper_name:"k" ~trace_id:"reserved-flush"
+        ~keeper_turn_id:1 ~generation:0 ()
+    in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-07-18T00:00:00Z"
+        ~keeper_turn_id:1 ~oas_turn:0 ~tool_name:"tool_execute" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "durable") ~duration_ms:10
+        ~execution_id:"exec-reserved-flush" ()
+    in
+    Trajectory.record_entry acc entry;
+    (match Trajectory.finalize acc Trajectory.Completed with
+     | _ -> Alcotest.fail "reserved observer exception must propagate"
+     | exception Sys.Break -> ());
+    Unix.unlink blocked_parent;
+    Trajectory.flush_pending acc;
+    let rows =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"reserved-flush"
+    in
+    Alcotest.(check int)
+      "reserved failure leaves the complete batch retryable"
+      2 (List.length rows))
+
 (* The accumulator persists the complete structured Thinking block. *)
 let test_record_thinking_persists_untruncated () =
   with_tmpdir (fun dir ->
@@ -1432,6 +1463,8 @@ let () =
         test_tool_results_are_persisted_untruncated;
       Alcotest.test_case "failed finalize retries Tool rows and summary" `Quick
         test_finalize_retries_complete_batch_after_write_failure;
+      Alcotest.test_case "reserved flush observer exception propagates" `Quick
+        test_flush_error_observer_reserved_exception_propagates;
       Alcotest.test_case "record_thinking persists canonical block" `Quick
         test_record_thinking_persists_untruncated;
       Alcotest.test_case "reasoning/Tool order is preserved" `Quick

@@ -673,6 +673,7 @@ let append_jsonl_rows ~operation ~path jsons =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Persistence_error _ as exn -> raise exn
   | exn ->
+      Agent_sdk.Llm_provider.Reserved_exn.reraise_if_reserved exn;
       raise
         (Persistence_error
            { operation; path; cause = Persistence_exception exn })
@@ -1290,9 +1291,7 @@ let flush_pending (acc : accumulator) : unit =
              Queue.transfer restored acc.pending_queue;
              acc.on_flush_error)
          in
-         (match exn with
-          | Eio.Cancel.Cancelled _ -> raise exn
-          | _ -> ());
+         Agent_sdk.Llm_provider.Reserved_exn.reraise_if_reserved exn;
          let persistence_exn =
            match exn with
            | Persistence_error _ -> exn
@@ -1310,8 +1309,9 @@ let flush_pending (acc : accumulator) : unit =
           | None -> ()
           | Some report ->
               try report persistence_exn with
-              | Eio.Cancel.Cancelled _ as cancel -> raise cancel
               | report_exn ->
+                  Agent_sdk.Llm_provider.Reserved_exn.reraise_if_reserved
+                    report_exn;
                   Log.Keeper.warn
                     "Failed to report trajectory flush error for %s: %s"
                     acc.trace_id
@@ -1351,6 +1351,7 @@ let flush_all_pending ~(sw : Eio.Switch.t) : unit =
               "trajectory background flush remains pending: %s"
               (persistence_error_to_string error)
           | exn ->
+            Agent_sdk.Llm_provider.Reserved_exn.reraise_if_reserved exn;
             Log.Keeper.error ~keeper_name:acc.keeper_name
               "trajectory background flush raised: %s"
               (Printexc.to_string exn)))

@@ -12,13 +12,17 @@
        Keeper-scoped connector lane; the durable chat-queue consumer owns the
        eventual Keeper turn and connector reply.
 
+    Ambient parity with the Discord gateway (RFC-0226): a human message that
+    fails the trigger policy is persisted as durable external attention plus a
+    single chat-store user line, committed as a durable [Connector_attention]
+    stimulus, and followed by a best-effort wake hint for the bound keeper.
+    Reactions are record-only observability signal on both connectors; a
+    reaction never starts a turn.
+
     Off by default: if [SLACK_APP_TOKEN] is unset the gateway logs a
     warning and skips startup; the server still boots normally. A message
     arriving while the keeper is in flight is enqueued with the leaf-owned
     Slack delivery source for deferred delivery, not dropped.
-
-    Not covered this pass (RFC-0317 follow-up): ambient recording + idle-keeper
-    wake on non-triggering messages, and reaction-as-trigger.
 
     See: docs/rfc/RFC-0317-slack-builtin-gateway.md. *)
 
@@ -63,6 +67,13 @@ module For_testing : sig
     dispatch_for_delivery:
       (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
     clock:_ Eio.Time.clock ->
+    Slack_socket_client.slack_event ->
+    unit
+
+  val submit_ambient_event :
+    ?team_id:string ->
+    Connector_ingress_lane.t ->
+    base_dir:string ->
     Slack_socket_client.slack_event ->
     unit
 end

@@ -25,6 +25,7 @@ let effect_summary : S.gateway_effect -> string = function
   | S.Close_wss -> "close_wss"
   | S.Send_ack _ -> "send_ack"
   | S.Emit_event _ -> "emit_event"
+  | S.Emit_ambient _ -> "emit_ambient"
   | S.Schedule_backoff _ -> "schedule_backoff"
   | S.Log _ -> "log"
 
@@ -133,6 +134,13 @@ let full_connect () =
   let (t, _) = S.step t ~now_mono:0.0 (S.Envelope_received hello) in
   t
 
+let full_connect_config config =
+  let t = S.create ~config in
+  let (t, _) = S.step t ~now_mono:0.0 S.Connect_requested in
+  let hello = { S.kind = S.Hello_env; envelope_id = None; event = None } in
+  let (t, _) = S.step t ~now_mono:0.0 (S.Envelope_received hello) in
+  t
+
 (* ---------------------------------------------------------------- *)
 (* step: per-envelope ack (the type-level guarantee)                 *)
 (* ---------------------------------------------------------------- *)
@@ -187,6 +195,81 @@ let test_app_mention_always_emits () =
   let effects = effects_of t (S.Envelope_received env) in
   check bool "emit (app_mention is a mention)" true
     (List.mem "emit_event" effects)
+
+(* ---------------------------------------------------------------- *)
+(* step: ambient lane (RFC-0226 parity)                              *)
+(* ---------------------------------------------------------------- *)
+
+let mk_event_reaction ?(channel = "C1") ?(message_ts = "1700000000.000100")
+    ?(user = "U1") ?(reaction = "thumbsup") () =
+  S.Reaction_added
+    { channel_id = channel; message_ts; user_id = user; reaction }
+
+let test_non_passing_human_message_emits_ambient () =
+  let t =
+    full_connect_config (cfg ~policy:S.Mention_only ~bot_user_id:"UBOT" ())
+  in
+  let env =
+    env_events_api ~envelope_id:"EA1" (mk_event_message ~mentions:false ())
+  in
+  let l = effects_of t (S.Envelope_received env) in
+  check string "ack + ambient" "[send_ack; emit_ambient]"
+    ("[" ^ String.concat "; " l ^ "]")
+
+let test_passing_message_emits_event_not_ambient () =
+  let t = full_connect () in
+  let env =
+    env_events_api ~envelope_id:"EA2" (mk_event_message ~mentions:false ())
+  in
+  let effects = effects_of t (S.Envelope_received env) in
+  check bool "emit_event" true (List.mem "emit_event" effects);
+  check bool "no emit_ambient" false (List.mem "emit_ambient" effects)
+
+let test_bot_message_is_not_ambient () =
+  let t =
+    full_connect_config (cfg ~policy:S.Mention_only ~bot_user_id:"UBOT" ())
+  in
+  let ev =
+    S.Message_create
+      { channel_id = "C1"
+      ; thread_ts = None
+      ; user_id = "U2"
+      ; user_name = None
+      ; text = "bot echo"
+      ; ts = "1700000000.000300"
+      ; mentions_bot = false
+      ; bot_id = Some "B1"
+      }
+  in
+  let env = env_events_api ~envelope_id:"EA3" ev in
+  let effects = effects_of t (S.Envelope_received env) in
+  check bool "acks" true (List.mem "send_ack" effects);
+  check bool "no emit_event" false (List.mem "emit_event" effects);
+  check bool "no emit_ambient (loop guard)" false
+    (List.mem "emit_ambient" effects)
+
+let test_human_reaction_emits_ambient () =
+  let t =
+    full_connect_config (cfg ~policy:S.Mention_only ~bot_user_id:"UBOT" ())
+  in
+  let env =
+    env_events_api ~envelope_id:"EA4" (mk_event_reaction ~user:"U1" ())
+  in
+  let effects = effects_of t (S.Envelope_received env) in
+  check bool "no emit_event (reactions never turn)" false
+    (List.mem "emit_event" effects);
+  check bool "emit_ambient" true (List.mem "emit_ambient" effects)
+
+let test_self_reaction_dropped () =
+  let t = full_connect_config (cfg ~policy:S.All ~bot_user_id:"UBOT" ()) in
+  let env =
+    env_events_api ~envelope_id:"EA5" (mk_event_reaction ~user:"UBOT" ())
+  in
+  let effects = effects_of t (S.Envelope_received env) in
+  check bool "acks" true (List.mem "send_ack" effects);
+  check bool "no emit_event" false (List.mem "emit_event" effects);
+  check bool "no emit_ambient (self echo)" false
+    (List.mem "emit_ambient" effects)
 
 (* ---------------------------------------------------------------- *)
 (* step: reconnect                                                   *)
@@ -364,6 +447,17 @@ let () =
         ; test_case "mention_only suppresses non-mention" `Quick
             test_mention_only_suppresses_non_mention
         ; test_case "app_mention always emits" `Quick test_app_mention_always_emits
+        ]
+    ; "ambient"
+      , [ test_case "non-passing human message emits ambient" `Quick
+            test_non_passing_human_message_emits_ambient
+        ; test_case "passing message emits event, not ambient" `Quick
+            test_passing_message_emits_event_not_ambient
+        ; test_case "bot message is not ambient" `Quick
+            test_bot_message_is_not_ambient
+        ; test_case "human reaction emits ambient" `Quick
+            test_human_reaction_emits_ambient
+        ; test_case "self reaction dropped" `Quick test_self_reaction_dropped
         ]
     ; "reconnect"
       , [ test_case "disconnect envelope reconnects" `Quick

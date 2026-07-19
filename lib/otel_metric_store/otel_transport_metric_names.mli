@@ -95,6 +95,12 @@ val metric_slack_gateway_events : string
      reply_sent | reply_send_error]. RFC-0317. *)
 val metric_slack_inbound_dispatch : string
 
+(** Record-only ambient Slack messages (RFC-0226 parity with Discord).
+    Labels: [outcome] =
+    [recorded | binding_store_error | dropped_unbound | dropped_empty |
+     dropped_too_long]. *)
+val metric_slack_ambient_record : string
+
 (** Slack REST replies attempted by the gateway reply path.
     Labels: [outcome] = [sent | send_error | empty]. RFC-0317. *)
 val metric_slack_outbound_replies : string

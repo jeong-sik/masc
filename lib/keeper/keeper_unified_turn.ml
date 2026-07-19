@@ -1235,9 +1235,29 @@ dominant source of the observed CAS race exhaustion after
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err ->
     Error (failure_of_error err)
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
-    let result, _turn_state = main_path turn_state phase_opt in
+    (* Post-run finalization (require_last_execution_for_finalize,
+       Keeper_unified_turn_success.handle) runs after [main_path] has already
+       stored the settled execution handle in [completed_execution_settlement].
+       Any exit other than [Turn_completed] — an [Error] result or a raised
+       exception from finalization/cancellation — must release that handle:
+       [Keeper_agent_run.run_turn] cleared its own cleanup ref on the agent's
+       success, so run_keeper_cycle is the sole remaining owner.  Dropping it
+       strands the durable recovery key in [active_keys], and the requeued
+       Keeper turn then fails closed with [Recovery_key_already_active] until
+       the server restarts. *)
+    let result, _turn_state =
+      match main_path turn_state phase_opt with
+      | outcome -> outcome
+      | exception exn ->
+        Option.iter Runtime_agent.retain_execution !completed_execution_settlement;
+        completed_execution_settlement := None;
+        raise exn
+    in
     (match result, !completed_execution_settlement with
-     | Error error, _ -> Error (failure_of_error error)
+     | Error error, settlement ->
+       Option.iter Runtime_agent.retain_execution settlement;
+       completed_execution_settlement := None;
+       Error (failure_of_error error)
      | Ok meta, Some execution_settlement ->
        Ok (Turn_completed { meta; execution_settlement })
      | Ok _, None ->

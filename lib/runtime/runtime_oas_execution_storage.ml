@@ -178,3 +178,44 @@ let remove_empty_directory ~parent dir =
     Unix.rmdir native;
     require_ok (fsync_directory parent))
 ;;
+
+(* Depth-first removal that never follows symlinks: every entry is classified
+   with [kind ~follow:false] so a symbolic link is [unlink]ed as a name rather
+   than descended into.  Used to reclaim a settled OAS execution scope (its
+   effect journal) whose contents are no longer referenced. *)
+let rec remove_children dir =
+  List.iter
+    (fun name ->
+      let child = Eio.Path.(dir / name) in
+      match Eio.Path.kind ~follow:false child with
+      | `Not_found -> ()
+      | `Directory ->
+        remove_children child;
+        Eio.Path.rmdir child
+      | _ -> Eio.Path.unlink child)
+    (Eio.Path.read_dir dir)
+;;
+
+let remove_directory_tree ~parent dir =
+  protect (fun () ->
+    (match Eio.Path.kind ~follow:false dir with
+     | `Not_found -> ()
+     | `Directory ->
+       remove_children dir;
+       let native =
+         match Eio.Path.native dir with
+         | Some native -> native
+         | None ->
+           raise
+             (Storage_error
+                "settled execution scope has no native cleanup representation")
+       in
+       Unix.rmdir native;
+       require_ok (fsync_directory parent)
+     | kind ->
+       raise
+         (Storage_error
+            (Printf.sprintf
+               "refusing to remove non-directory execution scope (%s)"
+               (file_kind_label kind)))))
+;;

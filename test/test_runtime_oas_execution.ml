@@ -406,6 +406,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
       in
+      let runs_before_terminal = run_count base_path in
       (match
          Agent.run
            ~sw
@@ -423,6 +424,10 @@ let test_exact_recovery_record_and_terminal_cleanup () =
        | Ok () -> ()
        | Error error ->
          Alcotest.fail (Runtime_oas_execution.finish_error_to_string error));
+      Alcotest.(check int)
+        "settled terminal execution scope reclaimed"
+        runs_before_terminal
+        (run_count base_path);
       Alcotest.(check (list string))
         "terminal recovery context cleared"
         []

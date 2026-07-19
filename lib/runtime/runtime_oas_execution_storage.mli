@@ -38,3 +38,11 @@ val remove_empty_directory :
   parent:Eio.Fs.dir_ty Eio.Path.t ->
   Eio.Fs.dir_ty Eio.Path.t ->
   (unit, string) result
+
+(** [remove_directory_tree ~parent dir] removes [dir] and its contents
+    depth-first without following symbolic links, then fsyncs [parent].  A
+    missing [dir] is treated as already removed. *)
+val remove_directory_tree :
+  parent:Eio.Fs.dir_ty Eio.Path.t ->
+  Eio.Fs.dir_ty Eio.Path.t ->
+  (unit, string) result

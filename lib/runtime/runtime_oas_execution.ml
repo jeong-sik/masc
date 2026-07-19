@@ -495,6 +495,29 @@ let finish = function
                     context_key;
                   prepared.finished := true;
                   Hashtbl.remove prepared.owner.active_keys prepared.recovery_key;
+                  (* Reclaim the execution scope (its OAS effect journal) now
+                     that the recovery slot and checkpoint record are gone.
+                     Recovery correctness is already satisfied by the slot and
+                     record removal above; failing to unlink the scope tree only
+                     leaks one directory, so it is logged rather than turned into
+                     a settlement failure that would strand the completed turn.
+                     A crash between the slot removal and this cleanup leaves an
+                     orphan directory referenced by no slot, which is never
+                     resumed. *)
+                  let scope_path =
+                    Eio.Path.(prepared.owner.runs_root / expected.scope_leaf)
+                  in
+                  (match
+                     Storage.remove_directory_tree
+                       ~parent:prepared.owner.runs_root
+                       scope_path
+                   with
+                   | Ok () -> ()
+                   | Error detail ->
+                     Log.Misc.warn
+                       "OAS settled execution scope %s cleanup failed: %s"
+                       expected.scope_leaf
+                       detail);
                   Ok ()))))
 ;;
 

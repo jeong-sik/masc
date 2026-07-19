@@ -15,7 +15,6 @@ type failure =
       { expected : int
       ; actual : int
       }
-  | Registry_owner_missing
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Registry_owner_generation_changed of
       { expected : int
@@ -44,7 +43,6 @@ let failure_to_string = function
       "durable Keeper owner generation changed: expected %d, actual %d"
       expected
       actual
-  | Registry_owner_missing -> "live Keeper owner is missing"
   | Registry_owner_not_paused phase ->
     Printf.sprintf
       "live Keeper owner is not paused: phase=%s"
@@ -84,12 +82,12 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
     Error
       (Durable_owner_generation_changed
          { expected = expected_generation; actual = meta.runtime.generation })
-  | Ok (Some _) -> Ok ()
+  | Ok (Some meta) -> Ok meta
 ;;
 
 let validate_registry_owner ~base_path ~keeper_name ~expected_generation =
   match Keeper_registry.get ~base_path keeper_name with
-  | None -> Error Registry_owner_missing
+  | None -> Ok ()
   | Some entry
     when (not entry.meta.paused) || entry.phase <> Keeper_state_machine.Paused ->
     Error (Registry_owner_not_paused entry.phase)
@@ -99,7 +97,7 @@ let validate_registry_owner ~base_path ~keeper_name ~expected_generation =
          { expected = expected_generation
          ; actual = entry.meta.runtime.generation
          })
-  | Some entry -> Ok entry
+  | Some _ -> Ok ()
 ;;
 
 let run config ~keeper_name request =
@@ -111,7 +109,7 @@ let run config ~keeper_name request =
       ~expected_generation:request.owner_generation
   with
   | Error _ as error -> error
-  | Ok () ->
+  | Ok durable_meta ->
     (match
        validate_registry_owner
          ~base_path
@@ -119,7 +117,7 @@ let run config ~keeper_name request =
          ~expected_generation:request.owner_generation
      with
      | Error _ as error -> error
-     | Ok entry ->
+     | Ok () ->
        let cancellation : Keeper_registry_event_queue.accepted_cancellation =
          { source_revision = request.source_revision
          ; owner_generation = request.owner_generation
@@ -130,7 +128,7 @@ let run config ~keeper_name request =
        Keeper_registry_event_queue.cancel_accepted_result
          ~base_path
          keeper_name
-         ~current_owner_generation:entry.meta.runtime.generation
+         ~current_owner_generation:durable_meta.runtime.generation
          ~settled_at:request.settled_at
          ~lease:request.lease
          ~cancellation

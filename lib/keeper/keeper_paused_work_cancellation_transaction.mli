@@ -22,7 +22,6 @@ type failure =
       { expected : int
       ; actual : int
       }
-  | Registry_owner_missing
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Registry_owner_generation_changed of
       { expected : int

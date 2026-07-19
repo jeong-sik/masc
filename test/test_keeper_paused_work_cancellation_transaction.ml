@@ -25,7 +25,7 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let with_lane ~paused ~generation f =
+let with_lane ?(registered = true) ~paused ~generation f =
   let base_path = Filename.temp_dir "keeper-paused-cancel-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
@@ -67,26 +67,29 @@ let with_lane ~paused ~generation f =
            ; payload = Queue.Bootstrap
            })
        |> require_ok "seed accepted source";
-       ignore (Keeper_registry.register ~base_path keeper_name persisted);
-       if paused
-       then
-         (match
-            Keeper_registry.dispatch_event
-              ~base_path
-              keeper_name
-              Keeper_state_machine.Operator_pause
-          with
-          | Ok _ -> ()
-          | Error error ->
-            Alcotest.failf
-              "pause live Keeper owner: %s"
-              (Keeper_state_machine.transition_error_to_string error));
+       if registered
+       then (
+         ignore (Keeper_registry.register ~base_path keeper_name persisted);
+         if paused
+         then
+           match
+             Keeper_registry.dispatch_event
+               ~base_path
+               keeper_name
+               Keeper_state_machine.Operator_pause
+           with
+           | Ok _ -> ()
+           | Error error ->
+             Alcotest.failf
+               "pause live Keeper owner: %s"
+               (Keeper_state_machine.transition_error_to_string error));
        let lease =
-         Registry_queue.claim_when_result
+         Persistence.claim_when_result
            ~base_path
-           keeper_name
+           ~keeper_name
            ~claimed_at:2.0
            ~ready:(fun _ -> true)
+           ()
          |> require_ok "claim accepted source"
          |> require_some "accepted source lease"
        in
@@ -182,6 +185,30 @@ let test_running_owner_is_rejected_before_commit () =
       (List.length (State.leases state)))
 ;;
 
+let test_durable_paused_owner_can_cancel_without_live_registry () =
+  with_lane ~registered:false ~paused:true ~generation:14 (fun config keeper_name request ->
+    let outcome =
+      Transaction.cancel config ~keeper_name request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "cancel durable paused work without live registry"
+    in
+    check_released outcome.reservation_release;
+    (match outcome.settlement with
+     | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ -> ()
+     | Registry_queue.Already_settled _ ->
+       Alcotest.fail "first durable paused cancellation was already settled");
+    let state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load cancelled unregistered lane"
+    in
+    Alcotest.(check int)
+      "unregistered paused lease removed"
+      0
+      (List.length (State.leases state)))
+;;
+
 let test_stale_generation_is_rejected_before_commit () =
   with_lane ~paused:true ~generation:13 (fun config keeper_name request ->
     let stale = { request with owner_generation = 12 } in
@@ -226,6 +253,10 @@ let () =
             "stale generation is rejected before commit"
             `Quick
             test_stale_generation_is_rejected_before_commit
+        ; Alcotest.test_case
+            "durable paused owner can cancel without live registry"
+            `Quick
+            test_durable_paused_owner_can_cancel_without_live_registry
         ] )
     ]
 ;;

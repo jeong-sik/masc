@@ -852,27 +852,31 @@ let same_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
 ;;
 
+let candidate_with_retryable_failure current failure =
+  match current.status with
+  | Pending pending ->
+    (match pending.last_failure with
+     | Some existing when same_failure existing failure -> current
+     | Some _ | None ->
+       { current with status = Pending { last_failure = Some failure } })
+  | Judged judged ->
+    (match judged.last_failure with
+     | Some existing when same_failure existing failure -> current
+     | Some _ | None ->
+       { current with
+         status = Judged { judged with last_failure = Some failure }
+       })
+  | Consumed _ -> current
+;;
+
 let record_retryable_failure ~base_path candidate failure =
   update_candidate
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
-       match current.status with
-       | Pending pending ->
-         (match pending.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some { current with status = Pending { last_failure = Some failure } })
-       | Judged judged ->
-         (match judged.last_failure with
-          | Some existing when same_failure existing failure -> None
-          | Some _ | None ->
-            Some
-              { current with
-                status = Judged { judged with last_failure = Some failure }
-              })
-       | Consumed _ -> None)
+       let updated = candidate_with_retryable_failure current failure in
+       if updated = current then None else Some updated)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -1210,26 +1214,69 @@ let chunks_of size items =
   loop [] 0 [] items
 ;;
 
-let record_batch_failure ~base_path candidate failure =
-  match record_retryable_failure ~base_path candidate failure with
-  | Ok _ -> Ok ()
-  | Error detail ->
-    Error
-      (Printf.sprintf
-         "Board attention batch failure evidence could not be persisted keeper=%s \
-          candidate=%s: %s"
-         candidate.keeper_name
-         candidate.candidate_id
-         detail)
-;;
-
 let record_batch_failures ~base_path candidates failure =
-  List.fold_left
-    (fun result candidate ->
-       let* () = result in
-       record_batch_failure ~base_path candidate failure)
-    (Ok ())
-    candidates
+  match candidates with
+  | [] -> Ok ()
+  | first :: _ ->
+    let keeper_name = first.keeper_name in
+    let* requested =
+      List.fold_left
+        (fun result candidate ->
+           let* ids = result in
+           if not (String.equal candidate.keeper_name keeper_name)
+           then
+             Error
+               (Printf.sprintf
+                  "Board attention failure batch keeper mismatch expected=%s actual=%s \
+                   candidate=%s"
+                  keeper_name
+                  candidate.keeper_name
+                  candidate.candidate_id)
+           else if Id_set.mem candidate.candidate_id ids
+           then
+             Error
+               ("duplicate candidate in Board attention failure batch: "
+                ^ candidate.candidate_id)
+           else Ok (Id_set.add candidate.candidate_id ids))
+        (Ok Id_set.empty)
+        candidates
+    in
+    update_ledger_many ~base_path ~keeper_name (fun current_rows ->
+      let current_by_id =
+        List.fold_left
+          (fun map candidate -> Candidate_map.add candidate.candidate_id candidate map)
+          Candidate_map.empty
+          current_rows
+      in
+      let* updated, changed =
+        List.fold_left
+          (fun result candidate ->
+             let* rows, changed = result in
+             match Candidate_map.find_opt candidate.candidate_id current_by_id with
+             | None ->
+               Error
+                 ("Board attention candidate not found for atomic failure evidence: "
+                  ^ candidate.candidate_id)
+             | Some current ->
+               (match current.status with
+                | Consumed _ ->
+                  Error
+                    ("Consumed Board attention candidate cannot receive batch failure \
+                      evidence: "
+                     ^ candidate.candidate_id)
+                | Pending _ | Judged _ ->
+                  let next = candidate_with_retryable_failure current failure in
+                  Ok (next :: rows, changed || next <> current)))
+          (Ok ([], false))
+          candidates
+        |> Result.map (fun (rows, changed) -> List.rev rows, changed)
+      in
+      if Id_set.cardinal requested <> List.length updated
+      then Error "Board attention atomic failure evidence cardinality changed"
+      else
+        Ok
+          ( (if changed then Some updated else None)
+          , () ))
 ;;
 
 let validate_batch_coverage candidates judgments =

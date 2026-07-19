@@ -844,25 +844,50 @@ let test_batch_failure_aborts_round_and_records_evidence () =
 let test_batch_failure_evidence_write_error_propagates () =
   with_temp_base "board-attention-failure-write" @@ fun base_path ->
   let keeper_name = "sangsu" in
-  ignore (record_or_fail ~base_path (candidate ~keeper_name ()) : A.candidate);
+  List.iter
+    (fun post_id ->
+       ignore
+         (record_or_fail
+            ~base_path
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())
+          : A.candidate))
+    [ "post-1"; "post-2" ];
   let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let backup = path ^ ".before-failure-evidence" in
   let failure : A.retryable_failure =
     { kind = A.Provider_unavailable
     ; detail = "provider unavailable"
     ; failed_at = 100.0
     }
   in
-  match
-    A.For_testing.drain_pending_with_judge_batch
-      ~base_path
-      ~keeper_name
-      ~judge_batch:(fun _ ->
-        Sys.remove path;
-        Unix.mkdir path 0o700;
-        Error failure)
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted"
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists path && Sys.is_directory path then Unix.rmdir path;
+        if Sys.file_exists backup then Sys.rename backup path)
+      (fun () ->
+         A.For_testing.drain_pending_with_judge_batch
+           ~base_path
+           ~keeper_name
+           ~judge_batch:(fun _ ->
+             Sys.rename path backup;
+             Unix.mkdir path 0o700;
+             Error failure))
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error detail -> Alcotest.failf "candidate reload failed: %s" detail
+  | Ok candidates ->
+    Alcotest.(check int) "both candidates retained" 2 (List.length candidates);
+    List.iter
+      (fun (candidate : A.candidate) ->
+         match candidate.status with
+         | A.Pending { last_failure = None } -> ()
+         | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+           Alcotest.fail "failed atomic evidence commit changed part of the batch")
+      candidates
 ;;
 
 let test_atomic_judgment_commit_failure_preserves_all_pending () =

@@ -408,6 +408,13 @@ let context_overflow_event_of_error
     Some (Keeper_state_machine.Context_overflow_detected { limit_tokens = limit })
   | _ -> None
 
+(* Prefix that tags a [last_compaction_decision] value as a provider-overflow
+   recovery failure. Kept as a named binding so the observability regression test
+   can assert the tag without duplicating the literal. *)
+let provider_overflow_decision_prefix = "provider_overflow_recovery_failed: "
+
+let provider_overflow_decision ~reason = provider_overflow_decision_prefix ^ reason
+
 let record_overflow_failure
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -416,6 +423,13 @@ let record_overflow_failure
     ~base_path:config.base_path
     meta.name
     (Some Keeper_registry.Turn_overflow_failure);
+  (* Also stamp the specific recovery reason onto compaction_rt so the reactive
+     overflow spiral's failure is visible in status (last_compaction_decision),
+     not dropped to the generic Turn_overflow_failure enum. *)
+  Keeper_registry.set_compaction_decision
+    ~base_path:config.base_path
+    meta.name
+    (provider_overflow_decision ~reason);
   Log.Keeper.warn
     "%s: unresolved context overflow observed (%s); Keeper lifecycle remains active"
     meta.name

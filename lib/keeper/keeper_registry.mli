@@ -220,6 +220,11 @@ val clear_error : base_path:string -> string -> unit
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 
+(** [set_compaction_decision ~base_path name decision] stamps [decision] onto the
+    keeper's [compaction_rt.last_decision] so provider-overflow compaction
+    outcomes are observable in status (surfaced as [last_compaction_decision]). *)
+val set_compaction_decision : base_path:string -> string -> string -> unit
+
 (** Store the OAS Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit
 

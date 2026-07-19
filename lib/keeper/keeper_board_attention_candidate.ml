@@ -839,6 +839,29 @@ let run_blocking label operation =
 
 let store_error error = Fs_compat.private_jsonl_transaction_error_to_string error
 
+let observe_settlement_warning ~ledger_path error =
+  Log.Keeper.error
+    "board_attention_candidate: descriptor settlement incomplete ledger=%s detail=%s"
+    ledger_path
+    (store_error error)
+;;
+
+let snapshot_result ~ledger_path result =
+  match Fs_compat.private_jsonl_snapshot_success_receipt result with
+  | Error error -> Error (store_error error)
+  | Ok { value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~ledger_path) settlement_error;
+    Ok value
+;;
+
+let cursor_result ~ledger_path result =
+  match Fs_compat.private_jsonl_cursor_success_receipt result with
+  | Error error -> Error (store_error error)
+  | Ok { value; settlement_error } ->
+    Option.iter (observe_settlement_warning ~ledger_path) settlement_error;
+    Ok value
+;;
+
 let invalidate_cached entry observed =
   (* See cache race contract: a failed CAS means a newer cursor owns the slot. *)
   ignore (Atomic.compare_and_set entry.cached observed None : bool)
@@ -853,10 +876,13 @@ let read_view_blocking path =
   let entry = cache_entry path in
   let observed = Atomic.get entry.cached in
   let after = Option.map (fun view -> view.cursor) observed in
-  match Fs_compat.read_private_jsonl_durable_locked_result path ~after with
+  match
+    Fs_compat.read_private_jsonl_durable_locked_result path ~after
+    |> snapshot_result ~ledger_path:path
+  with
   | Error error ->
     invalidate_cached entry observed;
-    Error (store_error error)
+    Error error
   | Ok snapshot ->
     let* rows = parse_rows snapshot.bytes in
     let base =
@@ -910,8 +936,11 @@ let compact_for_process_start ~base_path ~keeper_name =
   run_blocking "board-attention-candidate-process-start-compaction" (fun () ->
     let entry = cache_entry path in
     Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
-      match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
-      | Error error -> Error (store_error error)
+      match
+        Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+        |> snapshot_result ~ledger_path:path
+      with
+      | Error error -> Error error
       | Ok snapshot ->
         let* rows = parse_rows snapshot.bytes in
         let* view = apply_rows (empty_view snapshot.cursor) rows in
@@ -929,8 +958,9 @@ let compact_for_process_start ~base_path ~keeper_name =
                path
                ~expected:snapshot.cursor
                canonical
+             |> cursor_result ~ledger_path:path
            with
-           | Error error -> Error (store_error error)
+           | Error error -> Error error
            | Ok cursor ->
              Atomic.set entry.cached (Some { view with cursor });
              observe_ledger_operation
@@ -1059,8 +1089,9 @@ let update_ledger_many ~base_path ~keeper_name decide =
              path
              ~expected:view.cursor
              bytes
+           |> cursor_result ~ledger_path:path
          with
-         | Error error -> Error (store_error error)
+         | Error error -> Error error
          | Ok cursor ->
            Atomic.set entry.cached (Some { updated with cursor });
            observe_ledger_operation

@@ -339,7 +339,13 @@ let test_manual_compaction_serializes_owner_lane () =
           ~manual_compaction_requested:true
           ()
       in
-      (match run_cycle () with
+      let busy_outcome =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_ids:_ ~keeper_name:_ () ->
+             fail "busy admission spent a compaction provider call")
+          run_cycle
+      in
+      (match busy_outcome with
        | Cycle.Busy _ -> ()
        | _ -> fail "manual compaction crossed an active owner turn slot");
       (match Admission.run_if_free ~base_path ~keeper_name:peer.name (fun () -> ()) with
@@ -490,6 +496,85 @@ let test_manual_compaction_serializes_owner_lane () =
       in
       check bool "CAS preserves concurrent checkpoint exactly" true
         (retained_concurrent_checkpoint.messages = concurrent_checkpoint.messages);
+      let race_checkpoint =
+        { (make_checkpoint ()) with
+          session_id = checkpoint.session_id
+        ; agent_name = meta.agent_name
+        ; turn_count = retained_concurrent_checkpoint.turn_count + 1
+        }
+      in
+      (match
+         Masc.Keeper_context_core.save_oas_checkpoint_classified
+           ~multimodal_policy:meta.multimodal_policy
+           ~keeper_name:meta.name
+           ~session
+           ~agent_name:meta.agent_name
+           ~ctx:(Masc.Keeper_context_core.context_of_oas_checkpoint race_checkpoint)
+           ~generation:meta.runtime.generation
+       with
+       | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
+       | Ok (_, Stale_noop _) -> fail "race fixture checkpoint save was stale"
+       | Error detail ->
+         failf
+           "race fixture checkpoint save failed: %s"
+           (Masc.Keeper_context_core.checkpoint_write_error_to_string
+              ~persistence_error_to_string:Fun.id
+              detail));
+      let commit_block_held, commit_block_held_u = Eio.Promise.create () in
+      let commit_block_release, commit_block_release_u = Eio.Promise.create () in
+      let commit_block_finished, commit_block_finished_u = Eio.Promise.create () in
+      let busy_after_prepare =
+        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+          (fun ~runtime_ids:_ ~keeper_name:_ () ->
+             Some (fun ~units ->
+               Eio.Fiber.fork ~sw (fun () ->
+                 let result =
+                   Admission.run_serialized
+                     ~base_path
+                     ~keeper_name:meta.name
+                     (fun () ->
+                       Eio.Promise.resolve commit_block_held_u ();
+                       Eio.Promise.await commit_block_release)
+                 in
+                 Eio.Promise.resolve commit_block_finished_u result);
+               Eio.Promise.await commit_block_held;
+               Masc.Keeper_compaction_llm_summarizer.plan_of_json
+                 ~runtime_id:"test.compaction"
+                 ~units
+                 (`Assoc
+                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
+                     , `List
+                         [ `Assoc
+                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
+                               , `Int 1 )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
+                               , `String
+                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
+                               )
+                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
+                               , `String "prepared while another turn acquires the slot" )
+                             ]
+                         ] )
+                   ])
+               |> Result.map_error (fun _ ->
+                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
+          (fun () -> Masc.Keeper_manual_compaction.run_admitted ~config ~meta)
+      in
+      (match busy_after_prepare with
+       | `Busy _ -> ()
+       | `Applied _ | `No_compaction _ | `Compaction_failed _ ->
+         fail "compaction commit crossed a turn admitted during preparation");
+      (match Masc.Keeper_registry.get ~base_path meta.name with
+       | Some entry ->
+         check bool
+           "busy commit admission never activates compaction lifecycle"
+           false
+           entry.conditions.compaction_active
+       | None -> fail "owner registry entry disappeared after busy commit admission");
+      Eio.Promise.resolve commit_block_release_u ();
+      (match Eio.Promise.await commit_block_finished with
+       | `Ran () -> ()
+       | `Rejected _ -> fail "race fixture owner turn was rejected");
       Registry_queue.settle_result
         ~base_path
         meta.name
@@ -530,6 +615,112 @@ let test_malformed_structure_preserves_checkpoint () =
             { message_index = 0; tool_use_id = "orphan" }) ) ->
     ()
   | _ -> fail "malformed compaction was not rejected with typed structure"
+;;
+
+  (* The prepare/commit split exists so the provider call can run outside
+     the keeper admission; the source CAS — not the slot — is the
+     interleaving guard.  Pin both halves: a prepared plan commits, and
+     the same prepared value is rejected once the source has advanced. *)
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let meta = make_meta () in
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let runtime_path =
+         Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+       in
+       (match Runtime.init_default ~config_path:runtime_path with
+        | Ok () -> ()
+        | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let checkpoint = make_checkpoint () in
+       let session =
+         Masc.Keeper_context_core.create_session
+           ~session_id:checkpoint.session_id
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       in
+       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+       (match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:context
+            ~generation:1
+        with
+        | Ok _ -> ()
+        | Error detail ->
+          failf
+            "fixture checkpoint save failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:(fun detail -> detail)
+               detail));
+  let plan_for ~units =
+    match
+      Masc.Keeper_compaction_llm_summarizer.plan_of_json
+        ~runtime_id:"test.compaction"
+        ~units
+        (`Assoc
+           [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
+             , `List
+                 [ `Assoc
+                     [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
+                       , `Int 1 )
+                     ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
+                       , `String
+                           Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
+                       )
+                     ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
+                       , `String "shorter" )
+                     ]
+                 ] )
+           ])
+    with
+    | Ok plan -> Ok plan
+    | Error _ -> Error Masc.Keeper_compaction_llm_summarizer.Invalid_plan
+  in
+  Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
+    (fun ~runtime_ids:_ ~keeper_name:_ () -> Some (fun ~units -> plan_for ~units))
+    (fun () ->
+       match
+         Post_turn.prepare_compaction
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+       with
+       | Error error ->
+         failf
+           "prepare failed: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok prepared ->
+         (match Post_turn.commit_prepared_compaction prepared with
+          | Ok _ -> ()
+          | Error error ->
+            failf
+              "commit of a fresh prepared plan failed: %s"
+              (Post_turn.compaction_recovery_error_to_string error));
+         (* The first commit advanced the durable source; the same
+            prepared value is now stale and must be CAS-rejected. *)
+         match Post_turn.commit_prepared_compaction prepared with
+         | Error
+             (Post_turn.Checkpoint_cas_failed
+                (Masc.Keeper_checkpoint_store.Source_changed _)) ->
+           ()
+         | Error error ->
+           failf
+             "stale prepared value failed with the wrong error: %s"
+             (Post_turn.compaction_recovery_error_to_string error)
+         | Ok _ -> fail "stale prepared value committed past the source CAS"))
 ;;
 
 let () =

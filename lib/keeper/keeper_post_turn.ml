@@ -501,15 +501,30 @@ let terminal_reason_of_rejection = function
   | Plan_provider_unavailable -> None
 ;;
 
-let recover_latest_checkpoint_for_compaction
-    ~(base_dir : string)
-    ~(meta : keeper_meta)
-    ~(trigger : Compaction_trigger.t)
-  : (compaction_recovery, compaction_recovery_error) result
-  =
-  let session = create_session ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir in
+type prepared_compaction =
+  { session : Keeper_context_core.session_context
+  ; source_ref : Keeper_checkpoint_ref.t
+  ; retry_meta : keeper_meta
+  ; turn_generation : int
+  ; prepared_trigger : Compaction_trigger.t
+  ; context : Keeper_context_core.working_context
+  ; evidence : Keeper_compaction_evidence.t
+  }
+
+let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_trigger.t)
+  : (prepared_compaction, compaction_recovery_error) result =
+  (* Load the durable source and run the policy + LLM planner.  This phase
+     is deliberately admission-free: the keeper's turn slot is not held
+     while the provider call runs.  Correctness after an interleaved state
+     change is enforced by the source CAS at commit, not by the slot. *)
+  let session =
+    create_session
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~base_dir
+  in
   match
-    Keeper_checkpoint_store.load_oas_with_ref ~session_dir:session.session_dir
+    Keeper_checkpoint_store.load_oas_with_ref
+      ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   with
   | Error Keeper_checkpoint_store.Ref_not_found ->
@@ -557,69 +572,15 @@ let recover_latest_checkpoint_for_compaction
             "compaction preparation completed without structural evidence \
              (planner invariant violation)")
      | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
-       (try
-          match
-            commit_prepared_after_save
-              ~trigger:prepared_trigger
-              ~save:(fun () ->
-                save_oas_checkpoint_if_source
-                  ~multimodal_policy:meta.multimodal_policy
-                  ~keeper_name:meta.name
-                  ~session
-                  ~agent_name:retry_meta.agent_name
-                  ~ctx:preparation.context
-                  ~generation:turn_generation
-                  ~expected_source_ref:source_ref
-                |> Result.map fst
-                |> Result.map_error (function
-                  | Tool_history_invalid _ ->
-                    No_compaction
-                      { source = source_ref
-                      ; reason = Keeper_event_queue_state.Invalid_structural_source
-                      }
-                  | Persistence_error error -> Checkpoint_cas_failed error))
-          with
-          | Ok (saved_checkpoint, trigger) ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string Compactions)
-              ~labels:[ "keeper", retry_meta.name ]
-              ();
-            Ok
-              { checkpoint = saved_checkpoint
-              ; trigger
-              ; evidence
-              ; turn_generation
-              }
-          | Error
-              (Checkpoint_cas_failed
-                 (Keeper_checkpoint_store.Source_changed actual) as error) ->
-            Log.Keeper.warn
-              "compaction checkpoint source changed: %s"
-              (checkpoint_ref_detail actual);
-            Error error
-          | Error (Checkpoint_cas_failed cas_error as error) ->
-            let detail = checkpoint_cas_error_detail cas_error in
-            Log.Keeper.error
-              "compaction checkpoint save failed: %s"
-              detail;
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string CheckpointFailures)
-              ~labels:
-                [ "keeper", retry_meta.agent_name
-                ; ( "operation"
-                  , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
-                ]
-              ();
-            Error error
-          | Error error -> Error error
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          let detail = Printexc.to_string exn in
-          log_keeper_exn
-            ~label:"compaction checkpoint save exception"
-            exn;
-          Error (Checkpoint_candidate_failed detail))
+       Ok
+         { session
+         ; source_ref
+         ; retry_meta
+         ; turn_generation
+         ; prepared_trigger
+         ; context = preparation.context
+         ; evidence
+         }
      | Keeper_compact_policy.Rejected (_, reason), _ ->
        (match terminal_reason_of_rejection reason with
         | Some reason -> Error (No_compaction { source = source_ref; reason })
@@ -635,3 +596,89 @@ let recover_latest_checkpoint_for_compaction
             (Printf.sprintf
                "compaction recovery reached a non-preparation decision: %s"
                (Keeper_compact_policy.compaction_decision_to_string decision))))
+;;
+
+let commit_prepared_compaction (prepared : prepared_compaction)
+  : (compaction_recovery, compaction_recovery_error) result =
+  (* Source-CAS commit.  The caller decides which admission (if any) guards
+     this phase; correctness against interleaved state change is enforced
+     by [expected_source_ref], not by the slot. *)
+  let { session
+      ; source_ref
+      ; retry_meta
+      ; turn_generation
+      ; prepared_trigger
+      ; context
+      ; evidence
+      } =
+    prepared
+  in
+  (try
+     match
+       commit_prepared_after_save
+         ~trigger:prepared_trigger
+         ~save:(fun () ->
+           save_oas_checkpoint_if_source
+             ~multimodal_policy:retry_meta.multimodal_policy
+             ~keeper_name:retry_meta.name
+             ~session
+             ~agent_name:retry_meta.agent_name
+             ~ctx:context
+             ~generation:turn_generation
+             ~expected_source_ref:source_ref
+           |> Result.map fst
+           |> Result.map_error (function
+             | Tool_history_invalid _ ->
+               No_compaction
+                 { source = source_ref
+                 ; reason = Keeper_event_queue_state.Invalid_structural_source
+                 }
+             | Persistence_error error -> Checkpoint_cas_failed error))
+     with
+     | Ok (saved_checkpoint, trigger) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string Compactions)
+         ~labels:[ "keeper", retry_meta.name ]
+         ();
+       Ok
+         { checkpoint = saved_checkpoint
+         ; trigger
+         ; evidence
+         ; turn_generation
+         }
+     | Error
+         (Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed actual) as error) ->
+       Log.Keeper.warn
+         "compaction checkpoint source changed: %s"
+         (checkpoint_ref_detail actual);
+       Error error
+     | Error (Checkpoint_cas_failed cas_error as error) ->
+       let detail = checkpoint_cas_error_detail cas_error in
+       Log.Keeper.error "compaction checkpoint save failed: %s" detail;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:
+           [ "keeper", retry_meta.agent_name
+           ; ( "operation"
+             , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
+           ]
+         ();
+       Error error
+     | Error error -> Error error
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     let detail = Printexc.to_string exn in
+     log_keeper_exn ~label:"compaction checkpoint save exception" exn;
+     Error (Checkpoint_candidate_failed detail))
+;;
+
+let recover_latest_checkpoint_for_compaction
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(trigger : Compaction_trigger.t)
+  : (compaction_recovery, compaction_recovery_error) result =
+  match prepare_compaction ~base_dir ~meta ~trigger with
+  | Error _ as error -> error
+  | Ok prepared -> commit_prepared_compaction prepared
+;;

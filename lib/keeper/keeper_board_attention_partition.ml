@@ -766,14 +766,12 @@ let run_blocking label operation =
 let store_error error = Fs_compat.private_jsonl_transaction_error_to_string error
 
 let invalidate_cached entry observed =
-  (* A failed CAS means another reader or the sole mutation lane already
-     published a newer durable cursor; that newer cache owns the slot. *)
+  (* See cache race contract: a failed CAS means a newer cursor owns the slot. *)
   ignore (Atomic.compare_and_set entry.cached observed None : bool)
 ;;
 
 let publish_cached entry observed view =
-  (* The returned [view] is still an exact durable snapshot when publication
-     loses this race. Cache publication is an optimization, never the SSOT. *)
+  (* See cache race contract: publication is optional; [view] stays exact. *)
   ignore (Atomic.compare_and_set entry.cached observed (Some view) : bool)
 ;;
 

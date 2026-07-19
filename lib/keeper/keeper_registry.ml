@@ -369,6 +369,7 @@ type wakeup_intent =
   | Hitl_resolution
   | Broadcast_signal
   | Compaction_signal
+  | Attention_result
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -378,6 +379,7 @@ let wakeup_intent_to_wire = function
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
   | Compaction_signal -> "compaction_signal"
+  | Attention_result -> "attention_result"
 ;;
 
 type wakeup_outcome =

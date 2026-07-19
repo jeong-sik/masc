@@ -2,7 +2,6 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
-module Id_set = Set.Make (String)
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -64,19 +63,13 @@ type persistence =
   | Candidate_already_present
 
 type wake_decision =
-  | Wake_requested of Keeper_registry.wakeup_outcome
+  | Judgment_worker_requested of Keeper_board_attention_worker_wake.wake_result
   | Wake_not_required
 
 type record_acceptance =
   { candidate : candidate
   ; persistence : persistence
   ; wake : wake_decision
-  }
-
-type drain_report =
-  { attempted : int
-  ; consumed : int
-  ; remaining : int
   }
 
 exception Candidate_unavailable of string
@@ -852,6 +845,12 @@ let same_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
 ;;
 
+let same_judgment left right =
+  left.verdict = right.verdict
+  && String.equal left.runtime_id right.runtime_id
+  && Float.equal left.judged_at right.judged_at
+;;
+
 let candidate_with_retryable_failure current failure =
   match current.status with
   | Pending pending ->
@@ -880,35 +879,62 @@ let record_retryable_failure ~base_path candidate failure =
 ;;
 
 let record_judgment ~base_path candidate judgment =
-  update_candidate
-    ~base_path
-    candidate.candidate_id
-    candidate.keeper_name
-    (fun current ->
-       match current.status with
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error
+        (Printf.sprintf
+           "Board attention candidate not found: %s"
+           candidate.candidate_id)
+    | Some current ->
+      (match current.status with
        | Pending _ ->
-         Some
+         let updated =
            { current with
              status = Judged { judgment; last_failure = None }
            }
-       | Judged _ | Consumed _ -> None)
+         in
+         Ok (Some updated, updated)
+       | Judged judged when same_judgment judged.judgment judgment ->
+         Ok (None, current)
+       | Consumed consumed when same_judgment consumed.judgment judgment ->
+         Ok (None, current)
+       | Judged _ | Consumed _ ->
+         Error
+           ("Board attention candidate judgment conflict: "
+            ^ candidate.candidate_id)))
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
-  update_candidate
-    ~base_path
-    candidate.candidate_id
-    candidate.keeper_name
-    (fun current ->
-       match current.status with
-       | Judged _ ->
-         Some
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error
+        (Printf.sprintf
+           "Board attention candidate not found: %s"
+           candidate.candidate_id)
+    | Some current ->
+      (match current.status with
+       | Judged judged when same_judgment judged.judgment judgment ->
+         let updated =
            { current with
              status =
                Consumed
                  { judgment; delivery; consumed_at = Time_compat.now () }
            }
-       | Pending _ | Consumed _ -> None)
+         in
+         Ok (Some updated, updated)
+       | Consumed consumed
+         when same_judgment consumed.judgment judgment
+              && consumed.delivery = delivery -> Ok (None, current)
+       | Pending _ ->
+         Error
+           ("Pending Board attention candidate cannot be consumed: "
+            ^ candidate.candidate_id)
+       | Judged _ | Consumed _ ->
+         Error
+           ("Board attention candidate consumption conflict: "
+            ^ candidate.candidate_id)))
 ;;
 
 let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
@@ -1009,32 +1035,26 @@ let reject_unregistered_tool ~name ~args:_ =
     "Board attention judgment is a tool-free boundary"
 ;;
 
-let rec process_with_judge ~base_path ~judge candidate =
-  match candidate.status with
-  | Consumed _ -> Ok candidate
-  | Judged judged -> consume_judged ~base_path candidate judged
-  | Pending _ ->
-    (match judge candidate with
-     | Error failure -> record_retryable_failure ~base_path candidate failure
-     | Ok judgment ->
-       let* current = record_judgment ~base_path candidate judgment in
-       process_with_judge ~base_path ~judge current)
-;;
-
 let record_and_wake ~base_path candidate =
+  let request_worker persisted =
+    let* wake =
+      Keeper_board_attention_worker_wake.request
+        ~base_path
+        ~keeper_name:persisted.keeper_name
+    in
+    Ok (Judgment_worker_requested wake)
+  in
   match record ~base_path candidate with
   | Record_error detail -> Error detail
   | Recorded persisted ->
-    let wake =
-      Wake_requested (request_owner_wake ~site:"recorded" ~base_path persisted)
-    in
+    let* wake = request_worker persisted in
     Ok { candidate = persisted; persistence = Candidate_recorded; wake }
   | Duplicate persisted ->
-    let wake =
+    let* wake =
       match persisted.status with
       | Pending _ | Judged _ ->
-        Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
-      | Consumed _ -> Wake_not_required
+        request_worker persisted
+      | Consumed _ -> Ok Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -1043,46 +1063,37 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
-(* ── Batch judgment ───────────────────────────────────── *)
+(* The configured output contract remains a one-item [verdicts] array so the
+   prompt/schema SSOT does not fork. Partition membership itself is singleton:
+   no candidate count, byte estimate, or token heuristic participates. *)
 
 let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
-let batch_max_candidates = 8
 
-let batch_request_json candidates =
-  let keeper_context_of candidate =
-    match candidate.judgment_request with
-    | `Assoc fields -> List.assoc_opt "keeper_context" fields
-    | _ -> None
-  in
-  let item_of candidate =
-    match candidate.judgment_request with
-    | `Assoc fields ->
-      `Assoc
-        (List.filter
-           (fun (key, _) -> not (String.equal key "keeper_context"))
-           fields)
-    | other -> other
-  in
-  match candidates with
-  | [] -> None
-  | first :: _ ->
-    (match keeper_context_of first with
-     | None -> None
-     | Some keeper_context ->
-       Some
+let singleton_request_json candidate =
+  match candidate.judgment_request with
+  | `Assoc fields ->
+    let contexts, item_fields =
+      List.partition
+        (fun (key, _) -> String.equal key "keeper_context")
+        fields
+    in
+    (match contexts with
+     | [ (_, keeper_context) ] ->
+       Ok
          (`Assoc
             [ "keeper_context", keeper_context
-            ; "items", `List (List.map item_of candidates)
-            ]))
+            ; "items", `List [ `Assoc item_fields ]
+            ])
+     | [] -> Error "singleton judgment request lacks keeper_context"
+     | _ -> Error "singleton judgment request contains multiple keeper_context fields")
+  | _ -> Error "singleton judgment request must be an object"
 ;;
 
-let build_batch_prompt candidates =
-  match batch_request_json candidates with
-  | None -> Error "batch request lacks the shared keeper context"
-  | Some json ->
-    Prompt_registry.render_prompt_template
-      prompt_name_batch
-      [ "batch_request_json", Yojson.Safe.to_string json ]
+let build_singleton_prompt candidate =
+  let* json = singleton_request_json candidate in
+  Prompt_registry.render_prompt_template
+    prompt_name_batch
+    [ "batch_request_json", Yojson.Safe.to_string json ]
 ;;
 
 let apply_batch_output_schema provider_config =
@@ -1093,417 +1104,106 @@ let apply_batch_output_schema provider_config =
        provider_config)
 ;;
 
-let run_judge_batch ~base_path candidates =
-  match candidates with
-  | [] -> Ok Candidate_map.empty
-  | first :: _ ->
-    let runtime_id_result =
-      try Ok (Runtime.runtime_id_for_structured_judge ()) with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Error
-          (failure
-             ~kind:Runtime_configuration_unavailable
-             (Printexc.to_string exn))
-    in
-    (match runtime_id_result with
-     | Error _ as error -> error
-     | Ok runtime_id ->
-       (match build_batch_prompt candidates with
-        | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
-        | Ok prompt ->
-          let provider_result =
-            try
-              match
-                Keeper_turn_driver_wrappers.run_named_with_masc_tools
-                  ~runtime_id
-                  ~keeper_name:first.keeper_name
-                  ~goal:prompt
-                  ~base_path
-                  ~masc_tools:[]
-                  ~dispatch:reject_unregistered_tool
-                  ~provider_config_transform:apply_batch_output_schema
-                  ()
-              with
-              | Ok result -> Ok result
-              | Error error ->
-                Error
-                  (failure
-                     ~kind:Provider_unavailable
-                     (Agent_sdk.Error.to_string error))
-            with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn ->
-              Error (failure ~kind:Provider_unavailable (Printexc.to_string exn))
-          in
-          (match provider_result with
-           | Error _ as error -> error
-           | Ok result ->
-             (match
-                Agent_sdk_response.structured_json_of_response
-                  ~schema_name:Keeper_board_attention_judgment.batch_schema_name
-                  result.response
-              with
+let judge_singleton ~sw ~net ~base_path candidate =
+  let runtime_id_result =
+    try Ok (Runtime.runtime_id_for_structured_judge ()) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (failure
+           ~kind:Runtime_configuration_unavailable
+           (Printexc.to_string exn))
+  in
+  match runtime_id_result with
+  | Error _ as error -> error
+  | Ok runtime_id ->
+    (match build_singleton_prompt candidate with
+     | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
+     | Ok prompt ->
+       let provider_result =
+         try
+           match
+             Keeper_turn_driver_wrappers.run_named_with_masc_tools
+               ~runtime_id
+               ~keeper_name:candidate.keeper_name
+               ~goal:prompt
+               ~base_path
+               ~masc_tools:[]
+               ~dispatch:reject_unregistered_tool
+               ~provider_config_transform:apply_batch_output_schema
+               ~sw
+               ?net
+               ()
+           with
+           | Ok result -> Ok result
+           | Error error ->
+             Error
+               (failure
+                  ~kind:Provider_unavailable
+                  (Agent_sdk.Error.to_string error))
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (failure ~kind:Provider_unavailable (Printexc.to_string exn))
+       in
+       (match provider_result with
+        | Error _ as error -> error
+        | Ok result ->
+          (match
+             Agent_sdk_response.structured_json_of_response
+               ~schema_name:Keeper_board_attention_judgment.batch_schema_name
+               result.response
+           with
+           | Error detail -> Error (failure ~kind:Response_contract_unavailable detail)
+           | Ok json ->
+             (match Keeper_board_attention_judgment.batch_of_yojson json with
               | Error detail ->
                 Error (failure ~kind:Response_contract_unavailable detail)
-              | Ok json ->
-                (match Keeper_board_attention_judgment.batch_of_yojson json with
-                 | Error detail ->
-                   Error (failure ~kind:Response_contract_unavailable detail)
-                 | Ok items ->
-                   let ids =
-                     List.fold_left
-                       (fun set candidate -> Id_set.add candidate.candidate_id set)
-                       Id_set.empty
-                       candidates
-                   in
-                   (match
-                      List.find_opt
-                        (fun (item : Keeper_board_attention_judgment.batch_item) ->
-                           not (Id_set.mem item.candidate_id ids))
-                        items
-                    with
-                    | Some item ->
-                      Error
-                        (failure
-                           ~kind:Response_contract_unavailable
-                           (Printf.sprintf
-                              "batch verdict references unknown candidate_id %S"
-                              item.candidate_id))
-                    | None ->
-                      let judged_at = Time_compat.now () in
-                      List.fold_left
-                        (fun result (item : Keeper_board_attention_judgment.batch_item) ->
-                           match result with
-                           | Error _ -> result
-                           | Ok map ->
-                             if Candidate_map.mem item.candidate_id map
-                             then
-                               Error
-                                 (failure
-                                    ~kind:Response_contract_unavailable
-                                    (Printf.sprintf
-                                       "batch verdict duplicates candidate_id %S"
-                                       item.candidate_id))
-                             else
-                               Ok
-                                 (Candidate_map.add
-                                    item.candidate_id
-                                    { verdict = item.verdict
-                                    ; runtime_id
-                                    ; judged_at
-                                    }
-                                    map))
-                        (Ok Candidate_map.empty)
-                        items))))))
+              | Ok [ item ] when String.equal item.candidate_id candidate.candidate_id ->
+                Ok
+                  { verdict = item.verdict
+                  ; runtime_id
+                  ; judged_at = Time_compat.now ()
+                  }
+              | Ok [ item ] ->
+                Error
+                  (failure
+                     ~kind:Response_contract_unavailable
+                     (Printf.sprintf
+                        "singleton verdict identity mismatch expected=%S actual=%S"
+                        candidate.candidate_id
+                        item.candidate_id))
+              | Ok items ->
+                Error
+                  (failure
+                     ~kind:Response_contract_unavailable
+                     (Printf.sprintf
+                        "singleton verdict count must be exactly one, got %d"
+                        (List.length items)))))))
 ;;
 
-(* ── Owner-lane batch drain ───────────────────────────── *)
-
-let chunks_of size items =
-  let rec loop current count chunks = function
-    | [] ->
-      (match current with
-       | [] -> List.rev chunks
-       | _ -> List.rev (List.rev current :: chunks))
-    | x :: rest ->
-      if count = size
-      then loop [ x ] 1 (List.rev current :: chunks) rest
-      else loop (x :: current) (count + 1) chunks rest
-  in
-  loop [] 0 [] items
-;;
-
-let record_batch_failures ~base_path candidates failure =
-  match candidates with
-  | [] -> Ok ()
-  | first :: _ ->
-    let keeper_name = first.keeper_name in
-    let* requested =
-      List.fold_left
-        (fun result candidate ->
-           let* ids = result in
-           if not (String.equal candidate.keeper_name keeper_name)
-           then
-             Error
-               (Printf.sprintf
-                  "Board attention failure batch keeper mismatch expected=%s actual=%s \
-                   candidate=%s"
-                  keeper_name
-                  candidate.keeper_name
-                  candidate.candidate_id)
-           else if Id_set.mem candidate.candidate_id ids
-           then
-             Error
-               ("duplicate candidate in Board attention failure batch: "
-                ^ candidate.candidate_id)
-           else Ok (Id_set.add candidate.candidate_id ids))
-        (Ok Id_set.empty)
-        candidates
-    in
-    update_ledger_many ~base_path ~keeper_name (fun current_rows ->
-      let current_by_id =
-        List.fold_left
-          (fun map candidate -> Candidate_map.add candidate.candidate_id candidate map)
-          Candidate_map.empty
-          current_rows
-      in
-      let* updated, changed =
-        List.fold_left
-          (fun result candidate ->
-             let* rows, changed = result in
-             match Candidate_map.find_opt candidate.candidate_id current_by_id with
-             | None ->
-               Error
-                 ("Board attention candidate not found for atomic failure evidence: "
-                  ^ candidate.candidate_id)
-             | Some current ->
-               (match current.status with
-                | Consumed _ ->
-                  Error
-                    ("Consumed Board attention candidate cannot receive batch failure \
-                      evidence: "
-                     ^ candidate.candidate_id)
-                | Pending _ | Judged _ ->
-                  let next = candidate_with_retryable_failure current failure in
-                  Ok (next :: rows, changed || next <> current)))
-          (Ok ([], false))
-          candidates
-        |> Result.map (fun (rows, changed) -> List.rev rows, changed)
-      in
-      if Id_set.cardinal requested <> List.length updated
-      then Error "Board attention atomic failure evidence cardinality changed"
-      else
-        Ok
-          ( (if changed then Some updated else None)
-          , () ))
-;;
-
-let validate_batch_coverage candidates judgments =
-  let requested =
-    List.fold_left
-      (fun ids candidate -> Id_set.add candidate.candidate_id ids)
-      Id_set.empty
-      candidates
-  in
-  let returned =
-    Candidate_map.fold
-      (fun candidate_id _ ids -> Id_set.add candidate_id ids)
-      judgments
-      Id_set.empty
-  in
-  if Id_set.equal requested returned
-  then Ok ()
-  else
-    let missing = Id_set.diff requested returned |> Id_set.elements in
-    let unknown = Id_set.diff returned requested |> Id_set.elements in
-    Error
-      (failure
-         ~kind:Response_contract_unavailable
-         (Printf.sprintf
-            "batch verdict identity mismatch missing=[%s] unknown=[%s]"
-            (String.concat "," missing)
-            (String.concat "," unknown)))
-;;
-
-let record_batch_judgments ~base_path ~keeper_name candidates judgments =
-  match candidates with
-  | [] -> Ok []
-  | _ ->
-    let* requested =
-      List.fold_left
-        (fun result candidate ->
-           let* ids = result in
-           if not (String.equal candidate.keeper_name keeper_name)
-           then
-             Error
-               (Printf.sprintf
-                  "Board attention atomic batch keeper mismatch expected=%s actual=%s \
-                   candidate=%s"
-                  keeper_name
-                  candidate.keeper_name
-                  candidate.candidate_id)
-           else if Id_set.mem candidate.candidate_id ids
-           then
-             Error
-               (Printf.sprintf
-                  "duplicate candidate in Board attention atomic batch: %s"
-                  candidate.candidate_id)
-           else Ok (Id_set.add candidate.candidate_id ids))
-        (Ok Id_set.empty)
-        candidates
-    in
-    update_ledger_many ~base_path ~keeper_name (fun current_rows ->
-      let current_by_id =
-        List.fold_left
-          (fun map candidate -> Candidate_map.add candidate.candidate_id candidate map)
-          Candidate_map.empty
-          current_rows
-      in
-      let* updated =
-        List.fold_left
-          (fun result candidate ->
-             let* rows = result in
-             match Candidate_map.find_opt candidate.candidate_id current_by_id with
-             | None ->
-               Error
-                 (Printf.sprintf
-                    "Board attention candidate not found for atomic judgment commit: %s"
-                    candidate.candidate_id)
-             | Some current ->
-               (match current.status with
-                | Judged _ | Consumed _ ->
-                  Error
-                    (Printf.sprintf
-                       "Board attention candidate is not Pending for atomic judgment \
-                        commit: %s"
-                       candidate.candidate_id)
-                | Pending _ ->
-                  (match Candidate_map.find_opt candidate.candidate_id judgments with
-                   | None ->
-                     Error
-                       (Printf.sprintf
-                          "Board attention judgment missing from validated atomic batch: %s"
-                          candidate.candidate_id)
-                   | Some judgment ->
-                     Ok
-                       ({ current with
-                          status = Judged { judgment; last_failure = None }
-                        }
-                        :: rows))))
-          (Ok [])
-          candidates
-        |> Result.map List.rev
-      in
-      if Id_set.cardinal requested <> List.length updated
-      then Error "Board attention atomic judgment commit cardinality changed"
-      else Ok (Some updated, updated))
-;;
-
-let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
+let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
   let* candidates = load_candidates ~base_path ~keeper_name in
-  let judged_ready, pending =
-    List.fold_left
-      (fun (judged_ready, pending) candidate ->
-         match candidate.status with
-         | Pending _ -> judged_ready, candidate :: pending
-         | Judged judged -> (candidate, judged) :: judged_ready, pending
-         | Consumed _ -> judged_ready, pending)
-      ([], [])
-      candidates
+  let* candidate =
+    match find_candidate candidates candidate_id with
+    | Some candidate -> Ok candidate
+    | None -> Error ("Board attention candidate not found: " ^ candidate_id)
   in
-  (* Already-judged verdicts deliver without new model calls. *)
-  let* judged_consumed, judged_remaining =
-    List.fold_left
-      (fun result (candidate, judged) ->
-         match result with
-         | Error _ -> result
-         | Ok (consumed, remaining) ->
-           (match consume_judged ~base_path candidate judged with
-            | Ok current ->
-              (match current.status with
-               | Consumed _ -> Ok (consumed + 1, remaining)
-               | Pending _ | Judged _ -> Ok (consumed, remaining + 1))
-            | Error detail -> Error detail))
-      (Ok (0, 0))
-      judged_ready
+  let* judged_candidate =
+    match candidate.status with
+    | Pending _ -> record_judgment ~base_path candidate judgment
+    | Judged judged when same_judgment judged.judgment judgment -> Ok candidate
+    | Consumed consumed when same_judgment consumed.judgment judgment -> Ok candidate
+    | Judged _ | Consumed _ ->
+      Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
   in
-  (* Fresh pending rows are judged in batches. A failed batch aborts the
-     round: the next keepalive turn owns the retry cadence, not a hot loop. *)
-  let batches = chunks_of batch_max_candidates (List.rev pending) in
-  let rec loop report = function
-    | [] -> Ok report
-    | batch :: rest ->
-      let deferred =
-        List.fold_left
-          (fun count rest_batch -> count + List.length rest_batch)
-          (List.length batch)
-          rest
-      in
-      (match judge_batch batch with
-       | Error failure ->
-         let* () = record_batch_failures ~base_path batch failure in
-         Ok
-           { report with
-             attempted = report.attempted + List.length batch
-           ; remaining = report.remaining + deferred
-           }
-       | Ok map ->
-         (match validate_batch_coverage batch map with
-          | Error failure ->
-            let* () = record_batch_failures ~base_path batch failure in
-            Ok
-              { report with
-                attempted = report.attempted + List.length batch
-              ; remaining = report.remaining + deferred
-              }
-          | Ok () ->
-            let* judged =
-              record_batch_judgments ~base_path ~keeper_name batch map
-            in
-            (match
-               List.fold_left
-                 (fun result candidate ->
-                    match result with
-                    | Error _ -> result
-                    | Ok (consumed, remaining) ->
-                      (match candidate.status with
-                       | Pending _ | Consumed _ ->
-                         Error
-                           (Printf.sprintf
-                              "atomic judgment commit returned non-Judged candidate: %s"
-                              candidate.candidate_id)
-                       | Judged judged_state ->
-                         (match consume_judged ~base_path candidate judged_state with
-                          | Ok current ->
-                            (match current.status with
-                             | Consumed _ -> Ok (consumed + 1, remaining)
-                             | Pending _ | Judged _ ->
-                               Ok (consumed, remaining + 1))
-                          | Error detail -> Error detail)))
-                 (Ok (0, 0))
-                 judged
-             with
-             | Error detail -> Error detail
-             | Ok (consumed, remaining) ->
-               loop
-                 { attempted = report.attempted + List.length batch
-                 ; consumed = report.consumed + consumed
-                 ; remaining = report.remaining + remaining
-                 }
-                 rest)))
-  in
-  let* batch_report = loop { attempted = 0; consumed = 0; remaining = 0 } batches in
-  Ok
-    { attempted = batch_report.attempted + judged_consumed + judged_remaining
-    ; consumed = batch_report.consumed + judged_consumed
-    ; remaining = batch_report.remaining + judged_remaining
-    }
-;;
-
-let drain_pending_on_owner_lane ~base_path ~keeper_name =
-  drain_pending_with_judge_batch
-    ~base_path
-    ~keeper_name
-    ~judge_batch:(run_judge_batch ~base_path)
-;;
-
-module For_testing = struct
-  let drain_pending_with_judge_batch = drain_pending_with_judge_batch
-
-  let drain_pending_with_judge ~base_path ~keeper_name ~judge =
-    let judge_batch candidates =
-      let rec fold map = function
-        | [] -> Ok map
-        | candidate :: rest ->
-          (match judge candidate with
-           | Ok judgment ->
-             fold (Candidate_map.add candidate.candidate_id judgment map) rest
-           | Error failure -> Error failure)
-      in
-      fold Candidate_map.empty candidates
-    in
-    drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch
-  ;;
-end
+  match judged_candidate.status with
+  | Consumed _ -> Ok judged_candidate
+  | Pending _ ->
+    Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
+  | Judged judged ->
+    let* delivered = consume_judged ~base_path judged_candidate judged in
+    (match delivered.status with
+     | Consumed _ -> Ok delivered
+     | Pending _ | Judged _ ->
+       Error ("Board attention candidate delivery did not reach Consumed: " ^ candidate_id))
 ;;

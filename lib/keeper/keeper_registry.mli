@@ -444,6 +444,7 @@ type wakeup_intent =
   | Hitl_resolution
   | Broadcast_signal
   | Compaction_signal
+  | Attention_result
 
 type wakeup_outcome =
   | Signaled

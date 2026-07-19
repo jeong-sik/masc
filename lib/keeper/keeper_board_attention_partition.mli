@@ -1,6 +1,6 @@
 (** Durable, capacity-agnostic Board-attention judgment partitions.
 
-    Every currently-unassigned Pending candidate receives one singleton root.
+    Every currently-unassigned non-terminal candidate receives one singleton root.
     A candidate is the irreducible work identity until the dispatched Provider
     exposes typed actual-wire split authority. No byte count, token estimate,
     wall-clock expiry, retry counter, or configured batch cap chooses
@@ -74,7 +74,8 @@ val ensure_roots :
   keeper_name:string ->
   Candidate.candidate list ->
   (int, string) result
-(** Persist one deterministic singleton root for each unassigned Pending
+(** Persist one deterministic singleton root for each unassigned [Pending] or
+    [Judged]
     candidate and return the number created by this transaction. Existing live
     membership is validated as one-to-one. *)
 

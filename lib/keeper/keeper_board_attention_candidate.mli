@@ -82,19 +82,13 @@ type persistence =
   | Candidate_already_present
 
 type wake_decision =
-  | Wake_requested of Keeper_registry.wakeup_outcome
+  | Judgment_worker_requested of Keeper_board_attention_worker_wake.wake_result
   | Wake_not_required
 
 type record_acceptance =
   { candidate : candidate
   ; persistence : persistence
   ; wake : wake_decision
-  }
-
-type drain_report =
-  { attempted : int
-  ; consumed : int
-  ; remaining : int
   }
 
 exception Candidate_unavailable of string
@@ -142,61 +136,29 @@ val record_retryable_failure :
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
 
-val process_with_judge :
+val judge_singleton :
+  sw:Eio.Switch.t ->
+  net:Eio_context.eio_net option ->
   base_path:string ->
-  judge:(candidate -> (judgment, retryable_failure) result) ->
   candidate ->
+  (judgment, retryable_failure) result
+(** Invoke the configured structured judge for exactly one immutable
+    candidate. The response must cover that exact candidate identity. This is
+    Provider work and must never run under Keeper turn admission. *)
+
+val apply_judgment_and_deliver :
+  base_path:string ->
+  keeper_name:string ->
+  candidate_id:string ->
+  judgment:judgment ->
   (candidate, string) result
-(** Testable state-machine boundary. Production drains the configured
-    structured judge through {!drain_pending_on_owner_lane}. *)
+(** Idempotently apply one completed worker judgment and finish its durable
+    event delivery. Success means the candidate is [Consumed]. Conflicting
+    prior judgment or a non-terminal delivery result is explicit. *)
 
 val record_and_wake :
   base_path:string -> candidate -> (record_acceptance, string) result
-(** Persist the exact candidate, then request a live wake from the registered
-    running Keeper. The durable row is authoritative: a deferred wake remains
-    a successful acceptance and is returned as a typed
-    {!Keeper_registry.wakeup_outcome}. A consumed duplicate needs no wake.
-    This function never invokes the model judge. *)
-
-val drain_pending_on_owner_lane :
-  base_path:string -> keeper_name:string -> (drain_report, string) result
-(** Synchronously process every non-terminal durable candidate. Production
-    calls this only while holding the Keeper's turn admission slot; no
-    dashboard/producer domain may call it.
-
-    Semantics:
-    - Already-judged verdicts deliver without new model calls.
-    - Pending rows are judged in batches of up to
-      {!batch_max_candidates} per model call. A failed batch aborts the round:
-      the next keepalive turn owns the retry cadence, so provider outages
-      cannot turn the drain into a hot retry loop.
-    - A successful response must cover the exact requested candidate-id set.
-      Unknown, duplicate, or missing identities fail the attempted batch and
-      persist retryable response-contract evidence on every requested row.
-    - An exact response commits all requested [Pending -> Judged] transitions
-      in one candidate-ledger rewrite or commits none. Durable queue delivery
-      and terminal [Consumed] transitions then proceed idempotently from the
-      committed judgments; they are not presented as a cross-file transaction.
-    - Failure-evidence persistence errors propagate to the caller; they are
-      never reduced to logs. Evidence for one attempted batch is committed in
-      one candidate-ledger rewrite or not committed at all. *)
-
-val batch_max_candidates : int
-(** Maximum candidates judged per model call. *)
-
-module Candidate_map : Map.S with type key = string
-
-module For_testing : sig
-  val drain_pending_with_judge :
-    base_path:string ->
-    keeper_name:string ->
-    judge:(candidate -> (judgment, retryable_failure) result) ->
-    (drain_report, string) result
-  (** Per-candidate judging adapter over the batch engine. *)
-
-  val drain_pending_with_judge_batch :
-    base_path:string ->
-    keeper_name:string ->
-    judge_batch:(candidate list -> (judgment Candidate_map.t, retryable_failure) result) ->
-    (drain_report, string) result
-end
+(** Persist the exact candidate, then request the per-Keeper judgment worker.
+    The durable row is authoritative: an unregistered worker is a typed,
+    successful deferral recovered by worker startup drain. A consumed duplicate
+    needs no wake. This function never invokes the model judge. *)

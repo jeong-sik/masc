@@ -30,11 +30,16 @@ provider weekly rate limit — observed live 2026-07-19 14:09Z,
 compaction fails, histories overflow the model context (a live keeper request
 reached 468,981 tokens against a 262,144 limit), and the fleet degrades.
 
-This is not a new mechanism. `hitl_summary_worker` already selects between
-`Native_structured` (provider-native `json_schema`) and a `Plain_json_text`
-degradation per endpoint capability (`hitl_summary_worker.mli:36-40`). This RFC
-extracts that decision into one shared capability-driven selector and has the
-compaction summarizer — and any other structured consumer — use it, so
+This is not a new OAS capability. `hitl_summary_worker` already proves the
+capability-based selection *pattern* — `Native_structured` (provider-native
+`json_schema`) vs a `Plain_json_text` degradation per endpoint
+(`hitl_summary_worker.mli:39-41`) — but it has only those two tiers. OAS
+already supports the missing middle tier: `JsonMode`
+(`response_format: {"type":"json_object"}`, `llm_provider/types.ml`), which
+`supports_response_format_json` maps to, yet no MASC structured consumer
+selects it. This RFC generalizes the pattern into one shared capability-driven
+selector with three tiers (`json_schema` / `json_object` / plain-json) and has
+the compaction summarizer — and other structured consumers — use it, so
 structured output is available on every runtime that can return JSON. That
 removes the single lane, so the convergence and rate-limit SPOF cannot form.
 
@@ -90,9 +95,9 @@ the first.
 
 ## Remediation (implementation scope, for a follow-up PR)
 
-1. Extract the `Native_structured | Json_object | Plain_json_text` selection
-   from `hitl_summary_worker` into a shared module keyed on runtime
-   capabilities.
+1. Generalize `hitl_summary_worker`'s two-tier selection into a shared module
+   keyed on runtime capabilities, adding the `json_object` tier that OAS already
+   supports (`JsonMode`) but no MASC structured consumer currently selects.
 2. Have `keeper_compaction_llm_summarizer` build its request through that
    selector instead of the single `json_schema` gate, so a `json_object`
    runtime (GLM/DeepSeek/Kimi) can return a valid compaction plan.

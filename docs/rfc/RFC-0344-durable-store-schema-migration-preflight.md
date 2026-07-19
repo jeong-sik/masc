@@ -28,7 +28,7 @@ durable store schema version bump이 배포 경계에서 데이터 유실 또는
 
 공통 근본: 각 store가 version bump 시 (a) migration 도구 또는 (b) generation-bump(경로 분리) 중 하나를 **타입 수준에서 강제받지 않는다**. 현재는 주석(`keeper_reaction_ledger.ml`의 "namespace and row schema advance together")으로만 규율되고 컴파일러가 미강제 → 매번 hand-decision, 매번 라이브 state 확인 누락.
 
-**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 21개 중 **16개가 위험**임을 보인다 — hard-cut-reject 7개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에서 **실제 구→신 변환(migration) 로직은 하나도 발견되지 않았고**, event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
+**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 21개 중 **16개가 위험**임을 보인다 — hard-cut-reject 7개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에 **durable state의 구→신 변환을 책임지는 공용 preflight 경로가 없고**, 존재하는 startup 변환은 store별 ad-hoc이라 재사용·검증되지 않으며 boot 시점 버전 대조와 결속되지 않는다. event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
 
 RFC-0338은 durable persistence를 다루면서도 "데이터 파일 migration은 없다"(본문 §rollback)고 scope에서 명시적으로 제외한다. 즉 개별 durability RFC들은 각자 "내 변경엔 migration 불요"를 판단할 뿐, **"durable store 전반의 version bump 안전성"을 책임지는 RFC가 구조적으로 없다**. 이 공백이 위 4건이 반복되는 이유다.
 
@@ -94,9 +94,13 @@ for each registered descriptor d:
 
 migration 실패 또는 fatal은 **operator-facing 명시적 종료**로 처리한다(silent Unavailable 금지). #25135의 실패 모드(store Unavailable → 조용한 HITL outage)를 boot 시점 fail-loud로 전환한다.
 
+**store 간 원자성**: 위 루프가 store를 하나씩 즉시 commit하면, store A가 새 version으로 rewrite된 뒤 store B의 migration이 실패했을 때 A(new)·B(old)의 부분 마이그레이션 상태로 남아 다음 boot이 불일치를 마주한다. 각 `migrate`는 §3.4처럼 backup을 남기고 **재실행에 멱등**(구 version이면 다시 변환, 이미 current면 no-op)이어야 하며, preflight는 실패 시 fatal로 멈춰 **다음 boot이 남은 store를 이어서 완료**할 수 있게 한다(commit된 store는 current라 재-migrate 대상 아님). 즉 부분 진행이 손실이 아니라 재개 가능한 상태가 되도록, `migrate`의 멱등성과 backup을 §4 acceptance에서 검증한다.
+
 ### 3.2.1 배타 락으로 구 프로세스 quiesce
 
 preflight를 "새 프로세스의 boot 전"에만 두는 것으로는 부족하다 — 같은 base-path를 공유하는 **구 프로세스가 아직 쓰는 중**이면 preflight의 backup·rewrite가 라이브 write와 경합한다(§2 non-goal "old runtime이 쓰는 중 rewrite 금지"의 실제 강제 수단 부재). preflight 진입 시 `<base-path>/.masc/preflight.lock`에 대한 **배타 flock**을 획득하고, 실패하면(구 프로세스 잔존) migrate하지 않고 fatal로 종료한다. 락 보유 중에만 migration을 수행하고, keeper 시작까지 유지한다.
+
+**첫 배포의 한계**: 이 락은 락을 아는 바이너리끼리만 quiesce를 보장한다. 이 메커니즘을 **처음 도입하는 배포**에서는 구 바이너리가 락을 잡지 않으므로 새 프로세스의 flock 획득이 성공해도 구 프로세스가 여전히 쓰고 있을 수 있다. 따라서 락은 정상 상태(락-aware ↔ 락-aware) 전환만 보호하고, **락을 처음 들이는 배포는 구 프로세스 종료를 배포 오케스트레이션 수준에서 보장하는 stop-the-world 단계**(구 프로세스 drain/stop 후 새 프로세스 start)로 처리해야 한다. 이 1회 조건을 §4 acceptance에 명시한다.
 
 ### 3.3 Version–store 타입 결속 (phantom type)
 
@@ -129,7 +133,7 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 ## 5. Blast radius
 
 - boot 시퀀스에 preflight 단계 삽입(keeper 시작 전, 단일 프로세스).
-- 위험 17개 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 7개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). 안전 3개(shutdown projection의 backward-read, reaction ledger·memory OS의 generation-bump)는 descriptor로 등록하되 기존 무손실 방식 유지.
+- 위험 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 7개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). **Memory OS(episode `-g%04d`)는 안전 아님** — `-g%04d`는 schema namespace가 아니라 episode/trace generation이라 schema bump 시 구 파일이 자동 orphan되므로 hard-cut 그룹으로 분류해 descriptor 대상. 진짜 안전 참고는 shutdown projection의 backward-read와 reaction ledger의 경로-generation-bump 2개뿐.
 - `Store_version` variant화로 각 store의 version 문자열 → typed. wire 호환 유지(디스크 표기 불변, 파싱만 typed).
 - version 표기 6가지 상이 컨벤션(schema-suffix / storage_generation / int schema_version / 문자열 rfc-vN / 경로-embed generation / 표기부재)을 descriptor의 `Store_version.t`로 수렴. 디스크 표기는 store별로 유지하되 **선언은 한 타입**으로.
 
@@ -174,10 +178,11 @@ gate mode(`gate/mode.json`), gate always-allowed rules(`gate/always-allowed.json
 
 Keeper memory bank(`memory_bank.jsonl`, `keeper_memory_schema_version=2`): version 불일치 row를 조용히 `None`으로 drop (`keeper_memory_bank.ml:97-99`). bump 시 무경고 유실.
 
-### 안전 참고 사례 (3개)
+### 안전 참고 사례 (2개)
 
 - **backward-read**: shutdown/lifecycle projection(`keeper_shutdown_store.ml:578-586`) — 유일하게 4개 구 스키마 compat reader 보유. §3.1 descriptor의 참조 구현.
-- **generation-bump**: reaction ledger(경로에 `/v4/` embed), memory OS(episode `-g%04d.json`) — 무손실이나 미마이그레이션.
+- **generation-bump**: reaction ledger(경로에 `/v4/` embed) — 경로에 schema generation을 embed해 구 세대가 명시적으로 분리·무손실.
+- (정정) memory OS의 episode `-g%04d.json`은 안전 사례가 **아니다** — `-g%04d`는 schema generation이 아니라 episode/trace 카운터라 schema shape이 bump되면 구 episode 파일이 조용히 orphan된다. §위험 A(hard-cut) 성격으로 재분류.
 
 ### SSOT 부재 (심각)
 

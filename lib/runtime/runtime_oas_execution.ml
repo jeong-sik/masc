@@ -278,10 +278,11 @@ let prepare_active ~sw ~recovery_key agent owner =
           match slot_state, context_state with
           | None, None ->
             let scope_leaf = Random_id.prefixed ~prefix:"run-" ~bytes:16 in
+            let scope_path = Eio.Path.(owner.runs_root / scope_leaf) in
             let scope_dir =
               require_ok (Storage.create_private_child ~sw owner.runs_root scope_leaf)
             in
-            None, None, scope_dir, Some scope_dir
+            None, None, scope_dir, Some scope_path
           | Some slot_record, Some checkpoint_record ->
             if not (same_record slot_record checkpoint_record)
             then
@@ -416,8 +417,8 @@ let execution_store prepared = prepared.store
 let cleanup_unused_fresh_scope prepared =
   match !(prepared.unused_fresh_scope) with
   | None -> Ok ()
-  | Some scope_dir ->
-    (match Storage.remove_empty_directory ~parent:prepared.owner.runs_root scope_dir with
+  | Some scope_path ->
+    (match Storage.remove_empty_directory ~parent:prepared.owner.runs_root scope_path with
      | Error _ as error -> error
      | Ok () ->
        prepared.unused_fresh_scope := None;

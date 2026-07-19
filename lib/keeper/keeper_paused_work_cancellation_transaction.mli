@@ -28,18 +28,19 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Queue_replay_failed of string
   | Queue_commit_failed of string
 
 type success =
   { settlement : Keeper_registry_event_queue.settle_result
-  ; reservation_release : Keeper_lifecycle_reservation.release_outcome
+  ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Failed of
       { cause : failure
-      ; reservation_release : Keeper_lifecycle_reservation.release_outcome
+      ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
       }
 
 val failure_to_string : failure -> string

@@ -21,18 +21,19 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Queue_replay_failed of string
   | Queue_commit_failed of string
 
 type success =
   { settlement : Keeper_registry_event_queue.settle_result
-  ; reservation_release : Keeper_lifecycle_reservation.release_outcome
+  ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
   }
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Failed of
       { cause : failure
-      ; reservation_release : Keeper_lifecycle_reservation.release_outcome
+      ; reservation_release : Keeper_lifecycle_reservation.release_outcome option
       }
 
 let failure_to_string = function
@@ -54,6 +55,7 @@ let failure_to_string = function
       "live Keeper owner generation changed: expected %d, actual %d"
       expected
       actual
+  | Queue_replay_failed detail -> "accepted cancellation replay failed: " ^ detail
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;
 
@@ -69,10 +71,34 @@ let error_to_string = function
     "Keeper lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Failed { cause; reservation_release } ->
-    Printf.sprintf
-      "%s; reservation_release=%s"
-      (failure_to_string cause)
-      (release_outcome_to_string reservation_release)
+    (match reservation_release with
+     | None -> failure_to_string cause
+     | Some release ->
+       Printf.sprintf
+         "%s; reservation_release=%s"
+         (failure_to_string cause)
+         (release_outcome_to_string release))
+;;
+
+let cancellation_of_request (request : request) :
+  Keeper_registry_event_queue.accepted_cancellation
+  =
+  { source_revision = request.source_revision
+  ; owner_generation = request.owner_generation
+  ; operator_operation_id = request.operator_operation_id
+  ; reason = request.reason
+  }
+;;
+
+let replay_committed ~base_path ~keeper_name request =
+  match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
+  | Error detail -> Error (Queue_replay_failed detail)
+  | Ok state ->
+    Keeper_event_queue_state.accepted_cancellation_replay
+      request.lease
+      (cancellation_of_request request)
+      state
+    |> Result.map_error (fun detail -> Queue_replay_failed detail)
 ;;
 
 let validate_durable_owner config ~keeper_name ~expected_generation =
@@ -130,13 +156,7 @@ let run config ~keeper_name request =
      with
      | Error _ as error -> error
      | Ok () ->
-       let cancellation : Keeper_registry_event_queue.accepted_cancellation =
-         { source_revision = request.source_revision
-         ; owner_generation = request.owner_generation
-         ; operator_operation_id = request.operator_operation_id
-         ; reason = request.reason
-         }
-       in
+       let cancellation = cancellation_of_request request in
        Keeper_registry_event_queue.cancel_accepted_result
          ~base_path
          keeper_name
@@ -148,32 +168,50 @@ let run config ~keeper_name request =
 ;;
 
 let cancel config ~keeper_name request =
-  match
-    Keeper_lifecycle_reservation.acquire
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-      ~expected_generation:request.owner_generation
-      ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
-  with
-  | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-    Error (Reservation_conflict owner)
-  | Ok token ->
-    (try
-       let outcome = run config ~keeper_name request in
-       let reservation_release = Keeper_lifecycle_reservation.release token in
-       match outcome with
-       | Ok settlement -> Ok { settlement; reservation_release }
-       | Error cause -> Error (Failed { cause; reservation_release })
-     with
-     | exn ->
-       let release = Keeper_lifecycle_reservation.release token in
-       (match release with
-        | Keeper_lifecycle_reservation.Released -> ()
-        | Keeper_lifecycle_reservation.Release_missing
-        | Keeper_lifecycle_reservation.Release_not_owner _ ->
-          Log.Keeper.error
-            "paused cancellation exception release failed keeper=%s outcome=%s"
-            keeper_name
-            (release_outcome_to_string release));
-       raise exn)
+  let base_path = config.Workspace.base_path in
+  let finish token outcome =
+    let reservation_release = Keeper_lifecycle_reservation.release token in
+    match outcome with
+    | Ok settlement -> Ok { settlement; reservation_release = Some reservation_release }
+    | Error cause ->
+      Error (Failed { cause; reservation_release = Some reservation_release })
+  in
+  let acquire () =
+    match
+      Keeper_lifecycle_reservation.acquire
+        ~base_path
+        ~keeper_name
+        ~expected_generation:request.owner_generation
+        ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+    with
+    | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+      Error (Reservation_conflict owner)
+    | Ok token ->
+      (try
+         match replay_committed ~base_path ~keeper_name request with
+         | Error cause -> finish token (Error cause)
+         | Ok (Some receipt) ->
+           finish token (Ok (Keeper_registry_event_queue.Already_settled receipt))
+         | Ok None -> finish token (run config ~keeper_name request)
+       with
+       | exn ->
+         let release = Keeper_lifecycle_reservation.release token in
+         (match release with
+          | Keeper_lifecycle_reservation.Released -> ()
+          | Keeper_lifecycle_reservation.Release_missing
+          | Keeper_lifecycle_reservation.Release_not_owner _ ->
+            Log.Keeper.error
+              "paused cancellation exception release failed keeper=%s outcome=%s"
+              keeper_name
+              (release_outcome_to_string release));
+         raise exn)
+  in
+  match replay_committed ~base_path ~keeper_name request with
+  | Error cause -> Error (Failed { cause; reservation_release = None })
+  | Ok (Some receipt) ->
+    Ok
+      { settlement = Keeper_registry_event_queue.Already_settled receipt
+      ; reservation_release = None
+      }
+  | Ok None -> acquire ()
 ;;

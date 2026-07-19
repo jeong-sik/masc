@@ -112,13 +112,26 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
 ;;
 
 let check_released = function
-  | Keeper_lifecycle_reservation.Released -> ()
-  | Keeper_lifecycle_reservation.Release_missing ->
+  | Some Keeper_lifecycle_reservation.Released -> ()
+  | Some Keeper_lifecycle_reservation.Release_missing ->
     Alcotest.fail "lifecycle reservation disappeared before release"
-  | Keeper_lifecycle_reservation.Release_not_owner owner ->
+  | Some (Keeper_lifecycle_reservation.Release_not_owner owner) ->
     Alcotest.failf
       "lifecycle reservation owner changed: %s"
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  | None -> Alcotest.fail "new cancellation did not acquire a lifecycle reservation"
+;;
+
+let check_replayed_without_reservation = function
+  | None -> ()
+  | Some release ->
+    Alcotest.failf
+      "committed replay acquired a lifecycle reservation: %s"
+      (match release with
+       | Keeper_lifecycle_reservation.Released -> "released"
+       | Keeper_lifecycle_reservation.Release_missing -> "release_missing"
+       | Keeper_lifecycle_reservation.Release_not_owner owner ->
+         "release_not_owner: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
 let test_paused_owner_cancellation_commits_once () =
@@ -136,12 +149,27 @@ let test_paused_owner_cancellation_commits_once () =
         Alcotest.fail "first paused cancellation was already settled"
       | Registry_queue.Committed_followup_failed { receipt; _ } -> receipt
     in
+    let current_meta =
+      Keeper_meta_store.read_meta config keeper_name
+      |> require_ok "read committed cancellation owner"
+      |> require_some "committed cancellation owner"
+    in
+    let resumed =
+      let resumed = Keeper_meta_contract.mark_resumed current_meta in
+      { resumed with
+        runtime =
+          { resumed.runtime with generation = resumed.runtime.generation + 1 }
+      }
+    in
+    Keeper_meta_store.write_meta config resumed
+    |> require_ok "persist replacement owner generation";
+    Keeper_registry.clear ();
     let replay =
       Transaction.cancel config ~keeper_name request
       |> Result.map_error Transaction.error_to_string
       |> require_ok "replay accepted paused cancellation"
     in
-    check_released replay.reservation_release;
+    check_replayed_without_reservation replay.reservation_release;
     (match replay.settlement with
      | Registry_queue.Already_settled replayed ->
        Alcotest.(check bool)

@@ -114,6 +114,37 @@ let retired_epoch_paths_of_owner owner =
   ]
 ;;
 
+let retired_epoch_presence_result owner =
+  let rec collect reversed = function
+    | [] -> Ok (List.rev reversed)
+    | path :: rest ->
+      (match Unix.lstat path with
+       | _stats -> collect (path :: reversed) rest
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> collect reversed rest
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+         Error
+           (Printf.sprintf
+              "failed to inspect retired event queue epoch keeper=%s path=%s: %s"
+              (keeper_name_of_owner owner)
+              path
+              (Printexc.to_string exn)))
+  in
+  collect [] (retired_epoch_paths_of_owner owner)
+;;
+
+let require_current_epoch_before_retired_mutation owner =
+  match retired_epoch_presence_result owner with
+  | Error _ as error -> error
+  | Ok [] -> Ok ()
+  | Ok paths ->
+    Error
+      (Printf.sprintf
+         "retired event queue epoch requires operator disposition before current-epoch mutation keeper=%s paths=%s"
+         (keeper_name_of_owner owner)
+         (String.concat "," paths))
+;;
+
 let save_json_atomic path json =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
@@ -337,7 +368,25 @@ let load_state_unlocked owner =
   match read_primary_unlocked owner with
   | Error _ as error -> error
   | Ok (Primary_current state) -> replay_settlement_wal_unlocked owner state
-  | Ok Primary_missing -> replay_settlement_wal_unlocked owner State.empty
+  | Ok Primary_missing ->
+    (match
+       Fs_compat.read_private_jsonl_slice_locked_result
+         (settlement_wal_path_of_owner owner)
+         ~from:0
+     with
+     | Error error ->
+       Error
+         (Printf.sprintf
+            "failed to inspect current settlement WAL keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (settlement_wal_path_of_owner owner)
+            (Fs_compat.Private_jsonl_slice.error_to_string error))
+     | Ok slice when slice.end_offset > 0 ->
+       replay_settlement_wal_unlocked owner State.empty
+     | Ok _ ->
+       (match require_current_epoch_before_retired_mutation owner with
+        | Error _ as error -> error
+        | Ok () -> replay_settlement_wal_unlocked owner State.empty))
 ;;
 
 let load_state_result ~base_path ~keeper_name =

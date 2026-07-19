@@ -1042,14 +1042,9 @@ let test_retired_epoch_is_quarantined_while_v4_continues () =
       None
       discovery.read_error;
 
-    let empty_current =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load absent v4 authority"
-    in
-    Alcotest.(check int)
-      "retired work is never loaded"
-      0
-      (Queue.length (State.pending empty_current));
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "retired-only epoch was accepted as empty v4 authority");
     Alcotest.(check bool)
       "read-only empty load does not synthesize v4 authority"
       false
@@ -1093,6 +1088,19 @@ let test_retired_epoch_is_quarantined_while_v4_continues () =
       observed_paths;
 
     let current_stimulus = stimulus "current-work" 2.0 in
+    (match
+       Persistence.enqueue_stimulus_if_absent_result
+         ~base_path
+         ~keeper_name
+         current_stimulus
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "retired-only epoch accepted a current mutation");
+    Alcotest.(check bool)
+      "blocked mutation does not synthesize v4 authority"
+      false
+      (Sys.file_exists current_snapshot);
+    write_state ~base_path ~keeper_name current_snapshot State.empty;
     (match
        Persistence.enqueue_stimulus_if_absent_result
          ~base_path

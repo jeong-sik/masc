@@ -362,13 +362,6 @@ let process_directive ~agent_name directive =
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
     set_keeper_paused_state ~agent_name true
-  | Keeper_directive.Resume ->
-    Log.Keeper.emit
-      Log.Info
-      ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "resume" ])
-      (Printf.sprintf "directive: resuming keeper %s" agent_name);
-    set_keeper_paused_state ~agent_name false
   | Keeper_directive.Wakeup ->
     (* Wakeup is only a scheduling signal. It must never clear an operator
        pause: paused-work disposition belongs to the receipt-first

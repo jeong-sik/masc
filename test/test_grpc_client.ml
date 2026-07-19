@@ -210,13 +210,12 @@ let test_heartbeat_ack_directive_types () =
       [ Keeper_directive.Pause
       ; Keeper_directive.Assign_task (task_id "T-42")
       ; Keeper_directive.Wakeup
-      ; Keeper_directive.Resume
       ];
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
   Alcotest.(check (list string)) "P3 directives roundtrip"
-    ["pause"; "claim:T-42"; "wakeup"; "resume"]
+    ["pause"; "claim:T-42"; "wakeup"]
     (List.map T.HeartbeatAck.directive_to_wire decoded.directives);
   let rejects raw =
     match T.HeartbeatAck.directive_of_wire raw with
@@ -224,6 +223,7 @@ let test_heartbeat_ack_directive_types () =
     | Error _ -> true
   in
   Alcotest.(check bool) "unknown directive rejected" true (rejects "compact");
+  Alcotest.(check bool) "legacy raw resume rejected" true (rejects "resume");
   Alcotest.(check bool) "empty task assignment rejected" true (rejects "claim:");
   Alcotest.(check bool)
     "near-prefix tag rejected"

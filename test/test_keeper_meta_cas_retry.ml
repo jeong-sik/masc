@@ -447,14 +447,14 @@ let test_revival_decision_matrix () =
   in
   case ~label:"no latch, not paused" ~latched_reason:None ~paused:false
     ~expect_dead_revival:false ~expect_clear:false;
-  case ~label:"no latch, paused (plain resume)" ~latched_reason:None ~paused:true
-    ~expect_dead_revival:false ~expect_clear:true;
+  case ~label:"no latch, paused (keeper_up retains pause)" ~latched_reason:None ~paused:true
+    ~expect_dead_revival:false ~expect_clear:false;
   case ~label:"operator_paused latch, not paused (inconsistent state, not dead-revival)"
     ~latched_reason:(Some grpc_directive_pause) ~paused:false
     ~expect_dead_revival:false ~expect_clear:false;
-  case ~label:"operator_paused latch, paused (canonical operator-pause resume)"
+  case ~label:"operator_paused latch, paused (keeper_up retains pause)"
     ~latched_reason:(Some grpc_directive_pause) ~paused:true
-    ~expect_dead_revival:false ~expect_clear:true;
+    ~expect_dead_revival:false ~expect_clear:false;
   case ~label:"dead_tombstone latch, not paused (stranded -- must still revive)"
     ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone) ~paused:false
     ~expect_dead_revival:true ~expect_clear:true;

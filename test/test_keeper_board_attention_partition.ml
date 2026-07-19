@@ -164,9 +164,18 @@ let ledger_lines path =
 
 let append_ledger path content =
   match Fs_compat.append_private_jsonl_durable_locked_result path content with
-  | Ok () -> ()
-  | Error error ->
+  | Fs_compat.Private_file_succeeded () -> ()
+  | Fs_compat.Private_file_failed error ->
     Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error)
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+    Alcotest.fail
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Alcotest.fail
+      (Printf.sprintf
+         "%s; cleanup: %s"
+         (Fs_compat.private_jsonl_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
 ;;
 
 let test_pending_candidates_form_singleton_roots () =
@@ -442,14 +451,7 @@ let test_partition_ledger_rejects_illegal_transition () =
   let root = ensure ~base_path candidates |> List.hd in
   let path = P.For_testing.path ~base_path ~keeper_name:"partition-keeper" in
   let illegal = { root with state = P.Settled { settled_at = 101.0 } } in
-  (match
-     Fs_compat.append_private_jsonl_durable_locked_result
-       path
-       (Yojson.Safe.to_string (P.to_yojson illegal) ^ "\n")
-   with
-   | Ok () -> ()
-   | Error error ->
-     Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error));
+  append_ledger path (Yojson.Safe.to_string (P.to_yojson illegal) ^ "\n");
   match P.load ~base_path ~keeper_name:"partition-keeper" with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "Ready -> Settled ledger regression was accepted"

@@ -1113,11 +1113,10 @@ dominant source of the observed CAS race exhaustion after
                       ~base_dir
                       ~meta
                       ~projection_request:
-                        (Keeper_compaction_projection_target.request
-                           ~assignment_id:final_execution.runtime_id
-                           ~resolve_context_window:(fun _ ->
-                             Keeper_compaction_projection_target.Resolved_context_window
-                               final_execution.max_context_resolution.effective_budget))
+                        (Keeper_compaction_projection_target.exact_request
+                           ~runtime:final_execution.runtime
+                           ~effective_max_context:
+                             final_execution.max_context_resolution.effective_budget)
                       err
                   in
                   let source_lease_disposition, turn_state =

@@ -4,12 +4,21 @@ type context_window_resolution =
   | Invalid_context_window of int
 
 type request =
-  { assignment_id : string
-  ; resolve_context_window : Runtime.t -> context_window_resolution
-  }
+  | Resolve_assignment of
+      { assignment_id : string
+      ; resolve_context_window : Runtime.t -> context_window_resolution
+      }
+  | Exact_runtime of
+      { runtime : Runtime.t
+      ; effective_max_context : int
+      }
 
 let request ~assignment_id ~resolve_context_window =
-  { assignment_id; resolve_context_window }
+  Resolve_assignment { assignment_id; resolve_context_window }
+;;
+
+let exact_request ~runtime ~effective_max_context =
+  Exact_runtime { runtime; effective_max_context }
 ;;
 
 type unavailable =
@@ -125,25 +134,28 @@ let capture_exact effective_max_context (runtime : Runtime.t) =
       }
 ;;
 
-let capture { assignment_id; resolve_context_window } =
-  if String.equal assignment_id ""
-  then Unavailable_target Empty_assignment
-  else
-    match Runtime.resolve_assignment assignment_id with
-    | `Lane _ -> Unavailable_target (Assignment_ambiguous { assignment_id })
-    | `Missing ->
-      Unavailable_target (Runtime_unavailable { runtime_id = assignment_id })
-    | `Single_runtime runtime ->
-      (match resolve_context_window runtime with
-       | Resolved_context_window effective_max_context ->
-         capture_exact effective_max_context runtime
-       | Context_window_not_resolved ->
-         Unavailable_target
-           (Context_window_unavailable { runtime_id = runtime.id })
-       | Invalid_context_window effective_max_context ->
-         Unavailable_target
-           (Invalid_effective_context_window
-              { runtime_id = runtime.id; effective_max_context }))
+let capture = function
+  | Exact_runtime { runtime; effective_max_context } ->
+    capture_exact effective_max_context runtime
+  | Resolve_assignment { assignment_id; resolve_context_window } ->
+    if String.equal assignment_id ""
+    then Unavailable_target Empty_assignment
+    else
+      match Runtime.resolve_assignment assignment_id with
+      | `Lane _ -> Unavailable_target (Assignment_ambiguous { assignment_id })
+      | `Missing ->
+        Unavailable_target (Runtime_unavailable { runtime_id = assignment_id })
+      | `Single_runtime runtime ->
+        (match resolve_context_window runtime with
+         | Resolved_context_window effective_max_context ->
+           capture_exact effective_max_context runtime
+         | Context_window_not_resolved ->
+           Unavailable_target
+             (Context_window_unavailable { runtime_id = runtime.id })
+         | Invalid_context_window effective_max_context ->
+           Unavailable_target
+             (Invalid_effective_context_window
+                { runtime_id = runtime.id; effective_max_context }))
 ;;
 
 type committed =

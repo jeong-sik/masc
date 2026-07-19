@@ -162,7 +162,7 @@ let slack_attention_surface ~team_id ~channel_id ~thread_ts =
   Keeper_external_attention.Slack { team_id; channel_id; thread_ts }
 
 let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-    ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot =
+    ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot ~route ~urgency =
   let surface = slack_attention_surface ~team_id ~channel_id ~thread_ts in
   let conversation_id = slack_conversation_id ~channel_id in
   let dedupe_key = Printf.sprintf "slack:%s:%s" conversation_id ts in
@@ -180,7 +180,7 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
         ; display_name = user_name
         ; authority = Keeper_chat_store.External
         }
-    ; urgency = Keeper_external_attention.Ambient
+    ; urgency
     ; content_preview = content
     ; content_ref = None
     ; received_at =
@@ -189,7 +189,7 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
            as event evidence and for pending-order projection; it does not
            branch deterministic policy. *)
     ; metadata =
-        [ "route", "ambient"
+        [ "route", route
         ; "mentions_bot", string_of_bool mentions_bot
         ; "slack_channel_id", channel_id
         ]
@@ -206,6 +206,21 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
       channel_id keeper_name error;
     None
 
+let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
+  match
+    Keeper_external_attention.mark_resolved
+      ~base_path:base_dir
+      ~keeper_name
+      ~event_ids:[ event_id ]
+      ~reason
+      ()
+  with
+  | Ok () -> ()
+  | Error error ->
+    Log.Server.warn
+      "slack external attention resolve failed (keeper=%s event=%s): %s"
+      keeper_name event_id error
+
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
@@ -214,10 +229,11 @@ type accepted_inbound =
   { channel_id : string
   ; reply_to_thread_ts : string
   ; keeper_name : string
+  ; attention_event_id : string option
   ; outcome : (Channel_gate.outbound_message, Channel_gate.gate_error) result
   }
 
-let accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
+let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~channel_id
     ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot ~is_app_mention =
   match resolved_binding with
   | None ->
@@ -269,6 +285,21 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
     (* DET-OK: rendering-only fallback to stable [user_id]; identity keys
        use [user_id] directly. *)
     let user_name = Option.value user_name ~default:user_id in
+    let urgency =
+      if mentions_bot || is_app_mention then Keeper_external_attention.Mention
+      else
+        (* A Slack DM is indistinguishable from a channel message at this
+           layer (the FSM does not decode [channel_type]); a non-mention
+           triggered message in a bound channel is ambient-grade attention.
+           [Direct_message] stays for a future channel_type-aware event. *)
+        Keeper_external_attention.Ambient
+    in
+    let attention_event_id =
+      record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
+        ~thread_ts ~ts ~user_id ~user_name:(Some user_name) ~content:text
+        ~mentions_bot:(mentions_bot || is_app_mention) ~route:"triggered"
+        ~urgency
+    in
     let delivery =
       slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
         ~user_name ~ts
@@ -277,13 +308,16 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
       { channel_id
       ; reply_to_thread_ts
       ; keeper_name
+      ; attention_event_id
       ; outcome =
           Channel_gate.handle_inbound
             ~dispatch:(dispatch_for_delivery delivery) msg
       }
 
-let deliver_inbound ~clock accepted =
-  let { channel_id; reply_to_thread_ts; keeper_name; outcome } = accepted in
+let deliver_inbound ~clock ~base_dir accepted =
+  let { channel_id; reply_to_thread_ts; keeper_name; attention_event_id
+      ; outcome } = accepted
+  in
   match outcome with
      | Error gate_err -> (
        match gate_err with
@@ -319,6 +353,11 @@ let deliver_inbound ~clock accepted =
            (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
+         (match attention_event_id with
+          | Some event_id ->
+            mark_attention_resolved ~base_dir ~keeper_name ~event_id
+              ~reason:"slack_empty_reply"
+          | None -> ());
          Slack_observability.record_inbound_dispatch
            Slack_observability.Empty_reply;
          Slack_observability.record_reply Slack_observability.Reply_empty
@@ -329,6 +368,11 @@ let deliver_inbound ~clock accepted =
              ~reply_to_message_id:reply_to_thread_ts ()
          with
          | Ok _ ->
+           (match attention_event_id with
+            | Some event_id ->
+              mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                ~reason:"slack_reply_sent"
+            | None -> ());
            Slack_observability.record_inbound_dispatch
              Slack_observability.Reply_sent;
            Slack_observability.record_reply Slack_observability.Reply_send_ok
@@ -340,7 +384,7 @@ let deliver_inbound ~clock accepted =
              channel_id
              (Format.asprintf "%a" State.pp_send_error e)
 
-let accept_event ~resolved_binding ~dispatch_for_delivery ~team_id
+let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
     (ev : Gw.slack_event) =
   match ev with
   | Gw.Message_create
@@ -357,17 +401,19 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~team_id
     | None ->
       Slack_observability.record_gateway_event
         ~route:Slack_observability.Triggered Slack_observability.Message_create;
-      accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
-        ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot
+      accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
+        ~channel_id ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot
         ~is_app_mention:false)
   | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
-    accept_inbound ~resolved_binding ~dispatch_for_delivery ~team_id ~channel_id
-      ~thread_ts ~user_id
+    accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
+      ~channel_id ~thread_ts ~user_id
       ~user_name:None ~text ~ts ~mentions_bot:true ~is_app_mention:true
   | Gw.Reaction_added _ ->
-    (* Ambient this pass: reactions are not turn-starters (RFC-0317). *)
+    (* Unreachable from the FSM's triggered lane: reactions are emitted on the
+       ambient lane only (see {!Slack_gateway_state.step}). Kept explicit for
+       the closed sum; the ambient handler records the same observability. *)
     Slack_observability.record_gateway_event ~route:Slack_observability.Ambient
       Slack_observability.Reaction_added;
     None
@@ -377,7 +423,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~team_id
     None
 
 let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
-    (ev : Gw.slack_event) =
+    ~base_dir (ev : Gw.slack_event) =
   let submit ~channel_id ~event_id =
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
@@ -387,7 +433,7 @@ let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
         channel_id event_id
         (Channel_gate_binding_store.binding_store_error_to_string reason)
     | Ok resolved_binding -> (
-      match accept_event ~resolved_binding ~dispatch_for_delivery ~team_id ev with
+      match accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ev with
       | None -> ()
       | Some accepted ->
         let lane = Connector_ingress_lane.Keeper_lane accepted.keeper_name in
@@ -397,7 +443,7 @@ let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
         let delivery =
           match deliver with
           | Some deliver -> deliver
-          | None -> fun () -> deliver_inbound ~clock accepted
+          | None -> fun () -> deliver_inbound ~clock ~base_dir accepted
         in
         match
           Connector_ingress_lane.submit
@@ -417,12 +463,12 @@ let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
   match ev with
   | Gw.Message_create { bot_id = Some _; _ } ->
     (* See [accept_event]: this variant only records observability. *)
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~team_id ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev)
   | Gw.Message_create { channel_id; ts; bot_id = None; _ }
   | Gw.App_mention { channel_id; ts; _ } -> submit ~channel_id ~event_id:ts
   | Gw.Reaction_added _ | Gw.Ignored_event _ ->
     (* See [accept_event]: these variants only record observability. *)
-    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~team_id ev)
+    ignore (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ~team_id ev)
 ;;
 
 (* Ambient lane recording: a bound-channel message that failed the trigger
@@ -464,6 +510,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
           ~thread_ts ~ts ~user_id ~user_name ~content:trimmed ~mentions_bot
+          ~route:"ambient" ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content:trimmed
@@ -617,6 +664,8 @@ let submit_ambient_event ?team_id ingress ~base_dir (ev : Gw.slack_event) =
 module For_testing = struct
   let submit_event = submit_event
   let submit_ambient_event = submit_ambient_event
+  let record_external_attention = record_external_attention
+  let mark_attention_resolved = mark_attention_resolved
 end
 
 (* ---------------------------------------------------------------- *)
@@ -699,6 +748,7 @@ let start ~sw ~env ~state =
                  ~dispatch_for_delivery:(dispatch_for_config config)
                  ?team_id
                  ~clock
+                 ~base_dir:config.base_path
                  ev)
              ~on_ambient:(fun ev ->
                let config = Mcp_server.workspace_config state in

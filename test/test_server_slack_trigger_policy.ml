@@ -257,6 +257,7 @@ let test_bound_message_queues_exact_slack_ts () =
           failwith "observe Slack ingress identity")
         ingress ~dispatch_for_delivery
         ~clock:(Eio.Stdenv.clock env)
+        ~base_dir:(Env_config_core.base_path ())
         (slack_message ~ts:"1710000000.123456");
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
@@ -335,6 +336,7 @@ let test_binding_store_failure_does_not_enqueue () =
       ~deliver:(fun () -> fail "binding failure must not schedule delivery")
       ingress ~dispatch_for_delivery
       ~clock:(Eio.Stdenv.clock env)
+      ~base_dir:(Env_config_core.base_path ())
       (slack_message ~ts:"1710000000.654321");
     Eio.Fiber.yield ();
     check bool "no volatile job accepted" false !dispatch_called;

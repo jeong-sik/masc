@@ -67,6 +67,7 @@ module For_testing : sig
     dispatch_for_delivery:
       (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
     clock:_ Eio.Time.clock ->
+    base_dir:string ->
     Slack_socket_client.slack_event ->
     unit
 
@@ -75,6 +76,30 @@ module For_testing : sig
     Connector_ingress_lane.t ->
     base_dir:string ->
     Slack_socket_client.slack_event ->
+    unit
+
+  val record_external_attention :
+    base_dir:string ->
+    keeper_name:string ->
+    team_id:string option ->
+    channel_id:string ->
+    thread_ts:string option ->
+    ts:string ->
+    user_id:string ->
+    user_name:string option ->
+    content:string ->
+    mentions_bot:bool ->
+    route:string ->
+    urgency:Keeper_external_attention.urgency ->
+    string option
+  (** The durable attention producer used by both the triggered and ambient
+      lanes; exposed for durable round-trip tests. *)
+
+  val mark_attention_resolved :
+    base_dir:string ->
+    keeper_name:string ->
+    event_id:string ->
+    reason:string ->
     unit
 end
 

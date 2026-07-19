@@ -286,6 +286,18 @@ let test_restart_scan_preserves_valid_peers_and_corruption () =
          | A.Registered_run _ | A.Stopped_without_computation_run _ -> false)
        valid_runs)
 ;;
+
+let test_typed_errors_keep_transition_evidence () =
+  check string "prompt mismatch evidence"
+    "authority evidence question mismatch: expected=\"q\" found=\"other\""
+    (A.error_to_string (A.Evidence_question_mismatch { expected = "q"; found = "other" }));
+  check string "transition evidence"
+    "authority event 7 cannot apply Computation_event to Empty_state"
+    (A.error_to_string
+       (A.Invalid_transition
+          { event_index = 7; state = A.Empty_state; event = A.Computation_event }))
+;;
+
 let () =
   run "fusion_run_authority"
     [ ( "authority"
@@ -295,6 +307,8 @@ let () =
             test_corruption_is_per_run_and_semantic
         ; test_case "restart scan preserves valid peers and corruption" `Quick
             test_restart_scan_preserves_valid_peers_and_corruption
+        ; test_case "typed errors retain transition evidence" `Quick
+            test_typed_errors_keep_transition_evidence
         ] )
     ]
 ;;

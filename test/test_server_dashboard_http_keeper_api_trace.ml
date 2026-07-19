@@ -38,7 +38,8 @@ let record_thinking ~masc_root ~keeper_name ~trace_id ~ts ~ts_iso ~turn
           ("invalid Thinking fixture: " ^ T.entry_decode_error_to_string error)
   in
   let acc =
-    T.create_accumulator ~masc_root ~keeper_name ~trace_id ~generation:0 ()
+    T.create_accumulator ~masc_root ~keeper_name ~trace_id ~keeper_turn_id:turn
+      ~generation:0 ()
   in
   T.record_thinking acc entry;
   T.finalize acc T.Completed |> ignore

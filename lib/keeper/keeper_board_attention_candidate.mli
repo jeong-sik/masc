@@ -57,6 +57,21 @@ type candidate =
   ; status : status
   }
 
+module Context_key : sig
+  type t
+
+  val of_candidate : candidate -> (t, string) result
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+  val to_yojson : t -> Yojson.Safe.t
+  val to_canonical_string : t -> string
+  val equal : t -> t -> bool
+end
+(** Exact persisted Keeper-context identity for immutable judgment
+    partitions. Object field order is canonicalized, while duplicate object
+    keys, missing context, or multiple [keeper_context] fields are rejected.
+    Lists retain their original order. No prompt-size, token, time, or provider
+    capacity estimate participates in this identity. *)
+
 type record_result =
   | Recorded of candidate
   | Duplicate of candidate

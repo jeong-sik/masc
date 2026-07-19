@@ -314,6 +314,78 @@ let candidate_to_json candidate =
 
 let ( let* ) = Result.bind
 
+module Context_key = struct
+  type t = Yojson.Safe.t
+
+  let rec canonicalize ~context = function
+    | `Assoc fields ->
+      let* canonical_fields =
+        List.fold_left
+          (fun result (key, value) ->
+             let* fields = result in
+             let* value = canonicalize ~context:(context ^ "." ^ key) value in
+             Ok ((key, value) :: fields))
+          (Ok [])
+          fields
+        |> Result.map List.rev
+      in
+      let sorted =
+        List.sort
+          (fun (left, _) (right, _) -> String.compare left right)
+          canonical_fields
+      in
+      let rec reject_duplicate_keys previous = function
+        | [] -> Ok ()
+        | (key, _) :: rest ->
+          (match previous with
+           | Some prior when String.equal prior key ->
+             Error (Printf.sprintf "%s contains duplicate object key %S" context key)
+           | Some _ | None -> reject_duplicate_keys (Some key) rest)
+      in
+      let* () = reject_duplicate_keys None sorted in
+      Ok (`Assoc sorted)
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           let* values = result in
+           let* value = canonicalize ~context value in
+           Ok (value :: values))
+        (Ok [])
+        values
+      |> Result.map (fun values -> `List (List.rev values))
+    | `Float value when not (Float.is_finite value) ->
+      Error (context ^ " contains a non-finite number")
+    | `Float value ->
+      Ok (`Float (if Float.equal value 0.0 then 0.0 else value))
+    | (`Bool _ | `Int _ | `Intlit _ | `Null | `String _) as scalar -> Ok scalar
+  ;;
+
+  let of_yojson = function
+    | `Assoc _ as context -> canonicalize ~context:"keeper_context" context
+    | _ -> Error "keeper_context must be an object"
+  ;;
+
+  let of_candidate candidate =
+    match candidate.judgment_request with
+    | `Assoc fields ->
+      let contexts =
+        List.filter_map
+          (fun (key, value) ->
+             if String.equal key "keeper_context" then Some value else None)
+          fields
+      in
+      (match contexts with
+       | [ context ] -> of_yojson context
+       | [] -> Error "judgment request lacks keeper_context"
+       | _ -> Error "judgment request contains multiple keeper_context fields")
+    | _ -> Error "judgment request must be an object"
+  ;;
+
+  let to_yojson context = context
+  let to_canonical_string context = Yojson.Safe.to_string context
+  let equal = ( = )
+end
+
 let exact_fields ~context expected fields =
   let actual = List.map fst fields in
   if List.length actual = List.length expected

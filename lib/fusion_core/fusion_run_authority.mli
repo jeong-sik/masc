@@ -9,20 +9,16 @@ type registration =
   ; started_at : float
   }
 type terminal =
-  | Succeeded of string
-  | Failed of
-      { code : string
-      ; detail : string
-      }
+  | Deliberated of Fusion_types.deliberation_evidence
+  | Aborted of string
   | Cancelled of string
+  | Interrupted_after_restart
 val equal_terminal : terminal -> terminal -> bool
 type error =
   | Empty_keeper
   | Empty_run_id
   | Invalid_started_at of float
-  | Empty_success_answer
-  | Empty_failure_code
-  | Empty_failure_detail
+  | Empty_abort_detail
   | Empty_cancellation_detail
   | Partial_tail
   | Unsupported_schema_version of { line : int; found : int }

@@ -10,20 +10,16 @@ type registration =
   }
 [@@deriving yojson, show, eq]
 type terminal =
-  | Succeeded of string
-  | Failed of
-      { code : string
-      ; detail : string
-      }
+  | Deliberated of Fusion_types.deliberation_evidence
+  | Aborted of string
   | Cancelled of string
+  | Interrupted_after_restart
 [@@deriving yojson, show, eq]
 type error =
   | Empty_keeper
   | Empty_run_id
   | Invalid_started_at of float
-  | Empty_success_answer
-  | Empty_failure_code
-  | Empty_failure_detail
+  | Empty_abort_detail
   | Empty_cancellation_detail
   | Partial_tail
   | Unsupported_schema_version of { line : int; found : int }
@@ -84,15 +80,14 @@ let validate_identity = function
   | _ -> Ok ()
 ;;
 let validate_terminal = function
-  | Succeeded "" -> Error Empty_success_answer
-  | Succeeded _ -> Ok ()
-  | Failed { code = ""; _ } -> Error Empty_failure_code
-  | Failed { detail = ""; _ } -> Error Empty_failure_detail
-  | Failed _ -> Ok ()
+  | Deliberated _ -> Ok ()
+  | Aborted "" -> Error Empty_abort_detail
+  | Aborted _ -> Ok ()
   | Cancelled "" -> Error Empty_cancellation_detail
   | Cancelled _ -> Ok ()
+  | Interrupted_after_restart -> Ok ()
 ;;
-let schema_version = 1
+let schema_version = 2
 let event_line event =
   Yojson.Safe.to_string (persisted_record_to_yojson { schema_version; event }) ^ "\n"
 ;;
@@ -109,13 +104,13 @@ let parse_events content =
       | line :: rest ->
         let parsed =
           try
-            let parsed =
+            let record_result =
               Yojson.Safe.from_string line
               |> persisted_record_of_yojson
               |> Result.map_error (fun detail ->
                 Invalid_record { line = line_number; detail })
             in
-            Result.bind parsed (fun record ->
+            Result.bind record_result (fun record ->
               if Int.equal record.schema_version schema_version
               then Ok record.event
               else

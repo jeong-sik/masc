@@ -255,6 +255,43 @@ type judge_outcome =
   | Judge_failed of judge_error_node  (** panel [Failed] 대칭. *)
 [@@deriving yojson, show, eq]
 
+let result_to_yojson ok_to_yojson error_to_yojson = function
+  | Ok value -> `List [ `String "Ok"; ok_to_yojson value ]
+  | Error error -> `List [ `String "Error"; error_to_yojson error ]
+;;
+
+let result_of_yojson ok_of_yojson error_of_yojson = function
+  | `List [ `String "Ok"; value ] -> Result.map (fun value -> Ok value) (ok_of_yojson value)
+  | `List [ `String "Error"; error ] ->
+    Result.map (fun error -> Error error) (error_of_yojson error)
+  | json ->
+    Error
+      (Printf.sprintf
+         "Fusion_types.deliberation_evidence.judge: unsupported shape %s"
+         (Yojson.Safe.to_string json))
+;;
+
+let equal_result equal_ok equal_error left right =
+  match left, right with
+  | Ok left, Ok right -> equal_ok left right
+  | Error left, Error right -> equal_error left right
+  | Ok _, Error _ | Error _, Ok _ -> false
+;;
+
+let pp_result pp_ok pp_error formatter = function
+  | Ok value -> Format.fprintf formatter "(Ok %a)" pp_ok value
+  | Error error -> Format.fprintf formatter "(Error %a)" pp_error error
+;;
+
+type deliberation_evidence =
+  { question : string
+  ; panel : panel_outcome list
+  ; judge : (judge_synthesis, judge_failure) result
+  ; judges : judge_outcome list
+  ; judge_usage : usage
+  }
+[@@deriving yojson, show, eq]
+
 type fusion_trigger =
   | Explicit_tool_call
   | Low_confidence

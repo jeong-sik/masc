@@ -1,4 +1,5 @@
 open Alcotest
+open Fusion_types
 module A = Fusion_run_authority
 let fresh_base () =
   let path = Filename.temp_file "fusion-authority-" "" in
@@ -6,8 +7,60 @@ let fresh_base () =
   Unix.mkdir path 0o700;
   path
 ;;
-let success answer = A.Succeeded answer
-let failure ~code detail = A.Failed { code; detail }
+let usage input_tokens output_tokens : Fusion_types.usage =
+  { input_tokens; output_tokens }
+;;
+
+let synthesis resolved_answer : Fusion_types.judge_synthesis =
+  { consensus = [ { text = "typed consensus"; supporting_models = [ "panel-a" ] } ]
+  ; contradictions = []
+  ; partial_coverage = []
+  ; unique_insights = [ { insight_text = "typed insight"; from_model = "panel-a" } ]
+  ; blind_spots = [ "unobserved edge" ]
+  ; resolved_answer
+  ; decision = Answer resolved_answer
+  }
+;;
+
+let successful_evidence () : Fusion_types.deliberation_evidence =
+  let judge = synthesis "durable answer" in
+  { question = "Which design preserves the authority boundary?"
+  ; panel =
+      [ Answered { model = "panel-a"; answer = "typed answer"; usage = usage 7 3 }
+      ; Failed { failed_model = "panel-b"; reason = Provider_error "transport" }
+      ]
+  ; judge = Ok judge
+  ; judges =
+      [ Synthesized { role = First "judge-a"; synthesis = judge; usage = usage 11 5 }
+      ; Judge_failed
+          { failed_role = First "judge-b"
+          ; failure = Timeout
+          ; usage = usage 13 0
+          ; elapsed_s = Some 0.5
+          }
+      ]
+  ; judge_usage = usage 24 5
+  }
+;;
+
+let failed_evidence () : Fusion_types.deliberation_evidence =
+  let failure = Panels_unavailable (No_panel_answers { total = 1 }) in
+  { question = "Can a typed judge failure survive restart?"
+  ; panel = [ Failed { failed_model = "panel-a"; reason = Timeout } ]
+  ; judge = Error failure
+  ; judges =
+      [ Judge_failed
+          { failed_role = Single
+          ; failure
+          ; usage = usage 2 0
+          ; elapsed_s = Some 0.25
+          }
+      ]
+  ; judge_usage = usage 2 0
+  }
+;;
+
+let deliberated evidence = A.Deliberated evidence
 let run_file directory keeper run_id =
   let key = Printf.sprintf "%d:%s%d:%s" (String.length keeper) keeper (String.length run_id) run_id in
   let digest = Digestif.SHA256.(digest_string key |> to_hex) in
@@ -32,7 +85,7 @@ let test_exact_lifecycle_and_validation () =
   (match A.register restarted ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:1. with
    | Ok A.Already_running -> ()
    | _ -> fail "exact registration retry must be idempotent");
-  let winner = success "answer" in
+  let winner = deliberated (successful_evidence ()) in
   (match A.claim_terminal store ~keeper:"k" ~run_id:"r" winner with
    | Ok A.First_committed -> ()
    | _ -> fail "first terminal must commit");
@@ -45,23 +98,32 @@ let test_exact_lifecycle_and_validation () =
    | _ -> fail "restart must retain the winner");
   (match
      A.claim_terminal store ~keeper:"k" ~run_id:"r"
-       (failure ~code:"judge_failed" "detail")
+       (deliberated (failed_evidence ()))
    with
    | Ok (A.Conflict terminal) ->
      check bool "conflict returns exact winner" true (A.equal_terminal winner terminal)
    | _ -> fail "different terminal must conflict");
-  let reject terminal expected =
-    match A.claim_terminal store ~keeper:"k" ~run_id:"other" terminal, expected with
-    | Error A.Empty_success_answer, `Answer
-    | Error A.Empty_failure_code, `Code
-    | Error A.Empty_failure_detail, `Detail
-    | Error A.Empty_cancellation_detail, `Cancel -> ()
-    | _ -> fail "terminal validation returned the wrong result"
-  in
-  reject (success "") `Answer;
-  reject (failure ~code:"" "detail") `Code;
-  reject (failure ~code:"code" "") `Detail;
-  reject (A.Cancelled "") `Cancel;
+  (match A.claim_terminal store ~keeper:"k" ~run_id:"other" (A.Cancelled "") with
+   | Error A.Empty_cancellation_detail -> ()
+   | _ -> fail "empty cancellation detail was accepted");
+  (match A.claim_terminal store ~keeper:"k" ~run_id:"other" (A.Aborted "") with
+   | Error A.Empty_abort_detail -> ()
+   | _ -> fail "empty abort detail was accepted");
+  (match
+     A.register store ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:2.
+   with
+   | Ok A.Registered -> ()
+   | _ -> fail "typed-failure registration failed");
+  let typed_failure = deliberated (failed_evidence ()) in
+  (match A.claim_terminal store ~keeper:"k" ~run_id:"typed-failure" typed_failure with
+   | Ok A.First_committed -> ()
+   | _ -> fail "typed failure terminal did not commit");
+  (match
+     A.register restarted ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:2.
+   with
+   | Ok (A.Already_settled terminal) ->
+     check bool "typed failure survives restart" true (A.equal_terminal typed_failure terminal)
+   | _ -> fail "typed failure terminal was not reloaded exactly");
   match A.claim_terminal store ~keeper:"k" ~run_id:"missing" (A.Cancelled "shutdown") with
   | Error A.Orphan_terminal -> ()
   | _ -> fail "terminal without durable registration must be rejected"
@@ -79,42 +141,60 @@ let test_corruption_is_per_run_and_semantic () =
   let bad_path = run_file directory "k" "bad" in
   let registered = Fs_compat.load_file bad_path in
   Fs_compat.save_file bad_path (String.sub registered 0 (String.length registered - 1));
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"bad" (success "answer") with
+  (match A.claim_terminal store ~keeper:"k" ~run_id:"bad" (deliberated (successful_evidence ())) with
    | Error A.Partial_tail -> ()
    | _ -> fail "partial tail must fail explicitly");
   register "peer";
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"peer" (success "peer answer") with
+  (match
+     A.claim_terminal store ~keeper:"k" ~run_id:"peer"
+       (deliberated (successful_evidence ()))
+   with
    | Ok A.First_committed -> ()
    | _ -> fail "corrupt peer must not block an unrelated run");
   let versioned =
     match Yojson.Safe.from_string registered with
-    | `Assoc fields -> `Assoc (("schema_version", `Int 2) :: List.remove_assoc "schema_version" fields)
+    | `Assoc fields -> `Assoc (("schema_version", `Int 1) :: List.remove_assoc "schema_version" fields)
     | _ -> fail "registered record was not an object"
   in
   Fs_compat.save_file bad_path (Yojson.Safe.to_string versioned ^ "\n");
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"bad" (success "answer") with
-   | Error (A.Unsupported_schema_version { found = 2; _ }) -> ()
+  (match
+     A.claim_terminal store ~keeper:"k" ~run_id:"bad"
+       (deliberated (successful_evidence ()))
+   with
+   | Error (A.Unsupported_schema_version { found = 1; _ }) -> ()
    | _ -> fail "unsupported schema version must fail explicitly");
   register "order";
-  (match A.claim_terminal store ~keeper:"k" ~run_id:"order" (success "ordered") with
+  (match
+     A.claim_terminal store ~keeper:"k" ~run_id:"order"
+       (deliberated (successful_evidence ()))
+   with
    | Ok A.First_committed -> ()
    | _ -> fail "ordered terminal did not commit");
   let order_path = run_file directory "k" "order" in
   (match String.split_on_char '\n' (Fs_compat.load_file order_path) with
    | [ registration; terminal; "" ] ->
      Fs_compat.save_file order_path (terminal ^ "\n");
-     (match A.claim_terminal store ~keeper:"k" ~run_id:"order" (success "ordered") with
+     (match
+        A.claim_terminal store ~keeper:"k" ~run_id:"order"
+          (deliberated (successful_evidence ()))
+      with
       | Error A.Orphan_terminal -> ()
       | _ -> fail "orphan terminal must fail explicitly");
      Fs_compat.save_file order_path (terminal ^ "\n" ^ registration ^ "\n");
-     (match A.claim_terminal store ~keeper:"k" ~run_id:"order" (success "ordered") with
+     (match
+        A.claim_terminal store ~keeper:"k" ~run_id:"order"
+          (deliberated (successful_evidence ()))
+      with
       | Error A.Reversed_records -> ()
       | _ -> fail "reversed records must fail explicitly")
    | _ -> fail "expected exact register/terminal JSONL pair");
   let foreign_path = run_file directory "k" "foreign" in
   Fs_compat.save_file foreign_path
     (Fs_compat.load_file (run_file directory "k" "peer"));
-  match A.claim_terminal store ~keeper:"k" ~run_id:"foreign" (success "foreign") with
+  match
+    A.claim_terminal store ~keeper:"k" ~run_id:"foreign"
+      (deliberated (successful_evidence ()))
+  with
   | Error (A.Identity_mismatch _) -> ()
   | _ -> fail "hashed path must still verify persisted identity"
 ;;

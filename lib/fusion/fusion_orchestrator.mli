@@ -16,16 +16,9 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
-type deliberation =
-  { panel : Fusion_types.panel_outcome list
-  ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
-  ; judges : Fusion_types.judge_node list
-  ; judge_usage : Fusion_types.usage
-  }
-
 type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
-  | Computed of deliberation
+  | Computed of Fusion_types.deliberation_evidence
 
 (** Run panel and judge computation without Board, chat, wake, or run-registry
     projection. The caller can durably claim the semantic terminal before
@@ -44,7 +37,7 @@ val project
   :  base_dir:string
   -> topology:Fusion_types.fusion_topology
   -> request:Fusion_types.fusion_request
-  -> deliberation
+  -> Fusion_types.deliberation_evidence
   -> outcome
 
 (** 요청을 심의한다.

@@ -5,4 +5,4 @@
  (public_name masc.keeper_checkpoint_ref)
  (wrapped false)
  (modules keeper_checkpoint_ref)
- (libraries digestif masc.keeper_registry))
+ (libraries digestif masc.keeper_registry yojson))

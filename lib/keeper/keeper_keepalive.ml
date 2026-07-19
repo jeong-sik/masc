@@ -35,9 +35,9 @@ include Keeper_heartbeat_loop
 
 module StringMap = Set_util.StringMap
 
-(* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
-let set_bus bus = Keeper_event_bus.set bus
-let get_bus () = Keeper_event_bus.get ()
+(* OAS Event_bus — delegated to Event_bus_slots to avoid dependency cycles. *)
+let set_bus bus = Event_bus_slots.set_keeper bus
+let get_bus () = Event_bus_slots.get_keeper ()
 
 (* ── gRPC directive processing ── *)
 

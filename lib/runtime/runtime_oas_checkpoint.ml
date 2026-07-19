@@ -7,7 +7,7 @@ let missing_masc_bus_warned = Atomic.make false
 
 let publish_lifecycle ~name ~event ~detail ?error ?session_id ?status
     ?(attrs = []) () =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | None ->
       if Atomic.compare_and_set missing_masc_bus_warned false true then
         Log.Misc.warn

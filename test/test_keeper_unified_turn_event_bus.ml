@@ -171,8 +171,8 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
 
 let test_keeper_event_bus_is_intentionally_process_wide () =
   let bus = Agent_sdk.Event_bus.create () in
-  Keeper_event_bus.set bus;
-  let worker = Domain.spawn (fun () -> Keeper_event_bus.get ()) in
+  Event_bus_slots.set_keeper bus;
+  let worker = Domain.spawn (fun () -> Event_bus_slots.get_keeper ()) in
   check
     (option pass)
     "event bus is intentionally process-wide and visible from another domain"
@@ -184,7 +184,7 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
   Eio_main.run @@ fun _env ->
   let captured_bus = Agent_sdk.Event_bus.create () in
   let later_bus = Agent_sdk.Event_bus.create () in
-  Keeper_event_bus.set captured_bus;
+  Event_bus_slots.set_keeper captured_bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let unsubscribed = ref false in
   let unsubscribe_once () =
@@ -196,9 +196,9 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
   Fun.protect
     ~finally:(fun () ->
       unsubscribe_once ();
-      Keeper_event_bus.set captured_bus)
+      Event_bus_slots.set_keeper captured_bus)
     (fun () ->
-       Keeper_event_bus.set later_bus;
+       Event_bus_slots.set_keeper later_bus;
        Agent_sdk.Event_bus.publish captured_bus (tool_called "captured");
        Agent_sdk.Event_bus.publish later_bus (tool_called "later");
        let summary = EB.drain ~site:"test_creation_bus" t in
@@ -224,12 +224,12 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
   Eio_main.run @@ fun _env ->
   let injected_bus = Agent_sdk.Event_bus.create () in
   let fallback_bus = Agent_sdk.Event_bus.create () in
-  Keeper_event_bus.set fallback_bus;
+  Event_bus_slots.set_keeper fallback_bus;
   let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~turn_id:1 () in
   Fun.protect
     ~finally:(fun () ->
       EB.unsubscribe t;
-      Keeper_event_bus.set fallback_bus)
+      Event_bus_slots.set_keeper fallback_bus)
     (fun () ->
        Agent_sdk.Event_bus.publish fallback_bus (tool_called "fallback");
        Agent_sdk.Event_bus.publish injected_bus (tool_called "injected");
@@ -280,11 +280,11 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
     | Error error ->
       Alcotest.fail (Invocation.request_error_to_string error)
   in
-  Keeper_event_bus.set captured_bus;
+  Event_bus_slots.set_keeper captured_bus;
   Fun.protect
     ~finally:(fun () ->
       Kmsg.For_testing.clear ();
-      Keeper_event_bus.set captured_bus)
+      Event_bus_slots.set_keeper captured_bus)
     (fun () ->
        let request_id =
          Ops.For_testing.submit_keeper_msg_with_captured_event_bus
@@ -293,7 +293,7 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
            ~caller:keeper_msg_caller
            ~request
            ~f:(fun ?event_bus _request _request_sw ->
-             Keeper_event_bus.set later_bus;
+             Event_bus_slots.set_keeper later_bus;
              observed_bus := event_bus;
              Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
            ()
@@ -321,7 +321,7 @@ let test_keeper_msg_async_submit_uses_captured_event_bus () =
          (option pass)
          "worker changed fallback bus after capture"
          (Some later_bus)
-       (Keeper_event_bus.get ()))
+       (Event_bus_slots.get_keeper ()))
 ;;
 
 let require_unique_assoc label = function
@@ -568,7 +568,7 @@ let test_background_drain_continues_across_multiple_polls () =
     ~sw
   @@ fun () ->
   let bus = Agent_sdk.Event_bus.create () in
-  Keeper_event_bus.set bus;
+  Event_bus_slots.set_keeper bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
   let rec wait_for_event_count expected attempts =

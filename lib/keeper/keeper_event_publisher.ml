@@ -6,7 +6,7 @@
     Custom-name convention: [masc.broadcast], [masc.heartbeat],
     [masc.keeper.lifecycle], ...
 
-    Every publish routes to [Masc_event_bus.get ()] so the OAS/MASC
+    Every publish routes to [Event_bus_slots.get_masc ()] so the OAS/MASC
     layer boundary is preserved. OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 
@@ -20,7 +20,7 @@
    violation where MASC was publishing Custom("masc:...") onto OAS's shared
    bus. *)
 let masc_publish event =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | Some mb -> Agent_sdk_metrics_bridge.publish mb event
   | None ->
     Log.Misc.warn "MASC observation event was not published: event bus is not initialized"

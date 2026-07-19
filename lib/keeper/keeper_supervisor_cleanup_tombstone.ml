@@ -73,7 +73,7 @@ let completion_meta_for_coverage config operation =
 ;;
 
 let lifecycle_event_bus_ready () =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ -> Ok ()
 ;;

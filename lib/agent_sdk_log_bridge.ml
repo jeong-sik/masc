@@ -26,17 +26,16 @@
            oas#816 (per-turn timing) + this bridge *)
 
 (** Convert an OAS field into a (key, Yojson.Safe.t) pair for the
-    [details] object.  Mirrors [Agent_sdk.Log.field_to_json] but we
-    build the pair inline to avoid pulling the helper through the
-    library boundary. *)
+    [details] object.  Delegates to [Agent_sdk.Log.field_to_json] for the
+    shared arms, but keeps the masc ["[REDACTED]"] placeholder for
+    [Secret]: the OAS helper renders ["<redacted>"] (oas/lib/log.mli
+    documents that contract), while every other masc redactor in this
+    JSONL stream writes ["[REDACTED]"].  Mixing placeholders in one
+    stream would break grep-ability, so the divergence is deliberate. *)
 let field_to_json (field : Agent_sdk.Log.field) : string * Yojson.Safe.t =
   match field with
-  | Agent_sdk.Log.S (k, v) -> (k, `String v)
-  | Agent_sdk.Log.I (k, v) -> (k, `Int v)
-  | Agent_sdk.Log.F (k, v) -> (k, `Float v)
-  | Agent_sdk.Log.B (k, v) -> (k, `Bool v)
-  | Agent_sdk.Log.J (k, v) -> (k, v)
   | Agent_sdk.Log.Secret (k, _) -> (k, `String "[REDACTED]")
+  | field -> Agent_sdk.Log.field_to_json field
 
 let details_of_fields (fields : Agent_sdk.Log.field list)
     : (string * Yojson.Safe.t) list =

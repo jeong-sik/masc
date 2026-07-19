@@ -24,7 +24,7 @@ let test_publish_lifecycle_reaches_masc_bus_with_max_tokens_intent () =
       ~purpose:"runtime-lifecycle-test"
       bus
   in
-  Masc_event_bus.set bus;
+  Event_bus_slots.set_masc bus;
   Fun.protect
     ~finally:(fun () -> Agent_sdk_metrics_bridge.unsubscribe bus subscription)
     (fun () ->

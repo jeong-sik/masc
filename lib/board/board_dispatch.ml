@@ -525,9 +525,7 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     | Flusher -> flusher_loop
     | Routing_retry -> routing_retry_loop
   in
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    loop ();
-    `Stop_daemon)
+  Eio.Fiber.fork_daemon ~sw (fun () -> loop ())
 
 (** Claim and start the Board runtime actors against the caller-owned root
     switch.  A losing caller yields and re-reads the typed backend state until

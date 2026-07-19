@@ -7,6 +7,8 @@ open Masc
 
 let () = Random.self_init ()
 
+let request_flush = Masc_board_handlers.Board_core_persist.request_flush
+
 let fresh_base prefix =
   Filename.concat
     (Filename.get_temp_dir_name ())
@@ -64,7 +66,7 @@ let test_failed_flush_retries_without_new_board_activity () =
      | Error failures ->
        Alcotest.fail
          (Board_dispatch.runtime_actor_start_failures_to_string failures));
-    (match Board.request_flush store with
+    (match request_flush store with
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
     await ~clock (fun () -> Board.persist_error_count () > errors_before));

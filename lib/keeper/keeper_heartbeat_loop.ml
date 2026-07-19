@@ -484,24 +484,23 @@ let run_keepalive_unified_turn
           ~keeper_name:meta_after_triage.name
           (Event_queue_settlement_failed message)
     in
+    let completed_execution_settlement () =
+      Option.bind !cycle_outcome_ref Cycle.execution_settlement
+    in
+    let retain_completed_execution () =
+      Option.iter
+        Runtime_agent.retain_execution
+        (completed_execution_settlement ())
+    in
     let settle_completed_execution () =
-      match !cycle_outcome_ref with
-      | Some (Cycle.Completed { execution_settlement; _ }) ->
+      match completed_execution_settlement () with
+      | Some execution_settlement ->
         (match Runtime_agent.settle_execution execution_settlement with
          | Ok () -> ()
          | Error error ->
            record_settlement_failure
              ("OAS execution settlement failed: "
               ^ Agent_sdk.Error.to_string error))
-      | Some
-          ( Cycle.Cancelled _
-          | Cycle.Skipped _
-          | Cycle.Failed _
-          | Cycle.Busy _
-          | Cycle.Judgment_settled _
-          | Cycle.Manual_compaction_failed _
-          | Cycle.Manual_compaction_not_applied _
-          | Cycle.Manual_compaction_applied _ )
       | None -> ()
     in
     let requeue_unsettled reason =
@@ -870,6 +869,7 @@ let run_keepalive_unified_turn
             record_settlement_failure
               "manual no-compaction terminal has no owning event queue lease"
           | Some (Cycle.Manual_compaction_applied _) ->
+            settle_completed_execution ();
             record_settlement_failure
               "manual compaction completed without an owning event queue lease"
           | Some
@@ -901,7 +901,8 @@ let run_keepalive_unified_turn
               "registry: durable lease settlement failed keeper=%s: %s"
               meta_after_triage.name
               message;
-            record_settlement_failure message
+            record_settlement_failure message;
+            retain_completed_execution ()
           | Ok
               ( Keeper_registry_event_queue.Settled _
               | Keeper_registry_event_queue.Already_settled _ ) ->
@@ -932,14 +933,20 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      requeue_unsettled Keeper_registry_event_queue.Cancelled;
+      Fun.protect
+        ~finally:retain_completed_execution
+        (fun () -> requeue_unsettled Keeper_registry_event_queue.Cancelled);
       Printexc.raise_with_backtrace e backtrace
     | Keeper_registry.Keeper_fiber_crash as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      Fun.protect
+        ~finally:retain_completed_execution
+        (fun () -> requeue_unsettled Keeper_registry_event_queue.Cycle_crashed);
       Printexc.raise_with_backtrace e backtrace
     | exn ->
-      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      Fun.protect
+        ~finally:retain_completed_execution
+        (fun () -> requeue_unsettled Keeper_registry_event_queue.Cycle_crashed);
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

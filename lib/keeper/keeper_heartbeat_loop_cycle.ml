@@ -84,6 +84,19 @@ let rec meta = function
   | Manual_compaction_applied outcome -> meta outcome
 ;;
 
+let rec execution_settlement = function
+  | Completed { execution_settlement; _ } -> Some execution_settlement
+  | Manual_compaction_applied outcome -> execution_settlement outcome
+  | Cancelled _
+  | Skipped _
+  | Failed _
+  | Busy _
+  | Judgment_settled _
+  | Manual_compaction_failed _
+  | Manual_compaction_not_applied _ ->
+    None
+;;
+
 let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
   | Manual_compaction_applied outcome -> turn_failure outcome

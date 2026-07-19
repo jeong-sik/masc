@@ -242,6 +242,8 @@
   masc.crypto_rng
   masc.dashboard
   masc.server
+  masc.runtime
+  masc.config
   masc.worker_execution_spec
   yojson
   unix

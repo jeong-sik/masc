@@ -396,6 +396,13 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
+let with_execution_settlement_retained_on_exit settlement run =
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter Runtime_agent.retain_execution settlement)
+    run
+;;
+
 (* Body of [handle_keeper_msg], runnable only while holding the keeper's
    turn slot ([Keeper_turn_admission]). Covers [Keeper_agent_run.run_turn]
    AND the post-turn meta/lifecycle writes — both must stay inside the slot
@@ -866,12 +873,15 @@ let run_keeper_invocation_turn_admitted
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
                  ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
             | Ok (result, _) ->
+              with_execution_settlement_retained_on_exit
+                result.execution_settlement
+              @@ fun () ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
@@ -1035,9 +1045,9 @@ let run_keeper_invocation_turn_admitted
                  (match Runtime_agent.settle_execution execution_settlement with
                   | Ok () -> tool_result_ok_data reply_json
                   | Error error ->
-                 tool_result_error
-                   ("keeper turn OAS execution settlement failed: "
-                    ^ Agent_sdk.Error.to_string error)))
+                    tool_result_error
+                      ("keeper turn OAS execution settlement failed: "
+                       ^ Agent_sdk.Error.to_string error)))
 
 ))))))))))
 

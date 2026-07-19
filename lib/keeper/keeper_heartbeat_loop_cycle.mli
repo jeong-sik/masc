@@ -42,6 +42,12 @@ val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
     admitted.  Queue ownership must inspect the full {!cycle_outcome}; this
     projection alone is never completion evidence. *)
 
+val execution_settlement
+  :  cycle_outcome
+  -> Runtime_agent.execution_settlement option
+(** Return the completed OAS execution settlement owned by this cycle,
+    recursively through {!Manual_compaction_applied}. *)
+
 val manual_compaction_followup_failure
   :  cycle_outcome
   -> Keeper_unified_turn.turn_failure option

@@ -61,20 +61,36 @@ let main_result () =
                 Eio_guard.disable ())
               (fun () ->
                 match
-                  Lib.Worker_runtime.run_worker_oas ~sw
-                    ~net:(Eio.Stdenv.net env)
-                    spec ()
+                  Runtime_oas_execution.initialize
+                    ~sw
+                    ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+                    ~fs:(Eio.Stdenv.fs env)
+                    ~base_path:spec.base_path
+                    ~domain_count:Env_config.Oas_execution.domain_count
                 with
-                | Ok run_result ->
-                    ( Lib.Worker_runtime_helper_protocol.success_json run_result,
-                      0 )
-                | Error msg ->
-                    ( Lib.Worker_runtime_helper_protocol.error_json
-                        {
-                          message = msg;
-                          kind = Lib.Worker_runtime_helper_protocol.Runtime;
-                        },
-                      1 )))
+                | Error error ->
+                  ( Lib.Worker_runtime_helper_protocol.error_json
+                      { message = Runtime_oas_execution.init_error_to_string error
+                      ; kind = Lib.Worker_runtime_helper_protocol.Runtime
+                      }
+                  , 1 )
+                | Ok () ->
+                  (match
+                     Lib.Worker_runtime.run_worker_oas
+                       ~sw
+                       ~net:(Eio.Stdenv.net env)
+                       spec
+                       ()
+                   with
+                   | Ok run_result ->
+                     ( Lib.Worker_runtime_helper_protocol.success_json run_result
+                     , 0 )
+                   | Error msg ->
+                     ( Lib.Worker_runtime_helper_protocol.error_json
+                         { message = msg
+                         ; kind = Lib.Worker_runtime_helper_protocol.Runtime
+                         }
+                     , 1 ))))
 
 let () =
   try

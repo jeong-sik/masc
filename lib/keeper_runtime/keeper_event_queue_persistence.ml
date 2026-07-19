@@ -96,6 +96,10 @@ type settle_result =
       ; detail : string
       }
 
+type transfer_projection_result = State.transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
+
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
 
@@ -230,12 +234,10 @@ let read_primary_unlocked owner =
   | Ok (Some json) ->
     (match schema_field json with
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
-     | Ok schema when String.equal schema State.schema ->
+     | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message -> Error (Printf.sprintf "%s: %s" path message))
-     | Ok schema ->
-       Error (Printf.sprintf "%s: unsupported snapshot schema %s" path schema))
+        | Error message -> Error (Printf.sprintf "%s: %s" path message)))
 ;;
 
 let reject_unsupported_inflight owner =
@@ -654,33 +656,21 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
-let accounted_stimuli state =
-  Keeper_event_queue.to_list (State.pending state)
-  @ List.concat_map (fun (lease : lease) -> lease.stimuli) (State.leases state)
-  @ List.concat_map
-      (fun (entry : outbox_entry) -> entry.stimuli)
-      (State.transition_outbox state)
-;;
-
-let enqueue_exact_stimulus_if_absent_result
+let project_accepted_transfer_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      stimulus
+      ~transfer
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    let matching =
-      accounted_stimuli state
-      |> List.filter (fun candidate ->
-        Keeper_event_queue.stimulus_identity_equal candidate stimulus)
-    in
-    match matching with
-    | [] ->
-      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued)
-    | [ existing ] when existing = stimulus -> Ok (state, Already_present)
-    | [ _ ] -> Error "exact stimulus identity exists with a different source snapshot"
-    | _ :: _ :: _ -> Error "exact stimulus identity is duplicated in durable target state")
+  if not (String.equal transfer.to_keeper keeper_name)
+  then Error "target transfer projection owner does not match the durable queue owner"
+  else
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      match State.project_accepted_transfer transfer state with
+      | Error _ as error -> error
+      | Ok (next, result) ->
+        if next == state then after_commit (State.pending next);
+        Ok (next, result))
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =

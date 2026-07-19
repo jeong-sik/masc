@@ -598,7 +598,7 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
                (Keeper_compact_policy.compaction_decision_to_string decision))))
 ;;
 
-let commit_prepared_compaction ~(meta : keeper_meta) (prepared : prepared_compaction)
+let commit_prepared_compaction (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
      this phase; correctness against interleaved state change is enforced
@@ -619,8 +619,8 @@ let commit_prepared_compaction ~(meta : keeper_meta) (prepared : prepared_compac
          ~trigger:prepared_trigger
          ~save:(fun () ->
            save_oas_checkpoint_if_source
-             ~multimodal_policy:meta.multimodal_policy
-             ~keeper_name:meta.name
+             ~multimodal_policy:retry_meta.multimodal_policy
+             ~keeper_name:retry_meta.name
              ~session
              ~agent_name:retry_meta.agent_name
              ~ctx:context
@@ -680,6 +680,5 @@ let recover_latest_checkpoint_for_compaction
   : (compaction_recovery, compaction_recovery_error) result =
   match prepare_compaction ~base_dir ~meta ~trigger with
   | Error _ as error -> error
-  | Ok prepared -> commit_prepared_compaction ~meta prepared
+  | Ok prepared -> commit_prepared_compaction prepared
 ;;
-

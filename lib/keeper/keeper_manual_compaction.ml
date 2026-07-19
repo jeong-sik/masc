@@ -79,7 +79,6 @@ let dispatch_event ~config ~meta event =
     ~keeper_name:meta.name
     event
 ;;
-
 let dispatch_failed ~config ~meta reason =
   Keeper_context_runtime.dispatch_keeper_phase_event_result
     ~config
@@ -107,7 +106,7 @@ let run_start_lifecycle ~config ~meta =
 ;;
 
 let run_commit ~config ~base_dir ~meta prepared =
-  match Keeper_context_runtime.commit_prepared_compaction ~meta prepared with
+  match Keeper_context_runtime.commit_prepared_compaction prepared with
   | Error error ->
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -135,32 +134,45 @@ let run_commit ~config ~base_dir ~meta prepared =
        Ok (Compacted { recovery; manifest }))
 ;;
 
+let finish_preparation ~config ~base_dir ~meta = function
+  | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+    let failure_dispatch =
+      dispatch_failed
+        ~config
+        ~meta
+        (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    (match failure_dispatch with
+     | Ok () -> Ok (No_compaction no_compaction)
+     | Error _ -> Error (Recovery (error, failure_dispatch)))
+  | Error error ->
+    let failure_dispatch =
+      dispatch_failed
+        ~config
+        ~meta
+        (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    Error (Recovery (error, failure_dispatch))
+  | Ok prepared -> run_commit ~config ~base_dir ~meta prepared
+;;
+
+let prepare ~config ~meta =
+  let base_dir = Keeper_types_profile.session_base_dir config in
+  ( base_dir
+  , Keeper_context_runtime.prepare_compaction
+      ~base_dir
+      ~meta
+      ~trigger:Compaction_trigger.Manual )
+;;
+
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  (* Synchronous composition (kept for API stability): start lifecycle,
-     prepare (load + policy + LLM), commit — all inline. *)
+  (* Planning is outside the lifecycle. Only the deterministic lifecycle and
+     source-CAS commit may set [compaction_active], and they close in this
+     single synchronous section. *)
+  let base_dir, preparation = prepare ~config ~meta in
   match run_start_lifecycle ~config ~meta with
   | Error _ as error -> error
-  | Ok () ->
-    let base_dir = Keeper_types_profile.session_base_dir config in
-    (match
-       Keeper_context_runtime.prepare_compaction
-         ~base_dir
-         ~meta
-         ~trigger:Compaction_trigger.Manual
-     with
-     | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-       let failure_dispatch =
-         dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
-       in
-       (match failure_dispatch with
-        | Ok () -> Ok (No_compaction no_compaction)
-        | Error _ -> Error (Recovery (error, failure_dispatch)))
-     | Error error ->
-       let failure_dispatch =
-         dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
-       in
-       Error (Recovery (error, failure_dispatch))
-     | Ok prepared -> run_commit ~config ~base_dir ~meta prepared)
+  | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
 ;;
 
 let observe_manifest ~keeper_name = function
@@ -177,65 +189,34 @@ let observe_manifest ~keeper_name = function
 ;;
 
 let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
-  (* The provider call (prepare) runs outside the keeper admission so the
-     lane stays runnable while the LLM works; the lifecycle start, the
-     source-CAS commit, the manifest and the completion dispatch stay
-     inside it.  Two short admission sections replace the old full-run
-     hold — correctness between them is enforced by the source CAS, not
-     by the slot. *)
+  (* Reject work that is already fenced before spending a provider call. This
+     preflight owns no lifecycle state and releases immediately. A turn can
+     still enter while planning; the final admission and source CAS close that
+     race without stranding [compaction_active]. *)
   match
     Keeper_turn_admission.run_compaction_if_free
       ~base_path:config.base_path
       ~keeper_name:meta.name
-      (fun () -> run_start_lifecycle ~config ~meta)
+      (fun () -> ())
   with
   | `Busy block -> `Busy block
-  | `Ran (Error failure) -> `Compaction_failed failure
-  | `Ran (Ok ()) ->
-    let base_dir = Keeper_types_profile.session_base_dir config in
+  | `Ran () ->
+    let base_dir, preparation = prepare ~config ~meta in
     (match
-       Keeper_context_runtime.prepare_compaction
-         ~base_dir
-         ~meta
-         ~trigger:Compaction_trigger.Manual
+       Keeper_turn_admission.run_compaction_if_free
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         (fun () ->
+           match run_start_lifecycle ~config ~meta with
+           | Error failure -> Error failure
+           | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
      with
-     | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-       (match
-          Keeper_turn_admission.run_compaction_if_free
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            (fun () ->
-              dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error))
-        with
-        | `Busy block -> `Busy block
-        | `Ran (Ok ()) -> `No_compaction no_compaction
-        | `Ran (Error failure) -> `Compaction_failed (Recovery (error, Error failure)))
-     | Error error ->
-       (match
-          Keeper_turn_admission.run_compaction_if_free
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            (fun () ->
-              let failure_dispatch =
-                dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
-              in
-              Recovery (error, failure_dispatch))
-        with
-        | `Busy block -> `Busy block
-        | `Ran failure -> `Compaction_failed failure)
-     | Ok prepared ->
-       (match
-          Keeper_turn_admission.run_compaction_if_free
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            (fun () -> run_commit ~config ~base_dir ~meta prepared)
-        with
-        | `Busy block -> `Busy block
-        | `Ran (Error failure) -> `Compaction_failed failure
-        | `Ran (Ok (Compacted success)) ->
-          observe_manifest ~keeper_name:meta.name success.manifest;
-          `Applied success
-        | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction))
+     | `Busy block -> `Busy block
+     | `Ran (Error failure) -> `Compaction_failed failure
+     | `Ran (Ok (Compacted success)) ->
+       observe_manifest ~keeper_name:meta.name success.manifest;
+       `Applied success
+     | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
 ;;
 
 let lifecycle_stage_to_string = function
@@ -271,7 +252,3 @@ let failure_to_string = function
       (Keeper_post_turn.compaction_recovery_error_to_string error)
       (failure_dispatch_to_string failure_dispatch)
 ;;
-
-
-
-

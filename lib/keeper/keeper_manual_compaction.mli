@@ -42,13 +42,14 @@ val run_admitted
      | `Busy of Keeper_turn_admission.autonomous_block
      ]
 (** The provider call runs OUTSIDE the keeper admission: [run_admitted]
-    splits into [prepare_compaction] (durable load + policy + LLM plan, no
-    slot held) and two short admitted sections (lifecycle start, then the
-    source-CAS commit + manifest + completion).  Between them the lane
-    stays runnable — a chat backlog or another turn of the same Keeper can
-    proceed while the LLM works — and correctness against interleaved
-    state change is enforced by the checkpoint source CAS, not by the slot.
-    This is the single sanctioned caller of that admission variant. *)
+    first performs a state-free availability preflight, then splits into
+    [prepare_compaction] (durable load + policy + LLM plan, no slot held and no
+    active lifecycle) and one admitted lifecycle section owning request +
+    start + source-CAS commit + completion/failure. The lane stays runnable
+    while the LLM works; a failed final admission cannot strand
+    [compaction_active], and interleaved checkpoint changes fail the exact
+    source CAS. This is the single sanctioned caller of that admission
+    variant. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit

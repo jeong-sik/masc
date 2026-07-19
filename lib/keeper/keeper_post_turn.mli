@@ -84,19 +84,14 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     verification.  Callers own serialization; the typical pattern
     is one store per keeper, owned by the keeper bridge. *)
 
-type prepared_compaction =
-  { session : Keeper_context_core.session_context
-  ; source_ref : Keeper_checkpoint_ref.t
-  ; retry_meta : Keeper_meta_contract.keeper_meta
-  ; turn_generation : int
-  ; prepared_trigger : Compaction_trigger.t
-  ; context : Keeper_context_core.working_context
-  ; evidence : Keeper_compaction_evidence.t
-  }
+type prepared_compaction
 (** Fully-planned compaction: durable source loaded, policy and LLM plan
     computed, nothing committed yet.  Carrying this value lets a caller run
     the provider call outside any keeper admission and commit later — the
-    source CAS, not the turn slot, is the interleaving guard. *)
+    source CAS, not the turn slot, is the interleaving guard. The token is
+    opaque and owns the exact Keeper identity and commit policy captured at
+    preparation; callers cannot construct it or combine a plan with another
+    Keeper's metadata. *)
 
 (** Phase 1: load the durable source and run the policy + LLM planner.
     Admission-free by contract; the caller must not hold the keeper's turn
@@ -110,7 +105,6 @@ val prepare_compaction :
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
     decides which admission (if any) guards this phase. *)
 val commit_prepared_compaction :
-  meta:Keeper_meta_contract.keeper_meta ->
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
 

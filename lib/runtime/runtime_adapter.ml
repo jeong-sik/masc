@@ -348,9 +348,12 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
+  let capability_provider_id =
+    Option.value provider.capability_namespace ~default:provider.id
+  in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   let model_capabilities_override =
-    model_capabilities_override_of_model_spec ~provider_id:provider.id spec
+    model_capabilities_override_of_model_spec ~provider_id:capability_provider_id spec
   in
   match provider.transport with
   | Http base_url ->
@@ -381,15 +384,11 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
        Ok
          (Llm_provider.Provider_config.make
             ~kind
-            (* [provider_id] is the runtime.toml [providers.<id>] table name. It is
-               the capability-catalog qualification key: [capability_provider_label]
-               prefers it over the wire [kind], so provider-qualified catalog rows
-               ([provider_name = "<id>"]) resolve per declared provider instead of
-               collapsing every OpenAI-compatible endpoint into the "openai_compat"
-               label (which no catalog row carries — the 2026-07-15 boot-gate
-               wipeout). OAS's own binding layer passes it the same way
-               (provider_runtime_binding.ml [runtime_binding_provider_config]). *)
-            ~provider_id:provider.id
+            (* [provider_id] is the OAS capability-catalog qualification key.
+               The optional deployment [capability-namespace] maps the MASC
+               transport id onto an OAS serving-contract id; absent that exact
+               declaration, the runtime.toml provider table id remains the key. *)
+            ~provider_id:capability_provider_id
             ~model_id:spec.api_name
             ~base_url
             ~api_key
@@ -415,7 +414,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
          (Llm_provider.Provider_config.make
             ~kind
             (* Same capability-qualification key as the Http branch above. *)
-            ~provider_id:provider.id
+            ~provider_id:capability_provider_id
             ~model_id:spec.api_name
             ~base_url:""
             ~api_key:(api_key_of_credential ?registry_entry provider.credentials)

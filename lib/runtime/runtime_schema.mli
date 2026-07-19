@@ -37,6 +37,10 @@ val connect_timeout_s_key : string
 
 type provider =
   { id : string
+  ; capability_namespace : string option
+    (** OAS serving-contract provider identity. [None] uses [id]. This maps a
+        deployment transport name to an OAS-owned capability catalog namespace
+        without copying model capability rows into MASC configuration. *)
   ; display_name : string
   ; protocol : string
   ; api_format : api_format

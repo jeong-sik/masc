@@ -20,6 +20,13 @@
 > config-root/parent full-catalog discovery and the repo full fork are retired.
 > Remaining masc-side work: D2 and D4.
 
+> 2026-07-19 update: D3 is implemented. A provider may declare the exact OAS
+> serving-contract id with `capability-namespace`; `Runtime_adapter` uses that
+> value only for `Provider_config.provider_id`, while transport lookup remains
+> keyed by the MASC provider id. The deployment overlay no longer duplicates
+> the `runpod_mtp/qwen36-35b-a3b-mtp` capability row or its reasoning replay
+> policy; OAS `vllm-qwen3-mtp` is the sole capability SSOT.
+
 ## 1. Problem
 
 2026-07-15, the server refused to boot: every routed runtime was reported
@@ -99,7 +106,7 @@ fail the load, they are not defaulted (same Unknown→Permissive bar as the
 gate). The capability gate then fires only for bindings that declare
 capabilities in neither the catalog nor runtime.toml.
 
-### D3. Alias → serving-contract mapping (masc, small)
+### D3. Alias → serving-contract mapping (masc, implemented)
 
 `[providers.<id>]` gains an optional key:
 

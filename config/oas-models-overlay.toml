@@ -72,24 +72,6 @@ ignored_sampling_parameters = ["temperature", "top_p"]
 input_per_million = 0.0
 output_per_million = 0.0
 
-# Deployment transport alias for the vllm-qwen3-mtp serving contract.
-[[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
-provider_name = "runpod_mtp"
-base = "openai_chat"
-max_context_tokens = 131072
-supports_tools = true
-supports_tool_choice = true
-supports_parallel_tool_calls = true
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "chat_template_kwargs"
-preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
-reasoning_streaming_format = "delta:reasoning_content"
-reasoning_replay = "drop_without_tool_preserve_with_tool"
-supports_native_streaming = true
-
 # Local Ollama Gemma 4 QAT build, probed on 2026-06-12.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"

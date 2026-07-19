@@ -46,6 +46,8 @@ let connect_timeout_s_key = "connect-timeout-s"
 
 type provider =
   { id : string
+  ; capability_namespace : string option
+    (** OAS serving-contract provider identity. [None] uses [id]. *)
   ; display_name : string
   ; protocol : string
   ; api_format : api_format

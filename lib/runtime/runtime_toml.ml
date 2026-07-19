@@ -288,10 +288,27 @@ let parse_provider (id : string) (tbl : Otoml.t)
     | None -> Error "missing required field 'protocol'"
   in
   let transport_result = transport_of_provider tbl id in
-  match protocol_result, transport_result with
-  | Error e, _ -> Error (error (path ^ ".protocol") e)
-  | _, Error e -> Error (error path e)
-  | Ok (protocol, api_format), Ok transport ->
+  let capability_namespace_result =
+    match typed_find "string" path tbl "capability-namespace" Otoml.get_string with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some value) when String.trim value = "" ->
+      Error
+        (error
+           (path ^ ".capability-namespace")
+           "capability-namespace must be non-empty")
+    | Ok (Some value) when value <> String.trim value ->
+      Error
+        (error
+           (path ^ ".capability-namespace")
+           "capability-namespace must not have leading or trailing whitespace")
+    | Ok (Some value) -> Ok (Some value)
+  in
+  match protocol_result, transport_result, capability_namespace_result with
+  | Error e, _, _ -> Error (error (path ^ ".protocol") e)
+  | _, Error e, _ -> Error (error path e)
+  | _, _, Error errors -> Error errors
+  | Ok (protocol, api_format), Ok transport, Ok capability_namespace ->
     let is_non_interactive =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-non-interactive" ]
     in
@@ -345,6 +362,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
         | Ok healthcheck_path, Ok connect_timeout_s ->
           Ok
             { Runtime_schema.id
+            ; capability_namespace
             ; display_name
             ; protocol
             ; api_format

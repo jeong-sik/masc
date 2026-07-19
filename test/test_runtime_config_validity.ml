@@ -343,10 +343,10 @@ let with_deployment_oas_model_catalog f =
          | None -> fail "embedded plus deployment overlay catalog should load"
          | Some catalog -> f catalog)
 
-let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
+let test_deployment_oas_model_catalog_uses_upstream_qwen_mtp_contract () =
   with_deployment_oas_model_catalog @@ fun catalog ->
   let runpod_model_id = "qwen36-35b-a3b-mtp" in
-  let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
+  let provider_labels = [ "vllm-qwen3-mtp" ] in
   let expect_provider_lookup provider_name =
     match
       Llm_provider.Model_catalog.lookup_for_provider
@@ -390,8 +390,17 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
          failf "expected RunPod qwen3.6 capability lookup for %s" provider_label
        | Some caps -> expect_runpod_caps provider_label caps)
     provider_labels;
-  (* Verify both the deployment transport alias and the upstream serving
-     contract without bare fallback. *)
+  check
+    (option string)
+    "deployment alias does not duplicate the upstream capability row"
+    None
+    (Option.map
+       (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+       (Llm_provider.Model_catalog.lookup_for_provider
+          catalog
+          ~provider_name:"runpod_mtp"
+          ~model_id:runpod_model_id));
+  (* Verify the upstream serving contract without bare fallback. *)
   List.iter
     (fun provider_label ->
        let name = "RunPod qwen3.6 gate " ^ provider_label in
@@ -590,7 +599,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
            caps.reasoning_replay_override = Force_preserve_always))
   in
   expect_request_side_preserve
-    ~provider_name:"runpod_mtp"
+    ~provider_name:"vllm-qwen3-mtp"
     ~model_id:"qwen36-35b-a3b-mtp";
   expect_preserve_always_replay
     ~provider_name:"ollama_cloud"
@@ -2338,8 +2347,8 @@ let () =
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
-          test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
-            test_deployment_oas_model_catalog_covers_live_runpod_mtp;
+          test_case "deployment OAS catalog uses upstream Qwen MTP contract" `Quick
+            test_deployment_oas_model_catalog_uses_upstream_qwen_mtp_contract;
           test_case
             "deployment OAS catalog covers live RunPod RTX A6000 Gemma runtime"
             `Quick test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;

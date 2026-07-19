@@ -30,6 +30,7 @@ let with_env key value f =
 
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
+  ; capability_namespace = None
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
@@ -174,6 +175,53 @@ let test_runtime_toml_threads_provider_connect_timeout () =
        failf "expected one provider/binding, got %d/%d"
          (List.length providers)
          (List.length bindings))
+
+let test_runtime_toml_threads_capability_namespace () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:"capability-namespace = \"vllm-qwen3-mtp\""
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected capability namespace to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (error : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" error.path error.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.providers, cfg.bindings with
+     | [ provider ], [ binding ] ->
+       check (option string) "typed provider field"
+         (Some "vllm-qwen3-mtp")
+         provider.Runtime_schema.capability_namespace;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error message -> failf "unexpected adapter error: %s" message
+        | Ok provider_cfg ->
+          check (option string) "OAS provider qualification"
+            (Some "vllm-qwen3-mtp")
+            provider_cfg.provider_id)
+     | providers, bindings ->
+       failf "expected one provider/binding, got %d/%d"
+         (List.length providers)
+         (List.length bindings))
+
+let test_runtime_toml_rejects_padded_capability_namespace () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:"capability-namespace = \" vllm-qwen3-mtp \""
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "padded capability namespace must fail"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.capability-namespace"
+      "capability-namespace must not have leading or trailing whitespace"
 
 let test_runtime_toml_threads_model_sampling_config () =
   let content =
@@ -879,6 +927,35 @@ let test_adapter_stamps_declared_provider_id () =
     (Some "runpod_mtp")
     (provider_cfg ()).provider_id
 
+let test_adapter_stamps_declared_capability_namespace () =
+  let provider =
+    { runpod_provider with
+      capability_namespace = Some "vllm-qwen3-mtp"
+    }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]
+    ; models = [ { qwen_model with api_name = "qwen36-35b-a3b-mtp" } ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; librarian_runtime_id = None
+    ; structured_judge_runtime_id = None
+    ; hitl_summary_runtime_id = None
+    ; cross_verifier_runtime_id = None
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Error message -> failf "unexpected adapter error: %s" message
+  | Ok provider_cfg ->
+    check
+      (option string)
+      "OAS serving-contract provider id"
+      (Some "vllm-qwen3-mtp")
+      provider_cfg.provider_id
+
 let test_provider_scoped_catalog_row_resolves_for_declared_provider () =
   with_model_catalog
     {|
@@ -1489,6 +1566,10 @@ let () =
             `Quick
             test_adapter_stamps_declared_provider_id
         ; test_case
+            "adapter stamps declared capability namespace"
+            `Quick
+            test_adapter_stamps_declared_capability_namespace
+        ; test_case
             "provider-scoped catalog row resolves for declared provider"
             `Quick
             test_provider_scoped_catalog_row_resolves_for_declared_provider
@@ -1520,6 +1601,14 @@ let () =
             "runtime TOML threads provider connect timeout"
             `Quick
             test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML threads capability namespace"
+            `Quick
+            test_runtime_toml_threads_capability_namespace
+        ; test_case
+            "runtime TOML rejects padded capability namespace"
+            `Quick
+            test_runtime_toml_rejects_padded_capability_namespace
         ; test_case
             "runtime TOML threads model sampling config"
             `Quick

@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "9d8c54b665c69b927ac1541bec58891ac3cc93d9",
-  "pinned_version": "v0.216.4",
+  "pinned_sha": "64525619fc749c310f992bb77190ebade0965783",
+  "pinned_version": "v0.216.5",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -40,6 +40,24 @@
       "on_token_usage",
       "on_tool_calls",
       "provider"
+    ],
+    "agent_execution_symbols": [
+      "label:on_scope_ready",
+      "label:on_terminal_disposition",
+      "label:resume",
+      "module:Execution_projection",
+      "type:execution_locator",
+      "type:execution_operator_repair_reason",
+      "type:execution_recovery_action",
+      "type:execution_runtime",
+      "type:execution_store",
+      "type:execution_terminal_disposition",
+      "type:execution_terminal_outcome",
+      "val:create_execution_runtime",
+      "val:execution_locator_of_yojson",
+      "val:execution_locator_to_yojson",
+      "val:execution_store",
+      "val:open_execution_projection"
     ]
   }
 }

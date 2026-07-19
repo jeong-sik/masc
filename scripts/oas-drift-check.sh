@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fingerprints OAS's public type surfaces (Event_bus payload variants,
-# Http_client error variants, Metrics.t record fields) and diffs against
+# Http_client error variants, Metrics.t record fields, durable Agent execution
+# symbols) and diffs against
 # the committed scripts/oas-api-surface.json.
 #
 # Purpose: when OAS adds/removes/renames a variant or field, MASC's
@@ -177,6 +178,29 @@ extract_metrics_fields() {
   | sort -u
 }
 
+# Durable execution names consumed by MASC's runtime boundary. The compiler
+# remains the signature authority; this inventory makes a removed or renamed
+# public contract visible during pin review before downstream compilation.
+extract_agent_execution_symbols() {
+  local src="$1"
+  local file="${src}/lib/agent/agent.mli"
+  [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
+  awk '
+    /^type execution_(runtime|store|locator|terminal_outcome|operator_repair_reason|recovery_action|terminal_disposition)([[:space:]]|$)/ {
+      print "type:" $2
+    }
+    /^module Execution_projection[[:space:]]*:/ {
+      print "module:Execution_projection"
+    }
+    /^val (execution_locator_to_yojson|execution_locator_of_yojson|create_execution_runtime|open_execution_projection|execution_store)([[:space:]]|$)/ {
+      print "val:" $2
+    }
+    /\?on_scope_ready:/ { print "label:on_scope_ready" }
+    /\?on_terminal_disposition:/ { print "label:on_terminal_disposition" }
+    /\?resume:/ { print "label:resume" }
+  ' "${file}" | sort -u
+}
+
 lines_to_json_array() {
   # stdin: one entry per line; stdout: JSON array
   jq -R . | jq -s .
@@ -184,10 +208,11 @@ lines_to_json_array() {
 
 build_fingerprint() {
   local src="$1"
-  local ebv hev mf
+  local ebv hev mf aes
   ebv="$(extract_event_bus_variants   "${src}" | lines_to_json_array)"
   hev="$(extract_http_error_variants  "${src}" | lines_to_json_array)"
   mf="$( extract_metrics_fields       "${src}" | lines_to_json_array)"
+  aes="$(extract_agent_execution_symbols "${src}" | lines_to_json_array)"
 
   jq -n \
     --arg sha "${OAS_AGENT_SDK_SHA}" \
@@ -195,13 +220,15 @@ build_fingerprint() {
     --argjson ebv "${ebv}" \
     --argjson hev "${hev}" \
     --argjson mf  "${mf}" \
+    --argjson aes "${aes}" \
     '{
        pinned_sha:        $sha,
        pinned_version:    $ver,
        surfaces: {
          event_bus_payload_variants: $ebv,
          http_error_variants:        $hev,
-         metrics_fields:             $mf
+         metrics_fields:             $mf,
+         agent_execution_symbols:    $aes
        }
      }'
 }
@@ -298,7 +325,7 @@ case "${MODE}" in
     if ! report_metadata_diff "${prev}" "${current}"; then
       drift=1
     fi
-    for section in event_bus_payload_variants http_error_variants metrics_fields; do
+    for section in event_bus_payload_variants http_error_variants metrics_fields agent_execution_symbols; do
       prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
       curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"
       if ! report_diff "${section}" "${prev_arr}" "${curr_arr}"; then
@@ -316,6 +343,7 @@ case "${MODE}" in
     echo "  Review the delta above against MASC consumer sites:" >&2
     echo "    lib/oas_compat/oas_compat.ml      (Http_client + Metrics — single source)" >&2
     echo "    lib/oas_event_bridge.ml           (Event_bus payload matches — until adapter covers it)" >&2
+    echo "    lib/runtime/runtime_agent.ml      (durable Agent execution boundary)" >&2
     echo
     echo "  Repair flow (after consumer changes compile clean):" >&2
     echo "    bash scripts/oas-drift-check.sh --regenerate" >&2

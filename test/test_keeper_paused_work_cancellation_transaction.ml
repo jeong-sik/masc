@@ -5,6 +5,8 @@ module Persistence = Keeper_event_queue_persistence
 module Registry_queue = Keeper_registry_event_queue
 module State = Keeper_event_queue_state
 module Transaction = Keeper_paused_work_cancellation_transaction
+module Disposition_receipt = Keeper_paused_work_disposition_receipt
+module Resume_transaction = Keeper_paused_work_resume_transaction
 
 let require_ok label = function
   | Ok value -> value
@@ -169,6 +171,16 @@ let check_replayed_without_reservation = function
        | Keeper_lifecycle_reservation.Release_missing -> "release_missing"
        | Keeper_lifecycle_reservation.Release_not_owner owner ->
          "release_not_owner: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+;;
+
+let check_resume_released = function
+  | Keeper_lifecycle_reservation.Released -> ()
+  | Keeper_lifecycle_reservation.Release_missing ->
+    Alcotest.fail "Resume_owner lifecycle reservation disappeared before release"
+  | Keeper_lifecycle_reservation.Release_not_owner owner ->
+    Alcotest.failf
+      "Resume_owner lifecycle reservation owner changed: %s"
+      (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
 let test_paused_owner_cancellation_commits_once () =
@@ -371,6 +383,285 @@ let test_stale_generation_is_rejected_before_commit () =
       (List.length (State.leases state)))
 ;;
 
+let resume_request generation operation_id : Resume_transaction.request =
+  { owner_generation = generation
+  ; operator_operation_id = operation_id
+  }
+;;
+
+let test_resume_owner_commits_receipt_and_preserves_pending () =
+  with_seeded_owner ~paused:true ~generation:21 (fun config keeper_name source ->
+    let request = resume_request 21 "operator-resume-1" in
+    let first =
+      Resume_transaction.resume config ~keeper_name request
+      |> Result.map_error Resume_transaction.error_to_string
+      |> require_ok "commit Resume_owner"
+    in
+    check_resume_released first.reservation_release;
+    (match first.commit_status with
+     | Resume_transaction.Committed -> ()
+     | Resume_transaction.Already_committed ->
+       Alcotest.fail "first Resume_owner call replayed an existing receipt");
+    (match first.projection with
+     | Resume_transaction.Applied phase ->
+       Alcotest.(check bool)
+         "Resume_owner leaves paused phase"
+         false
+         (phase = Keeper_state_machine.Paused)
+     | Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string
+            { cause = failure; reservation_release = None }));
+    let durable =
+      Keeper_meta_store.read_meta config keeper_name
+      |> require_ok "read resumed durable owner"
+      |> require_some "resumed durable owner"
+    in
+    Alcotest.(check bool) "durable pause cleared" false durable.paused;
+    let registered =
+      Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name
+      |> require_some "resumed registry owner"
+    in
+    Alcotest.(check bool) "registry pause cleared" false registered.meta.paused;
+    let queue_state =
+      Persistence.load_state_result
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+      |> require_ok "load resumed pending queue"
+    in
+    Alcotest.(check bool)
+      "Resume_owner preserves exact pending work"
+      true
+      (Queue.to_list (State.pending queue_state) = [ source ]);
+    let stored =
+      Disposition_receipt.load
+        config
+        ~keeper_name
+        ~operator_operation_id:request.operator_operation_id
+      |> require_ok "load Resume_owner receipt"
+      |> require_some "Resume_owner receipt"
+    in
+    Alcotest.(check bool)
+      "returned receipt is the durable receipt"
+      true
+      (Disposition_receipt.equal first.receipt stored);
+    let replay =
+      Resume_transaction.resume config ~keeper_name request
+      |> Result.map_error Resume_transaction.error_to_string
+      |> require_ok "replay Resume_owner"
+    in
+    check_resume_released replay.reservation_release;
+    (match replay.projection with
+     | Resume_transaction.Applied _ -> ()
+     | Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string
+            { cause = failure; reservation_release = None }));
+    (match replay.commit_status with
+     | Resume_transaction.Already_committed -> ()
+     | Resume_transaction.Committed ->
+       Alcotest.fail "Resume_owner replay created a second receipt");
+    let conflicting = { request with owner_generation = 20 } in
+    (match Resume_transaction.resume config ~keeper_name conflicting with
+     | Error { Resume_transaction.cause = Resume_transaction.Receipt_conflict _; _ } -> ()
+     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
+     | Ok _ -> Alcotest.fail "Resume_owner operation ID accepted a different request");
+    let second_operation = resume_request 21 "operator-resume-2" in
+    (match Resume_transaction.resume config ~keeper_name second_operation with
+     | Error
+         { Resume_transaction.cause = Resume_transaction.Durable_owner_not_paused
+         ; _
+         } -> ()
+     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
+     | Ok _ -> Alcotest.fail "active owner accepted a second Resume_owner receipt");
+    match
+      Disposition_receipt.load
+        config
+        ~keeper_name
+        ~operator_operation_id:second_operation.operator_operation_id
+    with
+    | Ok None -> ()
+    | Ok (Some _) -> Alcotest.fail "active owner persisted a second Resume_owner receipt"
+    | Error detail -> Alcotest.fail detail)
+;;
+
+let test_resume_owner_completes_prepared_receipt_projection () =
+  with_seeded_owner ~paused:true ~generation:22 (fun config keeper_name _source ->
+    let request = resume_request 22 "operator-resume-prepared" in
+    let durable =
+      Keeper_meta_store.read_meta config keeper_name
+      |> require_ok "read prepared Resume_owner durable owner"
+      |> require_some "prepared Resume_owner durable owner"
+    in
+    let prepared : Disposition_receipt.t =
+      { keeper_name
+      ; expected_trace_id = durable.runtime.trace_id
+      ; expected_generation = request.owner_generation
+      ; operator_operation_id = request.operator_operation_id
+      ; requested_at = 5.0
+      ; operation = Disposition_receipt.Resume_owner
+      }
+    in
+    (match
+       Disposition_receipt.with_keeper_lock config ~keeper_name (fun lock ->
+         Disposition_receipt.save_if_absent lock config prepared)
+     with
+     | Ok (Ok Disposition_receipt.Created) -> ()
+     | Ok (Ok (Disposition_receipt.Existing _)) ->
+       Alcotest.fail "prepared Resume_owner receipt already existed"
+     | Ok (Error detail) | Error detail -> Alcotest.fail detail);
+    Keeper_registry.clear ();
+    let interrupted =
+      Resume_transaction.resume config ~keeper_name request
+      |> Result.map_error Resume_transaction.error_to_string
+      |> require_ok "observe prepared Resume_owner without registry projection"
+    in
+    check_resume_released interrupted.reservation_release;
+    (match interrupted.projection with
+     | Resume_transaction.Committed_followup_failed
+         Resume_transaction.Registry_owner_missing -> ()
+     | Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string
+            { cause = failure; reservation_release = None })
+     | Resume_transaction.Applied _ ->
+       Alcotest.fail "Resume_owner claimed registry projection without a lane");
+    let durably_resumed =
+      Keeper_meta_store.read_meta config keeper_name
+      |> require_ok "read interrupted Resume_owner owner"
+      |> require_some "interrupted Resume_owner owner"
+    in
+    Alcotest.(check bool)
+      "receipt projects durable resume before reporting missing registry"
+      false
+      durably_resumed.paused;
+    ignore
+      (Keeper_registry.register
+         ~base_path:config.Workspace.base_path
+         keeper_name
+         durably_resumed);
+    (match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
+     | Some _ -> ()
+     | None -> Alcotest.fail "failed to restore registry lane for replay");
+    let replay =
+      Resume_transaction.resume config ~keeper_name request
+      |> Result.map_error Resume_transaction.error_to_string
+      |> require_ok "complete prepared Resume_owner receipt"
+    in
+    check_resume_released replay.reservation_release;
+    (match replay.projection with
+     | Resume_transaction.Applied _ -> ()
+     | Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string
+            { cause = failure; reservation_release = None }));
+    (match replay.commit_status with
+     | Resume_transaction.Already_committed -> ()
+     | Resume_transaction.Committed ->
+       Alcotest.fail "prepared Resume_owner receipt was written twice");
+    let resumed =
+      Keeper_meta_store.read_meta config keeper_name
+      |> require_ok "read prepared-receipt projection"
+      |> require_some "prepared-receipt projection"
+    in
+    Alcotest.(check bool) "prepared receipt clears durable pause" false resumed.paused)
+;;
+
+let test_resume_owner_rejects_stale_generation_without_receipt () =
+  with_seeded_owner ~paused:true ~generation:23 (fun config keeper_name _source ->
+    let request = resume_request 22 "operator-resume-stale" in
+    (match Resume_transaction.resume config ~keeper_name request with
+     | Error
+         { Resume_transaction.cause =
+             Resume_transaction.Durable_owner_generation_changed
+               { expected = 22; actual = 23 }
+         ; reservation_release = Some release
+         } ->
+       check_resume_released release
+     | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
+     | Ok _ -> Alcotest.fail "stale Resume_owner generation committed");
+    match
+      Disposition_receipt.load
+        config
+        ~keeper_name
+        ~operator_operation_id:request.operator_operation_id
+    with
+    | Ok None -> ()
+    | Ok (Some _) -> Alcotest.fail "stale Resume_owner persisted a receipt"
+    | Error detail -> Alcotest.fail detail)
+;;
+
+let test_resume_owner_commits_for_unregistered_durable_lane () =
+  with_seeded_owner
+    ~registered:false
+    ~paused:true
+    ~generation:25
+    (fun config keeper_name source ->
+       let request = resume_request 25 "operator-resume-unregistered" in
+       let outcome =
+         Resume_transaction.resume config ~keeper_name request
+         |> Result.map_error Resume_transaction.error_to_string
+         |> require_ok "commit Resume_owner for unregistered lane"
+       in
+       check_resume_released outcome.reservation_release;
+       (match outcome.commit_status with
+        | Resume_transaction.Committed -> ()
+        | Resume_transaction.Already_committed ->
+          Alcotest.fail "unregistered Resume_owner replayed on first commit");
+       (match outcome.projection with
+        | Resume_transaction.Committed_followup_failed
+            Resume_transaction.Registry_owner_missing -> ()
+        | Resume_transaction.Committed_followup_failed failure ->
+          Alcotest.fail
+            (Resume_transaction.error_to_string
+               { cause = failure; reservation_release = None })
+        | Resume_transaction.Applied _ ->
+          Alcotest.fail "unregistered Resume_owner claimed a live projection");
+       let durable =
+         Keeper_meta_store.read_meta config keeper_name
+         |> require_ok "read unregistered resumed owner"
+         |> require_some "unregistered resumed owner"
+       in
+       Alcotest.(check bool) "unregistered durable pause cleared" false durable.paused;
+       let queue_state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load unregistered resumed queue"
+       in
+       Alcotest.(check bool)
+         "unregistered Resume_owner preserves exact pending work"
+         true
+         (Queue.to_list (State.pending queue_state) = [ source ]))
+;;
+
+let test_resume_owner_rejects_dead_tombstone_without_receipt () =
+  with_seeded_owner
+    ~registered:false
+    ~latched_reason:Keeper_latched_reason.Dead_tombstone
+    ~paused:true
+    ~generation:24
+    (fun config keeper_name _source ->
+       let request = resume_request 24 "operator-resume-dead" in
+       (match Resume_transaction.resume config ~keeper_name request with
+        | Error
+            { Resume_transaction.cause = Resume_transaction.Durable_owner_dead_tombstone
+            ; reservation_release = Some release
+            } ->
+          check_resume_released release
+        | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
+        | Ok _ -> Alcotest.fail "Resume_owner revived a Dead tombstone");
+       match
+         Disposition_receipt.load
+           config
+           ~keeper_name
+           ~operator_operation_id:request.operator_operation_id
+       with
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "Dead Resume_owner persisted a receipt"
+       | Error detail -> Alcotest.fail detail)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -401,6 +692,26 @@ let () =
             "pending cancellation replays after owner transition"
             `Quick
             test_pending_cancellation_replays_after_owner_transition
+        ; Alcotest.test_case
+            "Resume_owner commits receipt and preserves pending"
+            `Quick
+            test_resume_owner_commits_receipt_and_preserves_pending
+        ; Alcotest.test_case
+            "Resume_owner completes prepared receipt projection"
+            `Quick
+            test_resume_owner_completes_prepared_receipt_projection
+        ; Alcotest.test_case
+            "Resume_owner rejects stale generation without receipt"
+            `Quick
+            test_resume_owner_rejects_stale_generation_without_receipt
+        ; Alcotest.test_case
+            "Resume_owner commits for unregistered durable lane"
+            `Quick
+            test_resume_owner_commits_for_unregistered_durable_lane
+        ; Alcotest.test_case
+            "Resume_owner rejects Dead tombstone without receipt"
+            `Quick
+            test_resume_owner_rejects_dead_tombstone_without_receipt
         ] )
     ]
 ;;

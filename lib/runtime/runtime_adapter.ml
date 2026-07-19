@@ -349,7 +349,9 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
   : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
   let capability_provider_id =
-    Option.value provider.capability_namespace ~default:provider.id
+    match provider.capability_namespace with
+    | Some capability_namespace -> capability_namespace
+    | None -> provider.id
   in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   let model_capabilities_override =

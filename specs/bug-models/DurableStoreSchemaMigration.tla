@@ -65,8 +65,9 @@ Next == PreflightMigrate \/ PreflightFailLoud \/ PreflightUpToDate
 
 \* ── Buggy boot (RFC-0344 §1: hard-cut reject) ────────────────
 
-\* Version mismatch: boot is reported ok, but the old rows are dropped and the
-\* durable file is orphaned. This is the shared defect behind the 4 incidents.
+\* Failure mode A — drop-on-mismatch (keeper memory bank, §현황 위험 C):
+\* boot is reported ok, the mismatched rows are rewritten out, and the durable
+\* file no longer holds them.
 HardCutAbsorb ==
     /\ boot_outcome = "pending"
     /\ disk_version = "old"
@@ -75,7 +76,22 @@ HardCutAbsorb ==
     /\ on_disk_rows' = 0             \* ... and the durable rows are gone.
     /\ disk_version' = "current"
 
-NextBuggy == Next \/ HardCutAbsorb
+\* Failure mode B — hard-cut reject / orphan (event queue #25078, gate #25135):
+\* the load path rejects the old shape and marks the store Unavailable, so the
+\* running binary reads nothing, yet the file is left intact on disk (orphaned).
+\* Boot still proceeds ("ok") → silent outage. The file surviving on disk does
+\* NOT satisfy the invariant: a boot reporting ok with no live rows is the bug,
+\* whether or not the bytes are still on disk. This is the actually-observed
+\* transition (read_primary_unlocked leaves the file, returns Unavailable).
+HardCutOrphan ==
+    /\ boot_outcome = "pending"
+    /\ disk_version = "old"
+    /\ boot_outcome' = "ok"          \* boot reported successful ...
+    /\ live_rows' = 0                \* ... yet no old row is readable ...
+    /\ on_disk_rows' = OldRows       \* ... though the file is left on disk.
+    /\ disk_version' = "old"         \* store never advanced; it is Unavailable.
+
+NextBuggy == Next \/ HardCutAbsorb \/ HardCutOrphan
 
 \* ── Safety ───────────────────────────────────────────────────
 

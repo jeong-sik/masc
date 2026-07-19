@@ -61,9 +61,8 @@ val persist_transaction_error :
 
 (** {1 Configuration} *)
 
-(** Re-export of [Env_config.Board.flush_interval_sec].  How
-    often the board flusher actor consumes a [Flush] message
-    from {!store.flusher_inbox}. *)
+(** Re-export of [Env_config.Board.flush_interval_sec].  The cadence for
+    scheduling deferred flushes and retrying failed flusher obligations. *)
 val flush_interval_sec : float
 
 (** {1 Store lifecycle} *)

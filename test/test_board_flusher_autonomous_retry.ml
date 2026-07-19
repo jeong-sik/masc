@@ -67,9 +67,15 @@ let test_failed_flush_retries_without_new_board_activity () =
     (match Board.request_flush store with
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
-    await ~clock (fun () -> Board.persist_error_count () > errors_before);
-    Unix.unlink board_dir;
-    Fs_compat.mkdir_p board_dir;
+    await ~clock (fun () -> Board.persist_error_count () > errors_before));
+  Unix.unlink board_dir;
+  Fs_compat.mkdir_p board_dir;
+  Eio.Switch.run (fun sw ->
+    (match Board_dispatch.start_runtime_actors ~sw ~clock with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
     await ~clock (fun () -> not store.Board.dirty_posts));
   let persisted_ids =
     Fs_compat.load_file (Board.persist_path ())
@@ -85,6 +91,57 @@ let test_failed_flush_retries_without_new_board_activity () =
     (List.exists (String.equal post_id) persisted_ids)
 ;;
 
+let test_failed_flush_does_not_block_sweep () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Unix.putenv "MASC_BASE_PATH" (fresh_base "masc-board-flusher-fair-source");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  let post =
+    match
+      Board.create_post store ~author:"flusher-fair-author"
+        ~content:"an expired post must sweep while flush recovery is pending"
+        ~post_kind:Board.Human_post ~ttl_hours:1 ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  Hashtbl.replace store.Board.posts post_id
+    { post with expires_at = Time_compat.now () -. 1.0 };
+  (match
+     Board.vote store ~voter:"flusher-fair-voter" ~post_id
+       ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  let recovery_base = fresh_base "masc-board-flusher-fair-recovery" in
+  Unix.putenv "MASC_BASE_PATH" recovery_base;
+  let persist_path = Board.persist_path () in
+  Fs_compat.mkdir_p persist_path;
+  let errors_before = Board.persist_error_count () in
+  Eio.Switch.run (fun sw ->
+    (match Board_dispatch.start_runtime_actors ~sw ~clock with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
+    await ~clock (fun () -> Board.persist_error_count () > errors_before);
+    await ~clock (fun () -> not (Hashtbl.mem store.Board.posts post_id));
+    Unix.rmdir persist_path;
+    await ~clock (fun () -> not store.Board.dirty_posts));
+  Alcotest.(check bool)
+    "expired post remained swept after projection recovery"
+    false
+    (Hashtbl.mem store.Board.posts post_id)
+;;
+
 let () =
   Alcotest.run
     "board_flusher_autonomous_retry"
@@ -93,6 +150,10 @@ let () =
             "failed flush retries without new Board activity"
             `Quick
             test_failed_flush_retries_without_new_board_activity
+        ; Alcotest.test_case
+            "failed flush does not block sweep"
+            `Quick
+            test_failed_flush_does_not_block_sweep
         ] )
     ]
 ;;

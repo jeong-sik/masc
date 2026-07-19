@@ -274,6 +274,19 @@ type dirty_projection_flush_failure =
       backtrace : Printexc.raw_backtrace;
     }
 
+type flusher_attempt_failure =
+  | Dirty_projection_flush_failed of dirty_projection_flush_failure
+  | Sweep_routing_references_unavailable of string
+  | Sweep_raised of {
+      cause : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+
+type flusher_retry_obligations = {
+  flush_retry_at : float option;
+  sweep_retry_at : float option;
+}
+
 exception Runtime_actor_start_failure of runtime_actor_start_failures
 
 let runtime_actor_to_string = function
@@ -317,63 +330,167 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     try
       match Board.flush_dirty store with
       | Ok () -> Ok ()
-      | Error error -> Error (Flush_rejected error)
+      | Error error ->
+        Error
+          ( Board_types.Flush
+          , Dirty_projection_flush_failed (Flush_rejected error) )
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | (Out_of_memory | Stack_overflow) as exn -> raise exn
     | exn ->
       Error
-        (Flush_raised
-           { cause = exn; backtrace = Printexc.get_raw_backtrace () })
+        ( Board_types.Flush
+        , Dirty_projection_flush_failed
+            (Flush_raised
+               { cause = exn; backtrace = Printexc.get_raw_backtrace () }) )
   in
-  let rec settle_dirty_projection ~recovering =
-    match flush_attempt () with
-    | Ok () ->
-      if recovering
-      then Log.BoardLog.info "Board dirty projection autonomous retry recovered"
-    | Error failure ->
-      (match failure with
-       | Flush_rejected error ->
-         Log.BoardLog.error
-           "Board dirty projection flush failed; autonomous retry remains active: %s"
-           (Board.show_board_error error)
-       | Flush_raised { cause; backtrace } ->
-         Log.BoardLog.error
-           "Board dirty projection flush raised; autonomous retry remains active: %s\n%s"
-           (Printexc.to_string cause)
-           (Printexc.raw_backtrace_to_string backtrace));
-      Eio.Time.sleep clock Board.flush_interval_sec;
-      settle_dirty_projection ~recovering:true
+  let sweep_attempt () =
+    try
+      with_routing_mutation_lock (fun () ->
+        match prepared_routing_references () with
+        | Error detail ->
+          Error
+            (Board_types.Sweep, Sweep_routing_references_unavailable detail)
+        | Ok references ->
+          (match
+             Board.sweep_and_flush
+               ~protected_post_ids:references.post_ids
+               ~protected_comment_ids:references.comment_ids
+               store
+           with
+           | Ok _ -> Ok ()
+           | Error error ->
+             (* The sweep mutation completed before its projection flush was
+                rejected.  Only the dirty projection remains an obligation. *)
+             Error
+               ( Board_types.Flush
+               , Dirty_projection_flush_failed (Flush_rejected error) )))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | (Out_of_memory | Stack_overflow) as exn -> raise exn
+    | exn ->
+      Error
+        ( Board_types.Sweep
+        , Sweep_raised
+            { cause = exn; backtrace = Printexc.get_raw_backtrace () } )
+  in
+  let operation_to_string = function
+    | Board_types.Flush -> "flush_projection"
+    | Board_types.Sweep -> "sweep_board"
+  in
+  let retry_deadline obligations = function
+    | Board_types.Flush -> obligations.flush_retry_at
+    | Board_types.Sweep -> obligations.sweep_retry_at
+  in
+  let without_retry obligations = function
+    | Board_types.Flush -> { obligations with flush_retry_at = None }
+    | Board_types.Sweep -> { obligations with sweep_retry_at = None }
+  in
+  let with_retry_at obligations operation retry_at =
+    match operation with
+    | Board_types.Flush -> { obligations with flush_retry_at = Some retry_at }
+    | Board_types.Sweep -> { obligations with sweep_retry_at = Some retry_at }
+  in
+  let earliest_retry obligations =
+    match obligations.flush_retry_at, obligations.sweep_retry_at with
+    | None, None -> None
+    | Some retry_at, None -> Some (retry_at, Board_types.Flush)
+    | None, Some retry_at -> Some (retry_at, Board_types.Sweep)
+    | Some flush_at, Some sweep_at ->
+      if Float.compare flush_at sweep_at <= 0
+      then Some (flush_at, Board_types.Flush)
+      else Some (sweep_at, Board_types.Sweep)
+  in
+  let retry_obligation obligations operation =
+    let proposed_retry_at = Eio.Time.now clock +. Board.flush_interval_sec in
+    let retry_at =
+      match retry_deadline obligations operation with
+      | None -> proposed_retry_at
+      | Some current_retry_at -> Float.min current_retry_at proposed_retry_at
+    in
+    with_retry_at obligations operation retry_at
+  in
+  let rec await_operation obligations =
+    let now = Eio.Time.now clock in
+    match earliest_retry obligations with
+    | Some (retry_at, operation) when Float.compare retry_at now <= 0 ->
+      operation, true, without_retry obligations operation
+    | retry ->
+      (match retry with
+       | None ->
+         let operation = Eio.Stream.take store.Board.flusher_inbox in
+         let recovering =
+           Option.is_some (retry_deadline obligations operation)
+         in
+         operation, recovering, without_retry obligations operation
+       | Some (retry_at, _) ->
+         let remaining = retry_at -. now in
+         (match
+            Eio.Time.with_timeout clock remaining (fun () ->
+              Ok (Eio.Stream.take store.Board.flusher_inbox))
+          with
+          | Ok message ->
+            let operation = message in
+            let recovering =
+              Option.is_some (retry_deadline obligations operation)
+            in
+            operation, recovering, without_retry obligations operation
+          | Error `Timeout -> await_operation obligations))
+  in
+  let log_attempt_failure ~operation ~retry_operation = function
+    | Dirty_projection_flush_failed (Flush_rejected error) ->
+      Log.BoardLog.error
+        "Board flusher operation=%s failed; retry obligation=%s remains active: %s"
+        (operation_to_string operation)
+        (operation_to_string retry_operation)
+        (Board.show_board_error error)
+    | Dirty_projection_flush_failed (Flush_raised { cause; backtrace }) ->
+      Log.BoardLog.error
+        "Board flusher operation=%s raised; retry obligation=%s remains active: %s\n%s"
+        (operation_to_string operation)
+        (operation_to_string retry_operation)
+        (Printexc.to_string cause)
+        (Printexc.raw_backtrace_to_string backtrace)
+    | Sweep_routing_references_unavailable detail ->
+      Log.BoardLog.warn
+        "Board flusher operation=%s deferred; retry obligation=%s remains active: %s"
+        (operation_to_string operation)
+        (operation_to_string retry_operation)
+        detail
+    | Sweep_raised { cause; backtrace } ->
+      Log.BoardLog.error
+        "Board flusher operation=%s raised; retry obligation=%s remains active: %s\n%s"
+        (operation_to_string operation)
+        (operation_to_string retry_operation)
+        (Printexc.to_string cause)
+        (Printexc.raw_backtrace_to_string backtrace)
   in
   let flusher_loop () =
     Log.BoardLog.info "Board flusher actor started";
-    while true do
-      match Eio.Stream.take store.Board.flusher_inbox with
-      | Board_types.Flush -> settle_dirty_projection ~recovering:false
-      | Board_types.Sweep ->
-          (try
-             with_routing_mutation_lock (fun () ->
-               match prepared_routing_references () with
-               | Ok references ->
-                 (match
-                    Board.sweep_and_flush
-                      ~protected_post_ids:references.post_ids
-                      ~protected_comment_ids:references.comment_ids
-                      store
-                  with
-                  | Ok _ -> ()
-                  | Error error ->
-                    Log.BoardLog.error
-                      "Post-sweep flush failed: %s"
-                      (Board.show_board_error error))
-               | Error detail ->
-                 Log.BoardLog.warn
-                   "Board sweep deferred because routing references are unavailable: %s"
-                   detail)
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
-    done
+    let rec loop obligations =
+      let operation, recovering, obligations = await_operation obligations in
+      let outcome =
+        match operation with
+        | Board_types.Flush -> flush_attempt ()
+        | Board_types.Sweep -> sweep_attempt ()
+      in
+      match outcome with
+      | Ok () ->
+        if recovering
+        then
+          Log.BoardLog.info
+            "Board flusher obligation settled operation=%s"
+            (operation_to_string operation);
+        loop obligations
+      | Error (retry_operation, failure) ->
+        log_attempt_failure ~operation ~retry_operation failure;
+        loop (retry_obligation obligations retry_operation)
+    in
+    let startup_reconciliation_at = Eio.Time.now clock in
+    loop
+      { flush_retry_at = Some startup_reconciliation_at
+      ; sweep_retry_at = Some startup_reconciliation_at
+      }
   in
   let routing_retry_loop () =
     Log.BoardLog.info "Board routing retry actor started";

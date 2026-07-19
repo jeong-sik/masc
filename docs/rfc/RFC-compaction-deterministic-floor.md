@@ -185,26 +185,37 @@ floor would therefore drop the foundational setup. Two protections cover this:
   #25281 P1.2). Protecting its exact index guarantees the goal survives wherever
   it is.
 
-### 2.1.3 What the reduction guarantees (and what it does not)
+### 2.1.3 What the reduction guarantees — and why the fixed tail is not enough (review #25281 P1.1)
 
-The floor reduces the checkpoint to
-`{protected head + first goal + tail recency + all non-droppable units}` — the
-smallest set a **unit-granular** keep/drop plan can produce. This is not an
-unconditional "fits under the provider window" guarantee: if that minimal set
-*alone* still exceeds the window (a single oversized message/unit), **no
-keep/drop plan — deterministic or LLM — can fit it**. That residual needs
-message-*content* truncation, a different mechanism, out of scope here (review
-#25281 P1.1). Two consequences:
+The reviewer is right that the **fixed** `tail = 12` does not guarantee the
+liveness invariant, and this is a *correctness* gap, not merely a recency-quality
+one. Be precise about the two residuals:
 
-- The downstream guard (`Structurally_unchanged` / `Checkpoint_not_reduced`)
-  only asserts `after < before`, so a floor commit can still exceed the window in
-  the pathological single-oversized-unit case. Every *non-pathological* overflow,
-  though, makes progress: each turn's newly accumulated middle is droppable, so
-  the floor converges rather than deadlocking on identical input.
-- Deriving the head/tail windows from the token budget (RFC §6) would let the
-  floor keep *more* recency when there is room. That improves recency quality; it
-  does **not** change the reduction guarantee, which is bounded by unit
-  granularity, not by the window being fixed vs budget-derived.
+- **Fixed tail (current):** the floor reduces to
+  `head + goal + tail(12) + non-droppable`. If that set exceeds the provider
+  window — e.g. the 12 protected recent units are individually large — the floor
+  commits an over-limit checkpoint (the downstream guard only asserts
+  `after < before`), and the keeper can re-overflow. So a fixed tail leaves a
+  residual proportional to the protected-window *size*.
+- **Adaptive tail (the proper fix):** dropping *into* the tail as needed — keep
+  `head + goal + non-droppable`, then keep only as many recent units as fit under
+  the budget — shrinks the residual to `head + goal + one recent unit`. The
+  overflow trigger already carries the budget (`Compaction_trigger.Provider_overflow
+  { limit_tokens }`), so the input exists; what it needs is a per-unit size
+  estimate consistent with how the provider counts (a token estimate, since the
+  window is in tokens while the checkpoint guards are in bytes). This is the
+  required follow-up, and it is correctness, not quality.
+
+The **absolute residual** that survives even the adaptive tail is a *single*
+unit larger than the window (one oversized message). No keep/drop plan —
+deterministic or LLM — can fit that; it needs message-*content* truncation, a
+different mechanism, out of scope for this RFC.
+
+Interim honesty: as shipped, the floor breaks the *common* spiral (each overflow
+drops the newly accumulated middle, so it converges on non-pathological input)
+but does **not** guarantee one-shot fit when the protected window itself is
+over-sized. #25281 therefore stays Draft until the adaptive tail lands or the
+fixed-window residual is explicitly accepted.
 
 ### 2.2 Where the floor engages
 

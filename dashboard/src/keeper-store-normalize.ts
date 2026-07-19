@@ -751,7 +751,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),
         context_source: asString(row.context_source) ?? asString(contextRaw?.source),
         context: normalizedContext,
-        compaction_profile: asString(row.compaction_profile) ?? null,
         traits: asStringArray(row.traits),
         interests: asStringArray(row.interests),
         primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),

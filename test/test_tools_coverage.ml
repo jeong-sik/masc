@@ -578,19 +578,26 @@ let test_keeper_goal_arg_rejected () =
     Alcotest.(check bool) "goal mentioned" true
       (contains_substring ~needle:"goal" msg)
 
-let test_keeper_compaction_cooldown_arg_rejected () =
-  let args = `Assoc [ "compaction_cooldown_sec", `Int 15 ] in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      args
-  with
-  | Ok () -> Alcotest.fail "removed compaction cooldown arg should be rejected"
-  | Error msg ->
-    Alcotest.(check bool)
-      "compaction_cooldown_sec mentioned"
-      true
-      (contains_substring ~needle:"compaction_cooldown_sec" msg)
+let test_keeper_removed_compaction_args_rejected () =
+  [ "compaction_cooldown_sec"
+  ; "compaction_profile"
+  ; "compaction_ratio_gate"
+  ; "compaction_message_gate"
+  ; "compaction_token_gate"
+  ]
+  |> List.iter (fun key ->
+    let args = `Assoc [ key, `Int 15 ] in
+    match
+      Masc.Keeper_config.reject_removed_keeper_input_keys
+        ~tool_name:"masc_keeper_up"
+        args
+    with
+    | Ok () -> Alcotest.failf "removed %s arg should be rejected" key
+    | Error msg ->
+      Alcotest.(check bool)
+        (key ^ " mentioned")
+        true
+        (contains_substring ~needle:key msg))
 
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
@@ -611,7 +618,15 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props)
+            (List.mem_assoc "active_model" props);
+          [ "compaction_profile"
+          ; "compaction_ratio_gate"
+          ; "compaction_message_gate"
+          ; "compaction_token_gate"
+          ]
+          |> List.iter (fun key ->
+            Alcotest.(check bool) ("omits " ^ key) false
+              (List.mem_assoc key props))
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_keeper_sandbox_args_rejected () =
@@ -866,8 +881,8 @@ let () =
         test_keeper_shards_arg_rejected;
       Alcotest.test_case "keeper-goal-arg-rejected" `Quick
         test_keeper_goal_arg_rejected;
-      Alcotest.test_case "keeper-compaction-cooldown-arg-rejected" `Quick
-        test_keeper_compaction_cooldown_arg_rejected;
+      Alcotest.test_case "keeper-compaction-policy-args-rejected" `Quick
+        test_keeper_removed_compaction_args_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick

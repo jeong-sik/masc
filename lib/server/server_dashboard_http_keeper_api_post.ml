@@ -388,7 +388,6 @@ let dashboard_config_string_fields =
   [
     "runtime_id";
     "instructions";
-    "compaction_profile";
     "sandbox_profile";
     "network_mode";
   ]

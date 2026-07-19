@@ -927,7 +927,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                     m.runtime.compaction_rt.last_decision
                 in
                 if String.trim decision = "" then `Null else `String decision );
-              ("compaction_profile", `String m.compaction.profile);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

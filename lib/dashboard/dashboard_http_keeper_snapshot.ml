@@ -210,11 +210,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("verify", `Bool false);
         ]
       in
-      let compaction =
-        `Assoc [
-          ("profile", `String m.compaction.profile);
-        ]
-      in
       let proactive =
         `Assoc [
           ("enabled", `Bool m.proactive.enabled);
@@ -293,7 +288,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
              profile_config_error );
          ("prompt", prompt);
          ("execution", execution);
-         ("compaction", compaction);
          ("proactive", proactive);
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());

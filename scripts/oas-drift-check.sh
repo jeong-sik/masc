@@ -186,18 +186,78 @@ extract_agent_execution_symbols() {
   local file="${src}/lib/agent/agent.mli"
   [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
   awk '
-    /^type execution_(runtime|store|locator|terminal_outcome|operator_repair_reason|recovery_action|terminal_disposition)([[:space:]]|$)/ {
-      print "type:" $2
+    function emit_constructor(type_name, text, parts, constructor) {
+      sub(/^[[:space:]]*\|?[[:space:]]*/, "", text)
+      split(text, parts, /[[:space:]]+/)
+      constructor = parts[1]
+      if (constructor ~ /^[A-Z][A-Za-z0-9_]*$/) {
+        print "constructor:" type_name "." constructor
+      }
     }
+
+    /^type / {
+      current_type = ""
+      if ($2 ~ /^execution_(runtime|store|locator|terminal_outcome|operator_repair_reason|recovery_action|terminal_disposition)$/) {
+        current_type = $2
+        print "type:" current_type
+        if (index($0, "=") > 0) {
+          inline_rhs = $0
+          sub(/^[^=]*=[[:space:]]*/, "", inline_rhs)
+          if (inline_rhs != "" && inline_rhs !~ /^\{/) {
+            emit_constructor(current_type, inline_rhs)
+          }
+        }
+      }
+      next
+    }
+
+    current_type ~ /^execution_(terminal_outcome|operator_repair_reason|recovery_action)$/ && /^[[:space:]]*\|/ {
+      emit_constructor(current_type, $0)
+      next
+    }
+
+    current_type == "execution_terminal_disposition" && /^[[:space:]]*[;{]?[[:space:]]*(outcome|recovery)[[:space:]]*:/ {
+      field = $0
+      sub(/^[[:space:]]*[;{]?[[:space:]]*/, "", field)
+      sub(/[[:space:]]*:.*$/, "", field)
+      print "field:execution_terminal_disposition." field
+      next
+    }
+
     /^module Execution_projection[[:space:]]*:/ {
+      current_type = ""
       print "module:Execution_projection"
+      next
     }
-    /^val (execution_locator_to_yojson|execution_locator_of_yojson|create_execution_runtime|open_execution_projection|execution_store)([[:space:]]|$)/ {
+
+    /^val execution_store([[:space:]]|$)/ {
+      current_type = ""
+      in_execution_store = 1
+      print "val:execution_store"
+      next
+    }
+
+    in_execution_store {
+      if (/\?on_scope_ready:/) {
+        print "label:execution_store.on_scope_ready"
+      }
+      if (/\?on_terminal_disposition:/) {
+        print "label:execution_store.on_terminal_disposition"
+      }
+      if (/\?resume:/) {
+        print "label:execution_store.resume"
+      }
+      if (/^[[:space:]]*->[[:space:]]*execution_store[[:space:]]*$/) {
+        in_execution_store = 0
+      }
+      next
+    }
+
+    /^val (execution_locator_to_yojson|execution_locator_of_yojson|create_execution_runtime|open_execution_projection)([[:space:]]|$)/ {
+      current_type = ""
       print "val:" $2
+      next
     }
-    /\?on_scope_ready:/ { print "label:on_scope_ready" }
-    /\?on_terminal_disposition:/ { print "label:on_terminal_disposition" }
-    /\?resume:/ { print "label:resume" }
   ' "${file}" | sort -u
 }
 
@@ -343,7 +403,7 @@ case "${MODE}" in
     echo "  Review the delta above against MASC consumer sites:" >&2
     echo "    lib/oas_compat/oas_compat.ml      (Http_client + Metrics — single source)" >&2
     echo "    lib/oas_event_bridge.ml           (Event_bus payload matches — until adapter covers it)" >&2
-    echo "    lib/runtime/runtime_agent.ml      (durable Agent execution boundary)" >&2
+    echo "    no durable Agent execution consumer is on main yet (tracking masc#25338)" >&2
     echo
     echo "  Repair flow (after consumer changes compile clean):" >&2
     echo "    bash scripts/oas-drift-check.sh --regenerate" >&2

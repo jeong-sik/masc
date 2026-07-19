@@ -12,6 +12,7 @@
   schedule_domain
   schedule_occurrence_id
   schedule_ical_recur
+  schedule_ical_content_line
   schedule_supported_kinds
   schedule_store
   schedule_service

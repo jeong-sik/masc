@@ -234,6 +234,13 @@ let completed_in_order ~base_path ~keeper_name =
        completed)
 ;;
 
+let replay_completed_owner_wake ~base_path ~keeper_name ~wake_owner =
+  let* completed = completed_in_order ~base_path ~keeper_name in
+  match completed with
+  | [] -> Ok None
+  | _ :: _ -> Ok (Some (wake_owner ~base_path ~keeper_name))
+;;
+
 let settle_one_completed ~base_path ~keeper_name =
   let* completed = completed_in_order ~base_path ~keeper_name in
   match completed with
@@ -304,6 +311,26 @@ let observe_error ~base_path ~keeper_name detail =
   Log.Keeper.error "Board attention worker deferred keeper=%s: %s" keeper_name detail
 ;;
 
+let rec drain_available
+          ~yield
+          ~now
+          ~worker_epoch
+          ~base_path
+          ~keeper_name
+          ~judge
+  =
+  match process_next ~now ~worker_epoch ~base_path ~keeper_name ~judge with
+  | Ok Idle -> Ok ()
+  | Ok
+      ( Judgment_completed _
+      | Judgment_deferred _
+      | Candidate_already_consumed _
+      | Partition_blocked _ ) ->
+    yield ();
+    drain_available ~yield ~now ~worker_epoch ~base_path ~keeper_name ~judge
+  | Error detail -> Error detail
+;;
+
 let run ~sw ~net ~base_path ~keeper_name =
   match Wake.register ~sw ~base_path ~keeper_name with
   | Error detail -> observe_error ~base_path ~keeper_name detail
@@ -314,7 +341,18 @@ let run ~sw ~net ~base_path ~keeper_name =
       then (
         try
           match Partition.recover_for_process_start ~base_path ~keeper_name with
-          | Ok _ -> true
+          | Ok _ ->
+            (match
+               replay_completed_owner_wake
+                 ~base_path
+                 ~keeper_name
+                 ~wake_owner:owner_wake
+             with
+             | Ok _ -> true
+             | Error detail ->
+               release_process_recovery ~base_path ~keeper_name;
+               observe_error ~base_path ~keeper_name detail;
+               false)
           | Error detail ->
             release_process_recovery ~base_path ~keeper_name;
             observe_error ~base_path ~keeper_name detail;
@@ -331,18 +369,15 @@ let run ~sw ~net ~base_path ~keeper_name =
       | Wake.Wake -> drain ()
     and drain () =
       match
-        process_next
+        drain_available
+          ~yield:Eio.Fiber.yield
           ~now:Time_compat.now
           ~worker_epoch
           ~base_path
           ~keeper_name
           ~judge:(Candidate.judge_singleton ~sw ~net ~base_path)
       with
-      | Ok Idle -> await ()
-      | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
-        Eio.Fiber.yield ();
-        drain ()
-      | Ok (Judgment_deferred _) -> await ()
+      | Ok () -> await ()
       | Error detail ->
         observe_error ~base_path ~keeper_name detail;
         await ()
@@ -362,5 +397,7 @@ let run ~sw ~net ~base_path ~keeper_name =
 
 module For_testing = struct
   let process_next = process_next
+  let drain_available = drain_available
+  let replay_completed_owner_wake = replay_completed_owner_wake
 end
 ;;

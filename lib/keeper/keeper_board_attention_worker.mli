@@ -35,7 +35,9 @@ val run :
   unit
 (** Register and run the transition-driven worker until [sw] is cancelled.
     The first registration for this exact workspace/Keeper in the process owns
-    prior-process recovery. There is no timer polling or retry-count policy. *)
+    prior-process recovery and replays one owner wake when durable [Completed]
+    work exists. A durable [Deferred] root does not stop unrelated [Ready]
+    siblings from draining. There is no timer polling or retry-count policy. *)
 
 val settle_one_completed :
   base_path:string -> keeper_name:string -> (settlement, string) result
@@ -55,4 +57,24 @@ module For_testing : sig
        , Keeper_board_attention_candidate.retryable_failure )
        result) ->
     (step, string) result
+
+  val drain_available :
+    yield:(unit -> unit) ->
+    now:(unit -> float) ->
+    worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+    base_path:string ->
+    keeper_name:string ->
+    judge:
+      (Keeper_board_attention_candidate.candidate ->
+       ( Keeper_board_attention_candidate.judgment
+       , Keeper_board_attention_candidate.retryable_failure )
+       result) ->
+    (unit, string) result
+
+  val replay_completed_owner_wake :
+    base_path:string ->
+    keeper_name:string ->
+    wake_owner:
+      (base_path:string -> keeper_name:string -> Keeper_registry.wakeup_outcome) ->
+    (Keeper_registry.wakeup_outcome option, string) result
 end

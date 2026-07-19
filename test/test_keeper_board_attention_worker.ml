@@ -30,7 +30,7 @@ let expect_error label = function
   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
 ;;
 
-let candidate ?(id = "candidate-worker") () : A.candidate =
+let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   let keeper_name = "sangsu" in
   let signal : Masc.Board_dispatch.board_signal =
     { kind = Masc.Board_dispatch.Board_post_created
@@ -62,7 +62,7 @@ let candidate ?(id = "candidate-worker") () : A.candidate =
               ; "runtime", `Assoc [ "model", `String "configured-judge" ]
               ] )
         ]
-  ; recorded_at = 1.0
+  ; recorded_at
   ; status = A.Pending { last_failure = None }
   }
 ;;
@@ -176,6 +176,70 @@ let test_provider_failure_is_durable_without_hot_retry () =
      Alcotest.fail "partition failure leaked into the candidate SSOT")
 ;;
 
+let test_deferred_partition_does_not_strand_ready_sibling () =
+  Eio_main.run @@ fun _env ->
+  with_temp_base "board-attention-worker-sibling-progress" @@ fun base_path ->
+  let deferred = record ~base_path (candidate ~id:"deferred-first" ~recorded_at:1.0 ()) in
+  let sibling = record ~base_path (candidate ~id:"ready-sibling" ~recorded_at:2.0 ()) in
+  let calls = ref [] in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable; detail = "typed provider failure"; failed_at = 3.0 }
+  in
+  ok
+    "drain after deferred"
+    (W.For_testing.drain_available
+       ~yield:Eio.Fiber.yield
+       ~now:(fun () -> 3.0)
+       ~worker_epoch:(P.Worker_epoch.generate ())
+       ~base_path
+       ~keeper_name:"sangsu"
+       ~judge:(fun observed ->
+         calls := observed.candidate_id :: !calls;
+         if String.equal observed.candidate_id deferred.candidate_id
+         then Error failure
+         else Ok (judgment J.Not_relevant)));
+  Alcotest.(check int) "both ready roots attempted" 2 (List.length !calls);
+  let partitions = ok "load sibling partitions" (P.load ~base_path ~keeper_name:"sangsu") in
+  let state_for candidate_id =
+    List.find_opt
+      (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+      partitions
+    |> Option.map (fun partition -> partition.state)
+  in
+  (match state_for deferred.candidate_id with
+   | Some (P.Deferred _) -> ()
+   | Some _ | None -> Alcotest.fail "first root did not remain durably Deferred");
+  match state_for sibling.candidate_id with
+  | Some (P.Completed _) -> ()
+  | Some _ | None -> Alcotest.fail "Ready sibling did not progress after Deferred"
+;;
+
+let test_startup_replays_completed_owner_wake () =
+  with_temp_base "board-attention-worker-completed-replay" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  ignore
+    (ok
+       "worker completion"
+       (process ~base_path ~judge:(fun _ -> Ok (judgment J.Relevant)))
+     : W.step);
+  let wake_count = ref 0 in
+  let wake_owner ~base_path:_ ~keeper_name:_ =
+    incr wake_count;
+    Masc.Keeper_registry.Signaled
+  in
+  (match
+     ok
+       "replay completed wake"
+       (W.For_testing.replay_completed_owner_wake
+          ~base_path
+          ~keeper_name:"sangsu"
+          ~wake_owner)
+   with
+   | Some Masc.Keeper_registry.Signaled -> ()
+   | Some _ | None -> Alcotest.fail "Completed startup replay did not request owner wake");
+  Alcotest.(check int) "one coalescible owner wake" 1 !wake_count
+;;
+
 let test_existing_judgment_never_calls_provider () =
   with_temp_base "board-attention-worker-existing-judgment" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -286,6 +350,14 @@ let () =
             "Provider failure is durable without hot retry"
             `Quick
             test_provider_failure_is_durable_without_hot_retry
+        ; Alcotest.test_case
+            "Deferred root does not strand Ready sibling"
+            `Quick
+            test_deferred_partition_does_not_strand_ready_sibling
+        ; Alcotest.test_case
+            "startup replays Completed owner wake"
+            `Quick
+            test_startup_replays_completed_owner_wake
         ; Alcotest.test_case
             "existing judgment skips Provider"
             `Quick

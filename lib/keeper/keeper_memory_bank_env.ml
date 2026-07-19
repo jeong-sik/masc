@@ -20,6 +20,17 @@ let memory_llm_summary_enabled () =
 let bank_longterm_inject_enabled () =
   memory_env_bool_logged "MASC_KEEPER_BANK_LONGTERM_INJECT" ~default:true
 
+(* RFC keeper-memory-bank-write-reduction (parent: keeper-memory-consolidation
+   Stage 3): explicit/tool-result/voice writes to the memory bank kill-switch.
+   default=true → 동작 변화 0 (기존 write 유지). Setting it false stops feeding
+   the deprecated append-only bank; continuity is unaffected because it comes
+   from OAS checkpoint + typed MASC metadata, not .memory.jsonl. This is an
+   explicit operator gate, not a heuristic that decides which memories survive
+   (spec/12-memory-systems.md §Compaction) — when off, every writer skips
+   uniformly and reports the skip through a typed outcome. *)
+let bank_write_enabled () =
+  memory_env_bool_logged "MASC_KEEPER_MEMORY_BANK_WRITE" ~default:true
+
 let max_memory_text_length () =
   match memory_env_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
   | None -> 4096

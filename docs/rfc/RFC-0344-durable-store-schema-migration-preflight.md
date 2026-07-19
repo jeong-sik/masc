@@ -115,7 +115,8 @@ exhaustive match만으로는 부족하다 — 새 arm이 **어느 version으로 
 ```
 v_old = load raw (v_old parser)
 rows  = transform v_old → v_new
-backup original → path.bak.<from>
+validate rows (row-count / integrity invariant vs v_old; 손실 감지 시 fatal, replace 금지)
+backup original → path.bak.<from> → fsync(backup 파일 + 그 parent dir)
 write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 ```
 

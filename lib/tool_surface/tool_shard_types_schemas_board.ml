@@ -132,13 +132,10 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: same wire-format widening as
-                           PR #19383 on [tool_execute.timeout_sec]. The
-                           board_list runtime accepts both shapes; the
-                           strict ["integer"] only fires Anthropic-SDK
-                           [correction_pipeline] coerce. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50
@@ -283,13 +280,10 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: same widening as PR #19383 / sibling
-                           sites above. No fleet evidence yet on this site
-                           (board_search), but bundled here per RFC-0088 §3
-                           N-of-M avoidance — three [limit] sites with the
-                           same defect; fix all at once. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100

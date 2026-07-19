@@ -29,12 +29,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: wire-format widening — same
-                           pattern as PR #19383 on [limit] siblings.
-                           The runtime accepts both shapes; strict
-                           ["integer"] only fires correction_pipeline. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "description", `String "Max tasks to return (default: 50)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
@@ -55,11 +53,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
             , `Assoc
                 [ ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: wire-format widening — bundled
-                           with keeper_tasks_list.limit above per
-                           RFC-0088 §3 N-of-M avoidance. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "description", `String "Max orphans to return (default: 20)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50

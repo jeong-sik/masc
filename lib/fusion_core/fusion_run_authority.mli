@@ -33,7 +33,6 @@ type error =
   | Identity_mismatch of identity
   | Registration_conflict of registration
   | Durable_append_failed of Fs_compat.durable_append_error
-  | Read_failed of Fs_compat.owned_regular_file_read_error
 type register_outcome =
   | Registered
   | Already_running

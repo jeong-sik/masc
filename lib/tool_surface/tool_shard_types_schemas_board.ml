@@ -133,17 +133,20 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
-                           Runtime coerces string->int, so strict integer is safe. *)
+                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           [limit] stays a single scalar "integer". Tool_input_validation
+                           rejects a string [limit] against this integer schema, so the
+                           description must ask for a bare integer, not a numeric string
+                           (codex #25274 P2). *)
                         ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50
                       ; ( "description"
                         , `String
-                            "Max posts to return (default: 20, max: 50). \
-                             Numeric strings are accepted; prefer the bare \
-                             integer form." )
+                            "Max posts to return (default: 20, max: 50). Must \
+                             be a bare integer (e.g. 20); a quoted value is \
+                             rejected." )
                       ] )
                 ; (* Issue #8513: derive from local mirror tracking
            [Board_dispatch.valid_sort_order_strings].  Schema used to
@@ -281,16 +284,19 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
-                           Runtime coerces string->int, so strict integer is safe. *)
+                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           [limit] stays a single scalar "integer". Tool_input_validation
+                           rejects a string [limit] against this integer schema, so the
+                           description must ask for a bare integer, not a numeric string
+                           (codex #25274 P2). *)
                         ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
                       ; ( "description"
                         , `String
-                            "Max results (default: 20, max: 100). Numeric \
-                             strings are accepted; prefer the bare integer form." )
+                            "Max results (default: 20, max: 100). Must be a \
+                             bare integer (e.g. 20); a quoted value is rejected." )
                       ] )
                 ; (* Mirror masc_board_search: the search backend
                      (board_tool_handlers.ml handle_search) already reads

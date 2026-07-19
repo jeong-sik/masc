@@ -56,15 +56,18 @@ let base_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
-                           Runtime reads via [Safe_ops.json_int]/[json_float]
-                           which coerce string->int, so strict integer is safe. *)
+                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           [limit] stays a single scalar "integer". Wire contract:
+                           Tool_input_validation rejects a string [limit] against
+                           this integer schema (OAS 0.212 strict typing) in
+                           keeper_tools_oas_handler, before Safe_ops.json_int would
+                           coerce it, so the description must ask for a bare integer,
+                           not a numeric string (codex #25274 P2). *)
                         ( "type", `String "integer" )
                       ; ( "description"
                         , `String
-                            "max results (1-10, default 5). Numeric strings \
-                             (e.g. \"5\") are accepted; prefer the bare \
-                             integer form." )
+                            "max results (1-10, default 5). Must be a bare \
+                             integer (e.g. 5); a quoted value is rejected." )
                       ] )
                 ; (* Issue #8484: derive from local mirror that tracks
            [Keeper_tool_memory_runtime.valid_memory_search_source_strings]. *)

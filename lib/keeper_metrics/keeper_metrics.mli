@@ -111,6 +111,7 @@ type t =
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
+  | CheckpointGenerationRecovered
   | EpisodeCreateFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures

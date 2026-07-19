@@ -531,8 +531,8 @@ let test_orchestrator_project_success_projects_board_chat_and_registry () =
       ; trigger = Fusion_types.Explicit_tool_call
       }
     in
-    let deliberation : Fusion_orchestrator.deliberation =
-      { panel; judge = Ok synthesis; judges; judge_usage }
+    let deliberation : Fusion_types.deliberation_evidence =
+      { question; panel; judge = Ok synthesis; judges; judge_usage }
     in
     (match
        Fusion_orchestrator.project ~base_dir ~topology:Fusion_types.Simple ~request

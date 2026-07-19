@@ -275,10 +275,12 @@ let test_settled_root_tolerates_stale_pending_snapshot () =
      | Ok partitions -> partitions
      | Error detail -> Alcotest.fail detail
       : P.t list);
-  let replayed = ensure ~base_path [ pending_snapshot ] in
-  match replayed with
-  | [ { state = P.Settled _; _ } ] -> ()
-  | _ -> Alcotest.fail "stale Pending snapshot recreated or rejected a settled root"
+  let appended = ensure ~base_path [ pending_snapshot ] in
+  Alcotest.(check int) "settled root is not appended again" 0 (List.length appended);
+  match P.load ~base_path ~keeper_name:"partition-keeper" with
+  | Ok [ { state = P.Settled _; _ } ] -> ()
+  | Ok _ -> Alcotest.fail "stale Pending snapshot recreated a settled root"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 let test_claim_order_uses_candidate_recorded_identity () =
@@ -528,6 +530,9 @@ let test_provider_failure_defers_until_process_start_recovery () =
    | Ok (P.Partition_deferred { state = P.Deferred _; _ }) -> ()
    | Ok _ -> Alcotest.fail "provider failure did not defer"
    | Error detail -> Alcotest.fail detail);
+  let next = candidate 2 in
+  record_all ~base_path [ next ];
+  ignore (ensure ~base_path [ next ] : P.t list);
   let unrelated =
     match P.claim_next ~now:121.0 ~worker_epoch ~base_path ~keeper_name:"partition-keeper" with
     | Ok (Some unrelated) ->

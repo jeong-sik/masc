@@ -192,16 +192,16 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 36 |  |
 | `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 39 |  |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 42 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 109 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 105 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 118 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 123 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 119 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 132 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
 | `MASC_MAINTENANCE_PULSE_INTERVAL_SEC` | typed:float | Runtime | operator | 55 | Maintenance Pulse interval (seconds). Controls the orphan-observation and channel-dedup consumers. Clamped to >= 1.0 ... |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 96 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 90 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 82 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 110 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
+| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 104 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 96 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 8 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 12 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 75 |  |
+| `MASC_SCHEDULE_RUNNER_INTERVAL_SEC` | typed:float | unclassified | unclassified | 89 |  |
 
 ## Env_config_sandbox (15 knobs; typed classification 1/14)
 

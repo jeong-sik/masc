@@ -109,10 +109,13 @@ let parse_events content =
       | line :: rest ->
         let parsed =
           try
-            Yojson.Safe.from_string line
-            |> persisted_record_of_yojson
-            |> Result.map_error (fun detail -> Invalid_record { line = line_number; detail })
-            |> Result.bind (fun record ->
+            let parsed =
+              Yojson.Safe.from_string line
+              |> persisted_record_of_yojson
+              |> Result.map_error (fun detail ->
+                Invalid_record { line = line_number; detail })
+            in
+            Result.bind parsed (fun record ->
               if Int.equal record.schema_version schema_version
               then Ok record.event
               else

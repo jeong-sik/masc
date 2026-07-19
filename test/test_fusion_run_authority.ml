@@ -97,8 +97,11 @@ let test_exact_lifecycle_and_validation () =
    | Ok A.First_committed -> ()
    | _ -> fail "first terminal must commit");
   (match register store ~keeper:"k" ~run_id:"r" ~preset:"p" ~started_at:3. with
-   | Ok (A.Already_registered (A.Computation_committed_run (_, phase))) ->
-     check bool "settled retry returns winner" true (A.equal_phase winner phase)
+   | Ok (A.Already_registered (A.Computation_committed_run (_, evidence))) ->
+     check bool
+       "settled retry returns winner"
+       true
+       (A.equal_phase winner (A.Computation_committed evidence))
    | _ -> fail "settled registration retry could start another run");
   (match A.commit_phase restarted ~keeper:"k" ~run_id:"r" winner with
    | Ok A.Already_same -> ()
@@ -134,8 +137,11 @@ let test_exact_lifecycle_and_validation () =
   (match
      register restarted ~keeper:"k" ~run_id:"typed-failure" ~preset:"p" ~started_at:4.
    with
-   | Ok (A.Already_registered (A.Computation_committed_run (_, phase))) ->
-     check bool "typed failure survives restart" true (A.equal_phase typed_failure phase)
+   | Ok (A.Already_registered (A.Computation_committed_run (_, evidence))) ->
+     check bool
+       "typed failure survives restart"
+       true
+       (A.equal_phase typed_failure (A.Computation_committed evidence))
    | _ -> fail "typed failure terminal was not reloaded exactly");
   match A.commit_phase store ~keeper:"k" ~run_id:"missing"
           (A.Stopped_without_computation (A.Cancelled "shutdown")) with
@@ -274,9 +280,9 @@ let test_restart_scan_preserves_valid_peers_and_corruption () =
   check bool "settled terminal survives scan" true
     (List.exists
        (function
-         | A.Computation_committed_run (registration, phase) ->
+         | A.Computation_committed_run (registration, evidence) ->
            String.equal registration.replay.request.run_id "settled"
-           && A.equal_phase winner phase
+           && A.equal_phase winner (A.Computation_committed evidence)
          | A.Registered_run _ | A.Stopped_without_computation_run _ -> false)
        valid_runs)
 ;;

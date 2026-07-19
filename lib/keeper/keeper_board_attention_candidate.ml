@@ -703,7 +703,7 @@ let ledger_rewrite_observer : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())
 ;;
 
-let update_ledger_many ~base_path ~keeper_name decide =
+let update_ledger_many ?(move_updated_to_back = false) ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
   (* Compact on write: a committed change rewrites the ledger as the deduped
      latest-per-id set (via [latest_candidates]) instead of appending one row.
@@ -723,7 +723,21 @@ let update_ledger_many ~base_path ~keeper_name decide =
            | Error _ as error -> None, error
            | Ok (None, result) -> None, Ok result
            | Ok (Some updated, result) ->
-             let compacted = latest_candidates (candidates @ updated) in
+             let compacted =
+               if move_updated_to_back
+               then
+                 let updated_ids =
+                   List.fold_left
+                     (fun ids candidate -> Id_set.add candidate.candidate_id ids)
+                     Id_set.empty
+                     updated
+                 in
+                 List.filter
+                   (fun candidate -> not (Id_set.mem candidate.candidate_id updated_ids))
+                   candidates
+                 @ updated
+               else latest_candidates (candidates @ updated)
+             in
              Some (serialize_candidates compacted), Ok result))
     with
     | Error error -> Error error
@@ -780,7 +794,13 @@ let update_candidate ~base_path candidate_id keeper_name transition =
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
-let update_candidate_batch ~base_path ~keeper_name candidates transition =
+let update_candidate_batch
+      ?(move_updated_to_back = false)
+      ~base_path
+      ~keeper_name
+      candidates
+      transition
+  =
   let requested =
     List.fold_left
       (fun result candidate ->
@@ -792,7 +812,7 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
       candidates
   in
   let* requested = requested in
-  update_ledger_many ~base_path ~keeper_name (fun current_rows ->
+  update_ledger_many ~move_updated_to_back ~base_path ~keeper_name (fun current_rows ->
     let found, updated_rows, selected =
       List.fold_left
         (fun (found, updated_rows, selected) current ->
@@ -801,7 +821,9 @@ let update_candidate_batch ~base_path ~keeper_name candidates transition =
            else
              let next = transition current in
              ( Id_set.add current.candidate_id found
-             , (if next = current then updated_rows else next :: updated_rows)
+             , (if next = current && not move_updated_to_back
+                then updated_rows
+                else next :: updated_rows)
              , Candidate_map.add current.candidate_id next selected ))
         (Id_set.empty, [], Candidate_map.empty)
         current_rows
@@ -1238,10 +1260,19 @@ let record_batch_failures ~base_path candidates failure =
   | first :: _ ->
     (match
        update_candidate_batch
+         ~move_updated_to_back:true
          ~base_path
          ~keeper_name:first.keeper_name
          candidates
-         (fun current -> candidate_with_retryable_failure current failure)
+         (fun current ->
+            match current.status with
+            | Pending _ ->
+              { current with status = Pending { last_failure = Some failure } }
+            | Judged judged ->
+              { current with
+                status = Judged { judged with last_failure = Some failure }
+              }
+            | Consumed _ -> current)
      with
      | Ok _ -> Ok ()
      | Error detail ->
@@ -1278,96 +1309,90 @@ let delivery_of_judgment judgment =
   | Keeper_board_attention_judgment.Relevant -> Enqueued_to_keeper_lane
 ;;
 
-let enqueue_batch_deliveries ~base_path candidates =
-  List.fold_left
-    (fun result candidate ->
-       let* () = result in
-       match candidate.status with
-       | Judged judged ->
-         (match judged.judgment.verdict.decision with
-          | Keeper_board_attention_judgment.Not_relevant -> Ok ()
-          | Keeper_board_attention_judgment.Relevant ->
-            let stimulus = board_attention_stimulus candidate in
-            (match
-               Keeper_registry_event_queue.enqueue_if_missing_durable_result
-                 ~base_path
-                 ~event_id:candidate.candidate_id
-                 candidate.keeper_name
-                 stimulus
-             with
-             | Keeper_registry_event_queue.Enqueued
-             | Keeper_registry_event_queue.Already_present -> Ok ()
-             | Keeper_registry_event_queue.Identity_conflict detail
-             | Keeper_registry_event_queue.Storage_error detail -> Error detail))
+type batch_consumption =
+  | Delivery_complete of int
+  | Delivery_blocked of
+      { consumed : int
+      ; remaining : int
+      }
+
+let deliver_judged ~base_path candidate judged =
+  let* () =
+    match judged.judgment.verdict.decision with
+    | Keeper_board_attention_judgment.Not_relevant -> Ok ()
+    | Keeper_board_attention_judgment.Relevant ->
+      let stimulus = board_attention_stimulus candidate in
+      (match
+         Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:candidate.candidate_id
+           candidate.keeper_name
+           stimulus
+       with
+       | Keeper_registry_event_queue.Enqueued
+       | Keeper_registry_event_queue.Already_present -> Ok ()
+       | Keeper_registry_event_queue.Identity_conflict detail
+       | Keeper_registry_event_queue.Storage_error detail -> Error detail)
+  in
+  mark_consumed ~base_path candidate judged.judgment (delivery_of_judgment judged.judgment)
+;;
+
+(* Delivery is committed candidate-by-candidate before control returns to the
+   owner lane, so an earlier durable enqueue cannot be acknowledged while its
+   ledger row still waits behind a later failing candidate. *)
+let consume_judged_batch ~base_path candidates =
+  let rec loop consumed wake_candidate = function
+    | [] ->
+      (match wake_candidate with
+       | None -> ()
+       | Some candidate ->
+         let (_ : Keeper_registry.wakeup_outcome) =
+           request_owner_wake ~site:"durable_batch_delivery" ~base_path candidate
+         in
+         ());
+      Ok (Delivery_complete consumed)
+    | candidate :: rest ->
+      (match candidate.status with
+       | Consumed _ -> loop consumed wake_candidate rest
        | Pending _ ->
          Error
            (Printf.sprintf
               "candidate %s was not durably judged before batch delivery"
               candidate.candidate_id)
-       | Consumed _ -> Ok ())
-    (Ok ())
-    candidates
-;;
-
-(* The candidate ledger and Keeper event queue are separate durable files, so
-   pretending they share one atomic transaction would create an unprovable
-   exactly-once boundary. The caller first commits every verdict as [Judged].
-   This function then performs idempotent event enqueues and commits every
-   [Consumed] row together. A crash between those steps replays from [Judged];
-   event identity makes the enqueue replay safe. *)
-let consume_judged_batch ~base_path candidates =
-  match candidates with
-  | [] -> Ok (0, 0)
-  | first :: _ ->
-    (match enqueue_batch_deliveries ~base_path candidates with
-     | Error detail ->
-       let delivery_failure = failure ~kind:Durable_delivery_unavailable detail in
-       let* () = record_batch_failures ~base_path candidates delivery_failure in
-       Ok (0, List.length candidates)
-     | Ok () ->
-       let consumed_at = Time_compat.now () in
-       let* current =
-         update_candidate_batch
-           ~base_path
-           ~keeper_name:first.keeper_name
-           candidates
-           (fun candidate ->
-              match candidate.status with
-              | Judged judged ->
-                { candidate with
-                  status =
-                    Consumed
-                      { judgment = judged.judgment
-                      ; delivery = delivery_of_judgment judged.judgment
-                      ; consumed_at
-                      }
-                }
-              | Pending _ | Consumed _ -> candidate)
-       in
-       let consumed, remaining, wake_candidate =
-         List.fold_left
-           (fun (consumed, remaining, wake_candidate) candidate ->
-              match candidate.status with
-              | Consumed { delivery = Enqueued_to_keeper_lane; _ } ->
-                ( consumed + 1
-                , remaining
-                , (match wake_candidate with
-                   | Some _ -> wake_candidate
-                   | None -> Some candidate) )
-              | Consumed { delivery = Not_relevant; _ } ->
-                consumed + 1, remaining, wake_candidate
-              | Pending _ | Judged _ -> consumed, remaining + 1, wake_candidate)
-           (0, 0, None)
-           current
-       in
-       (match wake_candidate with
-        | None -> ()
-        | Some candidate ->
-          let (_ : Keeper_registry.wakeup_outcome) =
-            request_owner_wake ~site:"durable_batch_delivery" ~base_path candidate
-          in
-          ());
-       Ok (consumed, remaining))
+       | Judged judged ->
+         (match deliver_judged ~base_path candidate judged with
+          | Ok consumed_candidate ->
+            (match consumed_candidate.status with
+             | Consumed { delivery = Enqueued_to_keeper_lane; _ } ->
+               let wake_candidate =
+                 match wake_candidate with
+                 | Some _ -> wake_candidate
+                 | None -> Some consumed_candidate
+               in
+               loop (consumed + 1) wake_candidate rest
+             | Consumed { delivery = Not_relevant; _ } ->
+               loop (consumed + 1) wake_candidate rest
+             | Pending _ | Judged _ ->
+               Error
+                 (Printf.sprintf
+                    "candidate %s did not commit delivery completion"
+                    candidate.candidate_id))
+          | Error detail ->
+            let delivery_failure =
+              failure ~kind:Durable_delivery_unavailable detail
+            in
+            let remaining_candidates = candidate :: rest in
+            let* () =
+              record_batch_failures
+                ~base_path
+                remaining_candidates
+                delivery_failure
+            in
+            Ok
+              (Delivery_blocked
+                 { consumed; remaining = List.length remaining_candidates })))
+  in
+  loop 0 None candidates
 ;;
 
 let validate_batch_coverage batch judgments =
@@ -1411,17 +1436,22 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   in
   (* Already-judged verdicts deliver without new model calls. *)
   let judged_candidates = List.map fst judged_ready in
-  let* judged_consumed, judged_remaining =
-    consume_judged_batch ~base_path judged_candidates
+  let* judged_delivery = consume_judged_batch ~base_path judged_candidates in
+  let judged_consumed, judged_remaining, judged_blocked =
+    match judged_delivery with
+    | Delivery_complete consumed -> consumed, 0, false
+    | Delivery_blocked { consumed; remaining } -> consumed, remaining, true
   in
   (* A single owner admission performs at most one provider call, and that
      call contains one exact persisted Keeper context. Other contexts and
      capacity overflow remain durable for a later admission. *)
   let batch, deferred = select_context_batch (List.rev pending) in
   let* batch_report =
-    match batch with
-    | [] -> Ok { attempted = 0; consumed = 0; remaining = 0 }
-    | _ ->
+    match judged_blocked, batch with
+    | true, _ ->
+      Ok { attempted = 0; consumed = 0; remaining = List.length pending }
+    | false, [] -> Ok { attempted = 0; consumed = 0; remaining = 0 }
+    | false, _ ->
       (match judge_batch batch with
        | Error failure ->
          let* () = record_batch_failures ~base_path batch failure in
@@ -1441,16 +1471,23 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
               }
           | Ok () ->
             let* judged = record_batch_judgments ~base_path batch judgments in
-            let* consumed, remaining = consume_judged_batch ~base_path judged in
+            let* delivery = consume_judged_batch ~base_path judged in
+            let consumed, remaining, delivery_blocked =
+              match delivery with
+              | Delivery_complete consumed -> consumed, 0, false
+              | Delivery_blocked { consumed; remaining } ->
+                consumed, remaining, true
+            in
             let remaining = remaining + List.length deferred in
             let continuation_candidate =
-              match deferred with
-              | candidate :: _ -> Some candidate
-              | [] when remaining > 0 ->
+              match delivery_blocked, deferred with
+              | true, _ -> None
+              | false, candidate :: _ -> Some candidate
+              | false, [] when remaining > 0 ->
                 (match judged with
                  | candidate :: _ -> Some candidate
                  | [] -> None)
-              | [] -> None
+              | false, [] -> None
             in
             (match continuation_candidate with
              | None -> ()

@@ -843,7 +843,7 @@ let test_successful_drain_runs_one_provider_batch_per_admission () =
          (Atomic.get entry.fiber_wakeup))
 ;;
 
-let test_successful_batch_uses_two_candidate_ledger_rewrites () =
+let test_successful_batch_commits_each_delivery_before_return () =
   with_temp_base "board-attention-atomic-batch" @@ fun base_path ->
   let keeper_name = "sangsu" in
   List.iter
@@ -871,8 +871,8 @@ let test_successful_batch_uses_two_candidate_ledger_rewrites () =
        in
        Alcotest.(check int) "whole batch consumed" A.batch_max_candidates report.consumed;
        Alcotest.(check int)
-         "one judgment commit plus one consumed commit"
-         2
+         "one judgment commit plus one commit per delivery"
+         (A.batch_max_candidates + 1)
          !rewrites;
        let queued =
          Keeper_event_queue_persistence.load ~base_path ~keeper_name
@@ -927,6 +927,166 @@ let test_batch_delivery_failure_preserves_all_judgments () =
          | A.Pending _ | A.Judged _ | A.Consumed _ ->
            Alcotest.fail "batch delivery failure lost a durable judgment")
       candidates
+;;
+
+let test_partial_delivery_commits_before_later_failure () =
+  with_temp_base "board-attention-partial-delivery" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let first =
+    record_or_fail
+      ~base_path
+      (candidate ~keeper_name ~signal:(signal ~post_id:"post-first" ()) ())
+  in
+  let second =
+    record_or_fail
+      ~base_path
+      (candidate ~keeper_name ~signal:(signal ~post_id:"post-second" ()) ())
+  in
+  let conflict : Keeper_event_queue.stimulus =
+    { post_id = "conflict"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 99.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  (match
+     Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+       ~base_path
+       ~event_id:second.candidate_id
+       keeper_name
+       conflict
+   with
+   | Masc.Keeper_registry_event_queue.Enqueued -> ()
+   | _ -> Alcotest.fail "conflicting delivery fixture was not enqueued");
+  let report =
+    match
+      A.For_testing.drain_pending_with_judge_batch
+        ~base_path
+        ~keeper_name
+        ~judge_batch:all_relevant
+    with
+    | Ok report -> report
+    | Error detail -> Alcotest.failf "partial delivery drain failed: %s" detail
+  in
+  Alcotest.(check int) "first delivery committed" 1 report.consumed;
+  Alcotest.(check int) "failed delivery remains" 1 report.remaining;
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error detail -> Alcotest.failf "candidate load failed: %s" detail
+  | Ok candidates ->
+    let status candidate =
+      List.find_opt
+        (fun (current : A.candidate) ->
+           String.equal current.candidate_id candidate.A.candidate_id)
+        candidates
+      |> Option.map (fun (current : A.candidate) -> current.status)
+    in
+    (match status first with
+     | Some (A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }) -> ()
+     | Some (A.Consumed _ | A.Pending _ | A.Judged _) | None ->
+       Alcotest.fail "earlier durable enqueue was not committed");
+    (match status second with
+     | Some
+         (A.Judged
+           { last_failure = Some { kind = A.Durable_delivery_unavailable; _ }
+           ; _
+           }) ->
+       ()
+     | Some (A.Consumed _ | A.Pending _ | A.Judged _) | None ->
+       Alcotest.fail "later failed delivery did not remain retryable")
+;;
+
+let test_delivery_failure_does_not_request_immediate_retry () =
+  with_temp_base "board-attention-delivery-backoff" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let entry = Registry.register ~base_path keeper_name (meta keeper_name) in
+  Fun.protect
+    ~finally:(fun () -> Registry.unregister ~base_path keeper_name)
+    (fun () ->
+       let persisted = record_or_fail ~base_path (candidate ~keeper_name ()) in
+       let conflict : Keeper_event_queue.stimulus =
+         { post_id = "conflict"
+         ; urgency = Keeper_event_queue.Normal
+         ; arrived_at = 99.0
+         ; payload = Keeper_event_queue.Bootstrap
+         }
+       in
+       (match
+          Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+            ~base_path
+            ~event_id:persisted.candidate_id
+            keeper_name
+            conflict
+        with
+        | Masc.Keeper_registry_event_queue.Enqueued -> ()
+        | _ -> Alcotest.fail "conflicting delivery fixture was not enqueued");
+       Atomic.set entry.fiber_wakeup false;
+       let report =
+         match
+           A.For_testing.drain_pending_with_judge_batch
+             ~base_path
+             ~keeper_name
+             ~judge_batch:all_relevant
+         with
+         | Ok report -> report
+         | Error detail -> Alcotest.failf "delivery failure drain failed: %s" detail
+       in
+       Alcotest.(check int) "failed delivery remains" 1 report.remaining;
+       Alcotest.(check bool)
+         "delivery outage waits for heartbeat retry"
+         false
+         (Atomic.get entry.fiber_wakeup))
+;;
+
+let test_failed_context_rotates_behind_untried_context () =
+  with_temp_base "board-attention-context-rotation" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let first =
+    record_or_fail
+      ~base_path
+      (candidate
+         ~keeper_name
+         ~instructions:"context-a"
+         ~signal:(signal ~post_id:"post-a" ())
+         ())
+  in
+  let second =
+    record_or_fail
+      ~base_path
+      (candidate
+         ~keeper_name
+         ~instructions:"context-b"
+         ~signal:(signal ~post_id:"post-b" ())
+         ())
+  in
+  let first_attempt = ref [] in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable; detail = "deterministic failure"; failed_at = 100.0 }
+  in
+  let run judge_batch =
+    match A.For_testing.drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch with
+    | Ok report -> report
+    | Error detail -> Alcotest.failf "context rotation drain failed: %s" detail
+  in
+  ignore
+    (run (fun candidates ->
+       first_attempt := List.map (fun (candidate : A.candidate) -> candidate.candidate_id) candidates;
+       Error failure)
+     : A.drain_report);
+  let second_attempt = ref [] in
+  ignore
+    (run (fun candidates ->
+       second_attempt :=
+         List.map (fun (candidate : A.candidate) -> candidate.candidate_id) candidates;
+       all_not_relevant candidates)
+     : A.drain_report);
+  Alcotest.(check (list string))
+    "oldest cohort attempted first"
+    [ first.candidate_id ]
+    !first_attempt;
+  Alcotest.(check (list string))
+    "failed cohort persisted behind deferred context"
+    [ second.candidate_id ]
+    !second_attempt
 ;;
 
 let test_batch_never_mixes_persisted_keeper_contexts () =
@@ -1117,13 +1277,25 @@ let () =
             `Quick
             test_successful_drain_runs_one_provider_batch_per_admission
         ; Alcotest.test_case
-            "successful batch uses two candidate-ledger rewrites"
+            "successful batch commits each delivery before return"
             `Quick
-            test_successful_batch_uses_two_candidate_ledger_rewrites
+            test_successful_batch_commits_each_delivery_before_return
         ; Alcotest.test_case
             "batch delivery failure preserves all judgments"
             `Quick
             test_batch_delivery_failure_preserves_all_judgments
+        ; Alcotest.test_case
+            "partial delivery commits before later failure"
+            `Quick
+            test_partial_delivery_commits_before_later_failure
+        ; Alcotest.test_case
+            "delivery failure does not request immediate retry"
+            `Quick
+            test_delivery_failure_does_not_request_immediate_retry
+        ; Alcotest.test_case
+            "failed context rotates behind untried context"
+            `Quick
+            test_failed_context_rotates_behind_untried_context
         ; Alcotest.test_case
             "batch never mixes persisted Keeper contexts"
             `Quick

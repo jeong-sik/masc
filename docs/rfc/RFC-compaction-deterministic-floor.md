@@ -170,13 +170,41 @@ blocks, so dropping User/Assistant ordinary units keeps the tool counts invarian
 and passes evidence. This is why the floor's drop set is exactly
 "middle `Ordinary_message` User/Assistant units".
 
-### 2.1.2 Why positional head protection is required
+### 2.1.2 Protecting the setup and the goal
 
 `partition` only protects a trailing *open* tool cycle as `protected_suffix`; the
-entire rest of the conversation, **including the leading system prompt / first
-goal at index 0**, lands in `closed_prefix`. A naive "drop the oldest units"
-floor would therefore drop the foundational setup. The head window protects it
-positionally without needing role classification of the leading messages.
+entire rest of the conversation, **including the leading system prompt and the
+first User goal**, lands in `closed_prefix`. A naive "drop the oldest units"
+floor would therefore drop the foundational setup. Two protections cover this:
+
+- a positional **head window** (`floor_protected_head_units`) for the leading
+  setup, and
+- **explicit protection of the first User unit** (`first_user_goal_index`) — the
+  OAS goal. A fixed head window alone does not suffice: if System/setup units
+  precede the goal, it can sit just past the window and be dropped (review
+  #25281 P1.2). Protecting its exact index guarantees the goal survives wherever
+  it is.
+
+### 2.1.3 What the reduction guarantees (and what it does not)
+
+The floor reduces the checkpoint to
+`{protected head + first goal + tail recency + all non-droppable units}` — the
+smallest set a **unit-granular** keep/drop plan can produce. This is not an
+unconditional "fits under the provider window" guarantee: if that minimal set
+*alone* still exceeds the window (a single oversized message/unit), **no
+keep/drop plan — deterministic or LLM — can fit it**. That residual needs
+message-*content* truncation, a different mechanism, out of scope here (review
+#25281 P1.1). Two consequences:
+
+- The downstream guard (`Structurally_unchanged` / `Checkpoint_not_reduced`)
+  only asserts `after < before`, so a floor commit can still exceed the window in
+  the pathological single-oversized-unit case. Every *non-pathological* overflow,
+  though, makes progress: each turn's newly accumulated middle is droppable, so
+  the floor converges rather than deadlocking on identical input.
+- Deriving the head/tail windows from the token budget (RFC §6) would let the
+  floor keep *more* recency when there is room. That improves recency quality; it
+  does **not** change the reduction guarantee, which is bounded by unit
+  granularity, not by the window being fixed vs budget-derived.
 
 ### 2.2 Where the floor engages
 

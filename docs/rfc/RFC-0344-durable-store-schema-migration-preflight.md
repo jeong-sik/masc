@@ -24,7 +24,7 @@ durable store schema version bump이 배포 경계에서 데이터 유실 또는
 | #25078 | event queue | v2→v3 | hard-cut, 라이브 migration 없이 배포 | 16/16 keeper boot 거부 |
 | #25197 | reaction ledger | same-generation(v3) | hard-cut | 배포 경계 livelock (v4 bump로 우회) |
 | #25231 | fusion terminal codec | shape 변경 | hard-cut | 구 `{ok,resolved_answer}` 행 디코드 불가 (compat read로 우회) |
-| #25135 (OPEN) | gate approval order | v2→v3 | hard-cut | 라이브 `~/.masc/gate/pending.json`(version=2, 367 durable HITL 레코드) exact-reject → store Unavailable → HITL Gate silent outage |
+| #25135 (OPEN) | gate approval order | v2→v3 | hard-cut | 라이브 `<base-path>/.masc/gate/pending.json`(version=2, 367 durable HITL 레코드) exact-reject → store Unavailable → HITL Gate silent outage |
 
 공통 근본: 각 store가 version bump 시 (a) migration 도구 또는 (b) generation-bump(경로 분리) 중 하나를 **타입 수준에서 강제받지 않는다**. 현재는 주석(`keeper_reaction_ledger.ml`의 "namespace and row schema advance together")으로만 규율되고 컴파일러가 미강제 → 매번 hand-decision, 매번 라이브 state 확인 누락.
 

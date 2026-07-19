@@ -2222,6 +2222,28 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let base_path = Filename.temp_file "masc-multimodal-runtime-" ".dir" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Eio.Path.rmtree
+        ~missing_ok:true
+        Eio.Path.(Eio.Stdenv.fs env / base_path))
+  @@ fun () ->
+  (match
+     Runtime_oas_execution.initialize
+       ~sw
+       ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+       ~fs:(Eio.Stdenv.fs env)
+       ~base_path
+       ~domain_count:1
+   with
+   | Ok () -> ()
+   | Error error ->
+     fail (Runtime_oas_execution.init_error_to_string error));
+  let checkpoint_sink (_ : Agent_sdk.Agent.checkpoint_snapshot) = Ok () in
+  let terminal_checkpoint_sink (_ : Agent_sdk.Checkpoint.t) = Ok () in
   let config =
     Runtime_agent.default_config
       ~name:"multimodal-runtime-proof"
@@ -2231,7 +2253,9 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
   in
   let config =
     { config with
-      session_id = Some "multimodal-runtime-proof-session";
+      session_id = Some "multimodal-runtime-proof-session"
+    ; checkpoint_sink = Some checkpoint_sink
+    ; terminal_checkpoint_sink = Some terminal_checkpoint_sink
     }
   in
   let agent_ref = ref None in

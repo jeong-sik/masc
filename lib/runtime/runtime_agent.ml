@@ -15,7 +15,6 @@ type oas_tool_projector =
 
 let oas_tool_of_masc_hook : oas_tool_projector option ref = ref None
 let set_oas_tool_of_masc_hook f = oas_tool_of_masc_hook := Some f
-let recovery_without_checkpoint_warning_emitted = Atomic.make false
 
 let oas_tool_hook_unset_error () =
   Agent_sdk.Error.Internal
@@ -131,8 +130,7 @@ type execution_settlement =
   { prepared : Runtime_oas_execution.prepared
   ; checkpoint : Agent_sdk.Checkpoint.t
   ; persist_terminal_checkpoint :
-      (Agent_sdk.Checkpoint.t -> (unit, string) result) option
-  ; durable : bool
+      Agent_sdk.Checkpoint.t -> (unit, string) result
   ; state : execution_settlement_state ref
   }
 
@@ -149,40 +147,27 @@ let settle_execution settlement =
   | Settled -> Ok ()
   | Failed error -> Error error
   | Pending ->
-    match settlement.durable, settlement.persist_terminal_checkpoint with
-    | true, None ->
-      Runtime_oas_execution.retain_failure settlement.prepared;
-      let error =
-        (Agent_sdk.Error.Internal
-           "durable OAS execution has no terminal checkpoint settlement sink")
-      in
-      settlement.state := Failed error;
-      Error error
-    | false, None ->
-      settlement.state := Settled;
-      Ok ()
-    | _, Some persist ->
-      (match
-         Runtime_oas_execution.finish_checkpoint
-           settlement.prepared
-           settlement.checkpoint
-       with
-       | Error error ->
-         let error =
-           (Agent_sdk.Error.Internal
-              (Runtime_oas_execution.finish_error_to_string error))
-         in
-         settlement.state := Failed error;
-         Error error
-       | Ok checkpoint ->
-         (match persist checkpoint with
-          | Ok () ->
-            settlement.state := Settled;
-            Ok ()
-          | Error detail ->
-            Error
-              (Agent_sdk.Error.Internal
-                 ("terminal OAS checkpoint settlement failed: " ^ detail))))
+    (match
+       Runtime_oas_execution.finish_checkpoint
+         settlement.prepared
+         settlement.checkpoint
+     with
+     | Error error ->
+       let error =
+         (Agent_sdk.Error.Internal
+            (Runtime_oas_execution.finish_error_to_string error))
+       in
+       settlement.state := Failed error;
+       Error error
+     | Ok checkpoint ->
+       (match settlement.persist_terminal_checkpoint checkpoint with
+        | Ok () ->
+          settlement.state := Settled;
+          Ok ()
+        | Error detail ->
+          Error
+            (Agent_sdk.Error.Internal
+               ("terminal OAS checkpoint settlement failed: " ^ detail))))
 ;;
 
 type run_result = {
@@ -1073,6 +1058,34 @@ let config_with_boundary_response_capture
   { config with hooks = Some hooks }
 ;;
 
+let required_execution_recovery_config (config : config) =
+  let invalid field detail =
+    Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail }))
+  in
+  match config.session_id, config.checkpoint_sink, config.terminal_checkpoint_sink with
+  | None, _, _ ->
+    invalid
+      "runtime_agent.session_id"
+      "a caller-owned stable session id is required for durable OAS execution"
+  | Some "", _, _ ->
+    invalid
+      "runtime_agent.session_id"
+      "the durable OAS execution session id must not be empty"
+  | Some _, None, _ ->
+    invalid
+      "runtime_agent.checkpoint_sink"
+      "a mutation-boundary checkpoint sink is required for durable OAS execution"
+  | Some _, Some _, None ->
+    invalid
+      "runtime_agent.terminal_checkpoint_sink"
+      "a consumer-settlement checkpoint sink is required for durable OAS execution"
+  | Some session_id, Some _, Some terminal_checkpoint_sink ->
+    Ok
+      ( session_id
+      , "runtime-agent:v1:" ^ session_id
+      , terminal_checkpoint_sink )
+;;
+
 let run_blocks
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1094,6 +1107,9 @@ let run_blocks
   with
   | Error _ as err -> err
   | Ok () ->
+  (match required_execution_recovery_config config with
+   | Error _ as err -> err
+   | Ok (session_id, recovery_key, terminal_checkpoint_sink) ->
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with
@@ -1104,14 +1120,6 @@ let run_blocks
     match goal_detail with
     | Some detail -> detail
     | None -> content_blocks_detail goal_blocks
-  in
-  let session_id = match config.session_id with
-    | Some id -> id
-    | None ->
-      Printf.sprintf "%s-%d-%06x"
-        config.name
-        (int_of_float (Time_compat.now () *. 1000.0))
-        (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
   in
   (match config.transport with
   | Masc_grpc_transport.Local -> ()
@@ -1139,21 +1147,6 @@ let run_blocks
       ();
     Error e
   | Ok agent ->
-  let recovery_key =
-    match config.session_id with
-    | None -> None
-    | Some "" -> Some ""
-    | Some stable_id -> Some ("runtime-agent:v1:" ^ stable_id)
-  in
-  (match config.session_id, config.checkpoint_sink with
-   | Some _, None
-     when Atomic.compare_and_set
-            recovery_without_checkpoint_warning_emitted
-            false
-            true ->
-     Log.Misc.warn
-       "oas_worker: stable session id has no mutation-boundary checkpoint sink; durable execution will fail closed after a crash but cannot automatically resume"
-   | None, _ | Some _, Some _ | Some _, None -> ());
   (match Runtime_oas_execution.prepare ~sw ~recovery_key agent with
    | Error error ->
      let detail = Runtime_oas_execution.prepare_error_to_string error in
@@ -1243,7 +1236,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
-                   ?execution_store
+                   ~execution_store
                    ~on_event:cb
                    agent
                    goal_blocks
@@ -1253,7 +1246,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
-                   ?execution_store
+                   ~execution_store
                    agent
                    goal_blocks)
               |> Result.map (fun response -> `Completed response)
@@ -1291,7 +1284,7 @@ let run_blocks
                   ?clock
                   ?on_yield
                   ?on_resume
-                  ?execution_store
+                  ~execution_store
                   ~api_strategy
                   ~on_tool_boundary
                   agent
@@ -1337,8 +1330,7 @@ let run_blocks
     let execution_settlement =
       { prepared = prepared_execution
       ; checkpoint = terminal_checkpoint
-      ; persist_terminal_checkpoint = config.terminal_checkpoint_sink
-      ; durable = Option.is_some execution_store
+      ; persist_terminal_checkpoint = terminal_checkpoint_sink
       ; state = ref (if !execution_terminal_handled then Settled else Pending)
       }
     in
@@ -1503,7 +1495,7 @@ let run_blocks
         ; transport_error_kind = transport_error_kind_of_exception exn
         }
     in
-    Error (Keeper_internal_error.sdk_error_of_masc_internal_error typed_internal_error)))
+    Error (Keeper_internal_error.sdk_error_of_masc_internal_error typed_internal_error))))
 
 let run
     ~(sw : Eio.Switch.t)

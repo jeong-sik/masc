@@ -4,6 +4,7 @@ type init_error =
   | Storage_root_failed of string
 
 type prepare_error =
+  | Runtime_not_initialized
   | Runtime_released of { base_path : string }
   | Invalid_recovery_key
   | Recovery_key_already_active
@@ -33,7 +34,7 @@ type lifecycle =
   | Active of active
   | Released of { base_path : string }
 
-type durable_prepared =
+type prepared =
   { owner : active
   ; recovery_key : string
   ; context : Agent_sdk.Context.t
@@ -45,10 +46,6 @@ type durable_prepared =
   ; store : Agent_sdk.Agent.execution_store
   }
 
-type prepared =
-  | Compatibility
-  | Durable of durable_prepared
-
 module Storage = Runtime_oas_execution_storage
 
 exception Operation_failed of string
@@ -59,7 +56,6 @@ let require_ok = function
 ;;
 
 let lifecycle = Atomic.make Never_initialized
-let compatibility_warning_emitted = Atomic.make false
 let context_key = "masc.oas_execution.v1"
 let record_schema = "masc.oas-execution-recovery.v1"
 let max_record_bytes = 1024 * 1024
@@ -74,6 +70,8 @@ let init_error_to_string = function
 ;;
 
 let prepare_error_to_string = function
+  | Runtime_not_initialized ->
+    "OAS execution runtime is not initialized; refusing non-durable fallback"
   | Runtime_released { base_path } ->
     Printf.sprintf
       "OAS execution runtime for %s has been released; refusing non-durable fallback"
@@ -239,11 +237,6 @@ let remove_slot slots_root slot_path =
   Storage.remove_file ~parent:slots_root slot_path
 ;;
 
-let warn_compatibility detail =
-  if Atomic.compare_and_set compatibility_warning_emitted false true
-  then Log.Misc.warn "OAS durable execution disabled for this caller: %s" detail
-;;
-
 let release_key prepared =
   Eio.Mutex.use_rw ~protect:true prepared.owner.state_mu (fun () ->
     Hashtbl.remove prepared.owner.active_keys prepared.recovery_key)
@@ -384,17 +377,16 @@ let prepare_active ~sw ~recovery_key agent owner =
             ()
         in
         Ok
-          (Durable
-             { owner
-             ; recovery_key
-             ; context
-             ; slot_path
-             ; unused_fresh_scope
-             ; record = record_ref
-             ; ready
-             ; finished = ref false
-             ; store
-             })
+          { owner
+          ; recovery_key
+          ; context
+          ; slot_path
+          ; unused_fresh_scope
+          ; record = record_ref
+          ; ready
+          ; finished = ref false
+          ; store
+          }
       with
       | Eio.Cancel.Cancelled _ as exn ->
         Hashtbl.remove owner.active_keys recovery_key;
@@ -410,21 +402,11 @@ let prepare_active ~sw ~recovery_key agent owner =
 let prepare ~sw ~recovery_key agent =
   match Atomic.get lifecycle with
   | Released { base_path } -> Error (Runtime_released { base_path })
-  | Never_initialized ->
-    warn_compatibility "application runtime was not initialized";
-    Ok Compatibility
-  | Active owner ->
-    (match recovery_key with
-     | None ->
-       warn_compatibility "caller supplied no stable recovery key";
-       Ok Compatibility
-     | Some recovery_key -> prepare_active ~sw ~recovery_key agent owner)
+  | Never_initialized -> Error Runtime_not_initialized
+  | Active owner -> prepare_active ~sw ~recovery_key agent owner
 ;;
 
-let execution_store = function
-  | Compatibility -> None
-  | Durable prepared -> Some prepared.store
-;;
+let execution_store prepared = prepared.store
 
 let cleanup_unused_fresh_scope prepared =
   match !(prepared.unused_fresh_scope) with
@@ -437,41 +419,37 @@ let cleanup_unused_fresh_scope prepared =
        Ok ())
 ;;
 
-let retain_failure = function
-  | Compatibility -> ()
-  | Durable prepared ->
-    if not !(prepared.finished)
-    then (
-      (match cleanup_unused_fresh_scope prepared with
-       | Ok () -> ()
-       | Error detail ->
-         Log.Misc.warn
-           "OAS unused fresh execution scope cleanup failed while retaining failure: %s"
-           detail);
-      prepared.finished := true;
-      release_key prepared)
+let retain_failure prepared =
+  if not !(prepared.finished)
+  then (
+    (match cleanup_unused_fresh_scope prepared with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Misc.warn
+         "OAS unused fresh execution scope cleanup failed while retaining failure: %s"
+         detail);
+    prepared.finished := true;
+    release_key prepared)
 ;;
 
-let finish = function
-  | Compatibility -> Ok ()
-  | Durable prepared ->
-    if !(prepared.finished)
-    then Ok ()
-    else if not !(prepared.ready)
-    then
-      let cleanup = cleanup_unused_fresh_scope prepared in
+let finish prepared =
+  if !(prepared.finished)
+  then Ok ()
+  else if not !(prepared.ready)
+  then
+    let cleanup = cleanup_unused_fresh_scope prepared in
+    prepared.finished := true;
+    release_key prepared;
+    Result.map_error (fun detail -> Recovery_cleanup_failed detail) cleanup
+  else
+    Eio.Mutex.use_rw ~protect:true prepared.owner.state_mu
+    @@ fun () ->
+    let fail detail =
       prepared.finished := true;
-      release_key prepared;
-      Result.map_error (fun detail -> Recovery_cleanup_failed detail) cleanup
-    else
-      Eio.Mutex.use_rw ~protect:true prepared.owner.state_mu
-      @@ fun () ->
-      let fail detail =
-        prepared.finished := true;
-        Hashtbl.remove prepared.owner.active_keys prepared.recovery_key;
-        Error (Recovery_cleanup_failed detail)
-      in
-      (match !(prepared.record) with
+      Hashtbl.remove prepared.owner.active_keys prepared.recovery_key;
+      Error (Recovery_cleanup_failed detail)
+    in
+    (match !(prepared.record) with
        | None -> fail "ready execution has no recovery record"
        | Some expected ->
          (match context_record prepared.context with

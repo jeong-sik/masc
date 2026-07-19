@@ -46,11 +46,7 @@ let make_agent ~net ?context ?checkpoint_sink ~name ~text () =
     ()
 ;;
 
-let prepared_store prepared =
-  match Runtime_oas_execution.execution_store prepared with
-  | Some store -> store
-  | None -> Alcotest.fail "expected durable OAS execution store"
-;;
+let prepared_store = Runtime_oas_execution.execution_store
 
 let slot_count base_path =
   let slots = Filename.concat base_path ".masc/oas-execution/slots" in
@@ -136,6 +132,64 @@ let stop_process pid =
     | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
   in
   wait ()
+;;
+
+let test_runtime_agent_requires_explicit_recovery_contract () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"test-model"
+      ~base_url:"http://test.invalid/v1"
+      ()
+  in
+  let base_config =
+    Runtime_agent.default_config
+      ~name:"recovery-contract-agent"
+      ~provider_cfg
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let run config =
+    Runtime_agent.run ~sw ~net:(Eio.Stdenv.net env) ~config "must-not-dispatch"
+  in
+  let check_invalid_field expected = function
+    | Error
+        (Agent_sdk.Error.Config
+          (Agent_sdk.Error.InvalidConfig { field; detail = _ })) ->
+      Alcotest.(check string) "typed invalid field" expected field
+    | Error error ->
+      Alcotest.failf "expected typed config error, got %s" (Error.to_string error)
+    | Ok _ -> Alcotest.fail "missing durable recovery ownership was accepted"
+  in
+  check_invalid_field "runtime_agent.session_id" (run base_config);
+  let session_config =
+    { base_config with session_id = Some "recovery-contract-session" }
+  in
+  check_invalid_field "runtime_agent.checkpoint_sink" (run session_config);
+  let checkpoint_config =
+    { session_config with checkpoint_sink = Some (fun _snapshot -> Ok ()) }
+  in
+  check_invalid_field
+    "runtime_agent.terminal_checkpoint_sink"
+    (run checkpoint_config);
+  let complete_config =
+    { checkpoint_config with terminal_checkpoint_sink = Some (fun _checkpoint -> Ok ()) }
+  in
+  (match run complete_config with
+   | Error (Agent_sdk.Error.Internal detail) ->
+     Alcotest.(check bool)
+       "uninitialized application runtime fails loudly"
+       true
+       (String.starts_with ~prefix:"OAS execution runtime is not initialized" detail)
+   | Error error ->
+     Alcotest.failf
+       "expected explicit runtime initialization error, got %s"
+       (Error.to_string error)
+   | Ok _ -> Alcotest.fail "uninitialized execution runtime fell back silently")
 ;;
 
 let test_runtime_agent_defers_cleanup_until_consumer_settlement () =
@@ -270,6 +324,21 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       Eio.Switch.run
       (fun sw ->
       initialize env sw base_path;
+      let invalid_agent =
+        make_agent
+          ~net:(Eio.Stdenv.net env)
+          ~name:"invalid-recovery-agent"
+          ~text:"unused"
+          ()
+      in
+      (match Runtime_oas_execution.prepare ~sw ~recovery_key:"" invalid_agent with
+       | Error error ->
+         Alcotest.(check string)
+           "empty recovery key fails explicitly"
+           "OAS execution recovery key must not be empty"
+           (Runtime_oas_execution.prepare_error_to_string error)
+       | Ok _ -> Alcotest.fail "empty recovery key was accepted");
+      Agent.close invalid_agent;
       let unused_agent =
         make_agent
           ~net:(Eio.Stdenv.net env)
@@ -281,7 +350,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let unused =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:unused")
+          ~recovery_key:"test:v1:unused"
           unused_agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -310,7 +379,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let prepared =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:recoverable")
+          ~recovery_key:"test:v1:recoverable"
           agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -356,7 +425,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let resumed =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:recoverable")
+          ~recovery_key:"test:v1:recoverable"
           resumed_agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -383,7 +452,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       (match
          Runtime_oas_execution.prepare
            ~sw
-           ~recovery_key:(Some "test:v1:recoverable")
+           ~recovery_key:"test:v1:recoverable"
            mismatched_agent
        with
        | Error _ -> ()
@@ -401,7 +470,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let terminal =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:terminal")
+          ~recovery_key:"test:v1:terminal"
           terminal_agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -449,7 +518,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let cleanup_failure =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:cleanup-failure")
+          ~recovery_key:"test:v1:cleanup-failure"
           cleanup_failure_agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -481,7 +550,7 @@ let test_exact_recovery_record_and_terminal_cleanup () =
       let cleanup_retry =
         Runtime_oas_execution.prepare
           ~sw
-          ~recovery_key:(Some "test:v1:cleanup-failure")
+          ~recovery_key:"test:v1:cleanup-failure"
           cleanup_failure_agent
         |> Result.map_error Runtime_oas_execution.prepare_error_to_string
         |> get_ok_string
@@ -496,6 +565,10 @@ let () =
     "runtime_oas_execution"
     [ ( "recovery"
       , [ Alcotest.test_case
+            "explicit recovery contract hard cut"
+            `Quick
+            test_runtime_agent_requires_explicit_recovery_contract
+        ; Alcotest.test_case
             "runtime consumer settlement defers cleanup"
             `Quick
             test_runtime_agent_defers_cleanup_until_consumer_settlement

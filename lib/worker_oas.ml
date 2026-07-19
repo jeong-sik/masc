@@ -298,8 +298,8 @@ let worker_checkpoint_sink ~base_path ~worker_name ~session_id
 
 let worker_execution_recovery_key session_id =
   if String.equal session_id ""
-  then Some ""
-  else Some ("worker-oas:v1:" ^ session_id)
+  then ""
+  else "worker-oas:v1:" ^ session_id
 ;;
 
 module For_testing = struct
@@ -543,7 +543,7 @@ and run_existing_worker_agent
          Agent_sdk.Agent.run
            ~sw
            ?clock
-           ?execution_store
+           ~execution_store
            agent
            prompt
        in

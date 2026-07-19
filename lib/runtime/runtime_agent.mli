@@ -66,6 +66,9 @@ type config = Runtime_agent_context.config = {
   hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
+  (** [run] and [run_blocks] require a non-empty caller-owned stable identity.
+      [None] is accepted only by build-only consumers; execution never
+      synthesizes an identity or falls back to a non-durable Agent call. *)
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection
@@ -88,6 +91,8 @@ type config = Runtime_agent_context.config = {
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
   terminal_checkpoint_sink :
     (Agent_sdk.Checkpoint.t -> (unit, string) result) option;
+  (** Required by [run] and [run_blocks], together with [checkpoint_sink].
+      Build-only consumers may leave both unset. *)
 }
 
 val default_config :

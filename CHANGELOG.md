@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- MASC now consumes OAS durable Agent execution through its existing runtime and local-worker surfaces. Opaque recovery locators, exact checkpoint/slot matching, fail-closed unknown settlement, and consumer-committed terminal cleanup prevent a completed effect journal from being retired ahead of durable queue or worker settlement.
+- MASC now has a draft durable OAS execution leaf on its existing runtime and local-worker surfaces. Opaque recovery locators, exact checkpoint/slot matching, and fail-closed unknown settlement are wired; `Runtime_agent.run*` rejects missing stable session/checkpoint ownership instead of synthesizing an identity or entering a non-durable compatibility call. Terminal retirement and projection retention remain explicit blockers until the newer typed OAS contracts are released and pinned.
 
 ### Fixed
 - CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.

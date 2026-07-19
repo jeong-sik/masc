@@ -17,17 +17,17 @@ val initialize
 
 val prepare
   :  sw:Eio.Switch.t
-  -> recovery_key:string option
+  -> recovery_key:string
   -> Agent_sdk.Agent.t
   -> (prepared, prepare_error) result
 (** Bind one Agent API call to its durable execution scope.
 
-    A stable [recovery_key] enables recovery. Its durable slot and the exact
+    A stable [recovery_key] is required. Its durable slot and the exact
     versioned record in the Agent's Session context must agree before an
-    existing scope is resumed. [None] preserves standalone callers without
-    claiming durable recovery. *)
+    existing scope is resumed. Calls without a caller-owned stable identity
+    are rejected; there is no non-durable compatibility path. *)
 
-val execution_store : prepared -> Agent_sdk.Agent.execution_store option
+val execution_store : prepared -> Agent_sdk.Agent.execution_store
 
 val finish : prepared -> (unit, finish_error) result
 (** Retire the recovery slot after a successful or typed non-Internal Agent

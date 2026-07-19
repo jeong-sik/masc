@@ -232,10 +232,10 @@ let test_worker_mcp_client_session_finish_clears_started_at () =
   check bool "last_run_at recorded" true (Option.is_some completed.last_run_at)
 
 let test_worker_execution_recovery_key_fails_closed_on_empty_session () =
-  check (option string) "empty is explicit invalid key" (Some "")
+  check string "empty is explicit invalid key" ""
     (Worker_oas.For_testing.worker_execution_recovery_key "");
-  check (option string) "stable session is namespaced"
-    (Some "worker-oas:v1:stable-session")
+  check string "stable session is namespaced"
+    "worker-oas:v1:stable-session"
     (Worker_oas.For_testing.worker_execution_recovery_key "stable-session")
 
 let () =

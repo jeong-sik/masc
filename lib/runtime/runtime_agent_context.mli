@@ -50,6 +50,8 @@ type config = {
   hooks : Agent_sdk.Hooks.hooks option;
   event_bus : Agent_sdk.Event_bus.t option;
   session_id : string option;
+      (** Required and non-empty for [Runtime_agent.run*]. [None] is valid only
+          while building an Agent for a different OAS-owned execution surface. *)
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
   model_input_projection
@@ -82,8 +84,10 @@ type config = {
   on_run_complete : (bool -> unit) option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
   terminal_checkpoint_sink :
-    (Agent_sdk.Checkpoint.t -> (unit, string) result) option;
-}
+      (Agent_sdk.Checkpoint.t -> (unit, string) result) option;
+      (** Required for [Runtime_agent.run*]. A missing sink is rejected before
+          Agent construction or provider effects. *)
+  }
 (** Per-worker configuration.  61 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)

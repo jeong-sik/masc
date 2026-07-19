@@ -78,8 +78,7 @@ module For_testing : sig
     Worker_container_types.worker_container_meta ->
     Worker_container_types.worker_container_meta
 
-  val worker_execution_recovery_key : string -> string option
+  val worker_execution_recovery_key : string -> string
   (** Empty persisted MCP session ids remain an explicit invalid recovery key
-      and fail closed at the durable execution boundary; they never silently
-      enter compatibility mode. *)
+      and fail closed at the durable execution boundary. *)
 end

@@ -90,8 +90,135 @@ let evidence_to_json = function
   | Unavailable reason ->
     `Assoc
       [ "kind", `String "unavailable"
-      ; "detail", unavailable_to_json reason
-      ]
+       ; "detail", unavailable_to_json reason
+       ]
+;;
+
+let object_fields label = function
+  | `Assoc fields -> Ok fields
+  | json ->
+    Error
+      (Printf.sprintf
+         "%s must be an object (received %s)"
+         label
+         (Yojson.Safe.to_string json))
+;;
+
+let exact_fields label expected fields =
+  let actual = List.map fst fields |> List.sort String.compare in
+  let expected = List.sort String.compare expected in
+  if List.equal String.equal expected actual
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf "%s contains an invalid or duplicate field set" label)
+;;
+
+let required_string label key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" label key)
+  | None -> Error (Printf.sprintf "%s.%s is missing" label key)
+;;
+
+let required_int label key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an int" label key)
+  | None -> Error (Printf.sprintf "%s.%s is missing" label key)
+;;
+
+let required_json label key fields =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s is missing" label key)
+;;
+
+let unavailable_of_json json =
+  let ( let* ) = Result.bind in
+  let label = "compaction projection target detail" in
+  let* fields = object_fields label json in
+  let* reason = required_string label "reason" fields in
+  match reason with
+  | "empty_assignment" ->
+    let* () = exact_fields label [ "reason" ] fields in
+    Ok Empty_assignment
+  | "assignment_ambiguous" ->
+    let* () = exact_fields label [ "assignment_id"; "reason" ] fields in
+    let* assignment_id = required_string label "assignment_id" fields in
+    Ok (Assignment_ambiguous { assignment_id })
+  | "runtime_unavailable" ->
+    let* () = exact_fields label [ "reason"; "runtime_id" ] fields in
+    let* runtime_id = required_string label "runtime_id" fields in
+    Ok (Runtime_unavailable { runtime_id })
+  | "context_window_unavailable" ->
+    let* () = exact_fields label [ "reason"; "runtime_id" ] fields in
+    let* runtime_id = required_string label "runtime_id" fields in
+    Ok (Context_window_unavailable { runtime_id })
+  | "invalid_effective_context_window" ->
+    let* () =
+      exact_fields
+        label
+        [ "effective_max_context"; "reason"; "runtime_id" ]
+        fields
+    in
+    let* runtime_id = required_string label "runtime_id" fields in
+    let* effective_max_context =
+      required_int label "effective_max_context" fields
+    in
+    if effective_max_context <= 0
+    then Ok (Invalid_effective_context_window { runtime_id; effective_max_context })
+    else Error "invalid effective context evidence must be non-positive"
+  | unknown ->
+    Error (Printf.sprintf "unknown compaction projection target reason: %s" unknown)
+;;
+
+let evidence_of_json json =
+  let ( let* ) = Result.bind in
+  let label = "compaction projection target" in
+  let* fields = object_fields label json in
+  let* kind = required_string label "kind" fields in
+  match kind with
+  | "exact" ->
+    let* () =
+      exact_fields
+        label
+        [ "effective_max_context"
+        ; "kind"
+        ; "model_id"
+        ; "oas_provider_kind"
+        ; "protocol"
+        ; "provider_id"
+        ; "runtime_id"
+        ]
+        fields
+    in
+    let* runtime_id = required_string label "runtime_id" fields in
+    let* provider_id = required_string label "provider_id" fields in
+    let* protocol = required_string label "protocol" fields in
+    let* oas_provider_kind = required_string label "oas_provider_kind" fields in
+    let* model_id = required_string label "model_id" fields in
+    let* effective_max_context =
+      required_int label "effective_max_context" fields
+    in
+    if effective_max_context <= 0
+    then Error "exact effective context evidence must be positive"
+    else
+      Ok
+        (Exact
+           { runtime_id
+           ; provider_id
+           ; protocol
+           ; oas_provider_kind
+           ; model_id
+           ; effective_max_context
+           })
+  | "unavailable" ->
+    let* () = exact_fields label [ "detail"; "kind" ] fields in
+    let* detail = required_json label "detail" fields in
+    let* reason = unavailable_of_json detail in
+    Ok (Unavailable reason)
+  | unknown -> Error (Printf.sprintf "unknown compaction projection kind: %s" unknown)
 ;;
 
 type exact_target =

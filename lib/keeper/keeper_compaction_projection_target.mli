@@ -50,6 +50,7 @@ type evidence =
   | Unavailable of unavailable
 
 val evidence_to_json : evidence -> Yojson.Safe.t
+val evidence_of_json : Yojson.Safe.t -> (evidence, string) result
 
 type t
 

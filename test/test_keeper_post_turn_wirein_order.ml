@@ -235,6 +235,19 @@ let test_projection_target_is_immutable_and_credential_free () =
       let public_json =
         Projection_target.evidence_to_json captured
       in
+      check bool
+        "exact evidence roundtrips"
+        true
+        (Projection_target.evidence_of_json public_json = Ok captured);
+      let extra_field_json =
+        match public_json with
+        | `Assoc fields -> `Assoc (("unexpected", `Null) :: fields)
+        | _ -> fail "projection evidence encoder returned a non-object"
+      in
+      check bool
+        "unknown evidence field is rejected"
+        true
+        (Result.is_error (Projection_target.evidence_of_json extra_field_json));
       List.iter
         (fun key -> check bool ("credential field excluded: " ^ key) false (json_has_key key public_json))
         [ "api_key"; "base_url"; "credentials"; "endpoint"; "headers" ];
@@ -251,8 +264,14 @@ let test_projection_target_is_immutable_and_credential_free () =
        | Projection_target.Unavailable
            (Projection_target.Runtime_unavailable { runtime_id }) ->
          check string "assignment identity is not normalized" unresolved_identity runtime_id
-       | Projection_target.Exact _ | Projection_target.Unavailable _ ->
-         fail "missing runtime identity was normalized or reclassified");
+        | Projection_target.Exact _ | Projection_target.Unavailable _ ->
+          fail "missing runtime identity was normalized or reclassified");
+      check bool
+        "unavailable evidence roundtrips"
+        true
+        (Projection_target.evidence_of_json
+           (Projection_target.evidence_to_json unresolved)
+         = Ok unresolved);
       let lane_target =
         Projection_target.request
           ~assignment_id:"default"

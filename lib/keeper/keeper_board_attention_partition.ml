@@ -412,8 +412,22 @@ let load ~base_path ~keeper_name =
       Fs_compat.update_private_file_durable_locked_result ledger_path (fun content ->
         None, Result.bind (parse content) (validate_ledger keeper_name))
     with
-    | Ok result -> result
-    | Error error -> Error (Fs_compat.durable_append_error_to_string error)
+    | Private_file_failed error ->
+      Error (Fs_compat.durable_append_error_to_string error)
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Error
+        (Printf.sprintf
+           "%s; descriptor settlement failed: %s"
+           (Fs_compat.durable_append_error_to_string error)
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    | Private_file_succeeded result -> result
+    | Private_file_succeeded_with_cleanup_failure
+        { value = result; cleanup_failure } ->
+      Log.Keeper.error
+        "board attention partition read succeeded with descriptor settlement failure path=%s: %s"
+        ledger_path
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      result
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

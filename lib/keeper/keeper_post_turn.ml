@@ -657,6 +657,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
          ; turn_generation
          ; projection_target =
              Keeper_compaction_projection_target.bind_committed_checkpoint
+               ~checkpoint:saved_checkpoint
                installed_ref
                projection_target
          }

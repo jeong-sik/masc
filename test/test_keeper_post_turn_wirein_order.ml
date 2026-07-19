@@ -274,6 +274,113 @@ let test_projection_target_is_immutable_and_credential_free () =
         fail "lane target guessed a provider candidate")
 ;;
 
+let with_input_count_response input_tokens f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:1
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> fail "input-count fixture did not bind a TCP socket"
+  in
+  let callback _conn _request _body =
+    Cohttp_eio.Server.respond_string
+      ~status:`OK
+      ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens)
+      ()
+  in
+  let server = Cohttp_eio.Server.make ~callback () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:raise);
+  f ~sw ~net ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+;;
+
+let test_checkpoint_projection_uses_provider_native_fit () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+  let runtime_path =
+    Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+  in
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+  let checkpoint =
+    { (make_checkpoint ()) with
+      system_prompt = Some "Measure this exact compacted checkpoint."
+    }
+  in
+  let trace_id =
+    Keeper_id.Trace_id.of_string checkpoint.session_id |> Result.get_ok
+  in
+  let checkpoint_ref =
+    Keeper_checkpoint_ref.create
+      ~trace_id
+      ~generation:3
+      ~turn_count:checkpoint.turn_count
+      ~canonical_checkpoint_bytes:(Agent_sdk.Checkpoint.to_string checkpoint)
+    |> Result.get_ok
+  in
+  let observe input_tokens =
+    with_input_count_response input_tokens (fun ~sw ~net ~base_url ->
+      let runtime = Runtime.get_default_runtime () |> Option.get in
+      let provider_config =
+        Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.Anthropic
+          ~model_id:"compaction-fit-fixture"
+          ~base_url
+          ~api_key:"test-key"
+          ~request_path:"/v1/messages"
+          ~max_tokens:64
+          ()
+      in
+      let runtime = { runtime with Runtime.provider_config = provider_config } in
+      Projection_target.exact_request
+        ~runtime
+        ~effective_max_context:512
+      |> Projection_target.capture
+      |> Projection_target.bind_committed_checkpoint ~checkpoint checkpoint_ref
+      |> Projection_target.measure_checkpoint_fit ~sw ~net)
+  in
+  let fitting = observe 321 in
+  check bool
+    "fit is correlated to committed checkpoint"
+    true
+    (Keeper_checkpoint_ref.equal fitting.checkpoint_ref checkpoint_ref);
+  check bool
+    "fit evidence excludes API keys"
+    false
+    (json_has_key "api_key" (Projection_target.fit_evidence_to_json fitting));
+  (match fitting.result with
+   | Projection_target.Fit.Fits fit ->
+     check int "provider input count" 321 fit.input_tokens;
+     check int "reserved output" 64 fit.reserved_output_tokens;
+     check int "captured context" 512 fit.max_context_tokens
+   | Projection_target.Fit.Exceeds _
+   | Projection_target.Fit.Unavailable _ ->
+     fail "provider-native measurement should fit");
+  let exceeding = observe 500 in
+  match exceeding.result with
+  | Projection_target.Fit.Exceeds fit ->
+    check int "overflow input count" 500 fit.input_tokens;
+    check int "overflow output reservation" 64 fit.reserved_output_tokens;
+    check int "overflow context" 512 fit.max_context_tokens
+  | Projection_target.Fit.Fits _
+  | Projection_target.Fit.Unavailable _ ->
+    fail "provider-native measurement should exceed the captured context")
+;;
+
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -871,6 +978,8 @@ let () =
         `Quick test_invalid_plan_is_distinct_from_provider_unavailable;
       test_case "projection target snapshot excludes credentials"
         `Quick test_projection_target_is_immutable_and_credential_free;
+      test_case "checkpoint projection uses provider-native fit"
+        `Quick test_checkpoint_projection_uses_provider_native_fit;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "malformed structure preserves checkpoint"

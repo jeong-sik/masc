@@ -98,7 +98,6 @@ type exact_target =
   { evidence : exact
   ; provider_config : Llm_provider.Provider_config.t
   }
-[@@warning "-69"]
 
 type t =
   | Exact_target of exact_target
@@ -159,10 +158,226 @@ let capture = function
 ;;
 
 type committed =
-  { target : t
-  ; checkpoint_ref : Keeper_checkpoint_ref.t
+  | Exact_committed of
+      { evidence : exact
+      ; checkpoint_ref : Keeper_checkpoint_ref.t
+      ; prepared_request : Llm_provider.Complete.prepared_request
+      }
+  | Unavailable_committed of
+      { reason : unavailable
+      ; checkpoint_ref : Keeper_checkpoint_ref.t
+      }
+
+let provider_config_for_checkpoint
+      (provider_config : Llm_provider.Provider_config.t)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  let agent_config : Agent_sdk.Types.agent_config =
+    { (Agent_sdk.Types.default_config ~model:provider_config.model_id) with
+      name = checkpoint.agent_name
+    ; system_prompt = checkpoint.system_prompt
+    ; max_tokens = provider_config.max_tokens
+    ; temperature = checkpoint.temperature
+    ; top_p = checkpoint.top_p
+    ; top_k = checkpoint.top_k
+    ; min_p = checkpoint.min_p
+    ; enable_thinking = checkpoint.enable_thinking
+    ; preserve_thinking = checkpoint.preserve_thinking
+    ; response_format = checkpoint.response_format
+    ; thinking_budget = checkpoint.thinking_budget
+    ; reasoning_effort = checkpoint.reasoning_effort
+    ; tool_choice = checkpoint.tool_choice
+    ; disable_parallel_tool_use = checkpoint.disable_parallel_tool_use
+    ; cache_system_prompt = checkpoint.cache_system_prompt
+    }
+  in
+  Agent_sdk.Provider.provider_config_with_agent_config
+    ~config:agent_config
+    provider_config
+;;
+
+let bind_committed_checkpoint
+      ~(checkpoint : Agent_sdk.Checkpoint.t)
+      checkpoint_ref
+  = function
+  | Unavailable_target reason -> Unavailable_committed { reason; checkpoint_ref }
+  | Exact_target { evidence; provider_config } ->
+    let config = provider_config_for_checkpoint provider_config checkpoint in
+    let tools =
+      List.map Agent_sdk.Types.tool_schema_to_json checkpoint.tools
+    in
+    let prepared_request =
+      Llm_provider.Complete.prepare_request
+        ~config
+        ~messages:checkpoint.messages
+        ~tools
+        ~capture_id:checkpoint_ref.sha256
+        ()
+    in
+    Exact_committed { evidence; checkpoint_ref; prepared_request }
+;;
+
+let committed_evidence = function
+  | Exact_committed { evidence; _ } -> Exact evidence
+  | Unavailable_committed { reason; _ } -> Unavailable reason
+;;
+
+let checkpoint_ref = function
+  | Exact_committed { checkpoint_ref; _ }
+  | Unavailable_committed { checkpoint_ref; _ } -> checkpoint_ref
+;;
+
+type target_unavailable = unavailable
+
+module Fit = struct
+  type context =
+    { input_tokens : int
+    ; reserved_output_tokens : int
+    ; max_context_tokens : int
+    }
+
+  type unavailable =
+    | Projection_target_unavailable of target_unavailable
+    | Input_count_failed of Llm_provider.Input_token_count.error
+    | Output_token_ceiling_missing
+    | Invalid_completion_request of string
+    | Context_limit_unknown of { model_id : string }
+    | Invalid_context_limit of
+        { model_id : string
+        ; max_context_tokens : int
+        }
+    | Output_reservation_unknown of { model_id : string }
+
+  type t =
+    | Fits of context
+    | Exceeds of context
+    | Unavailable of unavailable
+end
+
+type fit_evidence =
+  { checkpoint_ref : Keeper_checkpoint_ref.t
+  ; target : evidence
+  ; result : Fit.t
   }
 
-let bind_committed_checkpoint checkpoint_ref target = { target; checkpoint_ref }
-let committed_evidence committed = captured_evidence committed.target
-let checkpoint_ref committed = committed.checkpoint_ref
+let context_to_json (context : Fit.context) =
+  `Assoc
+    [ "input_tokens", `Int context.input_tokens
+    ; "reserved_output_tokens", `Int context.reserved_output_tokens
+    ; "max_context_tokens", `Int context.max_context_tokens
+    ]
+;;
+
+let json_kind kind fields = `Assoc (("kind", `String kind) :: fields)
+
+let input_count_error_to_json = function
+  | Llm_provider.Input_token_count.Unsupported { protocol; model_id } ->
+    json_kind
+      "unsupported"
+      [ "protocol", `String (Llm_provider.Input_token_count.show_protocol protocol)
+      ; "model_id", `String model_id
+      ]
+  | Transport error ->
+    json_kind
+      "transport"
+      [ ( "detail"
+        , `String (Llm_provider.Error.(of_http_error error |> to_string)) )
+      ]
+  | Invalid_response { protocol; model_id; detail } ->
+    json_kind
+      "invalid_response"
+      [ "protocol", `String (Llm_provider.Input_token_count.show_protocol protocol)
+      ; "model_id", `String model_id
+      ; "detail", `String detail
+      ]
+;;
+
+let unavailable_to_fit_json = function
+  | Fit.Projection_target_unavailable reason ->
+    json_kind
+      "projection_target_unavailable"
+      [ "detail", unavailable_to_json reason ]
+  | Input_count_failed error ->
+    json_kind "input_count_failed" [ "detail", input_count_error_to_json error ]
+  | Output_token_ceiling_missing ->
+    json_kind "output_token_ceiling_missing" []
+  | Invalid_completion_request detail ->
+    json_kind "invalid_completion_request" [ "detail", `String detail ]
+  | Context_limit_unknown { model_id } ->
+    json_kind "context_limit_unknown" [ "model_id", `String model_id ]
+  | Invalid_context_limit { model_id; max_context_tokens } ->
+    json_kind
+      "invalid_context_limit"
+      [ "model_id", `String model_id
+      ; "max_context_tokens", `Int max_context_tokens
+      ]
+  | Output_reservation_unknown { model_id } ->
+    json_kind "output_reservation_unknown" [ "model_id", `String model_id ]
+;;
+
+let fit_evidence_to_json evidence =
+  let checkpoint_ref = evidence.checkpoint_ref in
+  let result =
+    match evidence.result with
+    | Fit.Fits context -> json_kind "fits" [ "context", context_to_json context ]
+    | Fit.Exceeds context ->
+      json_kind "exceeds" [ "context", context_to_json context ]
+    | Fit.Unavailable reason ->
+      json_kind "unavailable" [ "reason", unavailable_to_fit_json reason ]
+  in
+  `Assoc
+    [ "checkpoint_ref", Keeper_checkpoint_ref.to_yojson checkpoint_ref
+    ; "target", evidence_to_json evidence.target
+    ; "result", result
+    ]
+;;
+
+let context_of_oas (fit : Llm_provider.Complete.context_fit) : Fit.context =
+  { input_tokens = fit.input_tokens
+  ; reserved_output_tokens = fit.reserved_output_tokens
+  ; max_context_tokens = fit.max_context_tokens
+  }
+;;
+
+let unavailable_of_measurement_error = function
+  | Llm_provider.Count_tokens_sync.Input_count_failed error ->
+    Fit.Input_count_failed error
+  | Output_token_resolution_failed Required_output_token_ceiling_missing ->
+    Output_token_ceiling_missing
+  | Invalid_completion_request detail -> Invalid_completion_request detail
+;;
+
+let measure_checkpoint_fit ?connection_cache ?clock ~sw ~net = function
+  | Unavailable_committed { reason; checkpoint_ref } ->
+    { checkpoint_ref
+    ; target = Unavailable reason
+    ; result = Fit.Unavailable (Projection_target_unavailable reason)
+    }
+  | Exact_committed { evidence; checkpoint_ref; prepared_request } ->
+    let result =
+      match
+        Llm_provider.Complete.measure_request
+          ?connection_cache
+          ?clock
+          ~sw
+          ~net
+          prepared_request
+      with
+      | Error error -> Fit.Unavailable (unavailable_of_measurement_error error)
+      | Ok measured ->
+        (match Llm_provider.Complete.admit_request measured with
+         | Ok admitted ->
+           Fit.Fits
+             (Llm_provider.Complete.admitted_fit admitted |> context_of_oas)
+         | Error (Context_window_exceeded fit) ->
+           Fit.Exceeds (context_of_oas fit)
+         | Error (Context_limit_unknown { model_id }) ->
+           Fit.Unavailable (Context_limit_unknown { model_id })
+         | Error (Invalid_context_limit { model_id; max_context_tokens }) ->
+           Fit.Unavailable
+             (Invalid_context_limit { model_id; max_context_tokens })
+         | Error (Output_reservation_unknown { model_id }) ->
+           Fit.Unavailable (Output_reservation_unknown { model_id }))
+    in
+    { checkpoint_ref; target = Exact evidence; result }
+;;

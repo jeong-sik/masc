@@ -8,14 +8,17 @@
 
     Enforced cross-property rules (typed errors, no silent coercion):
     - [UID] exactly once, non-empty (§3.8.4.7).
-    - [DTSTART] exactly once (§3.8.2.4: REQUIRED for VEVENT).
+    - This recurrence-identity projection requires [DTSTART] exactly once.
+      Full VEVENT validation of §3.8.2.4's outer [METHOD]-dependent optionality
+      is outside this leaf because it does not receive the VCALENDAR envelope.
     - [RECURRENCE-ID] at most once; its value form must match [DTSTART]'s
       (§3.8.4.4), including the TZID reference when present.
     - [RRULE] at most once (§3.8.5.3); when it carries [UNTIL], the UNTIL
       value form must agree with [DTSTART] per §3.3.10: DATE with DATE,
       floating local with local, UTC or TZID-referenced DTSTART with UTC.
-    - [RANGE] on [RECURRENCE-ID] is typed ([THISANDPRIOR] default,
-      [THISANDFUTURE]); anything else is rejected.
+    - [RANGE] on [RECURRENCE-ID] is absent for one exact recurrence or is the
+      RFC-defined [THISANDFUTURE] value; [THISANDPRIOR] and every other value
+      are rejected.
 
     TZID is carried as a validated opaque identifier; timezone resolution
     (VTIMEZONE/IANA) is a later leaf. *)
@@ -32,13 +35,22 @@ type dtstart =
   | Start_tzid of tzid * Recur.date * Recur.time_of_day
 
 type range =
-  | This_and_prior  (** RFC default. *)
   | This_and_future
 
 type recurrence_id = private
   { value : dtstart
-  ; range : range
+  ; range : range option
   }
+
+type parameter_error =
+  | Duplicate_parameter of
+      { property : string
+      ; parameter : string
+      }
+  | Multiple_parameter_values of
+      { property : string
+      ; parameter : string
+      }
 
 type t = private
   { uid : string
@@ -58,6 +70,7 @@ type parse_error =
   | Invalid_recurrence_id of { value : string; detail : string }
   | Recurrence_id_value_mismatch
   | Invalid_range of string
+  | Parameter_error of parameter_error
   | Duplicate_rrule
   | Rrule_error of Recur.parse_error
   | Until_dtstart_mismatch of { dtstart_form : string; until_form : string }

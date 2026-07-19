@@ -86,9 +86,9 @@ let test_recurrence_id_matching_form () =
       ]
   in
   match t.V.recurrence_id with
-  | Some { V.value = V.Start_utc (d, _); range = V.This_and_prior } ->
+  | Some { V.value = V.Start_utc (d, _); range = None } ->
     check bool "rid date" true (d.R.day = 25)
-  | _ -> fail "expected utc recurrence-id with default range"
+  | _ -> fail "expected one exact utc recurrence-id"
 
 let test_range_this_and_future () =
   let t =
@@ -99,8 +99,35 @@ let test_range_this_and_future () =
       ]
   in
   match t.V.recurrence_id with
-  | Some { V.range = V.This_and_future; _ } -> ()
+  | Some { V.range = Some V.This_and_future; _ } -> ()
   | _ -> fail "expected THISANDFUTURE"
+
+let test_explicit_date_time_value () =
+  let t =
+    parse_ok
+      [ "UID:explicit-date-time"
+      ; "DTSTART;VALUE=DATE-TIME:19980118T230000Z"
+      ]
+  in
+  match t.V.dtstart with
+  | V.Start_utc _ -> ()
+  | _ -> fail "explicit VALUE=DATE-TIME must be accepted"
+
+let test_uid_identity_is_exact () =
+  let t = parse_ok [ "UID:  event-identity  "; "DTSTART:19980118T230000Z" ] in
+  check string "uid bytes" "  event-identity  " t.V.uid
+
+let test_tzid_identity_is_exact () =
+  let t =
+    parse_ok
+      [ "UID:tzid-identity"
+      ; "DTSTART;TZID=\" America/New_York \":19980119T020000"
+      ]
+  in
+  match t.V.dtstart with
+  | V.Start_tzid (tzid, _, _) ->
+    check string "tzid bytes" " America/New_York " (tzid :> string)
+  | _ -> fail "expected TZID-referenced DTSTART"
 
 let test_ignored_other_properties () =
   let t =
@@ -121,7 +148,7 @@ let test_missing_uid () =
   | _ -> fail "expected Missing_uid"
 
 let test_empty_uid () =
-  match parse_error [ "UID:  " ; "DTSTART:19980118T230000Z" ] with
+  match parse_error [ "UID:"; "DTSTART:19980118T230000Z" ] with
   | Error V.Empty_uid -> ()
   | _ -> fail "expected Empty_uid"
 
@@ -157,6 +184,57 @@ let test_tzid_on_utc_rejected () =
   | Error (V.Invalid_dtstart _) -> ()
   | _ -> fail "expected Invalid_dtstart (TZID on UTC value)"
 
+let test_tzid_on_date_rejected () =
+  match
+    parse_error [ "UID:e1"; "DTSTART;VALUE=DATE;TZID=Asia/Seoul:19980118" ]
+  with
+  | Error (V.Invalid_dtstart _) -> ()
+  | _ -> fail "expected Invalid_dtstart (TZID on DATE value)"
+
+let test_duplicate_parameters_rejected () =
+  let cases =
+    [ ( [ "UID:e1"
+        ; "DTSTART;VALUE=DATE;VALUE=DATE:19980118"
+        ]
+      , "DTSTART"
+      , "VALUE" )
+    ; ( [ "UID:e1"
+        ; "DTSTART;TZID=Asia/Seoul;TZID=Asia/Seoul:19980119T020000"
+        ]
+      , "DTSTART"
+      , "TZID" )
+    ; ( [ "UID:e1"
+        ; "DTSTART:19980118T230000Z"
+        ; "RECURRENCE-ID;RANGE=THISANDFUTURE;RANGE=THISANDFUTURE:19980125T230000Z"
+        ]
+      , "RECURRENCE-ID"
+      , "RANGE" )
+    ]
+  in
+  List.iter
+    (fun (lines, property, parameter) ->
+       match parse_error lines with
+       | Error
+           (V.Parameter_error
+              (V.Duplicate_parameter
+                 { property = actual_property; parameter = actual_parameter })) ->
+         check string "property" property actual_property;
+         check string "parameter" parameter actual_parameter
+       | _ -> failf "%s duplicate %s was not rejected" property parameter)
+    cases
+
+let test_multi_valued_parameter_rejected () =
+  match
+    parse_error
+      [ "UID:e1"; "DTSTART;VALUE=DATE,DATE-TIME:19980118" ]
+  with
+  | Error
+      (V.Parameter_error
+        (V.Multiple_parameter_values
+          { property = "DTSTART"; parameter = "VALUE" })) ->
+    ()
+  | _ -> fail "multi-valued VALUE was not rejected"
+
 let test_recurrence_id_form_mismatch () =
   match
     parse_error
@@ -184,11 +262,22 @@ let test_invalid_range () =
     parse_error
       [ "UID:e1"
       ; "DTSTART:19980118T230000Z"
-      ; "RECURRENCE-ID;RANGE=EVERYTHING:19980125T230000Z"
+      ; "RECURRENCE-ID;RANGE=Everything:19980125T230000Z"
       ]
   with
-  | Error (V.Invalid_range _) -> ()
+  | Error (V.Invalid_range "Everything") -> ()
   | _ -> fail "expected Invalid_range"
+
+let test_this_and_prior_rejected () =
+  match
+    parse_error
+      [ "UID:e1"
+      ; "DTSTART:19980118T230000Z"
+      ; "RECURRENCE-ID;RANGE=THISANDPRIOR:19980125T230000Z"
+      ]
+  with
+  | Error (V.Invalid_range "THISANDPRIOR") -> ()
+  | _ -> fail "THISANDPRIOR is not defined by RFC 5545"
 
 let test_duplicate_rrule () =
   match
@@ -248,6 +337,9 @@ let () =
         ; test_case "recurrence-id matching form" `Quick
             test_recurrence_id_matching_form
         ; test_case "range thisandfuture" `Quick test_range_this_and_future
+        ; test_case "explicit date-time value" `Quick test_explicit_date_time_value
+        ; test_case "uid identity exact" `Quick test_uid_identity_is_exact
+        ; test_case "tzid identity exact" `Quick test_tzid_identity_is_exact
         ; test_case "other properties ignored" `Quick
             test_ignored_other_properties
         ]
@@ -259,11 +351,17 @@ let () =
         ; test_case "duplicate dtstart" `Quick test_duplicate_dtstart
         ; test_case "invalid dtstart" `Quick test_invalid_dtstart
         ; test_case "tzid on utc rejected" `Quick test_tzid_on_utc_rejected
+        ; test_case "tzid on date rejected" `Quick test_tzid_on_date_rejected
+        ; test_case "duplicate parameters rejected" `Quick
+            test_duplicate_parameters_rejected
+        ; test_case "multi-valued parameter rejected" `Quick
+            test_multi_valued_parameter_rejected
         ; test_case "recurrence-id form mismatch" `Quick
             test_recurrence_id_form_mismatch
         ; test_case "recurrence-id tzid mismatch" `Quick
             test_recurrence_id_tzid_mismatch
         ; test_case "invalid range" `Quick test_invalid_range
+        ; test_case "thisandprior rejected" `Quick test_this_and_prior_rejected
         ; test_case "duplicate rrule" `Quick test_duplicate_rrule
         ; test_case "rrule error propagates" `Quick
             test_rrule_error_propagates

@@ -12,13 +12,22 @@ type dtstart =
   | Start_tzid of tzid * Recur.date * Recur.time_of_day
 
 type range =
-  | This_and_prior
   | This_and_future
 
 type recurrence_id =
   { value : dtstart
-  ; range : range
+  ; range : range option
   }
+
+type parameter_error =
+  | Duplicate_parameter of
+      { property : string
+      ; parameter : string
+      }
+  | Multiple_parameter_values of
+      { property : string
+      ; parameter : string
+      }
 
 type t =
   { uid : string
@@ -38,6 +47,7 @@ type parse_error =
   | Invalid_recurrence_id of { value : string; detail : string }
   | Recurrence_id_value_mismatch
   | Invalid_range of string
+  | Parameter_error of parameter_error
   | Duplicate_rrule
   | Rrule_error of Recur.parse_error
   | Until_dtstart_mismatch of { dtstart_form : string; until_form : string }
@@ -56,6 +66,10 @@ let parse_error_to_string = function
   | Recurrence_id_value_mismatch ->
     "RECURRENCE-ID value form must match DTSTART's"
   | Invalid_range raw -> Printf.sprintf "invalid RANGE value %S" raw
+  | Parameter_error (Duplicate_parameter { property; parameter }) ->
+    Printf.sprintf "%s repeats parameter %s" property parameter
+  | Parameter_error (Multiple_parameter_values { property; parameter }) ->
+    Printf.sprintf "%s parameter %s must have exactly one value" property parameter
   | Duplicate_rrule -> "RRULE occurs more than once"
   | Rrule_error err ->
     Printf.sprintf "RRULE rejected: %s" (Recur.parse_error_to_string err)
@@ -69,16 +83,20 @@ let parse_error_to_string = function
 (* ---------------------------------------------------------------- *)
 
 let make_tzid raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
+  if String.equal raw "" then None else Some raw
 
 (* Single-valued parameters only; a multi-valued TZID/VALUE is malformed,
    not absent. *)
-let single_param name (line : Content_line.t) =
-  match Content_line.find_param ~name line.Content_line.params with
-  | None -> Ok None
-  | Some { Content_line.values = [ raw ]; _ } -> Ok (Some raw)
-  | Some _ -> Error (Printf.sprintf "%s parameter has multiple values" name)
+let single_param ~property name (line : Content_line.t) =
+  match Content_line.find_unique_param ~name line.Content_line.params with
+  | Error (Content_line.Duplicate_parameter parameter) ->
+    Error (Parameter_error (Duplicate_parameter { property; parameter }))
+  | Ok None -> Ok None
+  | Ok (Some { Content_line.values = [ raw ]; _ }) -> Ok (Some raw)
+  | Ok (Some _) ->
+    Error
+      (Parameter_error
+         (Multiple_parameter_values { property; parameter = name }))
 
 (* A DATE-TIME value: YYYYMMDDTHHMMSS with an optional trailing Z. *)
 let parse_datetime raw =
@@ -99,43 +117,44 @@ let parse_datetime raw =
     | _ -> Error "expected YYYYMMDDTHHMMSSZ")
   else Error "expected YYYYMMDDTHHMMSS[Z]"
 
-let parse_dtstart_like (line : Content_line.t) =
+let parse_dtstart_like ~property ~invalid (line : Content_line.t) =
+  let ( let* ) = Result.bind in
   let value = line.Content_line.value in
-  let invalid detail = Error (value, detail) in
-  match single_param "VALUE" line with
-  | Error detail -> invalid detail
-  | Ok (Some raw_value) when not (String.equal (String.uppercase_ascii raw_value) "DATE") ->
-    invalid (Printf.sprintf "unsupported VALUE=%s" raw_value)
-  | Ok (Some _) -> (
+  let reject detail = Error (invalid ~value ~detail) in
+  let* value_parameter = single_param ~property "VALUE" line in
+  let* tzid_parameter = single_param ~property "TZID" line in
+  match Option.map String.uppercase_ascii value_parameter with
+  | Some "DATE" -> (
+    match tzid_parameter with
+    | Some _ -> reject "TZID parameter on a DATE value"
+    | None ->
     match Recur.parse_date_value value with
     | Ok d -> Ok (Start_date d)
-    | Error err -> invalid (Recur.parse_error_to_string err))
-  | Ok None -> (
+    | Error err -> reject (Recur.parse_error_to_string err))
+  | Some "DATE-TIME" | None -> (
     match parse_datetime value with
-    | Error detail -> invalid detail
-    | Ok (`Utc (d, t)) -> (
-      match single_param "TZID" line with
-      | Error detail -> invalid detail
-      | Ok (Some _) -> invalid "TZID parameter on a UTC value"
-      | Ok None -> Ok (Start_utc (d, t)))
-    | Ok (`Local (d, t)) -> (
-      match single_param "TZID" line with
-      | Error detail -> invalid detail
-      | Ok (Some raw) -> (
+    | Error detail -> reject detail
+    | Ok (`Utc (d, t)) ->
+      (match tzid_parameter with
+       | Some _ -> reject "TZID parameter on a UTC value"
+       | None -> Ok (Start_utc (d, t)))
+    | Ok (`Local (d, t)) ->
+      (match tzid_parameter with
+       | Some raw -> (
         match make_tzid raw with
         | Some tzid -> Ok (Start_tzid (tzid, d, t))
-        | None -> invalid "TZID parameter is empty")
-      | Ok None -> Ok (Start_local (d, t))))
+        | None -> reject "TZID parameter is empty")
+       | None -> Ok (Start_local (d, t))))
+  | Some raw_value -> reject (Printf.sprintf "unsupported VALUE=%s" raw_value)
 
 let parse_range (line : Content_line.t) =
-  match Content_line.find_param ~name:"RANGE" line.Content_line.params with
-  | None -> Ok This_and_prior
-  | Some { Content_line.values = [ raw ]; _ } -> (
-    match String.uppercase_ascii raw with
-    | "THISANDPRIOR" -> Ok This_and_prior
-    | "THISANDFUTURE" -> Ok This_and_future
-    | other -> Error other)
-  | Some _ -> Error "multiple RANGE values"
+  match single_param ~property:"RECURRENCE-ID" "RANGE" line with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
+    if String.equal (String.uppercase_ascii raw) "THISANDFUTURE" then
+      Ok (Some This_and_future)
+    else Error (Invalid_range raw)
 
 let same_form a b =
   match a, b with
@@ -186,26 +205,35 @@ let apply (line : Content_line.t) b =
     match b.b_uid with
     | Some _ -> Error Duplicate_uid
     | None ->
-      let uid = String.trim line.Content_line.value in
+      let uid = line.Content_line.value in
       if String.equal uid "" then Error Empty_uid
       else Ok { b with b_uid = Some uid })
   | "DTSTART" -> (
     match b.b_dtstart with
     | Some _ -> Error Duplicate_dtstart
     | None -> (
-      match parse_dtstart_like line with
-      | Error (value, detail) -> Error (Invalid_dtstart { value; detail })
+      match
+        parse_dtstart_like
+          ~property:"DTSTART"
+          ~invalid:(fun ~value ~detail -> Invalid_dtstart { value; detail })
+          line
+      with
+      | Error _ as error -> error
       | Ok dtstart -> Ok { b with b_dtstart = Some dtstart }))
   | "RECURRENCE-ID" -> (
     match b.b_recurrence_id with
     | Some _ -> Error Duplicate_recurrence_id
     | None -> (
-      match parse_dtstart_like line with
-      | Error (value, detail) ->
-        Error (Invalid_recurrence_id { value; detail })
+      match
+        parse_dtstart_like
+          ~property:"RECURRENCE-ID"
+          ~invalid:(fun ~value ~detail -> Invalid_recurrence_id { value; detail })
+          line
+      with
+      | Error _ as error -> error
       | Ok value -> (
         match parse_range line with
-        | Error raw -> Error (Invalid_range raw)
+        | Error _ as error -> error
         | Ok range ->
           Ok { b with b_recurrence_id = Some { value; range } })))
   | "RRULE" -> (

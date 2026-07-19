@@ -40,8 +40,18 @@ already supports the missing middle tier: `JsonMode`
 selects it. This RFC generalizes the pattern into one shared capability-driven
 selector with three tiers (`json_schema` / `json_object` / plain-json) and has
 the compaction summarizer — and other structured consumers — use it, so
-structured output is available on every runtime that can return JSON. That
-removes the single lane, so the convergence and rate-limit SPOF cannot form.
+structured output is available on every runtime that can return JSON.
+
+Scope of the claim (corrected per adversarial review of `6f9337d9`): this RFC
+restores **availability** — when the `json_schema` lane is rate-limited or down,
+a `json_object`-capable runtime carries the request instead of failing. It does
+**not** by itself remove the convergence. The seed order still lists
+`[structured_judge; keeper_chat]` for every keeper (`keeper_compact_policy.ml`)
+and the summarizer stops at the first success, so the shared `json_schema` lane
+stays every keeper's first candidate under normal load; `json_object`/plain are
+fallbacks after a failure. Removing the SPOF also requires the per-keeper
+ordering change in #25192. This RFC and #25192 together dissolve it; neither
+alone does.
 
 ## Problem (evidence)
 
@@ -121,9 +131,11 @@ the first.
 
 ## Relationship to the compaction RFC family
 
-- #25192 (per-Keeper compaction lane): complementary. It distributes load off a
-  shared lane; this RFC removes the single lane entirely, so convergence is no
-  longer possible to begin with.
+- #25192 (per-Keeper compaction lane): **dependency for SPOF removal**, not
+  merely complementary. Capability-based mode selection restores failover
+  availability, but every keeper still tries the `json_schema` lane first in
+  seed order, so convergence remains. #25192's per-keeper ordering is what
+  removes the convergence. Neither alone dissolves the SPOF; together they do.
 - #25268 (deterministic structural floor): complementary. It provides a
   deterministic fallback when the LLM path fails; this RFC widens the LLM path
   so the floor is reached far less often.

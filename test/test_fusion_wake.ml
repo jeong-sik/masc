@@ -954,6 +954,48 @@ let test_tool_authority_suppresses_duplicate_and_conflict_loser () =
     check string "settled duplicate does not fork" "fusion_already_settled" (call ()))
 ;;
 
+let test_tool_cancel_claim_survives_cancelled_context () =
+  with_isolated_eio_base_path "fusion-tool-cancel" (fun env sw base_dir ->
+    let keeper = "fusion-cancel-keeper" in
+    let run_id = Printf.sprintf "fus-cancel-%d" (Random.bits ()) in
+    let authority = Fusion_run_authority.create ~directory:(Filename.concat base_dir "authority") in
+    let cancelled, resolve_cancelled = Eio.Promise.create () in
+    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~request:_ () =
+      Eio.Fiber.check ();
+      Fusion_orchestrator.Compute_denied Fusion_types.Disabled
+    in
+    let project ~base_dir:_ ~topology:_ ~request:_ _ =
+      fail "cancelled computation must not project"
+    in
+    let fork fn =
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          Eio.Cancel.sub (fun cc ->
+            Eio.Cancel.cancel cc Exit;
+            fn ())
+        with
+        | Eio.Cancel.Cancelled _ -> Eio.Promise.resolve resolve_cancelled ())
+    in
+    let response =
+      Fusion_tool.For_test.handle_with_runtime ~compute ~project ~fork ~sw
+        ~net:(Eio.Stdenv.net env) ~authority ~base_dir ~keeper ~now_unix:6.0 ~run_id
+        ~policy:(fusion_tool_policy ()) ~args:(`Assoc [ "prompt", `String "q" ]) ()
+      |> Yojson.Safe.from_string |> assoc_fields "response"
+    in
+    check string "cancelled child starts" "fusion_started"
+      (string_field "response" response "status");
+    Eio.Promise.await cancelled;
+    let request : Fusion_types.fusion_request =
+      { run_id; keeper; prompt = "q"; preset = "unit"; web_tools = false
+      ; depth = Fusion_types.Fusion_depth.Top; trigger = Explicit_tool_call }
+    in
+    match Fusion_run_authority.register authority ~topology:Simple ~request ~started_at:6.0 with
+    | Ok
+        (Fusion_run_authority.Already_registered
+           (Stopped_without_computation_run (_, Cancelled _))) -> ()
+    | _ -> fail "cancelled context must durably claim its terminal")
+;;
+
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in
@@ -1051,6 +1093,8 @@ let () =
             test_tool_handle_async_success_projects_running_then_completed
         ; test_case "tool authority suppresses duplicate and conflict loser" `Quick
             test_tool_authority_suppresses_duplicate_and_conflict_loser
+        ; test_case "tool cancellation durably settles inside cancelled context" `Quick
+            test_tool_cancel_claim_survives_cancelled_context
         ; test_case
             "emit treats board post failure as best-effort"
             `Quick

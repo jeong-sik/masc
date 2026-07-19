@@ -423,13 +423,36 @@ let record_overflow_failure
     ~base_path:config.base_path
     meta.name
     (Some Keeper_registry.Turn_overflow_failure);
-  (* Also stamp the specific recovery reason onto compaction_rt so the reactive
-     overflow spiral's failure is visible in status (last_compaction_decision),
-     not dropped to the generic Turn_overflow_failure enum. *)
+  let decision = provider_overflow_decision ~reason in
+  (* Stamp the specific recovery reason onto the in-memory registry entry's
+     compaction_rt so in-memory run_state readers stay consistent. *)
   Keeper_registry.set_compaction_decision
     ~base_path:config.base_path
     meta.name
-    (provider_overflow_decision ~reason);
+    decision;
+  (* Persist the same decision to the durable on-disk meta. The registry stamp
+     above is in-memory only, and the turn-failure path already flushed
+     [updated_meta] (derived from the pre-overflow meta, without this decision)
+     to disk before recovery ran. Status (read_meta_resolved) and the dashboard
+     projection (keepers_dashboard_json) read [last_compaction_decision] from the
+     persisted meta, so without this write-through the reactive overflow reason
+     is never surfaced and is lost across a restart. *)
+  (match
+     Keeper_meta_store.persist_compaction_decision
+       config
+       ~keeper_name:meta.name
+       ~decision
+   with
+   | Ok `Persisted -> ()
+   | Ok `No_durable_meta ->
+     Log.Keeper.debug
+       "%s: no durable meta to persist provider-overflow compaction decision (registry stamp retained)"
+       meta.name
+   | Error msg ->
+     Log.Keeper.warn
+       "%s: failed to persist provider-overflow compaction decision to disk: %s"
+       meta.name
+       msg);
   Log.Keeper.warn
     "%s: unresolved context overflow observed (%s); Keeper lifecycle remains active"
     meta.name

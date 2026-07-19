@@ -120,6 +120,22 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect('compaction_token_gate' in (keeper ?? {})).toBe(false)
   })
 
+  it('surfaces last_compaction_decision emitted by the backend row', () => {
+    const [withDecision] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        last_compaction_decision: 'provider_overflow_recovery_failed: plan_provider_unavailable',
+      },
+    ])
+    expect(withDecision?.last_compaction_decision).toBe(
+      'provider_overflow_recovery_failed: plan_provider_unavailable',
+    )
+
+    const [withoutDecision] = normalizeKeepers([{ name: 'sangsu', status: 'active' }])
+    expect(withoutDecision?.last_compaction_decision).toBeNull()
+  })
+
   it('normalizes live activity projection and current approval gate', () => {
     const [keeper] = normalizeKeepers([
       {

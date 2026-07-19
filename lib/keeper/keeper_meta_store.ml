@@ -518,6 +518,45 @@ let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
     m
 ;;
 
+(* Durable write-through of [compaction_rt.last_decision].
+
+   The status/dashboard read paths (read_meta_resolved / keepers_dashboard_json)
+   surface [last_compaction_decision] from the on-disk meta, not from the
+   in-memory registry. The reactive provider-overflow failure path stamps the
+   decision onto the registry entry (in-memory) and the turn-failure path had
+   already flushed [updated_meta] — derived from the pre-overflow meta, without
+   this decision — to disk before recovery ran. Persisting here is the only path
+   that makes the reactive overflow reason durable, so it is both readable by
+   status and preserved across a restart.
+
+   Read the current on-disk meta (already carrying the just-written turn-failure
+   metrics), stamp only [last_decision], and write back with a field-level merge
+   so a concurrent heartbeat/turn CAS race re-applies the stamp instead of
+   dropping it. [`No_durable_meta] is a distinct, non-fatal outcome (keeper meta
+   never persisted) rather than a swallowed error. *)
+let persist_compaction_decision config ~keeper_name ~decision
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    Keeper_meta_contract.map_compaction_rt
+      (fun rt ->
+        { rt with
+          last_decision =
+            Keeper_meta_contract.compaction_runtime_decision_of_string decision
+        })
+      m
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed

@@ -34,6 +34,13 @@ type no_compaction =
   ; reason : no_compaction_reason
   }
 
+type accepted_cancellation =
+  { source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  }
+
 let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
@@ -43,6 +50,7 @@ let escalation_reason_requests_external_input = function
 type settlement =
   | Ack
   | No_compaction of no_compaction
+  | Cancel_accepted of accepted_cancellation
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -366,6 +374,7 @@ let escalation_reason_of_wire ~label ~detail_json =
 let settlement_kind_label = function
   | Ack -> "ack"
   | No_compaction _ -> "no_compaction"
+  | Cancel_accepted _ -> "cancel_accepted"
   | Requeue _ -> "requeue"
   | Escalate _ -> "escalate"
 ;;
@@ -392,15 +401,17 @@ let settlement_equal left right =
   | No_compaction left, No_compaction right ->
     Keeper_checkpoint_ref.equal left.source right.source
     && left.reason = right.reason
+  | Cancel_accepted left, Cancel_accepted right -> left = right
   | Requeue left, Requeue right -> left = right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
     left_reason = right_reason
     && successor_equal left_successor right_successor
-  | Ack, (No_compaction _ | Requeue _ | Escalate _)
-  | No_compaction _, (Ack | Requeue _ | Escalate _)
-  | Requeue _, (Ack | No_compaction _ | Escalate _)
-  | Escalate _, (Ack | No_compaction _ | Requeue _) ->
+  | Ack, (No_compaction _ | Cancel_accepted _ | Requeue _ | Escalate _)
+  | No_compaction _, (Ack | Cancel_accepted _ | Requeue _ | Escalate _)
+  | Cancel_accepted _, (Ack | No_compaction _ | Requeue _ | Escalate _)
+  | Requeue _, (Ack | No_compaction _ | Cancel_accepted _ | Escalate _)
+  | Escalate _, (Ack | No_compaction _ | Cancel_accepted _ | Requeue _) ->
     false
 ;;
 
@@ -413,8 +424,21 @@ let transition_receipt_equal left right =
   && left.settlement = right.settlement
 ;;
 
+let validate_accepted_cancellation cancellation =
+  if Int64.compare cancellation.source_revision 0L < 0
+  then Error "accepted cancellation source revision must not be negative"
+  else if cancellation.owner_generation < 0
+  then Error "accepted cancellation owner generation must not be negative"
+  else if String.equal (String.trim cancellation.operator_operation_id) ""
+  then Error "accepted cancellation operator operation id must not be empty"
+  else if String.equal (String.trim cancellation.reason) ""
+  then Error "accepted cancellation reason must not be empty"
+  else Ok ()
+;;
+
 let validate_settlement = function
   | Ack | No_compaction _ | Requeue _ -> Ok ()
+  | Cancel_accepted cancellation -> validate_accepted_cancellation cancellation
   | Escalate
       { reason = Failure_judgment_requested
       ; successor =
@@ -462,9 +486,8 @@ let validate_settlement = function
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
    path (via [validate_settlement_for_lease]) and the persist decode boundary
-   (via [outbox_entry_of_yojson]) enforce the same rule: a [No_compaction]
-   settlement is only well-formed when paired with exactly one
-   manual-compaction request stimulus. *)
+   (via [outbox_entry_of_yojson]) enforce the same closed settlement/source
+   rules. *)
 let validate_settlement_for_stimuli settlement stimuli =
   match settlement, stimuli with
   | No_compaction _,
@@ -476,6 +499,9 @@ let validate_settlement_for_stimuli settlement stimuli =
   | No_compaction _, _ ->
     Error
       "no-compaction settlement requires one manual-compaction request stimulus"
+  | Cancel_accepted _, [ _ ] -> Ok ()
+  | Cancel_accepted _, _ ->
+    Error "accepted cancellation requires exactly one accepted event stimulus"
   | (Ack | Requeue _ | Escalate _), _ -> Ok ()
 ;;
 
@@ -524,7 +550,7 @@ let lease_equal (left : lease) (right : lease) =
   && List.for_all2 Keeper_event_queue.stimulus_identity_equal left.stimuli right.stimuli
 ;;
 
-let settle ~settled_at ~lease ~settlement state =
+let settle_committed ~settled_at ~lease ~settlement state =
   let* () =
     if Float.is_finite settled_at
     then Ok ()
@@ -550,7 +576,7 @@ let settle ~settled_at ~lease ~settlement state =
     let* () = validate_settlement_for_lease settlement committed in
     let pending =
       match settlement with
-      | Ack | No_compaction _ -> state.pending
+      | Ack | No_compaction _ | Cancel_accepted _ -> state.pending
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
@@ -580,6 +606,49 @@ let settle ~settled_at ~lease ~settlement state =
       , Settled receipt )
 ;;
 
+let settle ~settled_at ~lease ~settlement state =
+  match settlement with
+  | Cancel_accepted _ ->
+    Error "accepted cancellation requires the owner-fenced cancellation boundary"
+  | Ack | No_compaction _ | Requeue _ | Escalate _ ->
+    settle_committed ~settled_at ~lease ~settlement state
+;;
+
+let cancel_accepted
+      ~current_owner_generation
+      ~settled_at
+      ~(lease : lease)
+      ~cancellation
+      state
+  =
+  let settlement = Cancel_accepted cancellation in
+  match find_prior_receipt lease.lease_id state with
+  | Some _ -> settle_committed ~settled_at ~lease ~settlement state
+  | None ->
+    let* () = validate_accepted_cancellation cancellation in
+    let* () =
+      if Int.equal current_owner_generation cancellation.owner_generation
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "accepted cancellation owner generation changed: expected %d, current %d"
+             cancellation.owner_generation
+             current_owner_generation)
+    in
+    let* () =
+      if Int64.equal state.revision cancellation.source_revision
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "accepted cancellation source revision changed: expected %Ld, current %Ld"
+             cancellation.source_revision
+             state.revision)
+    in
+    settle_committed ~settled_at ~lease ~settlement state
+;;
+
 let replay_transition_receipt receipt state =
   match
     List.find_opt
@@ -588,7 +657,7 @@ let replay_transition_receipt receipt state =
   with
   | Some lease ->
     let* state, result =
-      settle
+      settle_committed
         ~settled_at:receipt.settled_at
         ~lease
         ~settlement:receipt.settlement
@@ -851,6 +920,14 @@ let settlement_to_yojson = function
       ; "reason", `String (no_compaction_reason_label reason)
       ; "source", checkpoint_source_to_yojson source
       ]
+  | Cancel_accepted cancellation ->
+    `Assoc
+      [ "kind", `String "cancel_accepted"
+      ; "source_revision", int64_json cancellation.source_revision
+      ; "owner_generation", `Int cancellation.owner_generation
+      ; "operator_operation_id", `String cancellation.operator_operation_id
+      ; "reason", `String cancellation.reason
+      ]
   | Requeue reason ->
     `Assoc
       [ "kind", `String "requeue"
@@ -885,6 +962,30 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = checkpoint_source_of_yojson source_json in
     Ok (No_compaction { source; reason })
+  | "cancel_accepted" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:
+          [ "kind"
+          ; "source_revision"
+          ; "owner_generation"
+          ; "operator_operation_id"
+          ; "reason"
+          ]
+        fields
+    in
+    let* source_revision = int64_field ~context "source_revision" fields in
+    let* owner_generation = int_field ~context "owner_generation" fields in
+    let* operator_operation_id =
+      string_field ~context "operator_operation_id" fields
+    in
+    let* reason = string_field ~context "reason" fields in
+    let cancellation =
+      { source_revision; owner_generation; operator_operation_id; reason }
+    in
+    let* () = validate_accepted_cancellation cancellation in
+    Ok (Cancel_accepted cancellation)
   | "requeue" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in
@@ -990,8 +1091,7 @@ let outbox_entry_of_yojson json =
     list_field ~context "stimuli" Keeper_event_queue.stimulus_of_yojson fields
   in
   (* Re-enforce the settle-time receipt-vs-stimuli invariant at the decode
-     boundary: a persisted [No_compaction] receipt paired with a non-manual or
-     mismatched stimulus is rejected as Error, not silently accepted as Ok. *)
+     boundary; malformed typed terminal receipts are rejected as [Error]. *)
   let* () = validate_settlement_for_stimuli receipt.settlement stimuli in
   Ok { receipt; stimuli }
 ;;

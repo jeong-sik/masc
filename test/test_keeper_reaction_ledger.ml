@@ -1169,6 +1169,8 @@ let test_reaction_kind_string_roundtrip () =
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
+    ; Keeper_reaction_ledger.Event_queue_no_compaction
+    ; Keeper_reaction_ledger.Event_queue_cancelled
     ; Keeper_reaction_ledger.Event_queue_requeued
     ; Keeper_reaction_ledger.Event_queue_escalated
     ; Keeper_reaction_ledger.Cursor_ack
@@ -1177,6 +1179,58 @@ let test_reaction_kind_string_roundtrip () =
   | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
     check string "unknown reaction decoder preserves evidence" "unknown_custom" value
   | Ok _ -> fail "unknown reaction string must not decode"
+;;
+
+let test_cancelled_transition_is_projected_as_typed_history () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cancelled-transition-keeper" in
+  let stimulus = board_stimulus () in
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
+  let claimed, lease =
+    Keeper_event_queue_state.claim_when
+      ~claimed_at:1235.0
+      ~ready:(fun _ -> true)
+      state
+    |> require_ok "claim cancellation stimulus"
+  in
+  let lease =
+    match lease with
+    | Some lease -> lease
+    | None -> fail "cancellation stimulus was not claimed"
+  in
+  let cancellation : Keeper_event_queue_state.accepted_cancellation =
+    { source_revision = Keeper_event_queue_state.revision claimed
+    ; owner_generation = 7
+    ; operator_operation_id = "operator-cancel-1"
+    ; reason = "operator rejected paused work"
+    }
+  in
+  let cancelled, _ =
+    Keeper_event_queue_state.cancel_accepted
+      ~current_owner_generation:7
+      ~settled_at:1236.0
+      ~lease
+      ~cancellation
+      claimed
+    |> require_ok "commit cancellation receipt"
+  in
+  let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname snapshot_path);
+  write_file
+    snapshot_path
+    (Yojson.Safe.to_string (Keeper_event_queue_state.to_yojson cancelled));
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "project cancellation receipt";
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "summary counts accepted cancellation" 1
+    (summary |> member "event_queue_cancelled_count" |> to_int);
+  check int "typed cancellation row is current" 0
+    (summary |> member "quarantined_row_count" |> to_int)
 ;;
 
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
@@ -1555,6 +1609,10 @@ let () =
             "fleet summary aggregates no-compaction count across keepers"
             `Quick
             test_fleet_summary_aggregates_no_compaction_count
+        ; test_case
+            "accepted cancellation projects as typed history"
+            `Quick
+            test_cancelled_transition_is_projected_as_typed_history
         ] )
     ]
 ;;

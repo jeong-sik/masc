@@ -41,6 +41,16 @@ type no_compaction =
   ; reason : no_compaction_reason
   }
 
+type accepted_cancellation =
+  { source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  }
+(** Exact operator authority for terminally cancelling one accepted event.
+    [source_revision] and [owner_generation] fence the observed paused owner;
+    [operator_operation_id] makes replay/conflict explicit. *)
+
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 
@@ -52,6 +62,7 @@ val escalation_reason_requests_external_input : escalation_reason -> bool
 type settlement =
   | Ack
   | No_compaction of no_compaction
+  | Cancel_accepted of accepted_cancellation
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -132,6 +143,19 @@ val settle :
     only for a lease containing exactly one typed
     [Manual_compaction_requested] stimulus; it cannot retire product work whose
     provider turn failed. Non-finite settlement times are rejected. *)
+
+val cancel_accepted :
+  current_owner_generation:int ->
+  settled_at:float ->
+  lease:lease ->
+  cancellation:accepted_cancellation ->
+  t ->
+  (t * settle_result, string) result
+(** Terminally settle exactly one leased accepted event when both the durable
+    queue revision and owner generation still match the operator snapshot.
+    Generic {!settle} rejects [Cancel_accepted], so callers cannot bypass this
+    owner-fenced boundary. Replaying the same committed cancellation is
+    idempotent; a different operation is a conflict. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying

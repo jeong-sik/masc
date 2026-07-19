@@ -37,9 +37,17 @@ type no_compaction = State.no_compaction =
   ; reason : no_compaction_reason
   }
 
+type accepted_cancellation = State.accepted_cancellation =
+  { source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  }
+
 type settlement = State.settlement =
   | Ack
   | No_compaction of no_compaction
+  | Cancel_accepted of accepted_cancellation
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason

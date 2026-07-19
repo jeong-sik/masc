@@ -225,6 +225,132 @@ let test_no_compaction_decode_rejects_mismatched_stimulus () =
       "decode accepted a No_compaction receipt paired with a non-manual stimulus"
 ;;
 
+let accepted_cancellation ~source_revision ~owner_generation operation_id
+    : State.accepted_cancellation
+  =
+  { source_revision
+  ; owner_generation
+  ; operator_operation_id = operation_id
+  ; reason = "operator cancelled retained work"
+  }
+;;
+
+let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
+  let accepted = stimulus "accepted-event" 1.0 in
+  let peer = stimulus "peer-event" 2.0 in
+  let source =
+    State.empty
+    |> State.with_pending (queue [ accepted; peer ])
+    |> State.with_revision 7L
+  in
+  let claimed, lease =
+    State.claim_when
+      ~claimed_at:3.0
+      ~ready:(Queue.stimulus_identity_equal accepted)
+      source
+    |> require_ok "claim exact accepted event"
+  in
+  let lease = require_some "accepted event lease" lease in
+  let cancellation = accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1" in
+  (match
+     State.settle
+       ~settled_at:4.0
+       ~lease
+       ~settlement:(State.Cancel_accepted cancellation)
+       claimed
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "generic settlement bypassed the owner fence");
+  let settled, result =
+    State.cancel_accepted
+      ~current_owner_generation:4
+      ~settled_at:4.0
+      ~lease
+      ~cancellation
+      claimed
+    |> require_ok "cancel accepted event"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first cancellation was already settled"
+  in
+  Alcotest.(check string)
+    "typed transition identity"
+    "lease:1:cancel_accepted"
+    receipt.transition_id;
+  Alcotest.(check (list string))
+    "only the exact accepted event is terminal"
+    [ "peer-event" ]
+    (post_ids (State.pending settled));
+  let outbox = State.transition_outbox settled in
+  let source_stimuli =
+    match outbox with
+    | [ entry ] -> entry.stimuli
+    | _ -> Alcotest.fail "cancellation did not retain one exact outbox source"
+  in
+  Alcotest.(check bool)
+    "outbox retains the exact source identity"
+    true
+    (match source_stimuli with
+     | [ source ] -> Queue.stimulus_identity_equal source accepted
+     | _ -> false);
+  let decoded =
+    State.transition_receipt_to_yojson receipt
+    |> State.transition_receipt_of_yojson
+    |> require_ok "accepted cancellation receipt roundtrip"
+  in
+  Alcotest.(check bool)
+    "cancellation receipt roundtrips"
+    true
+    (State.transition_receipt_equal receipt decoded);
+  (match
+     State.cancel_accepted
+       ~current_owner_generation:99
+       ~settled_at:5.0
+       ~lease
+       ~cancellation
+       settled
+   with
+   | Ok (_, State.Already_settled repeated) ->
+     Alcotest.(check string)
+       "same operation replays the committed receipt"
+       receipt.transition_id
+       repeated.transition_id
+   | Ok (_, State.Settled _) -> Alcotest.fail "replay created a second cancellation"
+   | Error message -> Alcotest.failf "committed cancellation did not replay: %s" message)
+;;
+
+let test_accepted_cancellation_rejects_stale_fences () =
+  let accepted = stimulus "accepted-event" 1.0 in
+  let claimed, lease =
+    State.empty
+    |> State.with_pending (queue [ accepted ])
+    |> State.with_revision 7L
+    |> State.claim_when ~claimed_at:3.0 ~ready:(fun _ -> true)
+    |> require_ok "claim stale-fence fixture"
+  in
+  let lease = require_some "stale-fence lease" lease in
+  let cancel cancellation current_owner_generation =
+    State.cancel_accepted
+      ~current_owner_generation
+      ~settled_at:4.0
+      ~lease
+      ~cancellation
+      claimed
+  in
+  (match cancel (accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1") 5 with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stale owner generation cancelled accepted work");
+  (match cancel (accepted_cancellation ~source_revision:6L ~owner_generation:4 "op-1") 4 with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stale queue revision cancelled accepted work");
+  Alcotest.(check int)
+    "rejected cancellation keeps the exact lease active"
+    1
+    (List.length (State.leases claimed))
+;;
+
 let test_claim_codec_ack_idempotency () =
   let first = stimulus "first" 1.0 in
   let state = State.with_pending (queue [ first ]) State.empty in
@@ -1440,6 +1566,14 @@ let () =
             "no-compaction rejects scheduled product work"
             `Quick
             test_no_compaction_rejects_scheduled_product_work
+        ; Alcotest.test_case
+            "accepted cancellation is exact and owner-fenced"
+            `Quick
+            test_accepted_cancellation_is_exact_owner_fenced_terminal
+        ; Alcotest.test_case
+            "accepted cancellation rejects stale fences"
+            `Quick
+            test_accepted_cancellation_rejects_stale_fences
         ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick

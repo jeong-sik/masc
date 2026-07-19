@@ -820,6 +820,7 @@ type private_jsonl_operation_failure =
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
   | Cursor_succeeded of Private_jsonl_cursor.t
+  | Cursor_precondition_succeeded of Private_jsonl_cursor.t
 
 type private_jsonl_transaction_primary =
   | Transaction_succeeded of private_jsonl_transaction_success
@@ -940,6 +941,15 @@ val append_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
     fsynced; no directory-fsync failure is suppressed. The stable sibling lock
     remains the serialization authority across the inode replacement. *)
 val rewrite_private_jsonl_durable_locked_at_cursor_result :
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** Production-path seam proving that a descriptor settlement failure while
+    reading the rewrite precondition is not classified as a committed rewrite. *)
+val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
   string ->
   expected:Private_jsonl_cursor.t ->
   string ->

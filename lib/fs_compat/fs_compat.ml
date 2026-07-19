@@ -1830,6 +1830,7 @@ type private_jsonl_operation_failure =
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
   | Cursor_succeeded of Private_jsonl_cursor.t
+  | Cursor_precondition_succeeded of Private_jsonl_cursor.t
 
 type private_jsonl_transaction_primary =
   | Transaction_succeeded of private_jsonl_transaction_success
@@ -2006,6 +2007,10 @@ let rec private_jsonl_transaction_error_to_string = function
       | Transaction_succeeded (Cursor_succeeded cursor) ->
         Printf.sprintf
           "private JSONL cursor operation succeeded (cursor=%s)"
+          (Private_jsonl_cursor.to_string cursor)
+      | Transaction_succeeded (Cursor_precondition_succeeded cursor) ->
+        Printf.sprintf
+          "private JSONL cursor precondition read succeeded (cursor=%s)"
           (Private_jsonl_cursor.to_string cursor)
       | Transaction_failed primary ->
         private_jsonl_transaction_error_to_string primary
@@ -2475,7 +2480,7 @@ let read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after =
 ;;
 
 let private_jsonl_current_cursor ~io path =
-  let success cursor = Cursor_succeeded cursor in
+  let success cursor = Cursor_precondition_succeeded cursor in
   match private_jsonl_open_existing ~close_fd:io.close_fd path [ Unix.O_RDONLY ] with
   | Error _ as error -> error
   | Ok None -> Ok Private_jsonl_cursor.Missing
@@ -2704,6 +2709,19 @@ let rewrite_private_jsonl_durable_locked_at_cursor_result
   =
   rewrite_private_jsonl_durable_locked_at_cursor_with_io
     ~io:private_jsonl_transaction_unix_io
+    path
+    ~expected
+    content
+;;
+
+let rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ~io
+      path
+      ~expected
+      content
+  =
+  rewrite_private_jsonl_durable_locked_at_cursor_with_io
+    ~io
     path
     ~expected
     content

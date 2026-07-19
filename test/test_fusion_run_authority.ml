@@ -198,6 +198,67 @@ let test_corruption_is_per_run_and_semantic () =
   | Error (A.Identity_mismatch _) -> ()
   | _ -> fail "hashed path must still verify persisted identity"
 ;;
+let identity_of_recovered = function
+  | A.Running_run registration -> registration.identity
+  | A.Settled_run { registration; _ } -> registration.identity
+;;
+
+let test_restart_scan_preserves_valid_peers_and_corruption () =
+  let base_path = fresh_base () in
+  let directory = Filename.concat base_path "runs" in
+  let store = A.create ~directory in
+  let register run_id started_at =
+    match A.register store ~keeper:"keeper-a" ~run_id ~preset:"p" ~started_at with
+    | Ok A.Registered -> ()
+    | _ -> fail (run_id ^ " registration failed")
+  in
+  register "running" 1.;
+  register "settled" 2.;
+  register "corrupt" 3.;
+  let winner = deliberated (successful_evidence ()) in
+  (match
+     A.claim_terminal store ~keeper:"keeper-a" ~run_id:"settled"
+       winner
+   with
+   | Ok A.First_committed -> ()
+   | _ -> fail "settled terminal did not commit");
+  let corrupt_path = run_file directory "keeper-a" "corrupt" in
+  let registered = Fs_compat.load_file corrupt_path in
+  Fs_compat.save_file corrupt_path
+    (String.sub registered 0 (String.length registered - 1));
+  let entries =
+    match A.scan (A.create ~directory) with
+    | Ok (A.Store_scanned entries) -> entries
+    | Ok A.Store_missing -> fail "existing authority store was reported missing"
+    | Error _ -> fail "authority directory scan failed"
+  in
+  check int "all observed entries retained" 3 (List.length entries);
+  let valid_runs, corruptions =
+    List.fold_left
+      (fun (valid, corrupt) (entry : A.scan_entry) ->
+         match entry.outcome with
+         | Ok recovered -> recovered :: valid, corrupt
+         | Error (A.Entry_record_failed A.Partial_tail) -> valid, entry.entry_name :: corrupt
+         | Error _ -> fail "scan returned an unexpected per-entry failure")
+      ([], [])
+      entries
+  in
+  let valid_run_ids =
+    valid_runs
+    |> List.map (fun recovered -> (identity_of_recovered recovered).run_id)
+    |> List.sort String.compare
+  in
+  check (list string) "valid peers survive corrupt entry" [ "running"; "settled" ] valid_run_ids;
+  check int "corruption remains explicit" 1 (List.length corruptions);
+  check bool "settled terminal survives scan" true
+    (List.exists
+       (function
+         | A.Settled_run { registration; terminal } ->
+           String.equal registration.identity.run_id "settled"
+           && A.equal_terminal winner terminal
+         | A.Running_run _ -> false)
+       valid_runs)
+;;
 let () =
   run "fusion_run_authority"
     [ ( "authority"
@@ -205,6 +266,8 @@ let () =
             test_exact_lifecycle_and_validation
         ; test_case "per-run corruption and semantic validation" `Quick
             test_corruption_is_per_run_and_semantic
+        ; test_case "restart scan preserves valid peers and corruption" `Quick
+            test_restart_scan_preserves_valid_peers_and_corruption
         ] )
     ]
 ;;

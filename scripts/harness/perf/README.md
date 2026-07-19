@@ -1,4 +1,56 @@
-# Perf harness: main-domain scheduler starvation
+# Performance and soak harnesses
+
+## Paused-work disposition: exact 10-Keeper 8h soak
+
+`paused_work_disposition_soak.sh` is the release-evidence gate for #25191. It
+attaches to an isolated, already-running server and never builds or boots MASC.
+For exactly ten clean Keeper lanes it deterministically rotates through
+`Resume_owner`, `Transfer_owner`, and `Cancel_accepted`. Every case pauses the
+owner, injects one exact `Board_signal`, then verifies all of the following:
+
+- the paused lane retains the exact source once;
+- the first request and both pre-/post-terminal replays return the same durable
+  disposition receipt;
+- resume/transfer consumption advances the expected lease sequence once;
+- cancellation has one source terminal receipt and no surviving source;
+- transfer has one source settlement and one target
+  `accepted_transfer_projections` row, including replay after target ACK;
+- a configured server restart recovers before the same exact request is
+  replayed.
+
+An 8-hour run is acceptance-eligible only when all ten Keepers have exercised
+all three disposition classes, each class has at least one restart fault, and
+both `duplicate_terminal_effects` and `silent_losses` are zero. A shorter run is
+allowed for wiring checks but its `summary.json` says
+`acceptance_eligible:false`; it is not release evidence.
+
+The target is intentionally explicit and destructive to its isolated fixture:
+the harness posts Board entries and changes Keeper pause state. It refuses to
+start without `MASC_PAUSED_WORK_SOAK_ISOLATED=1`, an existing `MASC_BASE_PATH`,
+and exactly ten unique Keeper names. All ten lanes must initially be active and
+empty. Non-loopback targets additionally require `ALLOW_NON_LOOPBACK=1`.
+
+```bash
+MASC_PAUSED_WORK_SOAK_ISOLATED=1 \
+MASC_BASE_PATH=/absolute/path/to/isolated-base \
+MCP_TOKEN="$(< /absolute/path/to/isolated-token)" \
+scripts/harness/perf/paused_work_disposition_soak.sh \
+  --keepers k1,k2,k3,k4,k5,k6,k7,k8,k9,k10 \
+  --restart-hook /absolute/path/to/synchronous-restart-hook
+```
+
+The restart hook is executed directly, never through `eval`, with arguments
+`PHASE ITERATION SOURCE_KEEPER TARGET_KEEPER`. It must synchronously launch the
+replacement server; the harness then waits for `/health` and a fresh MCP
+session. The current phase is
+`after_disposition_commit_before_terminal_observation`. A smoke run can disable
+restarts with `--restart-every 0` and shorten the duration with
+`--duration-sec`, but cannot become acceptance-eligible.
+
+Artifacts are written to `logs/paused-work-soak/<run-id>/`: exact per-case
+`cases.jsonl`, `summary.json`, and `failure.json` on failure.
+
+## Main-domain scheduler starvation
 
 `scheduler_starvation_gate.sh` turns the previously *observational* claim "MASC latency
 tracks host load while `main_eio` sits at 12–27% CPU" (RFC-0204) into a **deterministic,

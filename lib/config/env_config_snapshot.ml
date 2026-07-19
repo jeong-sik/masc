@@ -227,6 +227,8 @@ let board_entries =
       "Board backend type (e.g. jsonl, pg); None when unset";
     entry ~default:"30.0" "MASC_BOARD_FLUSH_INTERVAL_SEC"
       "Flush interval for board persistence (seconds)";
+    entry ~default:"30.0" "MASC_BOARD_ROUTING_RETRY_INTERVAL_SEC"
+      "Durable Board-signal routing retry interval (seconds)";
   ]
 
 let cache_entries =

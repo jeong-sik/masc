@@ -1,13 +1,25 @@
-(** Regression for autonomous Board dirty-projection recovery.
+(** Regression for autonomous Board projection and routing recovery.
 
-    This executable has a test-only persistence flush interval in [test/dune].
-    Production continues to use the operator-owned Board flush interval. *)
+    This executable has distinct test-only projection and routing retry
+    intervals in [test/dune]. Production continues to use the operator-owned
+    Board interval SSOTs. *)
 
 open Masc
 
 let () = Random.self_init ()
 
 let request_flush = Masc_board_handlers.Board_core_persist.request_flush
+
+let test_retry_cadences_are_independent () =
+  Alcotest.(check (float 0.0))
+    "projection retry cadence"
+    0.01
+    Env_config.Board.flush_interval_sec;
+  Alcotest.(check (float 0.0))
+    "routing retry cadence"
+    0.02
+    Env_config.Board.routing_retry_interval_sec
+;;
 
 let fresh_base prefix =
   Filename.concat
@@ -221,7 +233,13 @@ let test_sse_hook_failure_boundary () =
 let () =
   Alcotest.run
     "board_flusher_autonomous_retry"
-    [ ( "recovery"
+    [ ( "configuration"
+      , [ Alcotest.test_case
+            "retry cadences are independent"
+            `Quick
+            test_retry_cadences_are_independent
+        ] )
+    ; ( "recovery"
       , [ Alcotest.test_case
             "failed flush retries without new Board activity"
             `Quick

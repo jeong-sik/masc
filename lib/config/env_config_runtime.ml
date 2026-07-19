@@ -275,15 +275,9 @@ module Board = struct
     | Pg -> "pg"
     | Unknown_backend value -> value
 
-  (** Flush interval for board persistence (seconds). Default: 30.
-      Once a dirty projection fails, this value becomes the autonomous retry
-      cadence, so zero, negative, and non-finite values would create either a
-      hot loop or an obligation that can never make progress.  Reject those at
-      the configuration boundary instead of coercing them. *)
-  let flush_interval_sec =
-    let key = "MASC_BOARD_FLUSH_INTERVAL_SEC" in
+  let positive_finite_interval_sec ~key ~default =
     match raw_value_opt key |> trim_opt with
-    | None -> 30.0
+    | None -> default
     | Some raw ->
       (match Safe_ops.float_of_string_safe raw with
        | Some value when Float.is_finite value && Float.compare value 0.0 > 0 -> value
@@ -295,6 +289,23 @@ module Board = struct
          raise
            (Config_error
               (Printf.sprintf "%s must be a positive finite float; got %S" key raw)))
+
+  (** Flush scheduling and autonomous dirty-projection retry cadence in
+      seconds. Default: 30. *)
+  let flush_interval_sec =
+    positive_finite_interval_sec
+      ~key:"MASC_BOARD_FLUSH_INTERVAL_SEC"
+      ~default:30.0
+  ;;
+
+  (** Durable Board-signal routing retry cadence in seconds. Default: 30.
+      Routing availability is independent from projection persistence, so it
+      must not inherit the flush policy. *)
+  let routing_retry_interval_sec =
+    positive_finite_interval_sec
+      ~key:"MASC_BOARD_ROUTING_RETRY_INTERVAL_SEC"
+      ~default:30.0
+  ;;
 
   (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
   let backend_opt () =

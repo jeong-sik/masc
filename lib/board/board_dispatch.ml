@@ -568,7 +568,10 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
              "Board signal outbox recovery obligation raised and remains pending: %s\n%s"
              (Printexc.to_string cause)
              (Printexc.raw_backtrace_to_string backtrace));
-        loop (Some (Eio.Time.now clock +. Env_config.Board.flush_interval_sec))
+        loop
+          (Some
+             (Eio.Time.now clock
+              +. Env_config.Board.routing_retry_interval_sec))
     in
     loop (Some (Eio.Time.now clock))
   in

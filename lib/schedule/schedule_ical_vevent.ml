@@ -40,6 +40,7 @@ type parse_error =
   | Missing_uid
   | Duplicate_uid
   | Empty_uid
+  | Invalid_uid of { value : string; detail : string }
   | Missing_dtstart
   | Duplicate_dtstart
   | Invalid_dtstart of { value : string; detail : string }
@@ -56,6 +57,8 @@ let parse_error_to_string = function
   | Missing_uid -> "VEVENT recurrence identity requires UID"
   | Duplicate_uid -> "UID occurs more than once"
   | Empty_uid -> "UID must be non-empty"
+  | Invalid_uid { value; detail } ->
+    Printf.sprintf "invalid UID value %S: %s" value detail
   | Missing_dtstart -> "VEVENT recurrence identity requires DTSTART"
   | Duplicate_dtstart -> "DTSTART occurs more than once"
   | Invalid_dtstart { value; detail } ->
@@ -84,6 +87,41 @@ let parse_error_to_string = function
 
 let make_tzid raw =
   if String.equal raw "" then None else Some raw
+
+(* RFC 5545 section 3.3.11 TEXT decoding. The content-line layer preserves
+   raw property values; property leaves own value-type decoding. *)
+let decode_text raw =
+  let length = String.length raw in
+  let decoded = Buffer.create length in
+  let rec loop index =
+    if index = length then Ok (Buffer.contents decoded)
+    else
+      match raw.[index] with
+      | ',' -> Error "COMMA must be escaped in a TEXT value"
+      | ';' -> Error "SEMICOLON must be escaped in a TEXT value"
+      | '\\' ->
+        if index + 1 = length then Error "trailing BACKSLASH in a TEXT value"
+        else (
+          match raw.[index + 1] with
+          | '\\' ->
+            Buffer.add_char decoded '\\';
+            loop (index + 2)
+          | ';' ->
+            Buffer.add_char decoded ';';
+            loop (index + 2)
+          | ',' ->
+            Buffer.add_char decoded ',';
+            loop (index + 2)
+          | 'N' | 'n' ->
+            Buffer.add_char decoded '\n';
+            loop (index + 2)
+          | escaped ->
+            Error (Printf.sprintf "invalid TEXT escape \\%c" escaped))
+      | char ->
+        Buffer.add_char decoded char;
+        loop (index + 1)
+  in
+  loop 0
 
 (* Single-valued parameters only; a multi-valued TZID/VALUE is malformed,
    not absent. *)
@@ -205,9 +243,12 @@ let apply (line : Content_line.t) b =
     match b.b_uid with
     | Some _ -> Error Duplicate_uid
     | None ->
-      let uid = line.Content_line.value in
-      if String.equal uid "" then Error Empty_uid
-      else Ok { b with b_uid = Some uid })
+      let value = line.Content_line.value in
+      if String.equal value "" then Error Empty_uid
+      else (
+        match decode_text value with
+        | Ok uid -> Ok { b with b_uid = Some uid }
+        | Error detail -> Error (Invalid_uid { value; detail })))
   | "DTSTART" -> (
     match b.b_dtstart with
     | Some _ -> Error Duplicate_dtstart
@@ -224,17 +265,18 @@ let apply (line : Content_line.t) b =
     match b.b_recurrence_id with
     | Some _ -> Error Duplicate_recurrence_id
     | None -> (
-      match
-        parse_dtstart_like
-          ~property:"RECURRENCE-ID"
-          ~invalid:(fun ~value ~detail -> Invalid_recurrence_id { value; detail })
-          line
-      with
+      match parse_range line with
       | Error _ as error -> error
-      | Ok value -> (
-        match parse_range line with
+      | Ok range -> (
+        match
+          parse_dtstart_like
+            ~property:"RECURRENCE-ID"
+            ~invalid:(fun ~value ~detail ->
+              Invalid_recurrence_id { value; detail })
+            line
+        with
         | Error _ as error -> error
-        | Ok range ->
+        | Ok value ->
           Ok { b with b_recurrence_id = Some { value; range } })))
   | "RRULE" -> (
     match b.b_rrule with

@@ -7,7 +7,8 @@
     this module projects identity, not the whole component.
 
     Enforced cross-property rules (typed errors, no silent coercion):
-    - [UID] exactly once, non-empty (§3.8.4.7).
+    - [UID] exactly once, non-empty, and decoded from its RFC [TEXT] wire
+      representation without trimming (§3.3.11, §3.8.4.7).
     - This recurrence-identity projection requires [DTSTART] exactly once.
       Full VEVENT validation of §3.8.2.4's outer [METHOD]-dependent optionality
       is outside this leaf because it does not receive the VCALENDAR envelope.
@@ -63,6 +64,7 @@ type parse_error =
   | Missing_uid
   | Duplicate_uid
   | Empty_uid
+  | Invalid_uid of { value : string; detail : string }
   | Missing_dtstart
   | Duplicate_dtstart
   | Invalid_dtstart of { value : string; detail : string }

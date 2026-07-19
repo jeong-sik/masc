@@ -117,6 +117,15 @@ let test_uid_identity_is_exact () =
   let t = parse_ok [ "UID:  event-identity  "; "DTSTART:19980118T230000Z" ] in
   check string "uid bytes" "  event-identity  " t.V.uid
 
+let test_uid_text_decoding () =
+  let t =
+    parse_ok
+      [ "UID:event\\,one\\;line\\\\tail\\nnext"
+      ; "DTSTART:19980118T230000Z"
+      ]
+  in
+  check string "decoded uid" "event,one;line\\tail\nnext" t.V.uid
+
 let test_tzid_identity_is_exact () =
   let t =
     parse_ok
@@ -151,6 +160,16 @@ let test_empty_uid () =
   match parse_error [ "UID:"; "DTSTART:19980118T230000Z" ] with
   | Error V.Empty_uid -> ()
   | _ -> fail "expected Empty_uid"
+
+let test_invalid_uid_text () =
+  let invalid_values = [ "event,one"; "event;one"; "event\\x"; "event\\" ] in
+  List.iter
+    (fun value ->
+       match parse_error [ "UID:" ^ value; "DTSTART:19980118T230000Z" ] with
+       | Error (V.Invalid_uid { value = actual; _ }) ->
+         check string "wire value" value actual
+       | _ -> failf "invalid UID TEXT %S was accepted" value)
+    invalid_values
 
 let test_duplicate_uid () =
   match
@@ -205,7 +224,7 @@ let test_duplicate_parameters_rejected () =
       , "TZID" )
     ; ( [ "UID:e1"
         ; "DTSTART:19980118T230000Z"
-        ; "RECURRENCE-ID;RANGE=THISANDFUTURE;RANGE=THISANDFUTURE:19980125T230000Z"
+        ; "RECURRENCE-ID;RANGE=THISANDFUTURE;RANGE=THISANDFUTURE:NOT-A-DATE"
         ]
       , "RECURRENCE-ID"
       , "RANGE" )
@@ -339,6 +358,7 @@ let () =
         ; test_case "range thisandfuture" `Quick test_range_this_and_future
         ; test_case "explicit date-time value" `Quick test_explicit_date_time_value
         ; test_case "uid identity exact" `Quick test_uid_identity_is_exact
+        ; test_case "uid text decoding" `Quick test_uid_text_decoding
         ; test_case "tzid identity exact" `Quick test_tzid_identity_is_exact
         ; test_case "other properties ignored" `Quick
             test_ignored_other_properties
@@ -346,6 +366,7 @@ let () =
     ; "rejections"
       , [ test_case "missing uid" `Quick test_missing_uid
         ; test_case "empty uid" `Quick test_empty_uid
+        ; test_case "invalid uid text" `Quick test_invalid_uid_text
         ; test_case "duplicate uid" `Quick test_duplicate_uid
         ; test_case "missing dtstart" `Quick test_missing_dtstart
         ; test_case "duplicate dtstart" `Quick test_duplicate_dtstart

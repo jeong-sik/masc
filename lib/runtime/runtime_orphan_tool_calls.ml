@@ -1,10 +1,12 @@
 module Sset = Set.Make (String)
 
 (* [ToolUse] (assistant tool_calls) legitimately appear only on [Assistant]
-   messages; [ToolResult] blocks only on [Tool] messages — masc renders tool
-   results under the Tool role (keeper_context_core_message_json: "Non-Tool
-   roles never own a tool_call_id"). Scoping by role stops a malformed [ToolUse]
-   or [ToolResult] on any other role from being treated as a call or an answer. *)
+   messages. [ToolResult] blocks are carried on [Tool]-role messages (OpenAI
+   wire format) and on [User]-role messages (Anthropic wire format puts
+   tool_result blocks in a user turn). Scoping by role stops a malformed
+   [ToolUse] or [ToolResult] on a role that never carries it from being treated
+   as a call or an answer, while still counting both legitimate answer carriers
+   so an Anthropic-format result is not mistaken for a missing answer. *)
 
 let is_assistant (m : Agent_sdk.Types.message) =
   match m.role with
@@ -12,16 +14,17 @@ let is_assistant (m : Agent_sdk.Types.message) =
   | Agent_sdk.Types.System | Agent_sdk.Types.User | Agent_sdk.Types.Tool -> false
 ;;
 
-let is_tool (m : Agent_sdk.Types.message) =
+let carries_answers (m : Agent_sdk.Types.message) =
   match m.role with
-  | Agent_sdk.Types.Tool -> true
-  | Agent_sdk.Types.System | Agent_sdk.Types.User | Agent_sdk.Types.Assistant -> false
+  | Agent_sdk.Types.Tool | Agent_sdk.Types.User -> true
+  | Agent_sdk.Types.System | Agent_sdk.Types.Assistant -> false
 ;;
 
-(* Result ids on this message that answer a call. Only Tool-role messages carry
-   answers; a [ToolResult] on any other role is malformed and does not count. *)
+(* Result ids on this message that answer a call. Only [Tool]/[User]-role
+   messages carry answers; a [ToolResult] on a System or Assistant message is
+   malformed and does not count. *)
 let answer_ids (m : Agent_sdk.Types.message) : Sset.t =
-  if not (is_tool m)
+  if not (carries_answers m)
   then Sset.empty
   else
     List.fold_left

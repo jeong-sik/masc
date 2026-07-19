@@ -110,16 +110,30 @@ let test_result_before_call_is_orphan () =
   Alcotest.(check (list string)) "call preceded by its result is orphan" [] (tool_use_ids out)
 ;;
 
-(* Role scoping: a [ToolResult] on a non-Tool (here User) message does not count
-   as an answer, so the matching call stays an orphan and is dropped. *)
+(* Role scoping: a [ToolResult] on a role that never carries answers (here
+   System) does not count, so the matching call stays an orphan and is dropped. *)
 let test_result_on_wrong_role_does_not_answer () =
+  let msgs =
+    [ assistant [ tool_use ~id:"a" ]
+    ; T.make_message ~role:T.System [ tool_result_block ~tool_use_id:"a" ]
+    ]
+  in
+  let out = Runtime_orphan_tool_calls.drop msgs in
+  Alcotest.(check (list string)) "result on System role does not rescue call" [] (tool_use_ids out)
+;;
+
+(* Anthropic wire format carries tool_result blocks in a User-role turn. Such a
+   result is a legitimate answer and must rescue its call (regression guard: a
+   Tool-only answer scope would drop the call as a false orphan). *)
+let test_user_role_result_answers_call () =
   let msgs =
     [ assistant [ tool_use ~id:"a" ]
     ; T.make_message ~role:T.User [ tool_result_block ~tool_use_id:"a" ]
     ]
   in
   let out = Runtime_orphan_tool_calls.drop msgs in
-  Alcotest.(check (list string)) "result on non-Tool role does not rescue call" [] (tool_use_ids out)
+  Alcotest.(check bool) "User-role result is answered, no orphan drop" true (out == msgs);
+  Alcotest.(check (list string)) "call kept" [ "a" ] (tool_use_ids out)
 ;;
 
 let () =
@@ -148,6 +162,10 @@ let () =
             "result on wrong role does not answer"
             `Quick
             test_result_on_wrong_role_does_not_answer
+        ; Alcotest.test_case
+            "User-role (Anthropic) result answers call"
+            `Quick
+            test_user_role_result_answers_call
         ] )
     ]
 ;;

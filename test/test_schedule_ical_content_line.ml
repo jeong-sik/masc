@@ -150,6 +150,24 @@ let test_parse_param_missing_equals () =
   | C.Missing_param_equals _ -> ()
   | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
+let test_parse_accepts_empty_unquoted_param_value () =
+  let cl = parse_ok "PROP;P=:v" in
+  match cl.C.params with
+  | [ { C.values = [ "" ]; _ } ] -> ()
+  | _ -> fail "empty paramtext value was not preserved"
+
+let test_parse_accepts_empty_multi_param_value () =
+  let cl = parse_ok "PROP;P=a,,b:v" in
+  match cl.C.params with
+  | [ { C.values = [ "a"; ""; "b" ]; _ } ] -> ()
+  | _ -> fail "empty paramtext list member was not preserved"
+
+let test_parse_accepts_empty_quoted_param_value () =
+  let cl = parse_ok "PROP;P=\"\":v" in
+  match cl.C.params with
+  | [ { C.values = [ "" ]; _ } ] -> ()
+  | _ -> fail "empty quoted-string value was not preserved"
+
 let test_parse_unterminated_quote () =
   match parse_error "PROP;P=\"abc\"def:x" with
   | C.Invalid_quoted_string _ -> ()
@@ -241,6 +259,12 @@ let () =
         ; test_case "invalid name char" `Quick test_parse_invalid_name_char
         ; test_case "param missing equals" `Quick
             test_parse_param_missing_equals
+        ; test_case "empty unquoted param accepted" `Quick
+            test_parse_accepts_empty_unquoted_param_value
+        ; test_case "empty multi param accepted" `Quick
+            test_parse_accepts_empty_multi_param_value
+        ; test_case "empty quoted param accepted" `Quick
+            test_parse_accepts_empty_quoted_param_value
         ; test_case "unterminated quote" `Quick test_parse_unterminated_quote
         ; test_case "open quote hides colon" `Quick
             test_parse_open_quote_hides_colon

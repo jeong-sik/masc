@@ -441,7 +441,8 @@ let record_overflow_failure
      Keeper_meta_store.persist_compaction_decision
        config
        ~keeper_name:meta.name
-       ~decision
+       ~decision:
+         (Keeper_meta_contract.compaction_runtime_decision_of_string decision)
    with
    | Ok `Persisted -> ()
    | Ok `No_durable_meta ->

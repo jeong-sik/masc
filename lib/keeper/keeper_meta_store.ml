@@ -540,10 +540,7 @@ let persist_compaction_decision config ~keeper_name ~decision
   let stamp (m : Keeper_meta_contract.keeper_meta) =
     Keeper_meta_contract.map_compaction_rt
       (fun rt ->
-        { rt with
-          last_decision =
-            Keeper_meta_contract.compaction_runtime_decision_of_string decision
-        })
+        { rt with last_decision = decision })
       m
   in
   match read_meta config keeper_name with

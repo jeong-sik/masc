@@ -248,5 +248,5 @@ val write_meta_with_merge_for_lifecycle :
 val persist_compaction_decision :
   Workspace.config ->
   keeper_name:string ->
-  decision:string ->
+  decision:Keeper_meta_contract.compaction_runtime_decision ->
   ([ `Persisted | `No_durable_meta ], string) result

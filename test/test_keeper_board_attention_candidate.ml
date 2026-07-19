@@ -520,9 +520,18 @@ let with_ledger_operations operation =
 
 let append_ledger path rows =
   match Fs_compat.append_private_jsonl_durable_locked_result path rows with
-  | Ok () -> ()
-  | Error error ->
+  | Fs_compat.Private_file_succeeded () -> ()
+  | Fs_compat.Private_file_failed error ->
     Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error)
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+    Alcotest.fail
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Alcotest.fail
+      (Printf.sprintf
+         "%s; cleanup: %s"
+         (Fs_compat.private_jsonl_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
 ;;
 
 let test_runtime_appends_then_process_start_compacts () =

@@ -102,7 +102,7 @@ describe('normalizeKeepers phase field', () => {
 })
 
 describe('normalizeKeepers lifecycle metrics', () => {
-  it('preserves keeper compaction gates from the backend surface', () => {
+  it('preserves the compaction profile without retaining dead gate fields', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'sangsu',
@@ -115,9 +115,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.compaction_profile).toBe('balanced')
-    expect(keeper?.compaction_ratio_gate).toBe(0.72)
-    expect(keeper?.compaction_message_gate).toBe(120)
-    expect(keeper?.compaction_token_gate).toBe(240000)
+    expect('compaction_ratio_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_message_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_token_gate' in (keeper ?? {})).toBe(false)
   })
 
   it('normalizes live activity projection and current approval gate', () => {

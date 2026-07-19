@@ -206,10 +206,10 @@ describe('buildCompactionSpec', () => {
     expect(buildCompactionSpec('accumulating').nodes.find(n => n.id === 'accumulating')!.type).toBe('active')
   })
 
-  it('has a ratio_gate edge from accumulating to compacting', () => {
+  it('uses the typed compaction-start event for the accumulating transition', () => {
     const spec = buildCompactionSpec('accumulating')
     const edge = spec.edges.find(e => e.source === 'accumulating' && e.target === 'compacting')
-    expect(edge?.label).toBe('ratio_gate')
+    expect(edge?.label).toBe('Compaction_started')
   })
 
   it('has a recovery edge from compacting to done', () => {

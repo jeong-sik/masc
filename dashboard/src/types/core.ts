@@ -1245,9 +1245,6 @@ export interface Keeper {
     has_checkpoint?: boolean
   }
   compaction_profile?: string | null
-  compaction_ratio_gate?: number | null
-  compaction_message_gate?: number | null
-  compaction_token_gate?: number | null
   traits?: string[]
   interests?: string[]
   primaryValue?: string
@@ -1395,9 +1392,6 @@ interface KeeperConfigExecution {
 
 interface KeeperConfigCompaction {
   profile: string
-  ratio_gate: number
-  message_gate: number
-  token_gate: number
 }
 
 interface KeeperConfigProactive {

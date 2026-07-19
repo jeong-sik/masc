@@ -188,7 +188,7 @@ export function buildCompactionSpec(
       type: nodeType(state, activeStage, tone),
     })),
     edges: [
-      { source: 'accumulating', target: 'compacting', label: 'ratio_gate', type: 'runtime' },
+      { source: 'accumulating', target: 'compacting', label: 'Compaction_started', type: 'runtime' },
       { source: 'compacting', target: 'done', label: 'Compaction_completed', type: 'recovery' },
       { source: 'compacting', target: 'accumulating', label: 'Compaction_failed', type: 'error' },
     ],

@@ -192,6 +192,88 @@ let test_invalid_plan_is_distinct_from_provider_unavailable () =
       | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
       | _ -> fail "provider failure was collapsed into an invalid plan")
 
+let rec json_has_key key = function
+  | `Assoc fields ->
+    List.exists
+      (fun (field, value) -> String.equal field key || json_has_key key value)
+      fields
+  | `List values -> List.exists (json_has_key key) values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false
+;;
+
+let test_projection_target_is_immutable_and_credential_free () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      let runtime_path =
+        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      in
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+      let runtime =
+        Runtime.get_default_runtime ()
+        |> Option.get
+      in
+      let target =
+        Projection_target.request
+          ~assignment_id:runtime.id
+          ~resolve_context_window:(fun _ ->
+            Projection_target.Resolved_context_window 17)
+        |> Projection_target.capture
+      in
+      let captured =
+        Projection_target.captured_evidence target
+      in
+      (match captured with
+       | Projection_target.Exact exact ->
+         check string "runtime identity" runtime.id exact.runtime_id;
+         check int "effective context snapshot" 17 exact.effective_max_context
+       | Projection_target.Unavailable _ ->
+         fail "single runtime did not produce an exact target");
+      let public_json =
+        Projection_target.evidence_to_json captured
+      in
+      List.iter
+        (fun key -> check bool ("credential field excluded: " ^ key) false (json_has_key key public_json))
+        [ "api_key"; "base_url"; "credentials"; "endpoint"; "headers" ];
+      let unresolved_identity = " missing-runtime " in
+      let unresolved =
+        Projection_target.request
+          ~assignment_id:unresolved_identity
+          ~resolve_context_window:(fun _ ->
+            Projection_target.Resolved_context_window 17)
+        |> Projection_target.capture
+        |> Projection_target.captured_evidence
+      in
+      (match unresolved with
+       | Projection_target.Unavailable
+           (Projection_target.Runtime_unavailable { runtime_id }) ->
+         check string "assignment identity is not normalized" unresolved_identity runtime_id
+       | Projection_target.Exact _ | Projection_target.Unavailable _ ->
+         fail "missing runtime identity was normalized or reclassified");
+      let lane_target =
+        Projection_target.request
+          ~assignment_id:"default"
+          ~resolve_context_window:(fun _ ->
+            Projection_target.Resolved_context_window 17)
+        |> Projection_target.capture
+      in
+      match
+        Projection_target.captured_evidence lane_target
+      with
+      | Projection_target.Unavailable
+          (Projection_target.Assignment_ambiguous { assignment_id = "default" }) ->
+        Runtime.For_testing.restore runtime_snapshot;
+        check bool
+          "captured evidence survives runtime state replacement"
+          true
+          (Projection_target.captured_evidence target = captured)
+      | Projection_target.Exact _ | Projection_target.Unavailable _ ->
+        fail "lane target guessed a provider candidate")
+;;
+
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -744,7 +826,20 @@ let test_malformed_structure_preserves_checkpoint () =
            (Post_turn.compaction_recovery_error_to_string error)
        | Ok prepared ->
          (match Post_turn.commit_prepared_compaction prepared with
-          | Ok _ -> ()
+          | Ok recovery ->
+            let committed_ref =
+              Projection_target.checkpoint_ref recovery.projection_target
+            in
+            let _, durable_ref =
+              Masc.Keeper_checkpoint_store.load_oas_with_ref
+                ~session_dir:session.session_dir
+                ~session_id:checkpoint.session_id
+              |> Result.get_ok
+            in
+            check bool
+              "projection target retains exact committed checkpoint ref"
+              true
+              (Keeper_checkpoint_ref.equal committed_ref durable_ref)
           | Error error ->
             failf
               "commit of a fresh prepared plan failed: %s"
@@ -860,6 +955,8 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "invalid plan is distinct from provider unavailability"
         `Quick test_invalid_plan_is_distinct_from_provider_unavailable;
+      test_case "projection target snapshot excludes credentials"
+        `Quick test_projection_target_is_immutable_and_credential_free;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "malformed structure preserves checkpoint"

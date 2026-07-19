@@ -1306,6 +1306,11 @@
  (libraries alcotest yojson masc_schedule))
 
 (test
+ (name test_schedule_ical_recur)
+ (modules test_schedule_ical_recur)
+ (libraries alcotest masc_schedule))
+
+(test
  (name test_schedule_store)
  (modules test_schedule_store)
  (libraries

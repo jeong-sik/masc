@@ -1,5 +1,5 @@
-(** Drop assistant [ToolUse] blocks whose [id] has no matching [ToolResult]
-    anywhere in the message list, and drop any message emptied as a result.
+(** Drop assistant [ToolUse] blocks whose [id] has no matching [ToolResult] on a
+    later [Tool] message, and drop any message emptied as a result.
 
     Provider APIs (OpenAI-compatible, Anthropic) reject a request whose
     assistant [tool_calls] are not each answered by a tool result: "an
@@ -8,6 +8,14 @@
     such an orphan, so [drop] is a no-op there (returns the input list
     physically unchanged) and only repairs a list the provider would otherwise
     reject — it cannot break a valid request.
+
+    Role- and order-scoped to match the provider contract exactly: only
+    [Assistant] [ToolUse] blocks are treated as calls needing an answer, only
+    [Tool]-role [ToolResult] blocks count as answers (masc renders tool results
+    under the Tool role), and a result rescues a call only when it appears at a
+    strictly later position — a result that precedes its call, or a [ToolUse] on
+    a non-assistant message, does not satisfy the invariant. A malformed block on
+    the wrong role is therefore never treated as a call or an answer.
 
     Root cause: a [ToolUse] persisted without its [ToolResult] (a turn
     interrupted between the call and its result) then replayed every turn,

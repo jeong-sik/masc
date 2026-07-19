@@ -552,7 +552,6 @@ lib/operator/operator_judgment.ml:35
 lib/otel/otel_config.ml:9
 lib/otel/otel_trace_context.ml:103
 lib/procedural_memory.ml:86
-lib/process/bg_task.ml:430
 lib/process/exec_tap.ml:171
 lib/process/process_eio.ml:113
 lib/process/process_eio.ml:809

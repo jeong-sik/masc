@@ -55,7 +55,6 @@ type snapshot = {
 
 type spawn_error =
   | Spawn_failed of string
-  | Too_many_tasks of { keeper : string; limit : int }
   | Invalid_cwd of string
 
 val spawn :
@@ -79,7 +78,9 @@ val spawn :
     \`<base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid\`.  The file
     records \`pid\\npgid\\nstarted_at\\n\` so {!reap_orphans} can recover
     stranded process groups across keeper restarts.  When omitted,
-    no filesystem state is written. *)
+    no filesystem state is written. This process surface does not invent a
+    numeric global or per-Keeper task cap; lifetime-guard and process-spawn
+    failures remain explicit. *)
 
 type read_error =
   | Unknown_task of task_id

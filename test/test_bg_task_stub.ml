@@ -77,20 +77,6 @@ let with_ring_line_limit raw f =
       | None -> Unix.putenv "MASC_KEEPER_SHELL_RING_LINES" "")
     f
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some prior -> Unix.putenv name prior
-      | None -> Unix.putenv name "")
-    f
-
-let with_bg_task_limits ~global ~per_keeper f =
-  with_env "MASC_KEEPER_BG_TASK_GLOBAL_MAX" global (fun () ->
-      with_env "MASC_KEEPER_BG_TASK_PER_KEEPER_MAX" per_keeper f)
-
 let sp
     ?(keeper = "test-keeper")
     ?(cwd = "")
@@ -165,34 +151,35 @@ let line_count s =
   !n
 
 let test_sixteen_keepers_keep_bounded_shell_rings () =
-  with_bg_task_limits ~global:"32" ~per_keeper:"2" (fun () ->
-    with_ring_line_limit "3" (fun () ->
-      let tasks =
-        List.init 16 (fun i ->
-          let keeper = Printf.sprintf "kp-sustained-%02d" i in
-          let script =
-            Printf.sprintf
-              "i=0; while [ $i -lt 20 ]; do printf '%s-line-%%02d\\n' $i; i=$((i+1)); done"
-              keeper
-          in
-          (keeper, sp ~keeper [ "/bin/sh"; "-c"; script ]))
-      in
-      List.iter
-        (fun (_keeper, tid) ->
-          check bool "sustained keeper task closed" true (poll_for_closed tid))
-        tasks;
-      List.iter
-        (fun (keeper, tid) ->
-          match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
-          | Error _ -> failf "read failed for %s" keeper
-          | Ok s ->
-              check bool
-                (keeper ^ " retained at most 3 stdout lines")
-                true (line_count s.stdout_since <= 3);
-              check bool
-                (keeper ^ " reports dropped bytes")
-                true (s.bytes_dropped_stdout > 0))
-        tasks))
+  with_ring_line_limit "3" (fun () ->
+    let tasks =
+      List.init 16 (fun i ->
+        let keeper = Printf.sprintf "kp-sustained-%02d" i in
+        let script =
+          Printf.sprintf
+            "i=0; while [ $i -lt 20 ]; do printf '%s-line-%%02d\\n' $i; i=$((i+1)); done"
+            keeper
+        in
+        keeper, sp ~keeper [ "/bin/sh"; "-c"; script ])
+    in
+    List.iter
+      (fun (_keeper, tid) ->
+        check bool "sustained keeper task closed" true (poll_for_closed tid))
+      tasks;
+    List.iter
+      (fun (keeper, tid) ->
+        match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+        | Error _ -> failf "read failed for %s" keeper
+        | Ok snapshot ->
+          check bool
+            (keeper ^ " retained at most 3 stdout lines")
+            true
+            (line_count snapshot.stdout_since <= 3);
+          check bool
+            (keeper ^ " reports dropped bytes")
+            true
+            (snapshot.bytes_dropped_stdout > 0))
+      tasks)
 
 let spawn_and_read_stdout_with_limit ~limit ~keeper =
   with_ring_line_limit limit (fun () ->
@@ -322,43 +309,11 @@ let test_exit_watcher_failure_rolls_back_spawn () =
           check (list string) "registry rollback removes task" []
             (List.map Bg_task.task_id_to_string
                (Bg_task.list ~keeper:"kp-exit-watch-fail"))
-      | Error (Bg_task.Too_many_tasks _) ->
-          fail "unexpected capacity failure"
       | Error (Bg_task.Invalid_cwd msg) ->
           failf "unexpected invalid cwd: %s" msg
       | Ok tid ->
           ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
           fail "spawn succeeded despite exit watcher failure")
-
-let test_global_capacity_blocks_detached_stampede () =
-  with_bg_task_limits ~global:"1" ~per_keeper:"4" (fun () ->
-      let first = sp ~keeper:"kp-cap-a" [ "/bin/sleep"; "30" ] in
-      (match
-         Bg_task.spawn ~keeper:"kp-cap-b"
-           ~argv:[ "/bin/sleep"; "30" ]
-           ~cwd:"" ~envp:(env_of_current ()) ~timeout_sec:0.0 ()
-       with
-       | Error (Bg_task.Too_many_tasks { keeper; limit }) ->
-           check string "global capacity owner" "global" keeper;
-           check int "global capacity limit" 1 limit
-       | Error (Bg_task.Spawn_failed msg) ->
-           failf "unexpected spawn failure: %s" msg
-       | Error (Bg_task.Invalid_cwd msg) ->
-           failf "unexpected invalid cwd: %s" msg
-      | Ok tid ->
-          ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
-          fail "second background task bypassed global capacity");
-      ignore (Bg_task.kill first ~signal:Sys.sigterm ~grace_sec:0.2);
-      check bool "first closed" true (poll_for_closed ~timeout_s:10.0 first);
-      match
-        Bg_task.spawn ~keeper:"kp-cap-b"
-          ~argv:[ "/bin/echo"; "after-capacity" ]
-          ~cwd:"" ~envp:(env_of_current ()) ~timeout_sec:0.0 ()
-      with
-      | Ok tid ->
-          check bool "spawn succeeds after closed task is polled" true
-            (poll_for_closed tid)
-      | Error _ -> fail "capacity did not recover after first task closed")
 
 let test_reap_orphans_returns_zero () =
   check int "no orphans at boot" 0
@@ -578,7 +533,5 @@ let () =
             test_lifetime_guard_released_on_close;
           test_case "exit watcher failure rolls back spawn" `Quick
             test_exit_watcher_failure_rolls_back_spawn;
-          test_case "global capacity blocks detached stampede" `Quick
-            test_global_capacity_blocks_detached_stampede;
         ] );
     ]

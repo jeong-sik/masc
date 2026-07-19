@@ -41,7 +41,6 @@ type snapshot = {
 
 type spawn_error =
   | Spawn_failed of string
-  | Too_many_tasks of { keeper : string; limit : int }
   | Invalid_cwd of string
 
 type read_error =
@@ -190,8 +189,6 @@ let mark_process_finished st status =
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
 let id_counter = ref 0
-let pending_spawn_global = ref 0
-let pending_spawn_by_keeper : (string, int) Hashtbl.t = Hashtbl.create 16
 
 let with_reg f = Mutex.protect registry_mu f
 
@@ -235,20 +232,6 @@ let shell_ring_line_limit () =
       | Some n when n >= 0 -> n
       | _ -> 5000)
   | None -> 5000
-
-let env_int ?(min_v = 1) name default =
-  match Sys.getenv_opt name with
-  | Some raw ->
-      (match int_of_string_opt (String.trim raw) with
-       | Some n -> max min_v n
-       | None -> default)
-  | None -> default
-
-let global_task_limit () =
-  env_int "MASC_KEEPER_BG_TASK_GLOBAL_MAX" 12
-
-let per_keeper_task_limit () =
-  env_int "MASC_KEEPER_BG_TASK_PER_KEEPER_MAX" 2
 
 let retained_start_for_last_lines s ~limit =
   if limit <= 0 then String.length s
@@ -419,49 +402,6 @@ let poll_state st =
 		    end
 	  end
 
-let poll_all_states () =
-  Hashtbl.iter (fun _ st -> poll_state st) registry
-
-let live_task_count ?keeper () =
-  Hashtbl.fold
-    (fun _ st acc ->
-      if st.closed then acc
-      else
-        match keeper with
-        | Some expected when not (String.equal st.keeper expected) -> acc
-        | Some _ | None -> acc + 1)
-    registry
-    0
-
-let pending_keeper_count keeper =
-  Hashtbl.find_opt pending_spawn_by_keeper keeper
-  |> Option.value ~default:0
-
-let reserve_spawn_slot ~keeper =
-  with_reg (fun () ->
-    poll_all_states ();
-    let global_limit = global_task_limit () in
-    let per_keeper_limit = per_keeper_task_limit () in
-    let keeper_pending = pending_keeper_count keeper in
-    let keeper_count = live_task_count ~keeper () + keeper_pending in
-    let global_count = live_task_count () + !pending_spawn_global in
-    if keeper_count >= per_keeper_limit then
-      Error (Too_many_tasks { keeper; limit = per_keeper_limit })
-    else if global_count >= global_limit then
-      Error (Too_many_tasks { keeper = "global"; limit = global_limit })
-    else begin
-      incr pending_spawn_global;
-      Hashtbl.replace pending_spawn_by_keeper keeper (keeper_pending + 1);
-      Ok ()
-    end)
-
-let release_spawn_slot ~keeper =
-  with_reg (fun () ->
-    pending_spawn_global := max 0 (!pending_spawn_global - 1);
-    let next = max 0 (pending_keeper_count keeper - 1) in
-    if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
-    else Hashtbl.replace pending_spawn_by_keeper keeper next)
-
 let cleanup_failed_registered_spawn ~tid st =
   Safe_ops.protect ~default:() (fun () ->
     Process_eio.tree_kill ~pgid:st.handle.pgid ~signal:Sys.sigterm ~grace_sec:0.2);
@@ -472,83 +412,70 @@ let cleanup_failed_registered_spawn ~tid st =
   try_delete_pid_file st.pid_file
 
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
-  match reserve_spawn_slot ~keeper with
-  | Error err -> Error err
-  | Ok () ->
-	    let release_lifetime_guard =
-	      try Ok (acquire_lifetime_guard ()) with
-	      | Eio.Cancel.Cancelled _ as e ->
-	          release_spawn_slot ~keeper;
-	          raise e
-	      | exn ->
-	          release_spawn_slot ~keeper;
+  let release_lifetime_guard =
+    try Ok (acquire_lifetime_guard ()) with
+    | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+    | exn ->
+      Error
+        (Spawn_failed
+           (Printf.sprintf
+              "bg_task lifetime guard acquire failed: %s"
+              (Printexc.to_string exn)))
+  in
+  match release_lifetime_guard with
+  | Error _ as error -> error
+  | Ok release_lifetime_guard ->
+    (match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
+     | Error detail ->
+       release_lifetime_guard ();
+       Error (Spawn_failed detail)
+     | Ok handle ->
+       try_set_nonblock handle.stdout_fd;
+       try_set_nonblock handle.stderr_fd;
+       let tid = fresh_id () in
+       let pid_file =
+         match base_path with
+         | None | Some "" -> None
+         | Some base_path ->
+           let path = pid_file_of ~base_path ~keeper ~task_id:tid in
+           try_write_pid_file
+             path
+             ~pid:handle.pid
+             ~pgid:handle.pgid
+             ~started_at:handle.started_at;
+           Some path
+       in
+       let state =
+         { handle
+         ; keeper
+         ; timeout_sec
+         ; stdout_buf = Buffer.create 4096
+         ; stderr_buf = Buffer.create 4096
+         ; stdout_base_offset = 0
+         ; stderr_base_offset = 0
+         ; status = None
+         ; closed = false
+         ; stdout_eof = false
+         ; stderr_eof = false
+         ; pid_file
+         ; release_lifetime_guard = Some release_lifetime_guard
+         }
+       in
+       with_reg (fun () -> Hashtbl.replace registry tid state);
+       (try
+          start_exit_watcher state;
+          Ok tid
+        with
+        | Eio.Cancel.Cancelled _ as cancellation ->
+          cleanup_failed_registered_spawn ~tid state;
+          raise cancellation
+        | exn ->
+          cleanup_failed_registered_spawn ~tid state;
           Error
             (Spawn_failed
-               (Printf.sprintf "bg_task lifetime guard acquire failed: %s"
-                  (Printexc.to_string exn)))
-    in
-    (match release_lifetime_guard with
-    | Error err -> Error err
-    | Ok release_lifetime_guard ->
-        match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
-        | Error e ->
-            release_lifetime_guard ();
-            release_spawn_slot ~keeper;
-            Error (Spawn_failed e)
-        | Ok handle ->
-            try_set_nonblock handle.stdout_fd;
-            try_set_nonblock handle.stderr_fd;
-            let tid = fresh_id () in
-            let pid_file =
-              match base_path with
-              | None | Some "" -> None
-              | Some bp ->
-                  let path =
-                    pid_file_of ~base_path:bp ~keeper ~task_id:tid
-                  in
-                  try_write_pid_file path
-                    ~pid:handle.pid
-                    ~pgid:handle.pgid
-                    ~started_at:handle.started_at;
-                  Some path
-            in
-            let st =
-              {
-                handle;
-                keeper;
-                timeout_sec;
-                stdout_buf = Buffer.create 4096;
-                stderr_buf = Buffer.create 4096;
-                stdout_base_offset = 0;
-                stderr_base_offset = 0;
-                status = None;
-                closed = false;
-                stdout_eof = false;
-                stderr_eof = false;
-                pid_file;
-                release_lifetime_guard = Some release_lifetime_guard;
-              }
-            in
-            with_reg (fun () ->
-                Hashtbl.replace registry tid st;
-                pending_spawn_global := max 0 (!pending_spawn_global - 1);
-	                let next = max 0 (pending_keeper_count keeper - 1) in
-	                if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
-	                else Hashtbl.replace pending_spawn_by_keeper keeper next);
-		            (try
-		               start_exit_watcher st;
-		               Ok tid
-		             with
-		             | Eio.Cancel.Cancelled _ as e ->
-		                 cleanup_failed_registered_spawn ~tid st;
-		                 raise e
-		             | exn ->
-		                 cleanup_failed_registered_spawn ~tid st;
-		                 Error
-		                   (Spawn_failed
-		                      (Printf.sprintf
-		                         "bg_task exit watcher start failed: %s"
-		                         (Printexc.to_string exn)))))
+               (Printf.sprintf
+                  "bg_task exit watcher start failed: %s"
+                  (Printexc.to_string exn)))))
 
 let bufsub buf ~base_offset since =
   let len = Buffer.length buf in

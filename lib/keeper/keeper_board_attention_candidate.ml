@@ -1446,7 +1446,10 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
             let continuation_candidate =
               match deferred with
               | candidate :: _ -> Some candidate
-              | [] when remaining > 0 -> List.hd_opt judged
+              | [] when remaining > 0 ->
+                (match judged with
+                 | candidate :: _ -> Some candidate
+                 | [] -> None)
               | [] -> None
             in
             (match continuation_candidate with

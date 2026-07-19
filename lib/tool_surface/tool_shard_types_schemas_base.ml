@@ -55,15 +55,11 @@ let base_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: LLM keepers emit [limit] as a JSON
-                           string (["5"]); strict ["integer"] routes through
-                           [correction_pipeline] for a silent coerce. The
-                           runtime handler reads via [Safe_ops.json_int] /
-                           [json_float] which accepts both shapes, so this is
-                           wire-format only. Mirrors PR #19383's widening on
-                           [tool_execute.timeout_sec]. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime reads via [Safe_ops.json_int]/[json_float]
+                           which coerce string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; ( "description"
                         , `String
                             "max results (1-10, default 5). Numeric strings \

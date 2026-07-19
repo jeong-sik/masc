@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-07-18T06:06:32Z (HEAD: 9a49a1d1a2)
+Generated: 2026-07-19T03:24:38Z (HEAD: eb2bbb7e4c)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 41 |
-| Manual specs | 41 |
+| Total .tla files | 42 |
+| Manual specs | 42 |
 | TTrace (auto-generated) | 0 |
 | Directories | 12 |
-| Total .cfg files | 85 |
-| Buggy .cfg (bug-model pair) | 44 |
+| Total .cfg files | 87 |
+| Buggy .cfg (bug-model pair) | 45 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -49,7 +49,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia} buggy={inv:DockerImpliesDockerVia} | 812039212d1b |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 1c05d24d93ea |
 
-### specs/bug-models (12 specs)
+### specs/bug-models (13 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -59,6 +59,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | DashboardCacheStampede.tla | DashboardCacheStampede | manual | 2 | 1 | clean={inv:TypeOK, inv:NoZombieSlot} buggy={inv:TypeOK, inv:NoZombieSlot} | 0419ec627911 |
 | DiscoveryCacheTTL.tla | DiscoveryCacheTTL | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistentRead} buggy={inv:TypeOK, inv:ConsistentRead} | 67b6a98c6628 |
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:ObserversAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | a56f7e91e5c2 |
+| DurableStoreSchemaMigration.tla | DurableStoreSchemaMigration | manual | 2 | 1 | clean={inv:NoDurableRowLostOnBump} buggy={inv:NoDurableRowLostOnBump} | b4a0844e7d89 |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |
 | KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | 3729df26b85a |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |

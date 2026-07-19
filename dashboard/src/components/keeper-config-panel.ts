@@ -287,7 +287,6 @@ export type RuntimeDraft = {
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
-  compaction_profile: string
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -356,7 +355,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
-    compaction_profile: c.compaction.profile,
   }
 }
 
@@ -600,14 +598,13 @@ export function keeperConfigControlInventory(
         keeperRuntimeControlItem(
           c,
           tab,
-          'kcf-policy-continuity',
-          'Compaction and proactive',
-          `${configApiSource} compaction.* + proactive.* + autoboot_enabled`,
-          'PATCH /api/v1/keepers/:name/config continuity/autoboot fields',
-          'continuity/autoboot fields',
+          'kcf-policy-proactive',
+          'Proactive and autoboot',
+          `${configApiSource} proactive.* + autoboot_enabled`,
+          'PATCH /api/v1/keepers/:name/config proactive/autoboot fields',
+          'proactive/autoboot fields',
           [
             'autoboot_enabled',
-            'compaction.profile',
             'proactive.enabled',
           ],
         ),
@@ -802,7 +799,6 @@ export function buildRuntimePayloadResult(
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
-  if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
   return { ok: true, payload }
 }
 
@@ -849,7 +845,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
-    compaction_profile: 'compaction_profile' in payload,
   }
 }
 
@@ -1912,24 +1907,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </${KcfSec}>
   `
 
-  // policy ⚖ — verify gate + compaction + proactive + tool policy
+  // policy ⚖ — verify gate + proactive + tool policy
   const policyTab = html`
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
-
-    <${SectionHeader} title="컴팩션" />
-    ${rd && runtimeCanEdit ? html`
-      <${InlineSelectRow}
-        label="compaction_profile"
-        value=${rd.compaction_profile}
-        options=${['aggressive', 'balanced', 'conservative', 'custom'] as const}
-        onChange=${(value: string) => updateRuntimeDraft('compaction_profile', value)}
-        dirty=${dirtyFlags.compaction_profile}
-      />
-    ` : html`
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
-    `}
 
     <${SectionHeader} title="프로액티브" />
     ${rd && runtimeCanEdit ? html`

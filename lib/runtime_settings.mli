@@ -15,16 +15,15 @@
     - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
     - [drift_guard] — handoff drift classification thresholds
-    - [keeper_turn] / [keeper_compaction] / [keeper_proactive] /
-      [keeper_rules] — keeper LLM tuning surfaces
+    - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces
     - [dashboard] — display-only thresholds + truncation lengths
 
     Internal: 6 deserialization / validation helpers stay
     private — \[validate_float_range], \[validate_int_range],
     \[deserialize_float], \[deserialize_int],
     \[deserialize_string], \[deserialize_bool].  Plus 25+
-    keeper.turn / keeper.compaction / keeper.proactive /
-    keeper.rule param handles + \[message_max_count] +
+    keeper.turn / keeper.proactive / keeper.rule param handles +
+    \[message_max_count] +
     \[_cost_max_session_usd] are
     intentionally unexported — these are reachable only via
     {!Runtime_params.get_by_key} (runtime settings UI) and are pinned

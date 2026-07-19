@@ -169,7 +169,6 @@ describe('KeeperWorkspaceRail', () => {
     context_ratio: 0.62,
     context_tokens: 124000,
     context_max: 200000,
-    compaction_profile: 'balanced',
     recent_tool_names: ['masc_amplitude_query', 'masc_board_metrics'],
   })
 

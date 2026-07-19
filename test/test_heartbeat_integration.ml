@@ -1527,7 +1527,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       in
       let parsed : Turn_up_args.parsed_args =
         { name = live_name
-        ; compaction_profile_opt = None
         ; runtime_id_opt = None
         ; allowed_paths_opt = None
         ; autoboot_enabled_opt = None
@@ -1536,9 +1535,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; max_context_override_opt = None
         ; max_context_override_present = false
         ; proactive_enabled_opt = None
-        ; compaction_ratio_gate_opt = None
-        ; compaction_message_gate_opt = None
-        ; compaction_token_gate_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
         ; instructions_arg = Some "new operator intent"

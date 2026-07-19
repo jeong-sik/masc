@@ -85,6 +85,10 @@ let removed_keeper_input_key_names =
     "shards";
     "policy_voice_enabled";
     "compaction_cooldown_sec";
+    "compaction_profile";
+    "compaction_ratio_gate";
+    "compaction_message_gate";
+    "compaction_token_gate";
   ]
 
 let removed_keeper_sandbox_input_key_names =
@@ -137,7 +141,7 @@ let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
   then
     Error
       (Printf.sprintf
-         "removed keeper args for %s: %s. Keepers are always-on by definition."
+         "removed keeper args for %s: %s. These fields have no keeper runtime contract."
          tool_name
          (String.concat ", " present))
   else

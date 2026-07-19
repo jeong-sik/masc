@@ -427,15 +427,6 @@ let surfaces =
       ];
     };
     {
-      id = "keeper_compaction";
-      description = "Keeper context compaction thresholds";
-      param_keys = [
-        "keeper.compaction.ratio";
-        "keeper.compaction.max_messages";
-        "keeper.compaction.max_tokens";
-      ];
-    };
-    {
       id = "keeper_proactive";
       description = "Keeper proactive turn scheduling and bootstrap timing";
       param_keys = [

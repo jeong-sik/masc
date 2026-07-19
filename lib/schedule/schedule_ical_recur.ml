@@ -136,20 +136,22 @@ let parse_until raw =
   let n = String.length raw in
   if n = 8 then
     match parse_date raw with
+    | Error _ as error -> error
     | Ok d -> Ok (Until_date d)
-    | Error _ -> Error (Invalid_until raw)
   else if n = 15 && raw.[8] = 'T' then
-    match
-      (parse_date (String.sub raw 0 8), parse_time_of_day (String.sub raw 9 6))
-    with
-    | Ok d, Ok t -> Ok (Until_local (d, t))
-    | _ -> Error (Invalid_until raw)
+    (match parse_date (String.sub raw 0 8) with
+     | Error _ as error -> error
+     | Ok d ->
+       (match parse_time_of_day (String.sub raw 9 6) with
+        | Error _ as error -> error
+        | Ok t -> Ok (Until_local (d, t))))
   else if n = 16 && raw.[8] = 'T' && raw.[15] = 'Z' then
-    match
-      (parse_date (String.sub raw 0 8), parse_time_of_day (String.sub raw 9 6))
-    with
-    | Ok d, Ok t -> Ok (Until_utc (d, t))
-    | _ -> Error (Invalid_until raw)
+    (match parse_date (String.sub raw 0 8) with
+     | Error _ as error -> error
+     | Ok d ->
+       (match parse_time_of_day (String.sub raw 9 6) with
+        | Error _ as error -> error
+        | Ok t -> Ok (Until_utc (d, t))))
   else Error (Invalid_until raw)
 
 (* ---------------------------------------------------------------- *)
@@ -324,15 +326,17 @@ let empty_builder =
   ; b_wkst = None
   }
 
-(* [via parsed ~slot ~update] threads one rule part: a prior occurrence of
+(* [via parse ~slot ~update] threads one rule part: a prior occurrence of
    the same part is [Duplicate_part] (§3.3.10: each part at most once), a
    parse failure propagates, and success stores the value in the builder. *)
 let apply_part builder name raw_value =
-  let via parsed ~slot ~update =
-    match parsed, slot with
-    | (Error _ as error), _ -> error
-    | _, Some _ -> Error (Duplicate_part name)
-    | Ok value, None -> Ok (update value)
+  let via parse ~slot ~update =
+    match slot with
+    | Some _ -> Error (Duplicate_part name)
+    | None ->
+      (match parse () with
+       | Error _ as error -> error
+       | Ok value -> Ok (update value))
   in
   let nonzero ~min ~max values =
     if List.exists (fun n -> n = 0) values then
@@ -346,67 +350,90 @@ let apply_part builder name raw_value =
   in
   match name with
   | "FREQ" ->
-    via (freq_of_string (String.uppercase_ascii raw_value))
+    via (fun () -> freq_of_string (String.uppercase_ascii raw_value))
       ~slot:builder.b_freq
       ~update:(fun v -> { builder with b_freq = Some v })
   | "UNTIL" ->
-    via (parse_until raw_value) ~slot:builder.b_until
+    via (fun () -> parse_until raw_value) ~slot:builder.b_until
       ~update:(fun v -> { builder with b_until = Some v })
   | "COUNT" ->
-    via (positive_int ()) ~slot:builder.b_count
+    via positive_int ~slot:builder.b_count
       ~update:(fun v -> { builder with b_count = Some v })
   | "INTERVAL" ->
-    via (positive_int ()) ~slot:builder.b_interval
+    via positive_int ~slot:builder.b_interval
       ~update:(fun v -> { builder with b_interval = Some v })
   | "BYSECOND" ->
-    via (parse_int_list ~part:name ~min:0 ~max:60 ~max_digits:2 raw_value)
+    via
+      (fun () ->
+        parse_int_list ~part:name ~min:0 ~max:60 ~max_digits:2 raw_value)
       ~slot:builder.b_bysecond
       ~update:(fun v -> { builder with b_bysecond = Some v })
   | "BYMINUTE" ->
-    via (parse_int_list ~part:name ~min:0 ~max:59 ~max_digits:2 raw_value)
+    via
+      (fun () ->
+        parse_int_list ~part:name ~min:0 ~max:59 ~max_digits:2 raw_value)
       ~slot:builder.b_byminute
       ~update:(fun v -> { builder with b_byminute = Some v })
   | "BYHOUR" ->
-    via (parse_int_list ~part:name ~min:0 ~max:23 ~max_digits:2 raw_value)
+    via
+      (fun () ->
+        parse_int_list ~part:name ~min:0 ~max:23 ~max_digits:2 raw_value)
       ~slot:builder.b_byhour
       ~update:(fun v -> { builder with b_byhour = Some v })
   | "BYDAY" ->
-    via (parse_byday raw_value) ~slot:builder.b_byday
+    via (fun () -> parse_byday raw_value) ~slot:builder.b_byday
       ~update:(fun v -> { builder with b_byday = Some v })
   | "BYMONTHDAY" ->
     via
-      (match parse_signed_list ~part:name ~min:(-31) ~max:31 ~max_digits:2 raw_value with
-       | Error _ as error -> error
-       | Ok values -> nonzero ~min:(-31) ~max:31 values)
+      (fun () ->
+        match
+          parse_signed_list ~part:name ~min:(-31) ~max:31 ~max_digits:2
+            raw_value
+        with
+        | Error _ as error -> error
+        | Ok values -> nonzero ~min:(-31) ~max:31 values)
       ~slot:builder.b_bymonthday
       ~update:(fun v -> { builder with b_bymonthday = Some v })
   | "BYYEARDAY" ->
     via
-      (match parse_signed_list ~part:name ~min:(-366) ~max:366 ~max_digits:3 raw_value with
-       | Error _ as error -> error
-       | Ok values -> nonzero ~min:(-366) ~max:366 values)
+      (fun () ->
+        match
+          parse_signed_list ~part:name ~min:(-366) ~max:366 ~max_digits:3
+            raw_value
+        with
+        | Error _ as error -> error
+        | Ok values -> nonzero ~min:(-366) ~max:366 values)
       ~slot:builder.b_byyearday
       ~update:(fun v -> { builder with b_byyearday = Some v })
   | "BYWEEKNO" ->
     via
-      (match parse_signed_list ~part:name ~min:(-53) ~max:53 ~max_digits:2 raw_value with
-       | Error _ as error -> error
-       | Ok values -> nonzero ~min:(-53) ~max:53 values)
+      (fun () ->
+        match
+          parse_signed_list ~part:name ~min:(-53) ~max:53 ~max_digits:2 raw_value
+        with
+        | Error _ as error -> error
+        | Ok values -> nonzero ~min:(-53) ~max:53 values)
       ~slot:builder.b_byweekno
       ~update:(fun v -> { builder with b_byweekno = Some v })
   | "BYMONTH" ->
-    via (parse_int_list ~part:name ~min:1 ~max:12 ~max_digits:2 raw_value)
+    via
+      (fun () ->
+        parse_int_list ~part:name ~min:1 ~max:12 ~max_digits:2 raw_value)
       ~slot:builder.b_bymonth
       ~update:(fun v -> { builder with b_bymonth = Some v })
   | "BYSETPOS" ->
     via
-      (match parse_signed_list ~part:name ~min:(-366) ~max:366 ~max_digits:3 raw_value with
-       | Error _ as error -> error
-       | Ok values -> nonzero ~min:(-366) ~max:366 values)
+      (fun () ->
+        match
+          parse_signed_list ~part:name ~min:(-366) ~max:366 ~max_digits:3
+            raw_value
+        with
+        | Error _ as error -> error
+        | Ok values -> nonzero ~min:(-366) ~max:366 values)
       ~slot:builder.b_bysetpos
       ~update:(fun v -> { builder with b_bysetpos = Some v })
   | "WKST" ->
-    via (weekday_of_string (String.uppercase_ascii raw_value))
+    via (fun () -> weekday_of_string (String.uppercase_ascii raw_value))
       ~slot:builder.b_wkst
       ~update:(fun v -> { builder with b_wkst = Some v })
   | _ -> Error (Unknown_part name)

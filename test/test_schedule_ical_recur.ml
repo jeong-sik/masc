@@ -153,9 +153,12 @@ let test_unknown_part () =
   | e -> failf "wrong error: %s" (R.parse_error_to_string e)
 
 let test_duplicate_part () =
-  match parse_error "FREQ=DAILY;FREQ=WEEKLY" with
-  | R.Duplicate_part "FREQ" -> ()
-  | e -> failf "wrong error: %s" (R.parse_error_to_string e)
+  List.iter
+    (fun raw ->
+      match parse_error raw with
+      | R.Duplicate_part "FREQ" -> ()
+      | e -> failf "parse %S: wrong error: %s" raw (R.parse_error_to_string e))
+    [ "FREQ=DAILY;FREQ=WEEKLY"; "FREQ=DAILY;FREQ=BOGUS" ]
 
 let test_invalid_freq () =
   match parse_error "FREQ=FORTNIGHTLY" with
@@ -247,13 +250,13 @@ let test_grammar_digit_caps () =
 let test_invalid_dates () =
   check bool "feb 30" true
     (R.parse "FREQ=DAILY;UNTIL=20260230"
-    = Error (R.Invalid_until "20260230"));
+    = Error (R.Invalid_date "20260230"));
   check bool "month 13" true
     (R.parse "FREQ=DAILY;UNTIL=20261301"
-    = Error (R.Invalid_until "20261301"));
+    = Error (R.Invalid_date "20261301"));
   check bool "non-leap feb 29" true
     (R.parse "FREQ=DAILY;UNTIL=20260229"
-    = Error (R.Invalid_until "20260229"));
+    = Error (R.Invalid_date "20260229"));
   check bool "leap feb 29 ok" true
     (match R.parse "FREQ=DAILY;UNTIL=20280229" with
      | Ok _ -> true
@@ -262,12 +265,15 @@ let test_invalid_dates () =
 let test_invalid_until_shape () =
   check bool "garbage" true
     (match R.parse "FREQ=DAILY;UNTIL=tomorrow" with
-     | Error (R.Invalid_until _) -> true
+     | Error (R.Invalid_date "tomorrow") -> true
      | _ -> false);
   check bool "offset form forbidden" true
     (match R.parse "FREQ=DAILY;UNTIL=19980119T230000-0800" with
      | Error (R.Invalid_until _) -> true
-     | _ -> false)
+     | _ -> false);
+  check bool "invalid time remains typed" true
+    (R.parse "FREQ=DAILY;UNTIL=19980119T246000"
+    = Error (R.Invalid_time "246000"))
 
 let test_invalid_weekday () =
   match parse_error "FREQ=WEEKLY;BYDAY=XX" with

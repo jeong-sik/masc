@@ -12,6 +12,7 @@ module EC = Keeper_error_classify
 
 type runtime_execution = {
   runtime_id : string;
+  runtime : Runtime.t;
   max_context_resolution : max_context_resolution;
   max_context : int;
   temperature : float;

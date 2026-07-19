@@ -14,6 +14,7 @@ module StringMap = Set_util.StringMap
 
 type runtime_execution = {
   runtime_id : string;
+  runtime : Runtime.t;
   max_context_resolution : Keeper_context_runtime.max_context_resolution;
   max_context : int;
   temperature : float;

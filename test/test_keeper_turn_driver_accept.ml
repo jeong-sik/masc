@@ -855,7 +855,9 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
     let setup_failures = ref [] in
     let yielded = ref 0 in
     let retry_execution runtime_id : Masc.Keeper_turn_runtime_budget.runtime_execution =
+      let runtime = Runtime.get_runtime_by_id runtime_id |> Option.get in
       { runtime_id
+      ; runtime
       ; max_context_resolution = retry_context_resolution
       ; max_context = retry_context_resolution.requested_context_window
       ; temperature = 0.0

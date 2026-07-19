@@ -56,21 +56,26 @@ let sort_order_of_string_opt s =
 type board_backend =
   | Jsonl of Board.store
 
-(** Marker carried inside [Active] tracking whether the flusher fiber has
-    been spawned for the current backend.  [Eio.Fiber.fork_daemon] returns
-    [unit], so there's no cancel handle to thread through; the [bool]
-    placeholder keeps the structural fact - "we are active and the flusher
-    is (or is not) running" - inseparable from the backend itself.
+(** Lifecycle state carried inside [Active] for each long-lived Board actor.
+    Keeping the immutable record in the backend state makes backend publication
+    and both independent actor owners one atomic fact. *)
+type actor_status =
+  | Actor_stopped
+  | Actor_starting
+  | Actor_started
 
-    Tier D D-7: this used to live in a sibling [flusher_started : bool
-    Atomic.t], which allowed [Active && not flusher_started] /
-    [not Active && flusher_started] to be representable across two
-    independent CAS sites.  Folding the flag in collapses that surface. *)
-type flusher_handle = bool
+type runtime_actor_state = {
+  flusher : actor_status;
+  routing_retry : actor_status;
+}
+
+let runtime_actors_stopped =
+  { flusher = Actor_stopped; routing_retry = Actor_stopped }
+;;
 
 type backend_state =
   | Uninitialized
-  | Active of board_backend * flusher_handle
+  | Active of board_backend * runtime_actor_state
 
 type board_signal_kind = Board_signal_command.signal_kind =
   | Board_post_created
@@ -216,10 +221,6 @@ type board_sse_event =
     }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
-let flusher_start_cas_retries = 3
-let flusher_start_backoff_base_s = 0.001
-let flusher_start_backoff_cap_s = 0.02
-let forced_flusher_start_cas_conflicts_for_test : int Atomic.t = Atomic.make 0
 
 type routing_callback = unit -> (unit, string) result
 
@@ -245,43 +246,67 @@ let request_routing_retry () =
       raise exn
 ;;
 
-let flusher_start_backoff_delay_s ~attempt =
-  let rec pow2 acc n =
-    if n <= 0 then acc else pow2 (acc *. 2.0) (n - 1)
-  in
-  Float.min flusher_start_backoff_cap_s
-    (flusher_start_backoff_base_s *. pow2 1.0 attempt)
+let rec clear_routing_retry_inbox_for_test () =
+  match Eio.Stream.take_nonblocking routing_retry_inbox with
+  | Some () -> clear_routing_retry_inbox_for_test ()
+  | None -> ()
+;;
 
-let sleep_flusher_start_backoff ~attempt =
-  let delay = flusher_start_backoff_delay_s ~attempt in
-  match Eio_context.get_clock_opt () with
-  | Some clock -> Eio.Time.sleep clock delay
-  | None -> Time_compat.sleep delay
+type runtime_actor = Board_metrics_hooks.runtime_actor =
+  | Flusher
+  | Routing_retry
 
-let consume_forced_flusher_start_cas_conflict_for_test () =
-  let rec loop () =
-    let remaining = Atomic.get forced_flusher_start_cas_conflicts_for_test in
-    if remaining <= 0 then false
-    else if Atomic.compare_and_set forced_flusher_start_cas_conflicts_for_test
-        remaining (remaining - 1)
-    then true
-    else loop ()
-  in
-  loop ()
+type runtime_actor_start_error =
+  | Backend_uninitialized
+  | Backend_replaced_during_start of runtime_actor
+  | Switch_unavailable of runtime_actor * exn
+  | Actor_spawn_failed of runtime_actor * exn
 
-let force_flusher_start_cas_conflicts_for_test count =
-  Atomic.set forced_flusher_start_cas_conflicts_for_test (Int.max 0 count)
+type runtime_actor_start_failures =
+  | One_actor_start_failed of runtime_actor_start_error
+  | Both_actors_start_failed of
+      runtime_actor_start_error * runtime_actor_start_error
 
-let flusher_started_for_test () =
-  match Atomic.get backend_state with
-  | Active (_, true) -> true
-  | Active (_, false) | Uninitialized -> false
+exception Runtime_actor_start_failure of runtime_actor_start_failures
 
-let flusher_start_backoff_delay_for_test ~attempt =
-  flusher_start_backoff_delay_s ~attempt
+let runtime_actor_to_string = function
+  | Flusher -> "flusher"
+  | Routing_retry -> "routing_retry"
+;;
 
-let start_flusher_actor ~sw store =
-  Eio.Fiber.fork_daemon ~sw (fun () ->
+let runtime_actor_start_error_to_string = function
+  | Backend_uninitialized ->
+    "Board backend must be initialized before its runtime actors"
+  | Backend_replaced_during_start actor ->
+    Printf.sprintf "Board backend was replaced while actor=%s was starting"
+      (runtime_actor_to_string actor)
+  | Switch_unavailable (actor, exn) ->
+    Printf.sprintf "Board runtime actor=%s switch is unavailable: %s"
+      (runtime_actor_to_string actor)
+      (Printexc.to_string exn)
+  | Actor_spawn_failed (actor, exn) ->
+    Printf.sprintf "Board runtime actor=%s spawn failed: %s"
+      (runtime_actor_to_string actor)
+      (Printexc.to_string exn)
+;;
+
+let runtime_actor_start_failures_to_string = function
+  | One_actor_start_failed error -> runtime_actor_start_error_to_string error
+  | Both_actors_start_failed (first, second) ->
+    Printf.sprintf "Board runtime actor startup failures: [%s; %s]"
+      (runtime_actor_start_error_to_string first)
+      (runtime_actor_start_error_to_string second)
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Runtime_actor_start_failure error ->
+      Some (runtime_actor_start_failures_to_string error)
+    | _ -> None)
+;;
+
+let spawn_runtime_actor_on_switch ~sw ~clock store actor =
+  let flusher_loop () =
     Log.BoardLog.info "Board flusher actor started";
     while true do
       match Eio.Stream.take store.Board.flusher_inbox with
@@ -318,104 +343,127 @@ let start_flusher_actor ~sw store =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
     done
-  );
-  match Eio_context.get_clock_opt () with
-  | None ->
-    Log.BoardLog.error
-      "Board routing retry actor was not started because the Eio clock is unavailable"
-  | Some clock ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      Log.BoardLog.info "Board routing retry actor started";
-      while true do
-        Eio.Stream.take routing_retry_inbox;
-        Atomic.set routing_retry_requested false;
-        let outcome =
-          try
-            run_routing_callback
-              ~name:"Board routing retry authority"
-              routing_retry_callback
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Error
-              (Printf.sprintf
-                 "Board routing retry actor callback raised: %s"
-                 (Printexc.to_string exn))
-        in
-        match outcome with
-        | Ok () -> ()
-        | Error detail ->
-          Log.BoardLog.error
-            "Board signal outbox retry remains pending: %s"
-            detail;
-          Eio.Time.sleep clock Env_config.Board.flush_interval_sec;
-          request_routing_retry ()
-      done)
-
-(** CAS [Active (b, false) -> Active (b, true)] for the current [b], then
-    spawn the flusher daemon.  If the CAS loses to another fiber, retry a
-    bounded number of times with short exponential backoff while the state
-    still needs a flusher; if another fiber already flipped the flag,
-    return.  On daemon-spawn failure, roll the flag back so a later caller
-    can retry.
-
-    Pre-D-7 this was a sibling [Atomic.compare_and_set flusher_started
-    false true]; the flag now lives in the variant so it cannot drift
-    away from the [Active] state. *)
-let ensure_flusher_actor store =
-  match Eio_context.get_switch_opt () with
-  | None -> ()
-  | Some _ when not (Eio_context.root_switch_on_current_domain ()) ->
-      (* The flusher forks a daemon on the server root switch (get_switch_opt's
-         atomic fallback outside a turn). Eio.Fiber.fork_daemon ~sw is only legal
-         on the switch's owning (main) domain, but ensure_flusher_actor is
-         reachable from Domain_pool worker domains (board/dashboard projections).
-         Defer on a non-owning domain: the flusher is a single CAS-guarded daemon
-         started on the main domain at boot (mcp_server init_jsonl), so skipping
-         here starts nothing twice and loses nothing. Mirrors the
-         Keeper_board_attention_candidate.start_async guard (#25015). *)
-      ()
-  | Some sw ->
-      let rec loop attempts_left =
-        let current = Atomic.get backend_state in
-        match current with
-        | Uninitialized -> ()
-        | Active (_, true) -> ()
-        | Active (b, false) ->
-            let cas_won =
-              if consume_forced_flusher_start_cas_conflict_for_test () then false
-              else Atomic.compare_and_set backend_state current (Active (b, true))
-            in
-            if cas_won then
-              try start_flusher_actor ~sw store
-              with exn ->
-                (* Roll the flag back so a future caller can retry.  Only
-                   roll back if the state hasn't been swapped out from
-                   under us. *)
-                let _ : bool =
-                  Atomic.compare_and_set backend_state
-                    (Active (b, true)) (Active (b, false))
-                in
-                match exn with
-                | Invalid_argument msg when String.equal msg "Switch finished!" ->
-                    Board_metrics_hooks.inc_dispatch_flusher_start_outcome
-                      ~outcome:Switch_finished;
-                    Log.BoardLog.warn
-                      "Skipping board flusher actor startup on finished switch"
-                | _ -> raise exn
-            else if attempts_left > 0 then begin
-              Eio.Fiber.yield ();
-              sleep_flusher_start_backoff
-                ~attempt:(flusher_start_cas_retries - attempts_left);
-              loop (attempts_left - 1)
-            end else begin
-              Board_metrics_hooks.inc_dispatch_flusher_start_outcome
-                ~outcome:Cas_exhausted;
-              Log.BoardLog.warn
-                "Board flusher actor startup CAS contention exhausted; retrying on next backend access"
-            end
+  in
+  let routing_retry_loop () =
+    Log.BoardLog.info "Board routing retry actor started";
+    while true do
+      Eio.Stream.take routing_retry_inbox;
+      Atomic.set routing_retry_requested false;
+      let outcome =
+        try
+          run_routing_callback
+            ~name:"Board routing retry authority"
+            routing_retry_callback
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error
+            (Printf.sprintf
+               "Board routing retry actor callback raised: %s"
+               (Printexc.to_string exn))
       in
-      loop flusher_start_cas_retries
+      match outcome with
+      | Ok () -> ()
+      | Error detail ->
+        Log.BoardLog.error
+          "Board signal outbox retry remains pending: %s"
+          detail;
+        Eio.Time.sleep clock Env_config.Board.flush_interval_sec;
+        request_routing_retry ()
+    done
+  in
+  let loop =
+    match actor with
+    | Flusher -> flusher_loop
+    | Routing_retry -> routing_retry_loop
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    loop ();
+    `Stop_daemon)
+
+(** Claim and start the Board runtime actors against the caller-owned root
+    switch.  A losing caller yields and re-reads the typed backend state until
+    another caller publishes [Actor_started] or it can claim the transition.
+    There is no retry budget or timing policy. *)
+let actor_status actors = function
+  | Flusher -> actors.flusher
+  | Routing_retry -> actors.routing_retry
+;;
+
+let with_actor_status actors actor status =
+  match actor with
+  | Flusher -> { actors with flusher = status }
+  | Routing_retry -> { actors with routing_retry = status }
+;;
+
+let start_runtime_actor ~sw ~clock actor =
+  let rec loop () =
+    let current = Atomic.get backend_state in
+    match current with
+    | Uninitialized -> Error Backend_uninitialized
+    | Active (_, actors) when actor_status actors actor = Actor_started -> Ok ()
+    | Active (_, actors) when actor_status actors actor = Actor_starting ->
+      Eio.Fiber.yield ();
+      loop ()
+    | Active (Jsonl store as backend, actors) ->
+      let starting_actors = with_actor_status actors actor Actor_starting in
+      let starting_state = Active (backend, starting_actors) in
+      if Atomic.compare_and_set backend_state current starting_state
+      then begin
+        let rollback () =
+          let stopped_state =
+            Active (backend, with_actor_status starting_actors actor Actor_stopped)
+          in
+          Atomic.compare_and_set backend_state starting_state stopped_state
+        in
+        let record outcome =
+          Board_metrics_hooks.inc_runtime_actor_start_outcome ~actor ~outcome
+        in
+        match Eio.Switch.get_error sw with
+        | Some exn ->
+          let rolled_back = rollback () in
+          record Start_failed;
+          if rolled_back
+          then Error (Switch_unavailable (actor, exn))
+          else Error (Backend_replaced_during_start actor)
+        | None ->
+          (try
+             spawn_runtime_actor_on_switch ~sw ~clock store actor;
+             let started_state =
+               Active (backend, with_actor_status starting_actors actor Actor_started)
+             in
+             if Atomic.compare_and_set backend_state starting_state started_state
+             then begin
+               record Started;
+               Ok ()
+             end
+             else begin
+               record Start_failed;
+               Error (Backend_replaced_during_start actor)
+             end
+           with
+           | exn ->
+             let _rolled_back = rollback () in
+             record Start_failed;
+             (match exn with
+              | Eio.Cancel.Cancelled _ -> raise exn
+              | _ -> Error (Actor_spawn_failed (actor, exn))))
+      end
+      else begin
+        Eio.Fiber.yield ();
+        loop ()
+      end
+  in
+  loop ()
+
+let start_runtime_actors ~sw ~clock =
+  let flusher = start_runtime_actor ~sw ~clock Flusher in
+  let routing_retry = start_runtime_actor ~sw ~clock Routing_retry in
+  match flusher, routing_retry with
+  | Ok (), Ok () -> Ok ()
+  | Error error, Ok ()
+  | Ok (), Error error -> Error (One_actor_start_failed error)
+  | Error first, Error second -> Error (Both_actors_start_failed (first, second))
 
 
 let board_signal_hook :
@@ -453,9 +501,10 @@ let admit_routing_mutation mutation =
 
 let set_board_signal_hook hook =
   Atomic.set board_signal_hook (Some hook);
-  match Eio_context.get_root_switch_opt (), Eio_context.get_clock_opt () with
-  | Some _, Some _ -> request_routing_retry ()
-  | _ ->
+  match Atomic.get backend_state with
+  | Active (_, { routing_retry = Actor_started; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = (Actor_stopped | Actor_starting); _ })
+  | Uninitialized ->
     (match
        run_routing_callback
          ~name:"Board signal recovery-and-drain authority"
@@ -560,9 +609,10 @@ let commit_routing_event ~event_id value =
 ;;
 
 let drain_after_mutation () =
-  match Eio_context.get_root_switch_opt (), Eio_context.get_clock_opt () with
-  | Some _, Some _ -> request_routing_retry ()
-  | _ ->
+  match Atomic.get backend_state with
+  | Active (_, { routing_retry = Actor_started; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = (Actor_stopped | Actor_starting); _ })
+  | Uninitialized ->
     (match
        run_routing_callback
          ~name:"Board signal recovery-and-drain authority"
@@ -593,19 +643,18 @@ let init_jsonl () =
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
   else begin
     let store = Board.global () in
-    let backend = Active (Jsonl store, false) in
+    let backend = Active (Jsonl store, runtime_actors_stopped) in
     if Atomic.compare_and_set backend_state Uninitialized backend then begin
-      ensure_flusher_actor store;
       Log.BoardLog.info "JSONL backend initialized"
     end else
       Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
   end
 
 let reset_for_test () =
-  (* D-7: dropping [Active] also drops the flusher-started flag, since
-     it now lives inside the variant. *)
+  (* Dropping [Active] also drops the runtime-actor state. *)
   Atomic.set backend_state Uninitialized;
-  Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
+  Atomic.set routing_retry_requested false;
+  clear_routing_retry_inbox_for_test ();
   Atomic.set board_signal_hook None;
   Atomic.set board_sse_hook None;
   Stdlib.Mutex.protect routing_delivery_claim_mu (fun () ->
@@ -618,22 +667,16 @@ let jsonl_forced () =
 
 let backend () =
   match Atomic.get backend_state with
-  | Active (Jsonl store as backend, _) ->
-      ensure_flusher_actor store;
-      backend
+  | Active (Jsonl _ as backend, _) -> backend
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
       let store = Board.global () in
       let b = Jsonl store in
-      let backend_val = Active (b, false) in
+      let backend_val = Active (b, runtime_actors_stopped) in
       let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
       match Atomic.get backend_state with
-      | Active (Jsonl active_store as active_b, _) ->
-          ensure_flusher_actor active_store;
-          active_b
-      | Uninitialized ->
-          ensure_flusher_actor store;
-          b
+      | Active (Jsonl _ as active_b, _) -> active_b
+      | Uninitialized -> b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   (* Ranking formulas live in [Board_sort] (single source of truth) so the

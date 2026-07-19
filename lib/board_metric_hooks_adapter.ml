@@ -1,22 +1,26 @@
 (** Otel_metric_store adapter for neutral Board metric hooks.
 
     Holds the only [variant -> Otel_metric_store label string] mappings for the
-    typed label dimensions on {!Board_metrics_hooks.observer}. The emitted
-    strings are byte-identical to the values the pre-typed string hooks
-    passed, so existing dashboards and alerts keyed on these labels keep
-    working. The mappings are total (no [_ ->] wildcard) so adding a label
-    variant is a compile obligation here. *)
+    typed label dimensions on {!Board_metrics_hooks.observer}.  Mappings are
+    total (no [_ ->] wildcard), so adding a label variant is a compile
+    obligation here.  The runtime-actor startup metric is intentionally a new
+    contract; no alias for the deleted flusher-only metric is emitted. *)
 
 (* surface label for masc_persistence_read_drops_total *)
 let board_persist_surface_to_label :
   Board_metrics_hooks.board_persist_surface -> string = function
   | Board_post_meta_json -> "board_post_meta_json"
 
-(* outcome label for masc_board_dispatch_flusher_start_outcomes_total *)
-let flusher_outcome_to_label : Board_metrics_hooks.flusher_outcome -> string =
+(* labels for masc_board_dispatch_runtime_actor_start_outcomes_total *)
+let runtime_actor_to_label : Board_metrics_hooks.runtime_actor -> string =
   function
-  | Switch_finished -> "switch_finished"
-  | Cas_exhausted -> "cas_exhausted"
+  | Flusher -> "flusher"
+  | Routing_retry -> "routing_retry"
+
+let runtime_actor_start_outcome_to_label :
+  Board_metrics_hooks.runtime_actor_start_outcome -> string = function
+  | Started -> "started"
+  | Start_failed -> "start_failed"
 
 (* reason label for masc_persistence_read_drops_total; reuses the
    SSOT wire mapping in Read_drop_reason (byte-identical to the old
@@ -37,11 +41,14 @@ let install () =
            Otel_metric_store.observe_histogram
              Otel_metric_store.metric_board_persist_lock_held_sec
              seconds);
-      inc_dispatch_flusher_start_outcome =
-        (fun ~outcome ->
+      inc_runtime_actor_start_outcome =
+        (fun ~actor ~outcome ->
            Otel_metric_store.inc_counter
-             Otel_metric_store.metric_board_dispatch_flusher_start_outcomes
-             ~labels:[ ("outcome", flusher_outcome_to_label outcome) ]
+             Otel_metric_store.metric_board_dispatch_runtime_actor_start_outcomes
+             ~labels:
+               [ ("actor", runtime_actor_to_label actor)
+               ; ("outcome", runtime_actor_start_outcome_to_label outcome)
+               ]
              ());
       inc_persistence_read_drop =
         (fun ~surface ~reason ->

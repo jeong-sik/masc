@@ -2113,6 +2113,11 @@ let test_vote_persisted_by_flusher_actor () =
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         Board_dispatch.init_jsonl ();
+        (match Board_dispatch.start_runtime_actors ~sw ~clock with
+         | Ok () -> ()
+         | Error failures ->
+           Alcotest.fail
+             (Board_dispatch.runtime_actor_start_failures_to_string failures));
         let post_id =
           match
             Board_dispatch.create_post ~author:"persist-test" ~content:"persist my vote"
@@ -2143,39 +2148,42 @@ let test_vote_persisted_by_flusher_actor () =
         Eio.Switch.fail sw Exit)
   with Exit -> ()
 
-let test_flusher_start_retries_forced_cas_conflicts () =
+let test_runtime_actors_reject_finished_switch_and_allow_retry () =
+  let finished_switch =
+    Eio_main.run @@ fun _env -> Eio.Switch.run (fun sw -> sw)
+  in
   try
     Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
+    Eio.Switch.run @@ fun active_switch ->
     let clock = Eio.Stdenv.clock env in
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    Eio_context.with_test_env
-      ~net:(Eio.Stdenv.net env)
-      ~clock
-      ~mono_clock:(Eio.Stdenv.mono_clock env)
-      ~sw
-      (fun () ->
-        ignore (fresh_test_base_path ());
-        Board.reset_global_for_test ();
-        Board_dispatch.reset_for_test ();
-        Board_dispatch.force_flusher_start_cas_conflicts_for_test 2;
-        Board_dispatch.init_jsonl ();
-        Alcotest.(check bool)
-          "flusher starts after forced CAS contention" true
-          (Board_dispatch.flusher_started_for_test ());
-        Eio.Switch.fail sw Exit)
+    ignore (fresh_test_base_path ());
+    Board.reset_global_for_test ();
+    Board_dispatch.reset_for_test ();
+    Board_dispatch.init_jsonl ();
+    (match
+     Board_dispatch.start_runtime_actors ~sw:finished_switch ~clock
+     with
+     | Error
+         (Board_dispatch.Both_actors_start_failed
+           ( Board_dispatch.Switch_unavailable (Board_dispatch.Flusher, _)
+           , Board_dispatch.Switch_unavailable (Board_dispatch.Routing_retry, _) )) ->
+       ()
+     | Error failures ->
+       Alcotest.failf
+         "wrong finished-switch classification: %s"
+         (Board_dispatch.runtime_actor_start_failures_to_string failures)
+     | Ok () -> Alcotest.fail "finished switch was accepted as runtime owner");
+    (match
+       Board_dispatch.start_runtime_actors ~sw:active_switch ~clock
+     with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
+    Eio.Switch.fail active_switch Exit
   with Exit -> ()
-
-let test_flusher_start_backoff_delay_doubles_and_caps () =
-  Alcotest.(check (float 0.0001))
-    "attempt 0 delay" 0.001
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:0);
-  Alcotest.(check (float 0.0001))
-    "attempt 1 delay doubles" 0.002
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:1);
-  Alcotest.(check (float 0.0001))
-    "large attempt caps" 0.02
-    (Board_dispatch.flusher_start_backoff_delay_for_test ~attempt:10)
+;;
 
 (** {1 Reaction Operations} *)
 
@@ -3409,10 +3417,8 @@ let () =
         (with_eio test_restart_recalculates_vote_projection_from_ledger);
       Alcotest.test_case "vote persisted by flusher actor" `Quick
         test_vote_persisted_by_flusher_actor;
-      Alcotest.test_case "flusher start retries forced CAS conflicts" `Quick
-        test_flusher_start_retries_forced_cas_conflicts;
-      Alcotest.test_case "flusher start backoff doubles and caps" `Quick
-        test_flusher_start_backoff_delay_doubles_and_caps;
+      Alcotest.test_case "runtime actors reject finished switch and allow retry" `Quick
+        test_runtime_actors_reject_finished_switch_and_allow_retry;
     ];
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick

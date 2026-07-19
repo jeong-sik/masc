@@ -6,10 +6,9 @@
    mapping lives only in the Otel_metric_store adapter
    ([Board_metric_hooks_adapter.*_to_label]).
 
-   These strings are wire contracts: dashboards and alerts are keyed on
-   them. The expected values below are the exact strings the pre-typed
-   string hooks passed, so this test fails if any future variant change
-   drifts a Otel_metric_store label. *)
+   These strings are wire contracts.  The expected values below pin the
+   current typed mappings so a future variant change cannot silently drift an
+   Otel_metric_store label. *)
 
 module BPH = Masc.Board_metric_hooks_adapter
 module BMH = Masc.Board_metrics_hooks
@@ -24,13 +23,18 @@ let test_board_persist_surface_to_label () =
   check_label "Board_post_meta_json" "board_post_meta_json"
     (BPH.board_persist_surface_to_label BMH.Board_post_meta_json)
 
-(* outcome label for masc_board_dispatch_flusher_start_outcomes_total.
-   Old code passed "switch_finished" / "cas_exhausted". *)
-let test_flusher_outcome_to_label () =
-  check_label "Switch_finished" "switch_finished"
-    (BPH.flusher_outcome_to_label BMH.Switch_finished);
-  check_label "Cas_exhausted" "cas_exhausted"
-    (BPH.flusher_outcome_to_label BMH.Cas_exhausted)
+(* outcome label for masc_board_dispatch_runtime_actor_start_outcomes_total. *)
+let test_runtime_actor_start_outcome_to_label () =
+  check_label "Started" "started"
+    (BPH.runtime_actor_start_outcome_to_label BMH.Started);
+  check_label "Start_failed" "start_failed"
+    (BPH.runtime_actor_start_outcome_to_label BMH.Start_failed)
+
+let test_runtime_actor_to_label () =
+  check_label "Flusher" "flusher"
+    (BPH.runtime_actor_to_label BMH.Flusher);
+  check_label "Routing_retry" "routing_retry"
+    (BPH.runtime_actor_to_label BMH.Routing_retry)
 
 (* reason label for masc_persistence_read_drops_total. The board only
    emits Invalid_payload; the adapter reuses Read_drop_reason.to_wire,
@@ -49,8 +53,9 @@ let () =
     [ ( "to_label byte-identity"
       , [ Alcotest.test_case "board_persist_surface" `Quick
             test_board_persist_surface_to_label
-        ; Alcotest.test_case "flusher_outcome" `Quick
-            test_flusher_outcome_to_label
+        ; Alcotest.test_case "runtime_actor_start_outcome" `Quick
+            test_runtime_actor_start_outcome_to_label
+        ; Alcotest.test_case "runtime_actor" `Quick test_runtime_actor_to_label
         ; Alcotest.test_case "read_drop_reason" `Quick
             test_read_drop_reason_to_label
         ] )

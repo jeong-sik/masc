@@ -7,8 +7,8 @@
     events).
 
     Internal state and helpers ([backend_state] Atomic carrying the
-    flusher-started flag inside the [Active] variant since Tier D D-7,
-    [start_flusher_actor], [ensure_flusher_actor],
+    runtime-actor state inside the [Active] variant,
+    the explicit runtime-actor bootstrap,
     [board_signal_hook] / [board_sse_hook] Atomics,
     the durable signal outbox, [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
@@ -132,20 +132,41 @@ val backend : unit -> board_backend
     test suite can reach into the underlying [Board.store] directly. *)
 
 val init_jsonl : unit -> unit
-(** Initialise the JSONL backend (idempotent). *)
+(** Initialise the JSONL backend state (idempotent).  Runtime bootstrap must
+    then call {!start_runtime_actors} with its root switch and clock. *)
+
+type runtime_actor = Board_metrics_hooks.runtime_actor =
+  | Flusher
+  | Routing_retry
+
+type runtime_actor_start_error =
+  | Backend_uninitialized
+  | Backend_replaced_during_start of runtime_actor
+  | Switch_unavailable of runtime_actor * exn
+  | Actor_spawn_failed of runtime_actor * exn
+
+type runtime_actor_start_failures =
+  | One_actor_start_failed of runtime_actor_start_error
+  | Both_actors_start_failed of
+      runtime_actor_start_error * runtime_actor_start_error
+
+exception Runtime_actor_start_failure of runtime_actor_start_failures
+
+val runtime_actor_start_error_to_string : runtime_actor_start_error -> string
+val runtime_actor_start_failures_to_string : runtime_actor_start_failures -> string
+
+val start_runtime_actors :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  (unit, runtime_actor_start_failures) result
+(** Attach the Board flusher and durable routing retry actors to the explicit
+    runtime root switch.  Each actor is attempted independently and failures
+    are aggregated, so one actor's startup failure does not suppress the other.
+    Idempotent after success; concurrent callers cooperate through typed state
+    without timing policy. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)
-
-val force_flusher_start_cas_conflicts_for_test : int -> unit
-(** Force the next [n] flusher-start CAS attempts to lose. Test-only. *)
-
-val flusher_started_for_test : unit -> bool
-(** [true] iff the active backend has marked its flusher daemon as started.
-    Test-only. *)
-
-val flusher_start_backoff_delay_for_test : attempt:int -> float
-(** Exponential backoff delay used after a flusher-start CAS loss. Test-only. *)
 
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)

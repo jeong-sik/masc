@@ -7,9 +7,9 @@
     Labels: [kind] enumerates the fallback class and [detail] carries the
     specific reason within the kind. *)
 
-(** Counter for board flusher actor startup non-success outcomes.
-    Closed-vocabulary label [outcome] is [switch_finished | cas_exhausted]. *)
-val metric_board_dispatch_flusher_start_outcomes : string
+(** Counter for Board runtime actor startup outcomes.
+    Closed-vocabulary labels: [actor] and [outcome]. *)
+val metric_board_dispatch_runtime_actor_start_outcomes : string
 
 val metric_anti_rationalization_outcome : string
 

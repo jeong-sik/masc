@@ -1878,22 +1878,48 @@ type 'a private_jsonl_success_receipt =
   ; settlement_error : private_jsonl_transaction_error option
   }
 
+let private_jsonl_settlement_success = function
+  | (Transaction_settlement_failed
+      { primary = Transaction_succeeded success; _ } as error) ->
+    Some (success, error)
+  | Transaction_settlement_failed { primary = Transaction_failed _; _ }
+  | Stable_lock_contended _
+  | Unexpected_stable_lock_permissions _
+  | Invalid_stable_lock_state _
+  | Cursor_mismatch _
+  | Unexpected_transaction_file_kind _
+  | Ambiguous_transaction_file_identity _
+  | Transaction_path_binding_changed _
+  | Incomplete_transaction_tail _
+  | Invalid_transaction_suffix
+  | Private_jsonl_operation_failed _
+  | Rewrite_stage_failed _
+  | Rewrite_published_durability_unknown _
+  | Transaction_append_failed _ -> None
+;;
+
 let private_jsonl_snapshot_success_receipt = function
   | Ok value -> Ok { value; settlement_error = None }
-  | Error
-      (Transaction_settlement_failed
-        { primary = Transaction_succeeded (Snapshot_succeeded value); _ } as error) ->
-    Ok { value; settlement_error = Some error }
-  | Error error -> Error error
+  | Error error ->
+    (match private_jsonl_settlement_success error with
+     | Some (Snapshot_succeeded value, settlement_error) ->
+       Ok { value; settlement_error = Some settlement_error }
+     | Some
+         ( (Cursor_succeeded _ | Cursor_precondition_succeeded _)
+         , _settlement_error )
+     | None -> Error error)
 ;;
 
 let private_jsonl_cursor_success_receipt = function
   | Ok value -> Ok { value; settlement_error = None }
-  | Error
-      (Transaction_settlement_failed
-        { primary = Transaction_succeeded (Cursor_succeeded value); _ } as error) ->
-    Ok { value; settlement_error = Some error }
-  | Error error -> Error error
+  | Error error ->
+    (match private_jsonl_settlement_success error with
+     | Some (Cursor_succeeded value, settlement_error) ->
+       Ok { value; settlement_error = Some settlement_error }
+     | Some
+         ( (Snapshot_succeeded _ | Cursor_precondition_succeeded _)
+         , _settlement_error )
+     | None -> Error error)
 ;;
 
 let private_jsonl_operation_to_string = function

@@ -773,6 +773,49 @@ let test_batch_failure_evidence_write_error_propagates () =
   | Ok _ -> Alcotest.fail "failure-evidence storage error was silently accepted"
 ;;
 
+let test_atomic_judgment_commit_failure_preserves_all_pending () =
+  with_temp_base "board-attention-atomic-judgment-failure" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  List.iter
+    (fun post_id ->
+       ignore
+         (record_or_fail
+            ~base_path
+            (candidate ~keeper_name ~signal:(signal ~post_id ()) ())
+          : A.candidate))
+    [ "post-1"; "post-2" ];
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let backup = path ^ ".before-atomic-commit" in
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists path && Sys.is_directory path then Unix.rmdir path;
+        if Sys.file_exists backup then Sys.rename backup path)
+      (fun () ->
+         A.For_testing.drain_pending_with_judge_batch
+           ~base_path
+           ~keeper_name
+           ~judge_batch:(fun candidates ->
+             Sys.rename path backup;
+             Unix.mkdir path 0o700;
+             all_not_relevant candidates))
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "atomic judgment storage failure was accepted");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error detail -> Alcotest.failf "candidate reload failed: %s" detail
+  | Ok candidates ->
+    Alcotest.(check int) "both candidates retained" 2 (List.length candidates);
+    List.iter
+      (fun (candidate : A.candidate) ->
+         match candidate.status with
+         | A.Pending { last_failure = None } -> ()
+         | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+           Alcotest.fail "failed atomic commit changed part of the batch")
+      candidates
+;;
+
 let test_removed_expired_status_is_rejected () =
   let fixture = A.candidate_to_json (candidate ()) in
   let legacy =
@@ -921,6 +964,10 @@ let () =
             "batch failure evidence write error propagates"
             `Quick
             test_batch_failure_evidence_write_error_propagates
+        ; Alcotest.test_case
+            "atomic judgment failure preserves all pending"
+            `Quick
+            test_atomic_judgment_commit_failure_preserves_all_pending
         ; Alcotest.test_case
             "removed expired status is rejected"
             `Quick

@@ -151,9 +151,11 @@ val drain_pending_on_owner_lane :
       {!batch_max_candidates} per model call. A failed batch aborts the round:
       the next keepalive turn owns the retry cadence, so provider outages
       cannot turn the drain into a hot retry loop.
-    - Verdicts referencing unknown or duplicate candidate identities are
-      rejected as response-contract failures. Candidates absent from a
-      successful batch verdict stay [Pending] without failure evidence. *)
+    - A successful response must cover the exact requested candidate-id set.
+      Unknown, duplicate, or missing identities fail the attempted batch and
+      persist retryable response-contract evidence on every requested row.
+    - Failure-evidence persistence errors propagate to the caller; they are
+      never reduced to logs. *)
 
 val batch_max_candidates : int
 (** Maximum candidates judged per model call. *)

@@ -7,8 +7,8 @@
     ({!Schedule_ical_recur} and later leaves).
 
     Exactness stance, matching {!Schedule_ical_recur}:
-    - Line delimiters are CRLF; a bare LF is also accepted (documented
-      leniency for non-compliant producers), but a lone CR is a typed error.
+    - Line delimiters are exactly CRLF. Bare CR, bare LF, an unterminated final
+      line, and an empty physical line are distinct typed errors.
     - Folding is exactly §3.1: a CRLF followed by SPACE or HTAB is removed
       with the whitespace character. A continuation without a preceding line
       is a typed error.
@@ -36,8 +36,13 @@ type t = private
   ; value : string  (** Raw value text; property layers decode it. *)
   }
 
+type unique_param_error = Duplicate_parameter of string
+
 type parse_error =
   | Lone_carriage_return of { position : int }
+  | Lone_line_feed of { position : int }
+  | Missing_final_crlf of { position : int }
+  | Empty_physical_line of { line : int }
   | Orphan_continuation of { line : int }
       (** A folded continuation (leading SPACE/HTAB) with no preceding
           content line. *)
@@ -47,15 +52,16 @@ type parse_error =
   | Invalid_param_name_char of { line : int; name : string }
   | Missing_param_equals of { line : int; param : string }
   | Unterminated_quoted_string of { line : int; param : string }
+  | Invalid_quoted_string of { line : int; position : int }
+  | Invalid_utf8 of { line : int }
   | Control_character of { line : int; position : int; code : int }
 
 val parse_error_to_string : parse_error -> string
 
 val unfold : string -> (string list, parse_error) result
-(** Split an iCalendar stream into logical content lines: CRLF/LF delimited,
-    §3.1 folding rejoined. Empty physical lines carry no content and are
-    skipped (this is what makes a trailing newline at end of stream legal).
-    [line] numbers in errors are 1-based physical line numbers. *)
+(** Split a CRLF-terminated iCalendar stream into logical content lines and
+    rejoin §3.1 folding. Empty physical lines are rejected. [line] numbers in
+    errors are 1-based physical line numbers. *)
 
 val parse : line:int -> string -> (t, parse_error) result
 (** Parse one logical content line. [line] is the physical line number the
@@ -64,5 +70,7 @@ val parse : line:int -> string -> (t, parse_error) result
 val parse_many : string -> (t list, parse_error) result
 (** [unfold] then [parse] for every logical line, in order. *)
 
-val find_param : name:string -> param list -> param option
-(** Case-insensitive lookup helper for property layers. *)
+val find_unique_param :
+  name:string -> param list -> (param option, unique_param_error) result
+(** Case-insensitive lookup for property layers. A repeated name is an
+    explicit error rather than an arbitrary first-match selection. *)

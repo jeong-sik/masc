@@ -27,10 +27,10 @@ let test_unfold_crlf_basic () =
   | Ok other -> failf "wrong lines: %d" (List.length other)
   | Error e -> fail (C.parse_error_to_string e)
 
-let test_unfold_bare_lf_accepted () =
+let test_unfold_bare_lf_rejected () =
   match C.unfold "A:1\nB:2\n" with
-  | Ok [ "A:1"; "B:2" ] -> ()
-  | _ -> fail "bare LF lines must split"
+  | Error (C.Lone_line_feed { position = 3 }) -> ()
+  | _ -> fail "bare LF must be a typed error"
 
 let test_unfold_lone_cr_rejected () =
   match C.unfold "A:1\rB:2" with
@@ -46,19 +46,24 @@ let test_unfold_folding_rejoins () =
   | Error e -> fail (C.parse_error_to_string e)
 
 let test_unfold_folding_tab () =
-  match C.unfold "A:12\r\n\t34" with
+  match C.unfold "A:12\r\n\t34\r\n" with
   | Ok [ "A:1234" ] -> ()
   | _ -> fail "HTAB fold must rejoin"
 
 let test_unfold_orphan_continuation () =
-  match C.unfold " orphan" with
+  match C.unfold " orphan\r\n" with
   | Error (C.Orphan_continuation { line = 1 }) -> ()
   | _ -> fail "leading continuation must be rejected"
 
-let test_unfold_skips_empty_lines () =
+let test_unfold_rejects_empty_lines () =
   match C.unfold "A:1\r\n\r\nB:2\r\n" with
-  | Ok [ "A:1"; "B:2" ] -> ()
-  | _ -> fail "empty physical lines must be skipped"
+  | Error (C.Empty_physical_line { line = 2 }) -> ()
+  | _ -> fail "empty physical lines must be a typed error"
+
+let test_unfold_requires_final_crlf () =
+  match C.unfold "A:1" with
+  | Error (C.Missing_final_crlf { position = 3 }) -> ()
+  | _ -> fail "non-empty stream must end with CRLF"
 
 (* ---------------------------------------------------------------- *)
 (* Parse                                                            *)
@@ -110,10 +115,16 @@ let test_parse_semicolon_in_quoted_param () =
 let test_parse_multiple_params () =
   let cl = parse_ok "DTSTART;TZID=America/New_York;VALUE=DATE-TIME:19980119T020000" in
   check int "two params" 2 (List.length cl.C.params);
-  (match C.find_param ~name:"tzid" cl.C.params with
-   | Some { C.values = [ "America/New_York" ]; _ } -> ()
+  (match C.find_unique_param ~name:"tzid" cl.C.params with
+   | Ok (Some { C.values = [ "America/New_York" ]; _ }) -> ()
    | _ -> fail "TZID param lookup failed");
   check string "value" "19980119T020000" cl.C.value
+
+let test_unique_param_rejects_duplicate_name () =
+  let cl = parse_ok "DTSTART;TZID=A;TZID=B:19980119T020000" in
+  match C.find_unique_param ~name:"TZID" cl.C.params with
+  | Error (C.Duplicate_parameter "TZID") -> ()
+  | _ -> fail "duplicate parameter name was silently selected"
 
 let test_parse_value_may_contain_colon () =
   let cl = parse_ok "URL:http://example.com/path" in
@@ -140,16 +151,18 @@ let test_parse_param_missing_equals () =
   | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
 let test_parse_unterminated_quote () =
-  (* A quote that opens and never closes swallows the value separator, so
-     the accurate diagnosis is the missing colon. A closed quote followed by
-     junk is the unterminated/malformed quoted-string case. *)
   match parse_error "PROP;P=\"abc\"def:x" with
-  | C.Unterminated_quoted_string _ -> ()
+  | C.Invalid_quoted_string _ -> ()
   | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
 let test_parse_open_quote_hides_colon () =
   match parse_error "PROP;P=\"unterminated:x" with
-  | C.Missing_colon _ -> ()
+  | C.Unterminated_quoted_string { param = "P"; _ } -> ()
+  | e -> failf "wrong error: %s" (C.parse_error_to_string e)
+
+let test_parse_rejects_unquoted_dquote () =
+  match parse_error "PROP;P=ab\"cd:x" with
+  | C.Invalid_quoted_string _ -> ()
   | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
 let test_parse_control_character () =
@@ -160,6 +173,12 @@ let test_parse_control_character () =
 let test_parse_utf8_value_allowed () =
   let cl = parse_ok "SUMMARY:한국어 제목" in
   check string "utf8 kept" "한국어 제목" cl.C.value
+
+let test_parse_invalid_utf8_rejected () =
+  let invalid = "SUMMARY:" ^ String.make 1 (Char.chr 0xff) in
+  match parse_error invalid with
+  | C.Invalid_utf8 { line = 1 } -> ()
+  | e -> failf "wrong error: %s" (C.parse_error_to_string e)
 
 (* ---------------------------------------------------------------- *)
 (* parse_many                                                       *)
@@ -187,13 +206,16 @@ let () =
   run "Schedule_ical_content_line"
     [ "unfold"
       , [ test_case "crlf basic" `Quick test_unfold_crlf_basic
-        ; test_case "bare lf accepted" `Quick test_unfold_bare_lf_accepted
+        ; test_case "bare lf rejected" `Quick test_unfold_bare_lf_rejected
         ; test_case "lone cr rejected" `Quick test_unfold_lone_cr_rejected
         ; test_case "folding rejoins" `Quick test_unfold_folding_rejoins
         ; test_case "folding tab" `Quick test_unfold_folding_tab
         ; test_case "orphan continuation" `Quick
             test_unfold_orphan_continuation
-        ; test_case "empty lines skipped" `Quick test_unfold_skips_empty_lines
+        ; test_case "empty lines rejected" `Quick
+            test_unfold_rejects_empty_lines
+        ; test_case "final CRLF required" `Quick
+            test_unfold_requires_final_crlf
         ]
     ; "parse"
       , [ test_case "simple" `Quick test_parse_simple
@@ -205,6 +227,8 @@ let () =
         ; test_case "semicolon in quoted param" `Quick
             test_parse_semicolon_in_quoted_param
         ; test_case "multiple params" `Quick test_parse_multiple_params
+        ; test_case "duplicate param lookup rejected" `Quick
+            test_unique_param_rejects_duplicate_name
         ; test_case "value may contain colon" `Quick
             test_parse_value_may_contain_colon
         ; test_case "missing colon" `Quick test_parse_missing_colon
@@ -215,8 +239,12 @@ let () =
         ; test_case "unterminated quote" `Quick test_parse_unterminated_quote
         ; test_case "open quote hides colon" `Quick
             test_parse_open_quote_hides_colon
+        ; test_case "unquoted DQUOTE rejected" `Quick
+            test_parse_rejects_unquoted_dquote
         ; test_case "control character" `Quick test_parse_control_character
         ; test_case "utf8 value allowed" `Quick test_parse_utf8_value_allowed
+        ; test_case "invalid utf8 rejected" `Quick
+            test_parse_invalid_utf8_rejected
         ]
     ; "parse_many"
       , [ test_case "tracks physical lines" `Quick

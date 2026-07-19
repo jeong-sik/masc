@@ -699,7 +699,7 @@ let serialize_candidates candidates =
   String.concat "" (List.map append_row candidates)
 ;;
 
-let update_ledger ~base_path ~keeper_name decide =
+let update_ledger_many ~base_path ~keeper_name decide =
   let path = candidate_path ~base_path ~keeper_name in
   (* Compact on write: a committed change rewrites the ledger as the deduped
      latest-per-id set (via [latest_candidates]) instead of appending one row.
@@ -717,8 +717,8 @@ let update_ledger ~base_path ~keeper_name decide =
           (match decide candidates with
            | Error _ as error -> None, error
            | Ok (None, result) -> None, Ok result
-           | Ok (Some candidate, result) ->
-             let compacted = latest_candidates (candidates @ [ candidate ]) in
+           | Ok (Some updated, result) ->
+             let compacted = latest_candidates (candidates @ updated) in
              Some (serialize_candidates compacted), Ok result))
     with
     | Error error -> Error error
@@ -732,6 +732,14 @@ let update_ledger ~base_path ~keeper_name decide =
          keeper_name
          path
          (Printexc.to_string exn))
+;;
+
+let update_ledger ~base_path ~keeper_name decide =
+  update_ledger_many ~base_path ~keeper_name (fun candidates ->
+    match decide candidates with
+    | Error _ as error -> error
+    | Ok (None, result) -> Ok (None, result)
+    | Ok (Some candidate, result) -> Ok (Some [ candidate ], result))
 ;;
 
 let find_candidate candidates candidate_id =
@@ -1116,10 +1124,6 @@ let run_judge_batch ~base_path candidates =
 
 (* ── Owner-lane batch drain ───────────────────────────── *)
 
-let apply_judgment ~base_path candidate judgment =
-  process_with_judge ~base_path ~judge:(fun _ -> Ok judgment) candidate
-;;
-
 let chunks_of size items =
   let rec loop current count chunks = function
     | [] ->
@@ -1183,6 +1187,80 @@ let validate_batch_coverage candidates judgments =
             (String.concat "," unknown)))
 ;;
 
+let record_batch_judgments ~base_path ~keeper_name candidates judgments =
+  match candidates with
+  | [] -> Ok []
+  | _ ->
+    let* requested =
+      List.fold_left
+        (fun result candidate ->
+           let* ids = result in
+           if not (String.equal candidate.keeper_name keeper_name)
+           then
+             Error
+               (Printf.sprintf
+                  "Board attention atomic batch keeper mismatch expected=%s actual=%s \
+                   candidate=%s"
+                  keeper_name
+                  candidate.keeper_name
+                  candidate.candidate_id)
+           else if Id_set.mem candidate.candidate_id ids
+           then
+             Error
+               (Printf.sprintf
+                  "duplicate candidate in Board attention atomic batch: %s"
+                  candidate.candidate_id)
+           else Ok (Id_set.add candidate.candidate_id ids))
+        (Ok Id_set.empty)
+        candidates
+    in
+    update_ledger_many ~base_path ~keeper_name (fun current_rows ->
+      let current_by_id =
+        List.fold_left
+          (fun map candidate -> Candidate_map.add candidate.candidate_id candidate map)
+          Candidate_map.empty
+          current_rows
+      in
+      let* updated =
+        List.fold_left
+          (fun result candidate ->
+             let* rows = result in
+             match Candidate_map.find_opt candidate.candidate_id current_by_id with
+             | None ->
+               Error
+                 (Printf.sprintf
+                    "Board attention candidate not found for atomic judgment commit: %s"
+                    candidate.candidate_id)
+             | Some current ->
+               (match current.status with
+                | Judged _ | Consumed _ ->
+                  Error
+                    (Printf.sprintf
+                       "Board attention candidate is not Pending for atomic judgment \
+                        commit: %s"
+                       candidate.candidate_id)
+                | Pending _ ->
+                  (match Candidate_map.find_opt candidate.candidate_id judgments with
+                   | None ->
+                     Error
+                       (Printf.sprintf
+                          "Board attention judgment missing from validated atomic batch: %s"
+                          candidate.candidate_id)
+                   | Some judgment ->
+                     Ok
+                       ({ current with
+                          status = Judged { judgment; last_failure = None }
+                        }
+                        :: rows))))
+          (Ok [])
+          candidates
+        |> Result.map List.rev
+      in
+      if Id_set.cardinal requested <> List.length updated
+      then Error "Board attention atomic judgment commit cardinality changed"
+      else Ok (Some updated, updated))
+;;
+
 let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   let* candidates = load_candidates ~base_path ~keeper_name in
   let judged_ready, pending =
@@ -1241,18 +1319,23 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
               ; remaining = report.remaining + deferred
               }
           | Ok () ->
+            let* judged =
+              record_batch_judgments ~base_path ~keeper_name batch map
+            in
             (match
                List.fold_left
                  (fun result candidate ->
                     match result with
                     | Error _ -> result
                     | Ok (consumed, remaining) ->
-                      (match Candidate_map.find_opt candidate.candidate_id map with
-                       | None ->
+                      (match candidate.status with
+                       | Pending _ | Consumed _ ->
                          Error
-                           "validated batch verdict disappeared before application"
-                       | Some judgment ->
-                         (match apply_judgment ~base_path candidate judgment with
+                           (Printf.sprintf
+                              "atomic judgment commit returned non-Judged candidate: %s"
+                              candidate.candidate_id)
+                       | Judged judged_state ->
+                         (match consume_judged ~base_path candidate judged_state with
                           | Ok current ->
                             (match current.status with
                              | Consumed _ -> Ok (consumed + 1, remaining)
@@ -1260,7 +1343,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
                                Ok (consumed, remaining + 1))
                           | Error detail -> Error detail)))
                  (Ok (0, 0))
-                 batch
+                 judged
              with
              | Error detail -> Error detail
              | Ok (consumed, remaining) ->

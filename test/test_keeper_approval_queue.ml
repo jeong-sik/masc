@@ -33,14 +33,17 @@ let rec ensure_dir path =
 ;;
 
 let durable_resolution_opt ~base_path ~keeper_name ~approval_id =
-  Registry_queue.snapshot ~base_path keeper_name
-  |> Keeper_event_queue.to_list
-  |> List.find_map (fun (stimulus : Keeper_event_queue.stimulus) ->
-    match stimulus.payload with
-    | Keeper_event_queue.Hitl_resolved resolution
-      when String.equal resolution.approval_id approval_id ->
-      Some resolution
-    | _ -> None)
+  match Registry_queue.snapshot_result ~base_path keeper_name with
+  | Error reason -> Alcotest.fail reason
+  | Ok queue ->
+    queue
+    |> Keeper_event_queue.to_list
+    |> List.find_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution
+        when String.equal resolution.approval_id approval_id ->
+        Some resolution
+      | _ -> None)
 ;;
 
 let require_some message = function

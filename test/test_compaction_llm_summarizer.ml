@@ -449,6 +449,28 @@ let test_request_excludes_protected_content () =
     ; "SECRET_METADATA"
     ]
 
+(* #25324: the json_object (JsonMode) tier is admitted for GLM/DeepSeek/Kimi,
+   but the OpenAI-compatible json_object contract rejects (HTTP 400) any request
+   whose messages lack the literal token "json" (DeepSeek/Kimi enforce; GLM is
+   lenient, which masked the defect in GLM-only live traffic). The plan prompt
+   must state that it returns JSON so every json_object-mode request is
+   contract-valid. This locks the token in place. *)
+let test_plan_prompt_states_json_contract () =
+  let units =
+    [ ordinary (text T.System "system directive")
+    ; ordinary (text T.User "user context")
+    ; ordinary (text T.Assistant "VISIBLE_ASSISTANT")
+    ]
+  in
+  let wire =
+    C.For_testing.messages_for_plan ~units
+    |> List.map T.text_of_message
+    |> String.concat "\n"
+    |> String.lowercase_ascii
+  in
+  Alcotest.(check bool) "plan prompt contains the json_object contract token" true
+    (Astring.String.is_infix ~affix:"json" wire)
+
 let test_apply_preserves_protected_units_and_source_order () =
   let system = text T.System "system" in
   let first = text T.Assistant "first" in
@@ -520,6 +542,8 @@ let () =
             test_only_plain_assistant_text_is_eligible
         ; Alcotest.test_case "protected content never reaches provider" `Quick
             test_request_excludes_protected_content
+        ; Alcotest.test_case "plan prompt states json_object contract token" `Quick
+            test_plan_prompt_states_json_contract
         ] )
     ; ( "plan_of_json"
       , [ Alcotest.test_case "valid source decisions accepted" `Quick

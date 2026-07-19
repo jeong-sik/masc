@@ -131,7 +131,8 @@ let messages_for_plan ~units =
      unit contributes no state, decision, evidence, constraint, unresolved \
      work, or outcome. For keep and drop, summary must be null. For summarize, \
      summary must be a non-empty string. Do not infer recency policy, merge \
-     units, relocate facts, invent facts, or include markdown fences."
+     units, relocate facts, invent facts, or include markdown fences. Respond \
+     with a single JSON object and no other text."
   in
   let user =
     Printf.sprintf

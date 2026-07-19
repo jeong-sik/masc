@@ -1,7 +1,8 @@
 (** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
     See keeper_compaction_llm_summarizer.mli. Structure mirrors
     Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + fail-closed [None]. *)
+    the shared structured-output tier ([apply_schema_or_prompt_tier]: native
+    schema when the provider accepts it, prompt tier otherwise). *)
 
 module Schema = Keeper_structured_output_schema
 module Int_set = Set.Make (Int)
@@ -45,15 +46,18 @@ let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
     tool_choice = None
   ; disable_parallel_tool_use = true
   }
-  (* Full module path (not the [Schema] alias): the structured-output
-     coverage test resolves callees literally via Ast_grep.count_calls, so
-     this call must read [Keeper_structured_output_schema.apply_to_provider_config]
-     in source — same pattern as the other registry entries. *)
-  |> Keeper_structured_output_schema.apply_to_provider_config
+  (* One structured-output surface for every summarizer runtime, the same SSOT
+     tier [Fusion_judge] uses: [apply_schema_or_prompt_tier] sends the native
+     JSON Schema to providers that accept it and falls back to the prompt tier
+     for the rest — the [messages_for_plan] prompt already spells out the plan
+     JSON, and [structured_json_of_response] extracts it from the visible text
+     either way. #25266: the previous schema-only gate left glm/kimi keepers
+     with an empty candidate pool -> Summarizer_unavailable -> compaction
+     deadlock; with the tier every assigned runtime is a candidate and the
+     failover chain in [make_resolved] does its ordinary job. *)
+  |> Keeper_structured_output_schema.apply_schema_or_prompt_tier
+       ~log_label:"compaction summarizer"
        Schema.compaction_plan_output_schema
-
-let plan_schema_supported provider_cfg =
-  Schema.provider_config_accepts_schema Schema.compaction_plan_output_schema provider_cfg
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
@@ -383,17 +387,15 @@ type candidate =
   ; provider_cfg : Llm_provider.Provider_config.t
   }
 
-let eligible_candidate ~keeper_name (runtime : Runtime.t) =
-  let runtime_id = runtime.Runtime.id in
-  let provider_cfg = runtime.Runtime.provider_config in
-  if not (plan_schema_supported provider_cfg)
-  then (
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM candidate skipped runtime=%s: provider does not support \
-       the compaction plan schema"
-      runtime_id;
-    None)
-  else Some { runtime_id; provider_cfg }
+let eligible_candidate ~keeper_name:_ (runtime : Runtime.t) =
+  (* Every assigned runtime is an eligible summarizer candidate. Providers that
+     cannot accept the native plan schema degrade to the prompt tier in
+     [provider_for_plan] rather than being excluded here, so [make_resolved]'s
+     failover chain always has targets (#25266). *)
+  Some
+    { runtime_id = runtime.Runtime.id
+    ; provider_cfg = runtime.Runtime.provider_config
+    }
 
 let candidates_for_assignment ~keeper_name assignment_id =
   let rec resolve_lane acc = function

@@ -201,39 +201,42 @@ let with_lane_split_runtime f =
       | Error detail -> Alcotest.failf "runtime config should load: %s" detail
       | Ok () -> f ())
 
-let test_ineligible_chat_runtime_alone_has_no_candidate () =
+let test_ineligible_chat_runtime_alone_is_prompt_tier_candidate () =
   with_lane_split_runtime @@ fun () ->
-  (* Reproduces the #25051 P0 symptom directly: when the keeper's own chat
-     runtime is the only seed (the pre-fix behaviour), an ineligible model
-     resolves to zero candidates, so the summarizer is permanently
-     unavailable for that keeper. *)
+  (* #25266: a runtime that does not advertise supports-structured-output is no
+     longer excluded. It becomes a candidate and compacts through the prompt
+     tier ([provider_for_plan] -> [apply_schema_or_prompt_tier]), so a keeper
+     whose only seed is its own chat runtime can still compact instead of
+     deadlocking on [Summarizer_unavailable]. *)
   Alcotest.(check (option (list string)))
-    "an ineligible seed alone resolves no candidates"
-    (Some [])
+    "an ineligible seed alone is a prompt-tier candidate"
+    (Some [ ineligible_chat_runtime_id ])
     (C.For_testing.candidate_runtime_ids_for_assignment
        ~keeper_name:"keeper-test"
        ~runtime_id:ineligible_chat_runtime_id)
 
-let test_structured_judge_seed_reaches_eligible_candidate () =
+let test_structured_judge_seed_ordered_before_chat_runtime () =
   with_lane_split_runtime @@ fun () ->
-  (* The fix: seeding the chain with the structured-judge id first gives the
-     chain an eligible candidate even though the keeper's own chat runtime
-     (still present as a lower-priority seed) remains ineligible. *)
+  (* #25266: both seeds are candidates now (the chat runtime via the prompt
+     tier), and seed order is preserved — the schema-capable judge is still
+     tried first, so a healthy native-schema runtime keeps its priority while
+     the chat runtime remains a failover target rather than being dropped. *)
   Alcotest.(check (list string))
-    "structured-judge seed supplies the only eligible candidate, ordered first"
-    [ eligible_judge_runtime_id ]
+    "schema-capable judge is ordered first, chat runtime kept as failover"
+    [ eligible_judge_runtime_id; ineligible_chat_runtime_id ]
     (C.For_testing.candidate_runtime_ids_for_assignments
        ~keeper_name:"keeper-test"
        ~runtime_ids:[ eligible_judge_runtime_id; ineligible_chat_runtime_id ])
 
-let test_both_seeds_unresolvable_yields_no_candidate () =
+let test_unresolvable_seed_skipped_ineligible_seed_kept () =
   with_lane_split_runtime @@ fun () ->
-  (* No silent fallback: an unresolvable structured-judge id alongside an
-     ineligible chat runtime must still resolve to zero candidates, never a
-     surprise fallback onto the ineligible model. *)
+  (* An unresolvable seed id contributes no candidate (it names no configured
+     runtime), but the ineligible chat runtime alongside it is now a valid
+     prompt-tier candidate (#25266). Resolution failure still drops only the
+     seed that failed to resolve — never the whole chain. *)
   Alcotest.(check (list string))
-    "no candidate when every seed fails to resolve or is ineligible"
-    []
+    "unresolvable seed drops out, ineligible seed kept as prompt-tier candidate"
+    [ ineligible_chat_runtime_id ]
     (C.For_testing.candidate_runtime_ids_for_assignments
        ~keeper_name:"keeper-test"
        ~runtime_ids:[ "no.such.runtime"; ineligible_chat_runtime_id ])
@@ -504,12 +507,12 @@ let () =
             test_lane_candidates_keep_declared_order
         ] )
     ; ( "structured_judge_lane_split_25051"
-      , [ Alcotest.test_case "ineligible chat runtime alone has no candidate" `Quick
-            test_ineligible_chat_runtime_alone_has_no_candidate
-        ; Alcotest.test_case "structured-judge seed reaches an eligible candidate" `Quick
-            test_structured_judge_seed_reaches_eligible_candidate
-        ; Alcotest.test_case "both seeds unresolvable yields no candidate" `Quick
-            test_both_seeds_unresolvable_yields_no_candidate
+      , [ Alcotest.test_case "ineligible chat runtime alone is a prompt-tier candidate" `Quick
+            test_ineligible_chat_runtime_alone_is_prompt_tier_candidate
+        ; Alcotest.test_case "structured-judge seed ordered before chat runtime" `Quick
+            test_structured_judge_seed_ordered_before_chat_runtime
+        ; Alcotest.test_case "unresolvable seed skipped, ineligible seed kept" `Quick
+            test_unresolvable_seed_skipped_ineligible_seed_kept
         ; Alcotest.test_case "duplicate seed collapses to one candidate" `Quick
             test_duplicate_seed_collapses_to_one_candidate
         ; Alcotest.test_case "compact policy prefers structured judge over chat runtime" `Quick

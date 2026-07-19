@@ -13,6 +13,7 @@ let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
+let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 
 let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
@@ -72,6 +73,7 @@ type keeper_post_route_kind =
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
+  | Keeper_post_paused_work
   | Keeper_post_catchup_judge
   | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_unknown
@@ -113,6 +115,7 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_clear then Keeper_post_clear
     else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
     else if ends_with keeper_suffix_directive then Keeper_post_directive
+    else if ends_with keeper_suffix_paused_work then Keeper_post_paused_work
     else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
     else Keeper_post_unknown
 
@@ -148,6 +151,9 @@ let is_keeper_checkpoints_get_path req_path =
 
 let is_keeper_runtime_trace_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_runtime_trace
+
+let is_keeper_paused_work_get_path req_path =
+  keeper_path_ends_with req_path keeper_suffix_paused_work
 
 let trim_to_opt = String_util.trim_to_option
 

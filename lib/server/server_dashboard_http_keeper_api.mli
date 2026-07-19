@@ -23,6 +23,7 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
+val keeper_suffix_paused_work : string
 
 (** {1 Trajectory merge}
 
@@ -204,6 +205,15 @@ val handle_keeper_directive_post :
 (** Handle [POST /directive] (operator directive injection). A resume body
     must carry [owner_generation] and a stable [operator_operation_id], and is
     committed through the typed paused-work disposition transaction. *)
+
+val handle_keeper_paused_work_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** Handle authenticated [POST /paused-work] for exact Resume, Transfer,
+    Cancel, or source-terminal disposition. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->

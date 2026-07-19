@@ -49,6 +49,17 @@ val continuation_binding_of_source :
 (** Extract the exact routed channel carried by channel-bearing source kinds;
     all other typed stimuli use [No_channel]. *)
 
+val continuation_binding_to_yojson : continuation_binding -> Yojson.Safe.t
+val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, string) result
+
+val source_terminal_receipt_kind :
+  Keeper_event_queue_state.source_terminal_receipt -> string
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Strict public codec used by authenticated operator surfaces and harnesses.
+    It is the same codec used for the durable receipt file. *)
+
 val load :
   Workspace.config ->
   keeper_name:string ->

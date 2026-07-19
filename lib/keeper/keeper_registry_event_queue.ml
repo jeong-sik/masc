@@ -57,11 +57,25 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   ; to_keeper : string
   }
 
+type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -444,6 +458,23 @@ let transfer_pending_accepted_result
     ~current_owner_generation
     ~settled_at
     ~transfer
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let settle_pending_from_source_terminal_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~source_terminal
+  =
+  Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

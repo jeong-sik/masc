@@ -51,6 +51,19 @@ type accepted_transfer =
   ; to_keeper : string
   }
 
+type source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
 let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
@@ -62,6 +75,7 @@ type settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -387,6 +401,7 @@ let settlement_kind_label = function
   | No_compaction _ -> "no_compaction"
   | Cancel_accepted _ -> "cancel_accepted"
   | Transfer_accepted _ -> "transfer_accepted"
+  | Settle_from_source_terminal _ -> "settle_from_source_terminal"
   | Requeue _ -> "requeue"
   | Escalate _ -> "escalate"
 ;;
@@ -415,17 +430,20 @@ let settlement_equal left right =
     && left.reason = right.reason
   | Cancel_accepted left, Cancel_accepted right -> left = right
   | Transfer_accepted left, Transfer_accepted right -> left = right
+  | Settle_from_source_terminal left, Settle_from_source_terminal right ->
+    left = right
   | Requeue left, Requeue right -> left = right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
     left_reason = right_reason
     && successor_equal left_successor right_successor
-  | Ack, (No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Requeue _ | Escalate _)
-  | No_compaction _, (Ack | Cancel_accepted _ | Transfer_accepted _ | Requeue _ | Escalate _)
-  | Cancel_accepted _, (Ack | No_compaction _ | Transfer_accepted _ | Requeue _ | Escalate _)
-  | Transfer_accepted _, (Ack | No_compaction _ | Cancel_accepted _ | Requeue _ | Escalate _)
-  | Requeue _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Escalate _)
-  | Escalate _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Requeue _) ->
+  | Ack, (No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
+  | No_compaction _, (Ack | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
+  | Cancel_accepted _, (Ack | No_compaction _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
+  | Transfer_accepted _, (Ack | No_compaction _ | Cancel_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
+  | Settle_from_source_terminal _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Requeue _ | Escalate _)
+  | Requeue _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Escalate _)
+  | Escalate _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _) ->
     false
 ;;
 
@@ -470,10 +488,46 @@ let validate_accepted_transfer transfer =
   else Ok ()
 ;;
 
+let source_terminal_receipt_of_stimulus source =
+  match source.Keeper_event_queue.payload with
+  | Keeper_event_queue.Fusion_completed completion ->
+    Ok (Fusion_terminal completion)
+  | Keeper_event_queue.Bg_completed completion ->
+    Ok (Background_job_terminal completion)
+  | Keeper_event_queue.Hitl_resolved resolution -> Ok (Hitl_terminal resolution)
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Goal_assigned _ ->
+    Error "source event does not carry a typed terminal receipt"
+;;
+
+let validate_accepted_source_terminal source_terminal =
+  if String.equal (String.trim source_terminal.source.post_id) ""
+  then Error "source-terminal settlement source post id must not be empty"
+  else if Int64.compare source_terminal.source_revision 0L < 0
+  then Error "source-terminal settlement source revision must not be negative"
+  else if source_terminal.owner_generation < 0
+  then Error "source-terminal settlement owner generation must not be negative"
+  else if String.equal (String.trim source_terminal.operator_operation_id) ""
+  then Error "source-terminal settlement operation id must not be empty"
+  else
+    let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
+    if receipt = source_terminal.source_receipt
+    then Ok ()
+    else Error "source-terminal settlement receipt does not match source payload"
+;;
+
 let validate_settlement = function
   | Ack | No_compaction _ | Requeue _ -> Ok ()
   | Cancel_accepted cancellation -> validate_accepted_cancellation cancellation
   | Transfer_accepted transfer -> validate_accepted_transfer transfer
+  | Settle_from_source_terminal source_terminal ->
+    validate_accepted_source_terminal source_terminal
   | Escalate
       { reason = Failure_judgment_requested
       ; successor =
@@ -545,6 +599,12 @@ let validate_settlement_for_stimuli settlement stimuli =
     Error "accepted transfer source does not match its exact event stimulus"
   | Transfer_accepted _, _ ->
     Error "accepted transfer requires exactly one accepted event stimulus"
+  | Settle_from_source_terminal source_terminal, [ source ]
+    when source_terminal.source = source -> Ok ()
+  | Settle_from_source_terminal _, [ _ ] ->
+    Error "source-terminal receipt does not match its exact event stimulus"
+  | Settle_from_source_terminal _, _ ->
+    Error "source-terminal settlement requires exactly one accepted event stimulus"
   | (Ack | Requeue _ | Escalate _), _ -> Ok ()
 ;;
 
@@ -619,7 +679,8 @@ let settle_committed ~settled_at ~lease ~settlement state =
     let* () = validate_settlement_for_lease settlement committed in
     let pending =
       match settlement with
-      | Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ -> state.pending
+      | Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
+      | Settle_from_source_terminal _ -> state.pending
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
@@ -651,7 +712,7 @@ let settle_committed ~settled_at ~lease ~settlement state =
 
 let settle ~settled_at ~lease ~settlement state =
   match settlement with
-  | Cancel_accepted _ | Transfer_accepted _ ->
+  | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ ->
     Error "accepted disposition requires its owner-fenced boundary"
   | Ack | No_compaction _ | Requeue _ | Escalate _ ->
     settle_committed ~settled_at ~lease ~settlement state
@@ -692,12 +753,19 @@ let cancel_accepted
     settle_committed ~settled_at ~lease ~settlement state
 ;;
 
-let prior_cancellation_by_operation_id operation_id state =
+let disposition_operation_id = function
+  | Cancel_accepted cancellation -> Some cancellation.operator_operation_id
+  | Transfer_accepted transfer -> Some transfer.operator_operation_id
+  | Settle_from_source_terminal source_terminal ->
+    Some source_terminal.operator_operation_id
+  | Ack | No_compaction _ | Requeue _ | Escalate _ -> None
+;;
+
+let prior_disposition_by_operation_id operation_id state =
   let is_same_operation receipt =
-    match receipt.settlement with
-    | Cancel_accepted cancellation ->
-      String.equal cancellation.operator_operation_id operation_id
-    | Ack | No_compaction _ | Transfer_accepted _ | Requeue _ | Escalate _ -> false
+    match disposition_operation_id receipt.settlement with
+    | Some committed -> String.equal committed operation_id
+    | None -> false
   in
   match state.transition_outbox with
   | [ entry ] when is_same_operation entry.receipt -> Some entry.receipt
@@ -711,7 +779,7 @@ let prior_cancellation_by_operation_id operation_id state =
 let accepted_pending_cancellation_replay cancellation state =
   let requested = Cancel_accepted cancellation in
   match
-    prior_cancellation_by_operation_id cancellation.operator_operation_id state
+    prior_disposition_by_operation_id cancellation.operator_operation_id state
   with
   | None -> Ok None
   | Some receipt when settlement_equal receipt.settlement requested ->
@@ -789,25 +857,9 @@ let cancel_pending_accepted
        settle_committed ~settled_at ~lease ~settlement claimed)
 ;;
 
-let prior_transfer_by_operation_id operation_id state =
-  let is_same_operation receipt =
-    match receipt.settlement with
-    | Transfer_accepted transfer ->
-      String.equal transfer.operator_operation_id operation_id
-    | Ack | No_compaction _ | Cancel_accepted _ | Requeue _ | Escalate _ -> false
-  in
-  match state.transition_outbox with
-  | [ entry ] when is_same_operation entry.receipt -> Some entry.receipt
-  | [] | [ _ ] ->
-    (match state.last_settlement with
-     | Some receipt when is_same_operation receipt -> Some receipt
-     | Some _ | None -> None)
-  | _ :: _ :: _ -> None
-;;
-
 let accepted_pending_transfer_replay transfer state =
   let requested = Transfer_accepted transfer in
-  match prior_transfer_by_operation_id transfer.operator_operation_id state with
+  match prior_disposition_by_operation_id transfer.operator_operation_id state with
   | None -> Ok None
   | Some receipt when settlement_equal receipt.settlement requested ->
     Ok (Some receipt)
@@ -879,6 +931,90 @@ let transfer_pending_accepted
          match lease with
          | Some lease -> Ok lease
          | None -> Error "accepted transfer did not create its synthetic lease"
+       in
+       settle_committed ~settled_at ~lease ~settlement claimed)
+;;
+
+let accepted_pending_source_terminal_replay source_terminal state =
+  let requested = Settle_from_source_terminal source_terminal in
+  match
+    prior_disposition_by_operation_id
+      source_terminal.operator_operation_id
+      state
+  with
+  | None -> Ok None
+  | Some receipt when settlement_equal receipt.settlement requested ->
+    Ok (Some receipt)
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "source-terminal settlement operation conflict: %s"
+         source_terminal.operator_operation_id)
+;;
+
+let settle_pending_from_source_terminal
+      ~current_owner_generation
+      ~settled_at
+      ~source_terminal
+      state
+  =
+  let settlement = Settle_from_source_terminal source_terminal in
+  match accepted_pending_source_terminal_replay source_terminal state with
+  | Error _ as error -> error
+  | Ok (Some receipt) -> Ok (state, Already_settled receipt)
+  | Ok None ->
+    let* () = validate_accepted_source_terminal source_terminal in
+    let* () =
+      if Int.equal current_owner_generation source_terminal.owner_generation
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "source-terminal settlement owner generation changed: expected %d, current %d"
+             source_terminal.owner_generation
+             current_owner_generation)
+    in
+    let* () =
+      if Int64.equal state.revision source_terminal.source_revision
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "source-terminal settlement source revision changed: expected %Ld, current %Ld"
+             source_terminal.source_revision
+             state.revision)
+    in
+    let* () =
+      if lease_admission_blocked state
+      then Error "event queue cannot settle pending source while a lease or outbox exists"
+      else Ok ()
+    in
+    let matching, retained =
+      Keeper_event_queue.to_list state.pending
+      |> List.partition (fun source ->
+        Keeper_event_queue.stimulus_identity_equal source_terminal.source source)
+    in
+    (match matching with
+     | [] -> Error "source-terminal settlement source is not pending"
+     | _ :: _ :: _ ->
+       Error "source-terminal settlement source identity is duplicated"
+     | [ source ] when source <> source_terminal.source ->
+       Error "source-terminal settlement source snapshot changed"
+     | [ source ] ->
+       let pending =
+         List.fold_left
+           Keeper_event_queue.enqueue
+           Keeper_event_queue.empty
+           retained
+       in
+       let* claimed, lease =
+         make_lease ~kind:Single ~claimed_at:None [ source ] { state with pending }
+       in
+       let* lease =
+         match lease with
+         | Some lease -> Ok lease
+         | None ->
+           Error "source-terminal settlement did not create its synthetic lease"
        in
        settle_committed ~settled_at ~lease ~settlement claimed)
 ;;
@@ -1034,6 +1170,41 @@ let replay_transition_outbox_entry entry state =
              Error "pending transfer WAL source conflicts with its receipt"
            | Transfer_accepted _, ([] | _ :: _ :: _) ->
              Error "pending transfer WAL must carry exactly one source"
+           | Settle_from_source_terminal source_terminal, [ source ]
+             when source = source_terminal.source ->
+             if not (Int64.equal state.next_lease_sequence entry.receipt.lease_sequence)
+             then
+               Error
+                 (Printf.sprintf
+                    "pending source-terminal WAL lease sequence changed: expected %Ld, current %Ld"
+                    entry.receipt.lease_sequence
+                    state.next_lease_sequence)
+             else
+               let* replayed, result =
+                 settle_pending_from_source_terminal
+                   ~current_owner_generation:source_terminal.owner_generation
+                   ~settled_at:entry.receipt.settled_at
+                   ~source_terminal
+                   state
+               in
+               let actual_receipt =
+                 match result with
+                 | Settled receipt | Already_settled receipt -> receipt
+               in
+               (match replayed.transition_outbox with
+                | [ actual ]
+                  when transition_receipt_equal entry.receipt actual_receipt
+                       && actual = entry ->
+                  Ok replayed
+                | [] | [ _ ] | _ :: _ :: _ ->
+                  Error
+                    (Printf.sprintf
+                       "pending source-terminal WAL replay conflict: %s"
+                       entry.receipt.transition_id))
+           | Settle_from_source_terminal _, [ _ ] ->
+             Error "pending source-terminal WAL source conflicts with its receipt"
+           | Settle_from_source_terminal _, ([] | _ :: _ :: _) ->
+             Error "pending source-terminal WAL must carry exactly one source"
            | (Ack | No_compaction _ | Requeue _ | Escalate _), _ ->
              Error
                (Printf.sprintf
@@ -1298,6 +1469,21 @@ let settlement_to_yojson = function
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
       ]
+  | Settle_from_source_terminal source_terminal ->
+    let receipt_kind =
+      match source_terminal.source_receipt with
+      | Fusion_terminal _ -> "fusion_terminal"
+      | Background_job_terminal _ -> "background_job_terminal"
+      | Hitl_terminal _ -> "hitl_terminal"
+    in
+    `Assoc
+      [ "kind", `String "settle_from_source_terminal"
+      ; "source", Keeper_event_queue.stimulus_to_yojson source_terminal.source
+      ; "source_revision", int64_json source_terminal.source_revision
+      ; "owner_generation", `Int source_terminal.owner_generation
+      ; "operator_operation_id", `String source_terminal.operator_operation_id
+      ; "source_receipt_kind", `String receipt_kind
+      ]
   | Requeue reason ->
     `Assoc
       [ "kind", `String "requeue"
@@ -1394,6 +1580,52 @@ let settlement_of_yojson json =
     in
     let* () = validate_accepted_transfer transfer in
     Ok (Transfer_accepted transfer)
+  | "settle_from_source_terminal" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:
+          [ "kind"
+          ; "source"
+          ; "source_revision"
+          ; "owner_generation"
+          ; "operator_operation_id"
+          ; "source_receipt_kind"
+          ]
+        fields
+    in
+    let* source_json = required_field ~context "source" fields in
+    let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+    let* source_revision = int64_field ~context "source_revision" fields in
+    let* owner_generation = int_field ~context "owner_generation" fields in
+    let* operator_operation_id =
+      string_field ~context "operator_operation_id" fields
+    in
+    let* source_receipt_kind =
+      string_field ~context "source_receipt_kind" fields
+    in
+    let* source_receipt = source_terminal_receipt_of_stimulus source in
+    let expected_kind =
+      match source_receipt with
+      | Fusion_terminal _ -> "fusion_terminal"
+      | Background_job_terminal _ -> "background_job_terminal"
+      | Hitl_terminal _ -> "hitl_terminal"
+    in
+    let* () =
+      if String.equal source_receipt_kind expected_kind
+      then Ok ()
+      else Error "source-terminal receipt kind does not match source payload"
+    in
+    let source_terminal =
+      { source
+      ; source_revision
+      ; owner_generation
+      ; operator_operation_id
+      ; source_receipt
+      }
+    in
+    let* () = validate_accepted_source_terminal source_terminal in
+    Ok (Settle_from_source_terminal source_terminal)
   | "requeue" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in

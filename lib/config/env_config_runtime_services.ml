@@ -66,13 +66,27 @@ module ScheduleRunner = struct
       @ops_class operator *)
   let interval_floor_sec = 1.0
 
+  (* Default poll cadence when the env var is unset or non-finite. Single
+     source of truth: used by both the [get_float] default and the
+     non-finite fallback below, so the two never drift. *)
+  let schedule_runner_interval_default_sec = 15.0
+
   (* Exposed as a pure function so the floor contract is testable in-process:
      [interval_sec] is read once at module load, so a test cannot exercise the
      clamp by setting a sub-floor env var. *)
-  let clamp_interval_sec value = Float.max interval_floor_sec value
+  let clamp_interval_sec value =
+    (* [Float.max] passes nan through and treats +inf as the max, so a
+       non-finite env value would reach [Eio.Time.sleep] and stall the
+       schedule runner (fiber sleeps forever / on nan; no more occurrences
+       fire until process restart). Reject non-finite at the boundary. *)
+    if Float.is_finite value then Float.max interval_floor_sec value
+    else schedule_runner_interval_default_sec
 
   let interval_sec =
-    clamp_interval_sec (get_float ~default:15.0 "MASC_SCHEDULE_RUNNER_INTERVAL_SEC")
+    clamp_interval_sec
+      (get_float
+         ~default:schedule_runner_interval_default_sec
+         "MASC_SCHEDULE_RUNNER_INTERVAL_SEC")
 end
 
 (** {1 Operator Snapshot Cache Configuration} *)

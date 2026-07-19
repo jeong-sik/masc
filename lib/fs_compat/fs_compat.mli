@@ -741,13 +741,6 @@ module Private_jsonl_slice : sig
   val error_to_string : error -> string
 end
 
-(** Read the exact complete JSONL bytes in [[from, end_offset)] while holding
-    the same per-path in-process mutex and a cross-process read lock used by
-    durable private JSONL writers. A missing file at offset zero is the empty
-    stream; every other cursor mismatch is explicit. *)
-val read_private_jsonl_slice_locked_result :
-  string -> from:int -> (Private_jsonl_slice.t, Private_jsonl_slice.error) result
-
 type durable_append_operation =
   | Write
   | Append_fsync
@@ -816,6 +809,38 @@ type private_jsonl_operation_failure =
   ; exception_ : exn
   ; backtrace : Printexc.raw_backtrace
   }
+
+type ('value, 'error) private_file_transaction_outcome =
+  | Private_file_succeeded of 'value
+  | Private_file_succeeded_with_cleanup_failure of
+      { value : 'value
+      ; cleanup_failure : private_jsonl_operation_failure
+      }
+  | Private_file_failed of 'error
+  | Private_file_failed_with_cleanup_failure of
+      { error : 'error
+      ; cleanup_failure : private_jsonl_operation_failure
+      }
+(** Result and descriptor-settlement outcome of a blocking private-file
+    transaction. A cleanup failure never replaces the primary value/error, and
+    a successful durable effect remains distinguishable from a primary failure
+    so callers cannot retry it accidentally. Exceptions documented by the
+    underlying operation still propagate. *)
+
+val private_jsonl_operation_failure_to_string :
+  private_jsonl_operation_failure -> string
+
+(** Read the exact complete JSONL bytes in [[from, end_offset)] while holding
+    the same per-path in-process mutex and a cross-process read lock used by
+    durable private JSONL writers. A missing file at offset zero is the empty
+    stream; every other cursor mismatch is explicit. Descriptor-close failure
+    preserves the successful slice or primary read error. *)
+val read_private_jsonl_slice_locked_result :
+  string ->
+  from:int ->
+  ( Private_jsonl_slice.t
+  , Private_jsonl_slice.error )
+  private_file_transaction_outcome
 
 type private_jsonl_transaction_success =
   | Snapshot_succeeded of private_jsonl_snapshot
@@ -908,6 +933,20 @@ type private_jsonl_transaction_io_for_testing =
   ; close_fd : Unix.file_descr -> unit
   }
 
+val read_private_jsonl_slice_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  from:int ->
+  ( Private_jsonl_slice.t
+  , Private_jsonl_slice.error )
+  private_file_transaction_outcome
+
+val update_private_file_durable_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
 (** Production-path seam for deterministic stable-lock creation and descriptor
     settlement tests. *)
 val read_private_jsonl_durable_locked_with_io_for_testing :
@@ -964,21 +1003,25 @@ val durable_append_error_to_string : durable_append_error -> string
 (** [update_private_file_durable_locked_result path decide] serializes in-process
     callers with the shared per-path append mutex, takes a cross-process file
     lock, reads the exact existing bytes, and calls [decide]. [Some suffix]
-    appends the complete suffix and fsyncs it before returning [Ok]; [None]
-    performs no write. If writing or the append fsync fails, the file is
-    truncated to its original length and that rollback is fsynced. [Error]
-    preserves the append failure and every rollback failure. Setup, read, and
-    [decide] exceptions still propagate. The file is created with mode [0600],
-    and every transaction fsyncs its parent directory before touching payload
-    bytes so a failed creation can be retried without silently skipping that
-    durability boundary. Filesystems that reject directory fsync fail
-    explicitly. The shared path mutex serializes this operation with cached
-    JSONL writers without closing their already-flushed descriptors. When the
-    Eio filesystem is active, the transaction and [decide] run in a system
-    thread so a contended file cannot stop unrelated fibers; [decide] therefore
-    must not perform Eio effects. *)
+    appends the complete suffix and fsyncs it before returning a successful
+    outcome; [None] performs no write. If writing or the append fsync fails,
+    the file is truncated to its original length and that rollback is fsynced.
+    A failed outcome preserves the append failure and every rollback failure.
+    Descriptor-close failure is returned together with the primary value or
+    error, so a committed append is never misclassified as retryable. Setup,
+    read, and [decide] exceptions still propagate. The file is created with
+    mode [0600], and every transaction fsyncs its parent directory before
+    touching payload bytes so a failed creation can be retried without silently
+    skipping that durability boundary. Filesystems that reject directory fsync
+    fail explicitly. The shared path mutex serializes this operation with
+    cached JSONL writers without closing their already-flushed descriptors.
+    When the Eio filesystem is active, the transaction and [decide] run in a
+    system thread so a contended file cannot stop unrelated fibers; [decide]
+    therefore must not perform Eio effects. *)
 val update_private_file_durable_locked_result :
-  string -> (string -> string option * 'a) -> ('a, durable_append_error) result
+  string ->
+  (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
 
 (** [rewrite_private_file_durable_locked_result path decide] is the whole-file
     replacement sibling of {!update_private_file_durable_locked_result}. It takes
@@ -1015,9 +1058,12 @@ type private_jsonl_append_error =
     fiber, the entire blocking lock/write/fsync transaction runs in a system
     thread, including directory creation and in-process mutex acquisition, so
     one contended file cannot stop unrelated fibers. Non-Eio callers execute
-    the same transaction directly. *)
+    the same transaction directly. Descriptor-close failure is returned with
+    the primary commit or rejection. *)
 val append_private_jsonl_durable_locked_with_end_offset_result :
-  string -> string -> (int, private_jsonl_append_error) result
+  string ->
+  string ->
+  (int, private_jsonl_append_error) private_file_transaction_outcome
 
 (** Append only when the file's locked byte length is exactly
     [expected_end_offset]. A stale writer receives [End_offset_mismatch] and
@@ -1027,12 +1073,21 @@ val append_private_jsonl_durable_locked_at_end_offset_result :
   string ->
   expected_end_offset:int ->
   string ->
-  (int, private_jsonl_append_error) result
+  (int, private_jsonl_append_error) private_file_transaction_outcome
 
 (** As {!append_private_jsonl_durable_locked_with_end_offset_result}, discarding
     the committed newline-end byte offset. *)
 val append_private_jsonl_durable_locked_result :
-  string -> string -> (unit, private_jsonl_append_error) result
+  string ->
+  string ->
+  (unit, private_jsonl_append_error) private_file_transaction_outcome
+
+val append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  expected_end_offset:int ->
+  string ->
+  (int, private_jsonl_append_error) private_file_transaction_outcome
 
 val private_jsonl_append_error_to_string : private_jsonl_append_error -> string
 

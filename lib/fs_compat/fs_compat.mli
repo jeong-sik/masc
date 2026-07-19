@@ -862,6 +862,27 @@ and private_jsonl_transaction_error =
       }
   | Transaction_append_failed of durable_append_error
 
+type 'a private_jsonl_success_receipt =
+  { value : 'a
+  ; settlement_error : private_jsonl_transaction_error option
+  }
+(** A completed transaction value together with exact evidence that descriptor
+    settlement remained incomplete. Consumers may advance from [value], but
+    must observe [settlement_error]. Primary failures and mismatched success
+    kinds are never converted to receipts. *)
+
+val private_jsonl_snapshot_success_receipt :
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result ->
+  ( private_jsonl_snapshot private_jsonl_success_receipt
+  , private_jsonl_transaction_error )
+  result
+
+val private_jsonl_cursor_success_receipt :
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result ->
+  ( Private_jsonl_cursor.t private_jsonl_success_receipt
+  , private_jsonl_transaction_error )
+  result
+
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
 

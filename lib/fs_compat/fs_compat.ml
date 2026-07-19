@@ -1872,6 +1872,29 @@ and private_jsonl_transaction_error =
       }
   | Transaction_append_failed of durable_append_error
 
+type 'a private_jsonl_success_receipt =
+  { value : 'a
+  ; settlement_error : private_jsonl_transaction_error option
+  }
+
+let private_jsonl_snapshot_success_receipt = function
+  | Ok value -> Ok { value; settlement_error = None }
+  | Error
+      (Transaction_settlement_failed
+        { primary = Transaction_succeeded (Snapshot_succeeded value); _ } as error) ->
+    Ok { value; settlement_error = Some error }
+  | Error error -> Error error
+;;
+
+let private_jsonl_cursor_success_receipt = function
+  | Ok value -> Ok { value; settlement_error = None }
+  | Error
+      (Transaction_settlement_failed
+        { primary = Transaction_succeeded (Cursor_succeeded value); _ } as error) ->
+    Ok { value; settlement_error = Some error }
+  | Error error -> Error error
+;;
+
 let private_jsonl_operation_to_string = function
   | Create_parent_directory -> "create parent directory"
   | Canonicalize_parent_directory -> "canonicalize parent directory"

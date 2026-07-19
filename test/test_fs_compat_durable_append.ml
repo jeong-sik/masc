@@ -510,12 +510,13 @@ let test_private_jsonl_transaction_preserves_primary_when_data_close_fails () =
 let test_private_jsonl_transaction_accumulates_nested_close_failures () =
   with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
   let io, calls = injected_close_io ~fail_calls:[ 1; 2 ] in
-  (match
-     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
-       ~io
-       path
-       ~after:None
-   with
+  let result =
+    Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+      ~io
+      path
+      ~after:None
+  in
+  (match result with
    | Error
        (Fs_compat.Transaction_settlement_failed
          { primary =
@@ -531,7 +532,41 @@ let test_private_jsonl_transaction_accumulates_nested_close_failures () =
      check_transaction_close_failure
        ~label:"stable lock descriptor cleanup"
        ~operation:Fs_compat.Close_stable_lock
-       lock_failure
+       lock_failure;
+     (match Fs_compat.private_jsonl_snapshot_success_receipt result with
+      | Ok { value; settlement_error = Some _ } ->
+        check string "classified snapshot receipt" snapshot.bytes value.bytes
+      | Ok { settlement_error = None; _ } ->
+        fail "snapshot classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     let cursor_settlement_error =
+       Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_succeeded snapshot.cursor)
+         ; cleanup_failures = [ data_failure; lock_failure ]
+         }
+     in
+     (match
+        Fs_compat.private_jsonl_cursor_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Ok { value; settlement_error = Some _ } ->
+        check bool
+          "classified cursor receipt"
+          true
+          (Fs_compat.Private_jsonl_cursor.equal snapshot.cursor value)
+      | Ok { settlement_error = None; _ } ->
+        fail "cursor classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     (match
+        Fs_compat.private_jsonl_snapshot_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Error _ -> ()
+      | Ok _ -> fail "snapshot classifier accepted a cursor success receipt")
    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
    | Ok _ -> fail "nested close failures were silently accepted");
   check int "both nested descriptors closed" 2 !calls

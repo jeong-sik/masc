@@ -531,8 +531,8 @@ let test_orchestrator_project_success_projects_board_chat_and_registry () =
       ; trigger = Fusion_types.Explicit_tool_call
       }
     in
-    let deliberation : Fusion_orchestrator.deliberation =
-      { panel; judge = Ok synthesis; judges; judge_usage }
+    let deliberation : Fusion_types.deliberation_evidence =
+      { question; panel; judge = Ok synthesis; judges; judge_usage }
     in
     (match
        Fusion_orchestrator.project ~base_dir ~topology:Fusion_types.Simple ~request
@@ -640,7 +640,7 @@ let test_orchestrator_project_success_projects_board_chat_and_registry () =
 
 (* Fusion_wake_route contract: the reply route registered at masc_fusion call
    time is consumed exactly once by the completion wake. Pure map semantics
-   plus the registration edge inside [handle_with_runner]. *)
+   plus the registration edge inside [handle_with_runtime]. *)
 let discord_channel =
   Keeper_continuation_channel.discord
     ~guild_id:(Some "g-1")
@@ -798,23 +798,27 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     in
     let release_promise, resolve_release = Eio.Promise.create () in
     let completed_promise, resolve_completed = Eio.Promise.create () in
-    let run_orchestrator ~sw:_ ~net:_ ~base_dir ~policy:_ ~topology:_ ~request () =
+    let authority =
+      Fusion_run_authority.create ~directory:(Filename.concat base_dir "authority")
+    in
+    let evidence : Fusion_types.deliberation_evidence =
+      { question; panel; judge = Ok synthesis; judges; judge_usage }
+    in
+    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~request:_ () =
       Eio.Promise.await release_promise;
+      Fusion_orchestrator.Computed evidence
+    in
+    let project ~base_dir ~topology ~request evidence =
       let outcome =
-        match
-          Fusion_sink.emit ~base_dir ~keeper:request.Fusion_types.keeper
-            ~run_id:request.Fusion_types.run_id ~question:request.Fusion_types.prompt
-            ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
-        with
-        | Ok () -> Fusion_orchestrator.Completed { panel; judge = Ok synthesis }
-        | Error msg -> Fusion_orchestrator.Sink_failed msg
+        Fusion_orchestrator.project ~base_dir ~topology ~request evidence
       in
       Eio.Promise.resolve resolve_completed outcome;
       outcome
     in
     let response =
-      Fusion_tool.For_test.handle_with_runner ~run_orchestrator ~sw
-        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0 ~run_id
+      Fusion_tool.For_test.handle_with_runtime ~compute ~project
+        ~fork:(fun fn -> Eio.Fiber.fork ~sw fn) ~sw ~net:(Eio.Stdenv.net env)
+        ~authority ~base_dir ~keeper ~now_unix:4.0 ~run_id
         ~policy:(fusion_tool_policy ())
         ~args:(`Assoc [ ("prompt", `String question) ])
         ()
@@ -903,6 +907,53 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       fail "fusion run should not remain Running after background success"
     | None -> fail "fusion run should remain visible after background success")
 ;;
+
+let test_tool_authority_suppresses_duplicate_and_conflict_loser () =
+  with_isolated_eio_base_path "fusion-tool-authority" (fun env sw base_dir ->
+    let keeper = "fusion-authority-keeper" in
+    let run_id = Printf.sprintf "fus-authority-%d" (Random.bits ()) in
+    let authority = Fusion_run_authority.create ~directory:(Filename.concat base_dir "authority") in
+    let evidence : Fusion_types.deliberation_evidence =
+      { question = "q"; panel = []; judge = Ok (judge_synthesis "a"); judges = []
+      ; judge_usage = Fusion_types.zero_usage }
+    in
+    let forked, resolve_forked = Eio.Promise.create () in
+    let projected, resolve_projected = Eio.Promise.create () in
+    let fork fn =
+      let request : Fusion_types.fusion_request =
+        { run_id; keeper; prompt = "q"; preset = "unit"; web_tools = false
+        ; depth = Fusion_types.Fusion_depth.Top; trigger = Explicit_tool_call }
+      in
+      match Fusion_run_authority.register authority ~topology:Simple ~request ~started_at:5.0 with
+      | Ok (Fusion_run_authority.Already_registered (Registered_run _)) ->
+        Eio.Promise.resolve resolve_forked fn
+      | _ -> fail "authority must be registered before fork"
+    in
+    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~request:_ () = Fusion_orchestrator.Computed evidence in
+    let project ~base_dir:_ ~topology:_ ~request:_ _ = Eio.Promise.resolve resolve_projected ();
+      Fusion_orchestrator.Completed { panel = []; judge = evidence.judge }
+    in
+    let call () =
+      Fusion_tool.For_test.handle_with_runtime ~compute ~project ~fork ~sw
+        ~net:(Eio.Stdenv.net env) ~authority ~base_dir ~keeper ~now_unix:5.0 ~run_id
+        ~policy:(fusion_tool_policy ()) ~args:(`Assoc [ "prompt", `String "q" ]) ()
+      |> Yojson.Safe.from_string |> assoc_fields "response" |> fun fields ->
+      string_field "response" fields "status"
+    in
+    check string "first call starts" "fusion_started" (call ());
+    check string "duplicate does not fork" "fusion_already_running" (call ());
+    (match Fusion_run_authority.commit_phase authority ~keeper ~run_id
+             (Fusion_run_authority.Stopped_without_computation (Aborted "winner")) with
+     | Ok Fusion_run_authority.First_committed -> () | _ -> fail "external terminal wins");
+    Eio.Promise.await forked ();
+    check bool "loser does not project" true (Eio.Promise.peek projected = None);
+    check bool "loser creates no board post" true (Board.find_post_by_run_id (Board.global ()) ~run_id = None);
+    check int "loser appends no chat" 0 (List.length (Keeper_chat_store.load ~base_dir ~keeper_name:keeper));
+    check int "loser queues no wake" 0
+      (Keeper_event_queue.length (Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper));
+    check string "settled duplicate does not fork" "fusion_already_settled" (call ()))
+;;
+
 let test_emit_board_failure_is_best_effort () =
   with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
     let keeper = "bad/keeper" in
@@ -998,6 +1049,8 @@ let () =
             "tool handle returns Running then async success projects evidence"
             `Quick
             test_tool_handle_async_success_projects_running_then_completed
+        ; test_case "tool authority suppresses duplicate and conflict loser" `Quick
+            test_tool_authority_suppresses_duplicate_and_conflict_loser
         ; test_case
             "emit treats board post failure as best-effort"
             `Quick

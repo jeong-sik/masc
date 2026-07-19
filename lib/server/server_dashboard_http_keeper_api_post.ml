@@ -108,10 +108,16 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
                   ]
               in
               let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
+              let authority =
+                Fusion_run_authority.create
+                  ~directory:(Common.fusion_run_authority_dir_from_base_path
+                    ~base_path:config.base_path)
+              in
               let raw =
                 Fusion_tool.handle
                   ~sw
                   ~net
+                  ~authority
                   ~base_dir:config.base_path
                   ~keeper:name
                   ~now_unix

@@ -40,8 +40,8 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
        ()
    with
    | Eio.Cancel.Cancelled _ as exn ->
-     (* 구조적 취소는 재전파. registry는 위에서 이미 Completed로 확정됨. *)
-     raise exn
+     let bt = Printexc.get_raw_backtrace () in
+     Printexc.raise_with_backtrace exn bt
    | exn ->
      Log.Keeper.warn ~keeper_name:keeper
        "fusion run %s failed to append failure message: %s" run_id
@@ -68,18 +68,44 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
       run_id
       reason
 
-type orchestrator_runner =
+type computation =
   sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> base_dir:string
   -> policy:Fusion_policy.t
   -> topology:Fusion_types.fusion_topology
   -> request:Fusion_types.fusion_request
   -> unit
+  -> Fusion_orchestrator.compute_outcome
+
+type projection =
+  base_dir:string
+  -> topology:Fusion_types.fusion_topology
+  -> request:Fusion_types.fusion_request
+  -> Fusion_types.deliberation_evidence
   -> Fusion_orchestrator.outcome
 
-let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix ~run_id
-      ~policy ?continuation_channel ~args () : Tool_result.result =
+let log_authority_error ~keeper ~run_id ~operation error =
+  Log.Keeper.error ~keeper_name:keeper
+    "fusion run %s authority %s failed: %s"
+    run_id operation (Fusion_run_authority.error_to_string error)
+;;
+
+let claim_first ~authority ~keeper ~run_id phase =
+  match Fusion_run_authority.commit_phase authority ~keeper ~run_id phase with
+  | Ok Fusion_run_authority.First_committed -> true
+  | Ok Fusion_run_authority.Already_same
+  | Ok (Fusion_run_authority.Conflict _) -> false
+  | Error error ->
+    let detail = Fusion_run_authority.error_to_string error in
+    log_authority_error ~keeper ~run_id ~operation:"phase commit" error;
+    Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+      ~failure:detail ~failure_code:"authority_failed" ~ok:false ();
+    Fusion_wake_route.discard ~run_id;
+    false
+;;
+
+let handle_with_runtime_result ~compute ~project ~fork ~authority ~sw ~net ~base_dir
+      ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args () : Tool_result.result =
   let tool_name = "masc_fusion" in
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
@@ -133,89 +159,120 @@ let handle_with_runner_result ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
     | Fusion_types.Allow allowed ->
-      (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
-         (sink/실패 경로가 Completed로 갱신). 등록은 부수효과 없는 in-memory 기록일
-         뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
-      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
-        ~preset ~started_at:now_unix;
-      (* Reply route: captured next to [register_running] so route lifetime
-         tracks the run. [register] drops [Unrouted] itself; the completion
-         wake ([Fusion_sink.wake_keeper_on_fusion_completion], success AND
-         failure paths) consumes it exactly once. *)
-      Option.iter
-        (fun channel -> Fusion_wake_route.register ~run_id channel)
-        continuation_channel;
-      (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
-         (no polling). wake-free, broadcast-failure-safe; see
-         Fusion_sink.broadcast_run_status. *)
-      Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-      (* out-of-band: fiber fork → 키퍼 턴은 즉시 진행, 결과는 sink가 chat lane에.
-         배경 fiber 실패/거부/싱크 실패는 동일한 chat lane에 기록해 started-but-failed
-         상태가 남지 않도록 한다. 호출자는 이 fiber가 키퍼 턴보다 오래 살아도록 root
-         switch를 sw로 넘긴다 (turn switch면 턴 종료 시 심의가 취소됨). *)
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          run_orchestrator ~sw ~net ~base_dir ~policy ~topology ~request:allowed ()
-        with
-        | Fusion_orchestrator.Completed _ -> ()
-        | Fusion_orchestrator.Denied reason ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
-            (Printf.sprintf "**Fusion run `%s`** _(denied after start: %s)_" run_id
-               (Fusion_types.deny_reason_label reason))
-        | Fusion_orchestrator.Sink_failed msg ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
-            (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
-        | exception (Eio.Cancel.Cancelled _ as exn) ->
-          (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
-             으로 등록된 run을 [Completed{ok=false}]로 갱신하지 않으면, in-memory registry
-             ([global], 서버 수명)에 영구 "running"으로 남아 dashboard fusion-runs 패널과
-             masc_fusion_status가 거짓 "심의중"을 보인다(prune는 [Running]을 evict하지 않음 —
-             fusion_run_registry.ml). 다른 종료 분기(Denied/Sink_failed/exception)는
-             append_chat_failure 경유로 이미 mark_completed 하는데 이 분기만 빠져 있었다.
-             [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도
-             안전하다. broadcast는 [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
-             취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
-             registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
-             그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-            ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
-            ~failure_code:"cancelled" ~ok:false ();
-          (* No completion wake fires on this path, so drop the reply route
-             here or it leaks for the process lifetime. *)
-          Fusion_wake_route.discard ~run_id;
-          raise exn
-        | exception exn ->
-          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
-            (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
-               (Printexc.to_string exn)));
-      (* [delivery] 필드는 도구 결과의 async 계약을 명시한다: 완료 시 키퍼는
-         [Fusion_completed] wake로 깨워지고 결론/실패 사유가 chat lane에 durable하게
-         남는다. 2026-07-01 관측: 이 계약이 결과 JSON에 없어서 키퍼들이 3-5초 간격
-         masc_fusion_status 폴링으로 턴을 소모했다(8 run에 35 poll + nudge 8회). *)
-      status_result
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~ok:true
-        [ ("status", `String "fusion_started")
-        ; ("run_id", `String run_id)
-        ; ( "delivery"
-          , `String
-              "async: you will be woken with the result when deliberation \
-               completes; the conclusion (or failure reason) also lands on \
-               your chat lane. No need to poll masc_fusion_status." )
-        ]
+      (match
+         Fusion_run_authority.register authority ~topology ~request:allowed
+           ~started_at:now_unix
+       with
+       | Error error ->
+         let message = Fusion_run_authority.error_to_string error in
+         log_authority_error ~keeper ~run_id ~operation:"registration" error;
+         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
+           [ "error", `String message ]
+       | Ok (Fusion_run_authority.Already_registered (Registered_run _)) ->
+         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:true
+           [ "status", `String "fusion_already_running"; "run_id", `String run_id ]
+       | Ok
+           (Fusion_run_authority.Already_registered
+              (Computation_committed_run _ | Stopped_without_computation_run _)) ->
+         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:true
+           [ "status", `String "fusion_already_settled"; "run_id", `String run_id ]
+       | Ok Fusion_run_authority.Registered ->
+         let cancellation exn bt =
+           let detail = Printexc.to_string exn in
+           Eio.Cancel.protect (fun () ->
+             if
+               claim_first ~authority ~keeper ~run_id
+                 (Fusion_run_authority.Stopped_without_computation (Cancelled detail))
+             then (
+               Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+                 ~failure:detail ~failure_code:"cancelled" ~ok:false ();
+               Fusion_wake_route.discard ~run_id));
+           Printexc.raise_with_backtrace exn bt
+         in
+         let abort detail =
+           if
+            claim_first ~authority ~keeper ~run_id
+               (Fusion_run_authority.Stopped_without_computation (Aborted detail))
+           then
+             append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
+               (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id detail)
+         in
+         let run_background () =
+           match compute ~sw ~net ~policy ~topology ~request:allowed () with
+           | exception (Eio.Cancel.Cancelled _ as exn) ->
+             cancellation exn (Printexc.get_raw_backtrace ())
+           | exception exn -> abort (Printexc.to_string exn)
+           | Fusion_orchestrator.Compute_denied reason ->
+             let detail = Fusion_types.deny_reason_label reason in
+             if
+               claim_first ~authority ~keeper ~run_id
+                 (Fusion_run_authority.Stopped_without_computation (Denied reason))
+             then
+               append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
+                 (Printf.sprintf "**Fusion run `%s`** _(compute denied: %s)_" run_id detail)
+           | Fusion_orchestrator.Computed evidence ->
+             if
+               claim_first ~authority ~keeper ~run_id
+                 (Fusion_run_authority.Computation_committed evidence)
+             then
+               (match project ~base_dir ~topology ~request:allowed evidence with
+                | Fusion_orchestrator.Completed _ -> ()
+                | Fusion_orchestrator.Denied reason ->
+                  append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
+                    (Printf.sprintf "**Fusion run `%s`** _(projection denied: %s)_" run_id
+                       (Fusion_types.deny_reason_label reason))
+                | Fusion_orchestrator.Sink_failed msg ->
+                  append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
+                    (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
+                | exception (Eio.Cancel.Cancelled _ as exn) ->
+                  let bt = Printexc.get_raw_backtrace () in
+                  Fusion_wake_route.discard ~run_id;
+                  Printexc.raise_with_backtrace exn bt
+                | exception exn ->
+                  append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
+                    (Printf.sprintf "**Fusion run `%s`** _(projection failed: %s)_" run_id
+                       (Printexc.to_string exn)))
+         in
+         (try
+            Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+              ~keeper ~preset:allowed.preset ~started_at:now_unix;
+            Option.iter
+              (fun channel -> Fusion_wake_route.register ~run_id channel)
+              continuation_channel;
+            Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+            fork run_background;
+            status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:true
+              [ ("status", `String "fusion_started")
+              ; ("run_id", `String run_id)
+              ; ( "delivery"
+                , `String
+                    "async: you will be woken with the result when deliberation \
+                     completes; the conclusion (or failure reason) also lands on \
+                     your chat lane. No need to poll masc_fusion_status." )
+              ]
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+            cancellation exn (Printexc.get_raw_backtrace ())
+          | exn ->
+            let detail = Printexc.to_string exn in
+            abort detail;
+            status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
+              [ "error", `String detail ]))
 
-let handle_result ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
+let handle_result ~sw ~net ~authority ~base_dir ~keeper ~now_unix ~run_id ~policy
       ?continuation_channel ~args () =
-  handle_with_runner_result ~run_orchestrator:Fusion_orchestrator.run ~sw ~net ~base_dir
-    ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args ()
+  handle_with_runtime_result ~compute:Fusion_orchestrator.compute
+    ~project:Fusion_orchestrator.project ~fork:(fun fn -> Eio.Fiber.fork ~sw fn)
+    ~authority ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy
+    ?continuation_channel ~args ()
 
-let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ?continuation_channel
-      ~args () : string =
+let handle ~sw ~net ~authority ~base_dir ~keeper ~now_unix ~run_id ~policy
+      ?continuation_channel ~args () : string =
   Tool_result.message
     (handle_result
        ~sw
        ~net
+       ~authority
        ~base_dir
        ~keeper
        ~now_unix
@@ -226,15 +283,19 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ?continuation_ch
        ())
 
 module For_test = struct
-  type nonrec orchestrator_runner = orchestrator_runner
+  type nonrec computation = computation
+  type nonrec projection = projection
 
-  let handle_with_runner ~run_orchestrator ~sw ~net ~base_dir ~keeper ~now_unix
-        ~run_id ~policy ?continuation_channel ~args () =
+  let handle_with_runtime ~compute ~project ~fork ~sw ~net ~authority ~base_dir
+        ~keeper ~now_unix ~run_id ~policy ?continuation_channel ~args () =
     Tool_result.message
-      (handle_with_runner_result
-         ~run_orchestrator
+      (handle_with_runtime_result
+         ~compute
+         ~project
+         ~fork
          ~sw
          ~net
+         ~authority
          ~base_dir
          ~keeper
          ~now_unix

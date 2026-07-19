@@ -791,9 +791,15 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
      | Ok policy ->
        let now_unix = Time_compat.now () in
        let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
+       let authority =
+         Fusion_run_authority.create
+           ~directory:(Common.fusion_run_authority_dir_from_base_path
+             ~base_path:config.Workspace.base_path)
+       in
        Fusion_tool.handle_result
          ~sw
          ~net
+         ~authority
          ~base_dir:config.Workspace.base_path
          ~keeper:meta.name
          ~now_unix

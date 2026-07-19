@@ -45,6 +45,8 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
+val fusion_run_authority_dir_from_base_path : base_path:string -> string
+(** Durable per-run Fusion authority root under [<base_path>/.masc]. *)
 val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)

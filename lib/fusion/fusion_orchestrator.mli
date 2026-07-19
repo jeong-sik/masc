@@ -20,9 +20,10 @@ type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
 
-(** Run panel and judge computation without Board, chat, wake, or run-registry
-    projection. The caller can durably claim the semantic terminal before
-    passing a [Computed] value to {!project}. *)
+(** Run panel and judge computation for an already-admitted request, without
+    Board, chat, wake, or run-registry projection. The caller owns the single
+    [Fusion_policy.decide] boundary and can durably claim the semantic terminal
+    before passing a [Computed] value to {!project}. *)
 val compute
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

@@ -14,16 +14,12 @@ type compute_outcome =
   | Computed of Fusion_types.deliberation_evidence
 
 let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
-  match Fusion_policy.decide ~policy request with
-  | Fusion_types.Deny reason ->
+  match Fusion_policy.find_preset policy request.Fusion_types.preset with
+  | None ->
     Fusion_metrics.record_invocation ~topology `Denied;
-    Compute_denied reason
-  | Fusion_types.Allow req ->
-    (match Fusion_policy.find_preset policy req.Fusion_types.preset with
-       | None ->
-         Fusion_metrics.record_invocation ~topology `Denied;
-         Compute_denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
-     | Some vp ->
+    Compute_denied (Fusion_types.Preset_unknown request.preset)
+  | Some vp ->
+    let req = request in
           let preset = Fusion_policy.Validated_preset.preset vp in
           let groups = preset.Fusion_policy.panels in
           let effective_groups =
@@ -377,7 +373,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
             ; judge
             ; judges = judge_nodes
             ; judge_usage
-            })
+            }
 
 let project
     ~base_dir
@@ -400,6 +396,11 @@ let project
 ;;
 
 let run ~sw ~net ~base_dir ~policy ~topology ~request () =
-  match compute ~sw ~net ~policy ~topology ~request () with
-  | Compute_denied reason -> Denied reason
-  | Computed deliberation -> project ~base_dir ~topology ~request deliberation
+  match Fusion_policy.decide ~policy request with
+  | Fusion_types.Deny reason ->
+    Fusion_metrics.record_invocation ~topology `Denied;
+    Denied reason
+  | Fusion_types.Allow admitted ->
+    (match compute ~sw ~net ~policy ~topology ~request:admitted () with
+     | Compute_denied reason -> Denied reason
+     | Computed deliberation -> project ~base_dir ~topology ~request:admitted deliberation)

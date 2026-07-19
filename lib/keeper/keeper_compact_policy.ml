@@ -296,6 +296,14 @@ let requested_of_plan ~units ~protected_suffix plan =
    prefix while protecting a head window (the conversation's setup: system prompt
    / first goal) and a tail window (recent context).
 
+   Unlike the LLM path this builds a [requested_compaction] directly rather than
+   through [Keeper_compaction_llm_summarizer.plan_of_json]: the summarizer's
+   [compaction_plan] can only name eligible (pure-text Assistant) units, so it
+   cannot express "drop this User unit", which is exactly the world-state bloat
+   the floor targets. The two paths therefore share the downstream contract (the
+   same [requested_compaction] fields feeding the same evidence / commit path),
+   not the plan representation.
+
    Safety: units are the tool-cycle-safe granularity from
    [Keeper_compaction_unit.partition] (a Closed_tool_cycle is one unit), so
    whole-unit drops never orphan a tool_result. The head window protects the
@@ -312,19 +320,28 @@ let deterministic_floor_runtime_id = "deterministic_floor"
 let floor_protected_head_units = 3
 let floor_protected_tail_units = 12
 
-(* Only Ordinary User/Assistant units may be dropped by the floor.
-   [Keeper_compaction_evidence.create] requires the tool_use and tool_result
-   counts to be invariant across compaction (the LLM path only ever touches
-   tool-free eligible units), so dropping a [Closed_tool_cycle] would be rejected
-   as Invalid_structural_evidence. [Keeper_compaction_unit.partition] groups every
-   tool cycle into a [Closed_tool_cycle], so an [Ordinary_message] carries no tool
-   blocks and dropping it leaves the tool counts invariant. System units are
-   preserved as foundational instructions. This still targets the dominant
-   accumulation — the world-state User messages — while staying evidence-valid. *)
+(* Only tool-free, provenance-free Ordinary User/Assistant units may be dropped.
+
+   - [Closed_tool_cycle] is never dropped: [Keeper_compaction_evidence.create]
+     requires the tool_use / tool_result counts to be invariant across compaction
+     (the LLM path only ever touches tool-free eligible units), so dropping a
+     cycle would be rejected as Invalid_structural_evidence. Since
+     [Keeper_compaction_unit.partition] groups every tool cycle into a
+     [Closed_tool_cycle], an [Ordinary_message] carries no tool blocks, so
+     dropping one keeps the tool counts invariant.
+   - System units are preserved as foundational instructions.
+   - [metadata = []] mirrors the summarizer's own eligibility conservatism
+     ([Keeper_compaction_llm_summarizer.eligible_source] excludes metadata-bearing
+     messages): a message with metadata carries provenance the floor cannot
+     preserve, so it is kept rather than dropped. The dominant accumulation —
+     world-state User snapshots — is metadata-free, so restricting to
+     [metadata = []] still targets the bloat while never discarding a
+     provenance-bearing utterance. *)
 let unit_is_floor_droppable = function
   | Keeper_compaction_unit.Closed_tool_cycle _ -> false
   | Keeper_compaction_unit.Ordinary_message
-      { role = Agent_sdk.Types.User | Agent_sdk.Types.Assistant; _ } -> true
+      { role = Agent_sdk.Types.User | Agent_sdk.Types.Assistant; metadata = []; _ }
+    -> true
   | Keeper_compaction_unit.Ordinary_message _ -> false
 ;;
 

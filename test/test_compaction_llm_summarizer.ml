@@ -582,6 +582,33 @@ let test_floor_preserves_tool_cycles_and_system () =
       true
       (List.exists (fun (m : T.message) -> m.role = T.Tool) kept)
 
+(* A middle unit that carries metadata (provenance the floor cannot preserve) is
+   kept, mirroring the summarizer's own eligibility conservatism; only the
+   metadata-free snapshot beside it is dropped. *)
+let test_floor_preserves_metadata_bearing_units () =
+  let head = floor_units floor_head in
+  let tail =
+    List.init floor_tail (fun i -> ordinary (text T.Assistant (Printf.sprintf "t%d" i)))
+  in
+  let meta_unit =
+    ordinary (message ~metadata:[ "provenance", `String "keep" ] T.User [ T.Text "meta-usr" ])
+  in
+  let middle = [ ordinary (text T.User "plain-usr"); meta_unit ] in
+  let units = head @ middle @ tail in
+  match
+    Compact_policy.For_testing.deterministic_floor_for_testing
+      ~units
+      ~protected_suffix:[]
+  with
+  | None -> Alcotest.fail "floor must engage on the metadata-free middle unit"
+  | Some (kept, dropped) ->
+    Alcotest.(check int) "only the metadata-free middle unit is dropped" 1 dropped;
+    let kept_texts = List.map floor_message_text kept in
+    Alcotest.(check bool) "metadata-free middle unit is dropped" false
+      (List.mem "plain-usr" kept_texts);
+    Alcotest.(check bool) "metadata-bearing middle unit is preserved" true
+      (List.mem "meta-usr" kept_texts)
+
 let () =
   Alcotest.run "compaction_llm_summarizer"
     [ ( "provider"
@@ -601,6 +628,8 @@ let () =
             test_floor_noop_without_middle_span
         ; Alcotest.test_case "preserves tool cycles and system units" `Quick
             test_floor_preserves_tool_cycles_and_system
+        ; Alcotest.test_case "preserves metadata-bearing units" `Quick
+            test_floor_preserves_metadata_bearing_units
         ] )
     ; ( "structured_judge_lane_split_25051"
       , [ Alcotest.test_case "ineligible chat runtime alone has no candidate" `Quick

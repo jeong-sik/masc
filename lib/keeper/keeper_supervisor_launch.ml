@@ -244,6 +244,7 @@ let launch_supervised_fiber_body
              Eio.Fiber.fork ~sw:lane_sw (fun () ->
                Keeper_board_attention_worker.run
                  ~sw:lane_sw
+                 ~clock:ctx.clock
                  ~net:ctx.net
                  ~base_path
                  ~keeper_name:meta.name);

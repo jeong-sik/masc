@@ -124,7 +124,9 @@ val route_kind_label : route -> string
     "escalate_judgment"]. *)
 
 val retry_class_label : retry_class -> string
+val retry_class_of_label : string -> retry_class option
 val rotate_class_label : rotate_class -> string
+val rotate_class_of_label : string -> rotate_class option
 val judgment_class_label : judgment_class -> string
 
 val judgment_provenance_label : judgment_provenance -> string

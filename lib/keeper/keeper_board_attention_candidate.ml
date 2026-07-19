@@ -2,6 +2,7 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
+module Judgment_failure = Keeper_board_attention_failure
 
 type retryable_failure_kind =
   | Runtime_configuration_unavailable
@@ -1110,15 +1111,20 @@ let judge_singleton ~sw ~net ~base_path candidate =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
       Error
-        (failure
-           ~kind:Runtime_configuration_unavailable
-           (Printexc.to_string exn))
+        (Judgment_failure.runtime_configuration_change
+           ~failed_at:(Time_compat.now ())
+           ~detail:(Printexc.to_string exn))
   in
   match runtime_id_result with
   | Error _ as error -> error
   | Ok runtime_id ->
     (match build_singleton_prompt candidate with
-     | Error detail -> Error (failure ~kind:Prompt_contract_unavailable detail)
+     | Error detail ->
+       Error
+         (Judgment_failure.blocked
+            ~blocked_at:(Time_compat.now ())
+            ~kind:Judgment_failure.Prompt_contract_unavailable
+            ~detail)
      | Ok prompt ->
        let provider_result =
          try
@@ -1138,12 +1144,17 @@ let judge_singleton ~sw ~net ~base_path candidate =
            | Ok result -> Ok result
            | Error error ->
              Error
-               (failure
-                  ~kind:Provider_unavailable
-                  (Agent_sdk.Error.to_string error))
+               (Judgment_failure.of_sdk_error
+                  ~observed_at:(Time_compat.now ())
+                  error)
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (failure ~kind:Provider_unavailable (Printexc.to_string exn))
+         | exn ->
+           Error
+             (Judgment_failure.blocked
+                ~blocked_at:(Time_compat.now ())
+                ~kind:Judgment_failure.Unexpected_judgment_exception
+                ~detail:(Printexc.to_string exn))
        in
        (match provider_result with
         | Error _ as error -> error
@@ -1153,11 +1164,20 @@ let judge_singleton ~sw ~net ~base_path candidate =
                ~schema_name:Keeper_board_attention_judgment.batch_schema_name
                result.response
            with
-           | Error detail -> Error (failure ~kind:Response_contract_unavailable detail)
+           | Error detail ->
+             Error
+               (Judgment_failure.blocked
+                  ~blocked_at:(Time_compat.now ())
+                  ~kind:Judgment_failure.Response_contract_unavailable
+                  ~detail)
            | Ok json ->
              (match Keeper_board_attention_judgment.batch_of_yojson json with
               | Error detail ->
-                Error (failure ~kind:Response_contract_unavailable detail)
+                Error
+                  (Judgment_failure.blocked
+                     ~blocked_at:(Time_compat.now ())
+                     ~kind:Judgment_failure.Response_contract_unavailable
+                     ~detail)
               | Ok [ item ] when String.equal item.candidate_id candidate.candidate_id ->
                 Ok
                   { verdict = item.verdict
@@ -1166,19 +1186,23 @@ let judge_singleton ~sw ~net ~base_path candidate =
                   }
               | Ok [ item ] ->
                 Error
-                  (failure
-                     ~kind:Response_contract_unavailable
-                     (Printf.sprintf
-                        "singleton verdict identity mismatch expected=%S actual=%S"
-                        candidate.candidate_id
-                        item.candidate_id))
+                  (Judgment_failure.blocked
+                     ~blocked_at:(Time_compat.now ())
+                     ~kind:Judgment_failure.Response_contract_unavailable
+                     ~detail:
+                       (Printf.sprintf
+                          "singleton verdict identity mismatch expected=%S actual=%S"
+                          candidate.candidate_id
+                          item.candidate_id))
               | Ok items ->
                 Error
-                  (failure
-                     ~kind:Response_contract_unavailable
-                     (Printf.sprintf
-                        "singleton verdict count must be exactly one, got %d"
-                        (List.length items)))))))
+                  (Judgment_failure.blocked
+                     ~blocked_at:(Time_compat.now ())
+                     ~kind:Judgment_failure.Response_contract_unavailable
+                     ~detail:
+                       (Printf.sprintf
+                          "singleton verdict count must be exactly one, got %d"
+                          (List.length items)))))))
 ;;
 
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =

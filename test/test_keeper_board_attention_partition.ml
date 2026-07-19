@@ -1,5 +1,6 @@
 module P = Masc.Keeper_board_attention_partition
 module A = P.Candidate
+module F = P.Failure
 module J = Masc.Keeper_board_attention_judgment
 
 let rec remove_tree path =
@@ -200,8 +201,15 @@ let test_lane_abort_and_process_start_recovery_are_explicit () =
       | _ -> Alcotest.fail "released claim was not Ready")
    | P.Claim_already_transitioned _ -> Alcotest.fail "live owner claim was not released");
   let first_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
-  let failure : A.retryable_failure =
-    { kind = A.Provider_unavailable; detail = "typed Provider failure"; failed_at = 12.0 }
+  let failure : F.retryable =
+    { requirement =
+        F.Provider_retry_after
+          { retry_class = Keeper_runtime_failure_route.Server_error
+          ; delay_seconds = 5.0
+          }
+    ; detail = "typed Provider failure"
+    ; failed_at = 12.0
+    }
   in
   ignore
     (ok
@@ -214,10 +222,34 @@ let test_lane_abort_and_process_start_recovery_are_explicit () =
     second.candidate_id
     second_claim.candidate_id;
   Alcotest.(check int)
-    "process start recovers prior Running and Deferred"
-    2
+    "process start recovers only prior Running"
+    1
     (ok "process-start recovery" (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
-  let recovered = claim ~base_path ~worker_epoch:owner ~now:14.0 in
+  Alcotest.(check (option (float 0.0)))
+    "Provider deadline remains durable"
+    (Some 17.0)
+    (ok
+       "next Provider retry deadline"
+       (P.next_provider_retry_deadline ~base_path ~keeper_name:"sangsu"));
+  Alcotest.(check int)
+    "deadline cannot release early"
+    0
+    (ok
+       "early Provider retry release"
+       (P.release_due_provider_retries
+          ~now:16.0
+          ~base_path
+          ~keeper_name:"sangsu"));
+  Alcotest.(check int)
+    "exact Provider deadline releases deferred root"
+    1
+    (ok
+       "due Provider retry release"
+       (P.release_due_provider_retries
+          ~now:17.0
+          ~base_path
+          ~keeper_name:"sangsu"));
+  let recovered = claim ~base_path ~worker_epoch:owner ~now:18.0 in
   Alcotest.(check string)
     "recovery restores durable oldest order"
     first.candidate_id
@@ -247,7 +279,7 @@ let test_strict_codec_and_ledger_identity_validation () =
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
     "unknown schema version"
-    (P.of_yojson (replace_field "schema_version" (`Int 2) encoded));
+    (P.of_yojson (replace_field "schema_version" (`Int 3) encoded));
   let malformed = replace_field "partition_id" (`String "forged-root") encoded in
   let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
   ok

@@ -12,7 +12,7 @@ type step =
       }
   | Judgment_deferred of
       { candidate_id : string
-      ; failure : Keeper_board_attention_candidate.retryable_failure
+      ; failure : Keeper_board_attention_failure.retryable
       }
   | Candidate_already_consumed of { candidate_id : string }
   | Partition_blocked of
@@ -29,6 +29,7 @@ type settlement =
 
 val run :
   sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:Eio_context.eio_net option ->
   base_path:string ->
   keeper_name:string ->
@@ -52,7 +53,7 @@ module For_testing : sig
     judge:
       (Keeper_board_attention_candidate.candidate ->
        ( Keeper_board_attention_candidate.judgment
-       , Keeper_board_attention_candidate.retryable_failure )
+       , Keeper_board_attention_failure.attempt_failure )
        result) ->
     (step, string) result
 end

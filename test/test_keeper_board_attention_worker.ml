@@ -1,4 +1,5 @@
 module A = Masc.Keeper_board_attention_candidate
+module F = Masc.Keeper_board_attention_failure
 module J = Masc.Keeper_board_attention_judgment
 module P = Masc.Keeper_board_attention_partition
 module W = Masc.Keeper_board_attention_worker
@@ -151,15 +152,19 @@ let test_provider_failure_is_durable_without_hot_retry () =
   with_temp_base "board-attention-worker-deferred" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let calls = ref 0 in
-  let failure : A.retryable_failure =
-    { kind = A.Provider_unavailable; detail = "typed provider failure"; failed_at = 3.0 }
+  let failure : F.retryable =
+    { requirement =
+        F.Provider_recovery Keeper_runtime_failure_route.Server_error
+    ; detail = "typed provider failure"
+    ; failed_at = 3.0
+    }
   in
   (match
      ok
        "defer worker step"
        (process ~base_path ~judge:(fun _ ->
           incr calls;
-          Error failure))
+          Error (F.Retryable failure)))
    with
    | W.Judgment_deferred { candidate_id; failure = observed }
      when String.equal candidate_id persisted.candidate_id && observed = failure -> ()
@@ -174,6 +179,35 @@ let test_provider_failure_is_durable_without_hot_retry () =
    | A.Pending { last_failure = None } -> ()
    | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
      Alcotest.fail "partition failure leaked into the candidate SSOT")
+;;
+
+let test_deterministic_failure_is_blocked_without_retry () =
+  with_temp_base "board-attention-worker-blocked" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let blocked : F.blocked =
+    { kind = F.Response_contract_unavailable
+    ; detail = "structured response did not cover the singleton identity"
+    ; blocked_at = 3.0
+    }
+  in
+  (match
+     ok
+       "block worker step"
+       (process ~base_path ~judge:(fun _ -> Error (F.Blocked blocked)))
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason = P.Judgment_blocked observed
+       }
+     when String.equal candidate_id persisted.candidate_id && observed = blocked -> ()
+   | _ -> Alcotest.fail "deterministic judgment failure was not durably blocked");
+  (match
+     ok
+       "blocked partition is not retried"
+       (process ~base_path ~judge:(fun _ -> Alcotest.fail "blocked work was retried"))
+   with
+   | W.Idle -> ()
+   | _ -> Alcotest.fail "blocked partition became claimable")
 ;;
 
 let test_existing_judgment_never_calls_provider () =
@@ -286,6 +320,10 @@ let () =
             "Provider failure is durable without hot retry"
             `Quick
             test_provider_failure_is_durable_without_hot_retry
+        ; Alcotest.test_case
+            "deterministic failure is blocked"
+            `Quick
+            test_deterministic_failure_is_blocked_without_retry
         ; Alcotest.test_case
             "existing judgment skips Provider"
             `Quick

@@ -234,11 +234,14 @@ type settlement_origin =
 
 type worker_settlement =
   | Status_settlement of
-      { status : request_status
+      { entry : entry
       ; durability : settlement_durability
       ; origin : settlement_origin
       }
-  | Settlement_projection_error of { poll_result : load_result }
+  | Settlement_projection_error of
+      { attempted_entry : entry
+      ; poll_result : load_result
+      }
 
 (** {1 Submit and poll} *)
 
@@ -281,12 +284,15 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     root switch.
 
     [on_worker_settled] is invoked only for terminal truth that exact in-process
-    poll also returns: a durably committed status, a typed volatile persistence
+    poll also returns: a durably committed entry, a typed volatile persistence
     overlay, or an already-existing canonical durable terminal discovered
-    during an integrity conflict. Ambiguous durable evidence has no fabricated
-    callback projection. It is the single projection boundary for SSE or other
-    live terminal notifications. Projection exceptions are observed and
-    isolated from request truth. *)
+    during an integrity conflict. The settlement carries that exact immutable
+    entry, so a projector never has to recover request, Keeper, BasePath, or
+    owner identity from an ambient mutable closure. Ambiguous durable evidence
+    carries the attempted entry beside the exact canonical lookup result; it
+    has no fabricated callback status. This is the single projection boundary
+    for SSE or other live terminal notifications. Projection exceptions are
+    observed and isolated from request truth. *)
 val submit
   :  ?on_accepted:(string -> (unit, string) result)
   -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)

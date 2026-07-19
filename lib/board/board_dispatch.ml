@@ -869,9 +869,29 @@ let board_sse_hook : (board_sse_event -> unit) option Atomic.t = Atomic.make Non
 let set_board_sse_hook hook =
   Atomic.set board_sse_hook (Some hook)
 
+let board_sse_event_log_context = function
+  | Post_created { post_id; _ } -> "post_created", post_id
+  | Comment_added { comment_id; _ } -> "comment_added", comment_id
+  | Post_voted { post_id; _ } -> "post_voted", post_id
+  | Comment_voted { comment_id; _ } -> "comment_voted", comment_id
+  | Reaction_changed { target_id; _ } -> "reaction_changed", target_id
+;;
+
 let emit_board_sse_event event =
   match Atomic.get board_sse_hook with
-  | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
+  | Some hook ->
+    (try hook event with
+     | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow) as cause ->
+       Printexc.raise_with_backtrace cause (Printexc.get_raw_backtrace ())
+     | cause ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       let event_kind, subject_id = board_sse_event_log_context event in
+       Log.BoardLog.error
+         "Board SSE hook failed event_kind=%s subject_id=%s: %s\n%s"
+         event_kind
+         subject_id
+         (Printexc.to_string cause)
+         (Printexc.raw_backtrace_to_string backtrace))
   | None -> ()
 
 let is_initialized () =

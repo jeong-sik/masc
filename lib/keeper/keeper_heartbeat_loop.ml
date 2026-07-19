@@ -351,6 +351,9 @@ let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
     else
       Keeper_registry_event_queue.Requeue
         Keeper_registry_event_queue.Context_compaction_retry
+  | Keeper_unified_turn.Requeue_after_transcript_quarantine ->
+    Keeper_registry_event_queue.Requeue
+      Keeper_registry_event_queue.Transcript_quarantine_retry
   | Keeper_unified_turn.Follow_failure_route_after_no_compaction { reason } ->
     if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
     then
@@ -978,6 +981,7 @@ let run_keepalive_unified_turn
             (match failure.Keeper_unified_turn.source_lease_disposition with
              | Keeper_unified_turn.Requeue_after_context_compaction _
              | Keeper_unified_turn.Escalate_after_exact_output_terminal _
+             | Keeper_unified_turn.Requeue_after_transcript_quarantine
              | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
              | Keeper_unified_turn.Follow_failure_route
              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->

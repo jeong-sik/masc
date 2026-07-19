@@ -12,6 +12,7 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
     (* The two approval arms are no longer produced: the approval-wake
@@ -381,6 +382,7 @@ let requeue_reason_label = function
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
   | Context_compaction_retry -> "context_compaction_retry"
+  | Transcript_quarantine_retry -> "transcript_quarantine_retry"
   | Approval_grant_unconsumed -> "approval_grant_unconsumed"
   | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
@@ -394,6 +396,7 @@ let requeue_reason_of_label = function
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
   | "context_compaction_retry" -> Ok Context_compaction_retry
+  | "transcript_quarantine_retry" -> Ok Transcript_quarantine_retry
   | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
   | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
@@ -860,11 +863,12 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
+          | Transcript_quarantine_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, a completed context-compaction handoff,
-           and a durable one-shot grant retain the exact leased stimuli
-           without monopolizing the FIFO front. *)
+        (* Retryable provider work, context repair handoffs, and a durable
+           one-shot grant retain the exact leased stimuli without monopolizing
+           the FIFO front. *)
         append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending

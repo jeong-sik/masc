@@ -1055,16 +1055,31 @@ let test_failed_cycle_route_mapping () =
           Masc.Keeper_unified_turn.Compaction_committed
     }
   in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:7.0
+       compacted_failure
+   with
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     ()
+   | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged");
+  let quarantined_failure =
+    { judgment_failure with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+    }
+  in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
-      ~settled_at:7.0
+      ~settled_at:8.0
       ~compaction_consecutive_failures:0
-      compacted_failure
+      quarantined_failure
   with
   | Masc.Keeper_registry_event_queue.Requeue
-      Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
     ()
-  | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged"
+  | _ -> Alcotest.fail "unprocessed source stimulus was acknowledged after quarantine"
 ;;
 
 let cycle_meta () =

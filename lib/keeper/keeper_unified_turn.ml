@@ -33,6 +33,7 @@ type source_lease_disposition =
       { reason : Keeper_event_queue_state.no_compaction_reason }
   | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
+  | Requeue_after_transcript_quarantine
   | Acknowledge_after_in_turn_handling
 
 let source_lease_disposition_after_no_compaction = function
@@ -1159,7 +1160,7 @@ dominant source of the observed CAS race exhaustion after
                   in
                   let source_lease_disposition, turn_state =
                     if is_incomplete_tool_transcript_error err
-                    then Acknowledge_after_in_turn_handling, turn_state
+                    then Requeue_after_transcript_quarantine, turn_state
                     else (
                       (* The checkpoint helper reports [Ok] only after the
                          compacted checkpoint is durably saved. The heartbeat

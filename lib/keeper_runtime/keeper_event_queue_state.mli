@@ -19,6 +19,7 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -207,9 +208,10 @@ val settle :
     same semantic settlement returns [Already_settled]; a different settlement
     for an already-settled lease is an explicit conflict.
 
-    [Retry_after_observed] and [Context_compaction_retry] retain the exact
-    leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. [No_compaction] is accepted
+    [Retry_after_observed], [Context_compaction_retry], and
+    [Transcript_quarantine_retry] retain the exact leased stimuli at the
+    pending FIFO tail so unrelated work in the same lane can proceed before
+    another provider attempt. [No_compaction] is accepted
     only for a lease containing exactly one typed
     [Manual_compaction_requested] stimulus; it cannot retire product work whose
     provider turn failed. Non-finite settlement times are rejected. *)

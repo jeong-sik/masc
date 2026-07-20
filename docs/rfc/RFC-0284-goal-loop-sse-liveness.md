@@ -1,7 +1,12 @@
 ---
 rfc: "0284"
 title: "Goal-loop status SSE liveness — server-side change detection extends the goals snapshot"
-status: Draft
+status: Superseded — RFC-0352 Path B (2026-07-21). The goal-loop OODA
+  surface this RFC made live (broadcast module, /goal-loop/status route,
+  goal_loop_status slice bridge, dashboard panel) was retired as a
+  dead-projection: the out-of-process producer was deleted first
+  (#25477), so every consumer read a file nothing writes. Do not
+  re-implement from this document.
 created: 2026-06-23
 updated: 2026-06-23
 author: vincent

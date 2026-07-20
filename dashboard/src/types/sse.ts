@@ -48,9 +48,6 @@ export type SSEEventType =
   | 'approval:pending'
   | 'approval:resolved'
   | 'approval:summary_updated'
-  // RFC-0284 §3.2: goal-loop OODA status live delta (see hydrateDashboardSlice
-  // in sse-store.ts). Emitted by server_dashboard_http_goal_loop_broadcast.ml.
-  | 'goal_loop_status'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'

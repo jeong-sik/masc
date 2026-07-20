@@ -429,7 +429,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'planning',
       label: 'Plans & Goals',
-      description: 'Goal loop, goal tree, and task kanban.',
+      description: 'Goal tree and task kanban.',
       params: { section: 'planning' },
     },
     {

@@ -76,10 +76,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
-  // RFC-0284 §3.2: goal-loop OODA status live delta. Emitted by
-  // server_dashboard_http_goal_loop_broadcast.ml. Dispatched by the
-  // hydrateDashboardSlice switch in sse-store.ts.
-  'goal_loop_status',
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',

@@ -161,10 +161,6 @@ describe('refreshDashboard bootstrap', () => {
           provenance: 'bootstrap',
         },
       },
-      goal_loop_status: {
-        generated_at: '2026-06-26T00:00:03Z',
-        status: 'idle',
-      },
     })
 
     const store = await import('./store')

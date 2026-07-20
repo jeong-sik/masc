@@ -1142,7 +1142,7 @@ let test_missed_pong_threshold_reads_env () =
 
 (* The per-session dashboard delivery counters are read and written on the SSE
    fanout callback, which fires from the main domain (keeper keepalive / event
-   bridge / registry / goal-loop refresh broadcasts) AND from serving handlers
+   bridge / registry broadcasts) AND from serving handlers
    (HTTP-route broadcasts).  Today that is safe only because a single Eio
    domain runs cooperative fibers that never preempt mid-update.  RFC-0204
    Phase 3 moves serving to a second domain; the moment two domains run in

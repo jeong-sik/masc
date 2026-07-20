@@ -4,7 +4,9 @@
     A candidate is the irreducible work identity until the dispatched Provider
     exposes typed actual-wire split authority. No byte count, token estimate,
     wall-clock expiry, retry counter, or configured batch cap chooses
-    membership. *)
+    membership. Runtime transitions append one cursor-fenced row and update
+    process-local indexes; only process-start recovery canonically compacts the
+    history to one latest row per partition. *)
 
 module Candidate = Keeper_board_attention_candidate
 module Failure = Keeper_board_attention_failure
@@ -79,13 +81,14 @@ val ensure_roots :
 (** Persist one deterministic singleton root for each unassigned [Pending] or
     [Judged]
     candidate and return the number created by this transaction. Existing live
-    membership is validated as one-to-one. *)
+    membership is validated as one-to-one. New roots are appended without
+    rewriting historical transition rows. *)
 
 val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
-(** Release prior-process [Running] rows to [Ready] in one rewrite. [Deferred]
-    rows retain their exact retry requirement; process restart is not retry
-    authority. *)
+(** Release prior-process [Running] rows to [Ready] and canonically compact
+    the append ledger to one latest row per partition. [Deferred] rows retain
+    their exact retry requirement; process restart is not retry authority. *)
 
 val release_due_provider_retries :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result

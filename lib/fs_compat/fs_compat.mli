@@ -794,11 +794,13 @@ type private_jsonl_transaction_operation =
   | Read_stable_lock_state
   | Write_stable_lock_state
   | Sync_stable_lock
+  | Close_stable_lock
   | Open_transaction_data
   | Set_transaction_data_permissions
   | Inspect_transaction_data
   | Inspect_transaction_path
   | Read_transaction_data
+  | Close_transaction_data
   | Create_rewrite_stage
   | Set_rewrite_stage_permissions
   | Write_rewrite_stage
@@ -815,7 +817,16 @@ type private_jsonl_operation_failure =
   ; backtrace : Printexc.raw_backtrace
   }
 
-type private_jsonl_transaction_error =
+type private_jsonl_transaction_success =
+  | Snapshot_succeeded of private_jsonl_snapshot
+  | Cursor_succeeded of Private_jsonl_cursor.t
+  | Cursor_precondition_succeeded of Private_jsonl_cursor.t
+
+type private_jsonl_transaction_primary =
+  | Transaction_succeeded of private_jsonl_transaction_success
+  | Transaction_failed of private_jsonl_transaction_error
+
+and private_jsonl_transaction_error =
   | Stable_lock_contended of { lock_path : string }
   | Unexpected_stable_lock_permissions of
       { path : string
@@ -846,7 +857,32 @@ type private_jsonl_transaction_error =
       { cursor : Private_jsonl_cursor.t option
       ; failure : private_jsonl_operation_failure
       }
+  | Transaction_settlement_failed of
+      { primary : private_jsonl_transaction_primary
+      ; cleanup_failures : private_jsonl_operation_failure list
+      }
   | Transaction_append_failed of durable_append_error
+
+type 'a private_jsonl_success_receipt =
+  { value : 'a
+  ; settlement_error : private_jsonl_transaction_error option
+  }
+(** A completed transaction value together with exact evidence that descriptor
+    settlement remained incomplete. Consumers may advance from [value], but
+    must observe [settlement_error]. Primary failures and mismatched success
+    kinds are never converted to receipts. *)
+
+val private_jsonl_snapshot_success_receipt :
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result ->
+  ( private_jsonl_snapshot private_jsonl_success_receipt
+  , private_jsonl_transaction_error )
+  result
+
+val private_jsonl_cursor_success_receipt :
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result ->
+  ( Private_jsonl_cursor.t private_jsonl_success_receipt
+  , private_jsonl_transaction_error )
+  result
 
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
@@ -868,10 +904,12 @@ val read_private_jsonl_durable_locked_result :
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
 type private_jsonl_transaction_io_for_testing =
-  { before_sync_parent : string -> unit }
+  { before_sync_parent : string -> unit
+  ; close_fd : Unix.file_descr -> unit
+  }
 
-(** Production-path seam for deterministic stable-lock creation durability
-    tests. *)
+(** Production-path seam for deterministic stable-lock creation and descriptor
+    settlement tests. *)
 val read_private_jsonl_durable_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string ->
@@ -890,11 +928,28 @@ val append_private_jsonl_durable_locked_at_cursor_result :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+(** Production-path seam for cancellation during descriptor settlement. *)
+val append_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Atomically replace a complete private JSONL store iff [expected] still
     names the exact current store. The staged payload and parent directory are
     fsynced; no directory-fsync failure is suppressed. The stable sibling lock
     remains the serialization authority across the inode replacement. *)
 val rewrite_private_jsonl_durable_locked_at_cursor_result :
+  string ->
+  expected:Private_jsonl_cursor.t ->
+  string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+(** Production-path seam proving that a descriptor settlement failure while
+    reading the rewrite precondition is not classified as a committed rewrite. *)
+val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
   string ->
   expected:Private_jsonl_cursor.t ->
   string ->

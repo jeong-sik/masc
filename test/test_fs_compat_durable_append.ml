@@ -448,6 +448,274 @@ let transaction_append path ~expected suffix =
   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
 ;;
 
+let injected_close_io ~fail_calls =
+  let calls = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> ())
+    ; close_fd =
+        (fun fd ->
+          incr calls;
+          Unix.close fd;
+          if List.mem !calls fail_calls
+          then
+            raise
+              (Unix.Unix_error
+                 (Unix.EIO, "injected_private_jsonl_close", string_of_int !calls)))
+    }
+  in
+  io, calls
+;;
+
+let check_transaction_close_failure
+      ~label
+      ~operation
+      (failure : Fs_compat.private_jsonl_operation_failure)
+  =
+  check bool (label ^ " operation") true (failure.operation = operation);
+  match failure.exception_ with
+  | Unix.Unix_error (Unix.EIO, "injected_private_jsonl_close", _) -> ()
+  | exception_ ->
+    fail
+      (Printf.sprintf
+         "%s lost injected close failure: %s"
+         label
+         (Printexc.to_string exception_))
+;;
+
+let test_private_jsonl_transaction_preserves_primary_when_data_close_fails () =
+  with_transaction_jsonl (Some "incomplete") @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+       ~io
+       path
+       ~after:None
+   with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_failed
+               (Fs_compat.Incomplete_transaction_tail _)
+         ; cleanup_failures = [ cleanup_failure ]
+         }) ->
+     check_transaction_close_failure
+       ~label:"data descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "data close failure was silently accepted");
+  check int "data and stable lock descriptors closed" 2 !calls
+;;
+
+let test_private_jsonl_transaction_accumulates_nested_close_failures () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1; 2 ] in
+  let result =
+    Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+      ~io
+      path
+      ~after:None
+  in
+  (match result with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Snapshot_succeeded snapshot)
+         ; cleanup_failures = [ data_failure; lock_failure ]
+         }) ->
+     check string "successful snapshot receipt" "{\"row\":1}\n" snapshot.bytes;
+     check_transaction_close_failure
+       ~label:"data descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       data_failure;
+     check_transaction_close_failure
+       ~label:"stable lock descriptor cleanup"
+       ~operation:Fs_compat.Close_stable_lock
+       lock_failure;
+     (match Fs_compat.private_jsonl_snapshot_success_receipt result with
+      | Ok { value; settlement_error = Some _ } ->
+        check string "classified snapshot receipt" snapshot.bytes value.bytes
+      | Ok { settlement_error = None; _ } ->
+        fail "snapshot classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     let cursor_settlement_error =
+       Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_succeeded snapshot.cursor)
+         ; cleanup_failures = [ data_failure; lock_failure ]
+         }
+     in
+     (match
+        Fs_compat.private_jsonl_cursor_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Ok { value; settlement_error = Some _ } ->
+        check bool
+          "classified cursor receipt"
+          true
+          (Fs_compat.Private_jsonl_cursor.equal snapshot.cursor value)
+      | Ok { settlement_error = None; _ } ->
+        fail "cursor classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     (match
+        Fs_compat.private_jsonl_snapshot_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Error _ -> ()
+      | Ok _ -> fail "snapshot classifier accepted a cursor success receipt")
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "nested close failures were silently accepted");
+  check int "both nested descriptors closed" 2 !calls
+;;
+
+let test_private_jsonl_rewrite_rejects_precondition_close_as_commit () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let origin = transaction_snapshot path ~after:None in
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  let result =
+    Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ~io
+      path
+      ~expected:origin.cursor
+      "{\"row\":2}\n"
+  in
+  (match result with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_precondition_succeeded observed)
+         ; cleanup_failures = [ cleanup_failure ]
+         }) ->
+     check bool
+       "precondition cursor preserved"
+       true
+       (Fs_compat.Private_jsonl_cursor.equal origin.cursor observed);
+     check_transaction_close_failure
+       ~label:"rewrite precondition descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure;
+     (match Fs_compat.private_jsonl_cursor_success_receipt result with
+      | Error _ -> ()
+      | Ok _ -> fail "precondition cursor was classified as a committed rewrite")
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite continued after precondition descriptor settlement failed");
+  check int "precondition and stable lock descriptors closed" 2 !calls;
+  check string
+    "failed precondition leaves target unchanged"
+    "{\"row\":1}\n"
+    (Fs_compat.load_file path)
+;;
+
+exception Requested_private_jsonl_cancellation
+
+type private_jsonl_append_cancellation_outcome =
+  | Append_returned of
+      ( Fs_compat.Private_jsonl_cursor.t
+        , Fs_compat.private_jsonl_transaction_error )
+        result
+  | Append_cancelled
+
+type private_jsonl_close_barrier =
+  { entered : unit Eio.Promise.t
+  ; resolve_entered : unit Eio.Promise.u
+  ; first_close : bool Atomic.t
+  ; close_calls : int Atomic.t
+  ; mutex : Stdlib.Mutex.t
+  ; condition : Stdlib.Condition.t
+  ; mutable released : bool
+  }
+
+let private_jsonl_close_barrier () =
+  let entered, resolve_entered = Eio.Promise.create () in
+  { entered
+  ; resolve_entered
+  ; first_close = Atomic.make true
+  ; close_calls = Atomic.make 0
+  ; mutex = Stdlib.Mutex.create ()
+  ; condition = Stdlib.Condition.create ()
+  ; released = false
+  }
+;;
+
+let release_private_jsonl_close barrier =
+  Stdlib.Mutex.protect barrier.mutex (fun () ->
+    if not barrier.released
+    then (
+      barrier.released <- true;
+      Stdlib.Condition.broadcast barrier.condition))
+;;
+
+let private_jsonl_blocking_close_io barrier =
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> ())
+    ; close_fd =
+        (fun fd ->
+          ignore (Atomic.fetch_and_add barrier.close_calls 1 : int);
+          if Atomic.compare_and_set barrier.first_close true false
+          then (
+            Eio.Promise.resolve barrier.resolve_entered ();
+            Stdlib.Mutex.protect barrier.mutex (fun () ->
+              while not barrier.released do
+                Stdlib.Condition.wait barrier.condition barrier.mutex
+              done));
+          Unix.close fd)
+    }
+  in
+  io
+;;
+
+let test_private_jsonl_append_cancellation_settles_once_with_receipt () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  Eio_main.run @@ fun _env ->
+  let origin = transaction_snapshot path ~after:None in
+  let barrier = private_jsonl_close_barrier () in
+  let context, resolve_context = Eio.Promise.create () in
+  let outcome, resolve_outcome = Eio.Promise.create () in
+  Fun.protect
+    ~finally:(fun () -> release_private_jsonl_close barrier)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub @@ fun context ->
+             Eio.Promise.resolve resolve_context context;
+             Append_returned
+               (Fs_compat.append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+                  ~io:(private_jsonl_blocking_close_io barrier)
+                  path
+                  ~expected:origin.cursor
+                  "{\"row\":2}\n")
+           with
+           | Eio.Cancel.Cancelled _ -> Append_cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let context = Eio.Promise.await context in
+       Eio.Promise.await barrier.entered;
+       Eio.Cancel.cancel context Requested_private_jsonl_cancellation;
+       release_private_jsonl_close barrier;
+       match Eio.Promise.await outcome with
+       | Append_cancelled ->
+         fail "committed append lost its terminal receipt to cancellation"
+       | Append_returned (Error error) ->
+         fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Append_returned (Ok committed) ->
+         check bool
+           "cancellation path returns committed cursor"
+           false
+           (Fs_compat.Private_jsonl_cursor.equal origin.cursor committed));
+  check int "cancellation path closes both descriptors" 2 (Atomic.get barrier.close_calls);
+  check string
+    "cancellation path commits suffix exactly once"
+    "{\"row\":1}\n{\"row\":2}\n"
+    (Fs_compat.load_file path)
+;;
+
 let test_private_jsonl_transaction_missing_and_delta_contract () =
   with_transaction_jsonl None @@ fun path ->
   let origin = transaction_snapshot path ~after:None in
@@ -527,7 +795,9 @@ let test_private_jsonl_stable_lock_parent_sync_is_one_shot () =
   with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
   let parent_syncs = ref 0 in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing =
-    { before_sync_parent = (fun _dir -> incr parent_syncs) }
+    { before_sync_parent = (fun _dir -> incr parent_syncs)
+    ; close_fd = Unix.close
+    }
   in
   let snapshot = transaction_snapshot_with_io ~io path ~after:None in
   ignore (transaction_snapshot_with_io ~io path ~after:(Some snapshot.cursor));
@@ -541,6 +811,7 @@ let test_private_jsonl_stable_lock_parent_sync_failure_retries () =
     { before_sync_parent =
         (fun dir ->
           raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    ; close_fd = Unix.close
     }
   in
   (match
@@ -788,6 +1059,22 @@ let () =
             "private JSONL stable lock rejects symlink aliases"
             `Quick
             test_private_jsonl_transaction_rejects_symlink_lock_without_chmod
+        ; test_case
+            "private JSONL data close preserves primary error"
+            `Quick
+            test_private_jsonl_transaction_preserves_primary_when_data_close_fails
+        ; test_case
+            "private JSONL nested close failures accumulate"
+            `Quick
+            test_private_jsonl_transaction_accumulates_nested_close_failures
+        ; test_case
+            "private JSONL rewrite precondition close is not a commit"
+            `Quick
+            test_private_jsonl_rewrite_rejects_precondition_close_as_commit
+        ; test_case
+            "private JSONL append cancellation settles once with receipt"
+            `Quick
+            test_private_jsonl_append_cancellation_settles_once_with_receipt
         ] )
     ]
 ;;

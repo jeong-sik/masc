@@ -135,6 +135,9 @@ module Board : sig
   (** Positive finite Board persistence and autonomous flush-retry cadence.
       Invalid configured values raise {!Env_config_core.Config_error} during
       configuration initialization. *)
+  val routing_retry_interval_sec : float
+  (** Positive finite durable Board-signal routing retry cadence.  This is
+      independent from projection persistence. *)
   val backend_opt : unit -> backend option
 end
 

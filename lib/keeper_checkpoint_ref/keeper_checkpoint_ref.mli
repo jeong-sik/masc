@@ -30,3 +30,9 @@ val of_persisted
     Non-canonical or malformed digests are rejected. *)
 
 val equal : t -> t -> bool
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Exact persisted representation of a checkpoint identity. Unknown fields,
+    invalid coordinates, invalid trace ids, and non-canonical digests are
+    rejected at this single decoder boundary. *)

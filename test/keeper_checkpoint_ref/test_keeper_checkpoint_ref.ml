@@ -75,6 +75,35 @@ let test_persisted_roundtrip_is_canonical () =
     [ String.uppercase_ascii expected.sha256; String.sub expected.sha256 0 62; " " ^ expected.sha256 ]
 ;;
 
+let test_json_roundtrip_is_exact () =
+  let expected = create {|{"messages":["before"]}|} in
+  let json = Keeper_checkpoint_ref.to_yojson expected in
+  let restored = Keeper_checkpoint_ref.of_yojson json |> result_ok in
+  Alcotest.(check bool)
+    "json identity"
+    true
+    (Keeper_checkpoint_ref.equal expected restored);
+  let reordered =
+    `Assoc
+      [ "sha256", `String expected.sha256
+      ; "turn_count", `Int expected.turn_count
+      ; "trace_id", `String (Keeper_id.Trace_id.to_string expected.trace_id)
+      ; "generation", `Int expected.generation
+      ]
+  in
+  let reordered = Keeper_checkpoint_ref.of_yojson reordered |> result_ok in
+  Alcotest.(check bool)
+    "object field order is not identity"
+    true
+    (Keeper_checkpoint_ref.equal expected reordered);
+  match json with
+  | `Assoc fields ->
+    (match Keeper_checkpoint_ref.of_yojson (`Assoc (("extra", `Bool true) :: fields)) with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unknown checkpoint identity field was accepted")
+  | _ -> Alcotest.fail "checkpoint identity encoder returned a non-object"
+;;
+
 let () =
   Alcotest.run
     "keeper checkpoint ref"
@@ -85,5 +114,6 @@ let () =
             "persisted canonical roundtrip"
             `Quick
             test_persisted_roundtrip_is_canonical
+        ; Alcotest.test_case "json roundtrip" `Quick test_json_roundtrip_is_exact
         ] )
     ]

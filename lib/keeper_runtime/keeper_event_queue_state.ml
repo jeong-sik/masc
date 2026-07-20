@@ -810,38 +810,8 @@ let no_compaction_reason_of_label = function
   | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
 ;;
 
-let checkpoint_source_to_yojson (source : Keeper_checkpoint_ref.t) =
-  `Assoc
-    [ "trace_id", `String (Keeper_id.Trace_id.to_string source.trace_id)
-    ; "generation", `Int source.generation
-    ; "turn_count", `Int source.turn_count
-    ; "sha256", `String source.sha256
-    ]
-;;
-
-let checkpoint_source_of_yojson json =
-  let context = "no-compaction checkpoint source" in
-  let* fields = assoc_fields ~context json in
-  let* () =
-    exact_fields
-      ~context
-      ~expected:[ "trace_id"; "generation"; "turn_count"; "sha256" ]
-      fields
-  in
-  let* trace_id_raw = string_field ~context "trace_id" fields in
-  let* trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
-  let* generation = int_field ~context "generation" fields in
-  let* turn_count = int_field ~context "turn_count" fields in
-  let* sha256 = string_field ~context "sha256" fields in
-  Keeper_checkpoint_ref.of_persisted ~trace_id ~generation ~turn_count ~sha256
-  |> Result.map_error (function
-    | Keeper_checkpoint_ref.Negative_generation value ->
-      Printf.sprintf "no-compaction checkpoint generation is negative: %d" value
-    | Negative_turn_count value ->
-      Printf.sprintf "no-compaction checkpoint turn count is negative: %d" value
-    | Invalid_sha256 value ->
-      Printf.sprintf "no-compaction checkpoint digest is invalid: %s" value)
-;;
+let checkpoint_source_to_yojson = Keeper_checkpoint_ref.to_yojson
+let checkpoint_source_of_yojson = Keeper_checkpoint_ref.of_yojson
 
 let settlement_to_yojson = function
   | Ack -> `Assoc [ "kind", `String "ack" ]

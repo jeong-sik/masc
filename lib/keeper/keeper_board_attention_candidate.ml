@@ -40,13 +40,10 @@ type consumed_state =
   ; consumed_at : float
   }
 
-type expired_state = { expired_at : float }
-
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
-  | Expired of expired_state
 
 type candidate =
   { candidate_id : string
@@ -302,11 +299,6 @@ let status_to_yojson = function
       ; "delivery", `String (delivery_to_string consumed.delivery)
       ; "consumed_at", `Float consumed.consumed_at
       ]
-  | Expired expired ->
-    `Assoc
-      [ "kind", `String "expired"
-      ; "expired_at", `Float expired.expired_at
-      ]
 ;;
 
 let candidate_to_json candidate =
@@ -534,11 +526,6 @@ let status_of_yojson json =
     let* consumed_at_json = field ~context "consumed_at" fields in
     let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
     Ok (Consumed { judgment; delivery; consumed_at })
-  | "expired" ->
-    let* () = exact_fields ~context [ "kind"; "expired_at" ] fields in
-    let* expired_at_json = field ~context "expired_at" fields in
-    let* expired_at = float_json ~context:(context ^ ".expired_at") expired_at_json in
-    Ok (Expired { expired_at })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -795,7 +782,7 @@ let record_retryable_failure ~base_path candidate failure =
               { current with
                 status = Judged { judged with last_failure = Some failure }
               })
-       | Consumed _ | Expired _ -> None)
+       | Consumed _ -> None)
 ;;
 
 let record_judgment ~base_path candidate judgment =
@@ -810,7 +797,7 @@ let record_judgment ~base_path candidate judgment =
            { current with
              status = Judged { judgment; last_failure = None }
            }
-       | Judged _ | Consumed _ | Expired _ -> None)
+       | Judged _ | Consumed _ -> None)
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
@@ -827,7 +814,7 @@ let mark_consumed ~base_path candidate judgment delivery =
                Consumed
                  { judgment; delivery; consumed_at = Time_compat.now () }
            }
-       | Pending _ | Consumed _ | Expired _ -> None)
+       | Pending _ | Consumed _ -> None)
 ;;
 
 let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
@@ -930,7 +917,7 @@ let reject_unregistered_tool ~name ~args:_ =
 
 let rec process_with_judge ~base_path ~judge candidate =
   match candidate.status with
-  | Consumed _ | Expired _ -> Ok candidate
+  | Consumed _ -> Ok candidate
   | Judged judged -> consume_judged ~base_path candidate judged
   | Pending _ ->
     (match judge candidate with
@@ -953,7 +940,7 @@ let record_and_wake ~base_path candidate =
       match persisted.status with
       | Pending _ | Judged _ ->
         Wake_requested (request_owner_wake ~site:"duplicate" ~base_path persisted)
-      | Consumed _ | Expired _ -> Wake_not_required
+      | Consumed _ -> Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -962,30 +949,10 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
-(* ── TTL and batch judgment ───────────────────────────── *)
+(* ── Batch judgment ───────────────────────────────────── *)
 
 let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
 let batch_max_candidates = 8
-let candidate_ttl_sec = 86_400.0
-
-let is_pending_expired ~now candidate =
-  match candidate.status with
-  | Pending _ ->
-    Float.compare candidate.recorded_at (now -. candidate_ttl_sec) < 0
-  | Judged _ | Consumed _ | Expired _ -> false
-;;
-
-let expire_candidate ~base_path ~now candidate =
-  update_candidate
-    ~base_path
-    candidate.candidate_id
-    candidate.keeper_name
-    (fun current ->
-       match current.status with
-       | Pending _ ->
-         Some { current with status = Expired { expired_at = now } }
-       | Judged _ | Consumed _ | Expired _ -> None)
-;;
 
 let batch_request_json candidates =
   let keeper_context_of candidate =
@@ -1169,35 +1136,18 @@ let record_batch_failure ~base_path candidate failure =
       detail
 ;;
 
-let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
+let drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch =
   let* candidates = load_candidates ~base_path ~keeper_name in
-  let stale, judged_ready, pending =
+  let judged_ready, pending =
     List.fold_left
-      (fun (stale, judged_ready, pending) candidate ->
+      (fun (judged_ready, pending) candidate ->
          match candidate.status with
-         | Pending _ when is_pending_expired ~now candidate ->
-           candidate :: stale, judged_ready, pending
-         | Pending _ -> stale, judged_ready, candidate :: pending
-         | Judged judged -> stale, (candidate, judged) :: judged_ready, pending
-         | Consumed _ | Expired _ -> stale, judged_ready, pending)
-      ([], [], [])
+         | Pending _ -> judged_ready, candidate :: pending
+         | Judged judged -> (candidate, judged) :: judged_ready, pending
+         | Consumed _ -> judged_ready, pending)
+      ([], [])
       candidates
   in
-  (* Stale pending rows expire first: the durable backlog must die even while
-     the provider is unavailable. *)
-  let* () =
-    List.fold_left
-      (fun result candidate ->
-         match result with
-         | Error _ -> result
-         | Ok () ->
-           (match expire_candidate ~base_path ~now candidate with
-            | Ok _ -> Ok ()
-            | Error detail -> Error detail))
-      (Ok ())
-      stale
-  in
-  let expired_count = List.length stale in
   (* Already-judged verdicts deliver without new model calls. *)
   let* judged_consumed, judged_remaining =
     List.fold_left
@@ -1209,7 +1159,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
             | Ok current ->
               (match current.status with
                | Consumed _ -> Ok (consumed + 1, remaining)
-               | Pending _ | Judged _ | Expired _ -> Ok (consumed, remaining + 1))
+               | Pending _ | Judged _ -> Ok (consumed, remaining + 1))
             | Error detail -> Error detail))
       (Ok (0, 0))
       judged_ready
@@ -1250,7 +1200,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
                        | Ok current ->
                          (match current.status with
                           | Consumed _ -> Ok (consumed + 1, remaining)
-                          | Pending _ | Judged _ | Expired _ ->
+                          | Pending _ | Judged _ ->
                             Ok (consumed, remaining + 1))
                        | Error detail -> Error detail)))
               (Ok (0, 0))
@@ -1268,7 +1218,7 @@ let drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch =
   let* batch_report = loop { attempted = 0; consumed = 0; remaining = 0 } batches in
   Ok
     { attempted = batch_report.attempted + judged_consumed + judged_remaining
-    ; consumed = batch_report.consumed + judged_consumed + expired_count
+    ; consumed = batch_report.consumed + judged_consumed
     ; remaining = batch_report.remaining + judged_remaining
     }
 ;;
@@ -1277,14 +1227,13 @@ let drain_pending_on_owner_lane ~base_path ~keeper_name =
   drain_pending_with_judge_batch
     ~base_path
     ~keeper_name
-    ~now:(Time_compat.now ())
     ~judge_batch:(run_judge_batch ~base_path)
 ;;
 
 module For_testing = struct
   let drain_pending_with_judge_batch = drain_pending_with_judge_batch
 
-  let drain_pending_with_judge ~base_path ~keeper_name ~now ~judge =
+  let drain_pending_with_judge ~base_path ~keeper_name ~judge =
     let judge_batch candidates =
       let rec fold map = function
         | [] -> Ok map
@@ -1296,7 +1245,7 @@ module For_testing = struct
       in
       fold Candidate_map.empty candidates
     in
-    drain_pending_with_judge_batch ~base_path ~keeper_name ~now ~judge_batch
+    drain_pending_with_judge_batch ~base_path ~keeper_name ~judge_batch
   ;;
 end
 ;;

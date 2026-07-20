@@ -489,8 +489,8 @@ let ensure_roots ~base_path ~keeper_name candidates =
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
                 match candidate.status with
-                | Candidate.Judged _ | Candidate.Consumed _ -> Ok roots
-                | Candidate.Pending _ ->
+                | Candidate.Consumed _ -> Ok roots
+                | Candidate.Pending _ | Candidate.Judged _ ->
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   (match Id_map.find_opt candidate.candidate_id owners with
                    | Some owner

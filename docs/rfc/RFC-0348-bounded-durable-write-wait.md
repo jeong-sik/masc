@@ -10,7 +10,7 @@ A hung durable persist (disk stall, NFS hang, blocked `fsync`/`rename`) permanen
 
 This RFC bounds **lane acquisition**, not the write. The in-flight write keeps its lane until it finishes; callers that cannot acquire the lane within a liveness floor give up and return a typed rejection. Acquisition failure is unambiguous — nothing was written — so it needs no reconciliation, no rollback, and no uncertain-publication state.
 
-An earlier draft of this RFC proposed the opposite (abandon the wait, release the lane, let the systhread finish detached). §2 records why that is unsound and must not be reintroduced.
+Two designs have now been rejected, both recorded in §2 so they are not reintroduced: abandoning the wait and releasing the lane (§2.1–2.3), and bounding acquisition by polling `try_lock` (§2.4). **§3 as written implements the second and is therefore withdrawn** — it stands only as the record of what was tried. §3.5 states the constraints any replacement must satisfy.
 
 ## 1. Problem (evidence)
 
@@ -48,7 +48,23 @@ A per-target guard does exist in the codebase — `Capability_mutation_lease.try
 
 **2.3 Why the draft looked easy.** Every mechanical part needed for detaching already exists — a long-lived switch (`server_background_switch ()`, `keeper_msg_async.ml:533-540`), an existing detached fiber on it (`Eio.Fiber.fork_daemon ~sw:background_sw`, `:2326`), and a promise-shaped offload (`Domain_pool.submit_io_async : 'a Eio.Promise.or_exn`, `domain_pool.mli:75,81`). The implementation would have gone in cleanly and the corruption would have been rare and silent. Availability of the mechanism is not evidence that the semantics are sound.
 
-## 3. Design
+### 2.4 Rejected — bounded acquisition by polling `try_lock`
+
+Implemented in #25438, verified unsound by a four-lens adversarial review, withdrawn. Three independent blocking defects, two of them inherent to polling.
+
+**Polling destroys starvation-freedom.** `Eio.Mutex.unlock` performs a direct handoff: `Waiters.wake_one … `Take` transfers ownership and leaves `state = Locked`, so a concurrent `try_lock` observes `false` (`eio_mutex.ml:43-47`, `:80-84`). Waiters queue in `t.waiters` via `Eio.Mutex.lock` (`:59`) and are served in order — the existing path is FIFO and starvation-free. Replacing it with polling means nothing ever enters `t.waiters` in production, every acquisition becomes a barging race, and the race is biased against waiters: a poller retries every 50 ms while an arriving caller tries immediately. Under ordinary keeper load — `set_status` Queued/Running/Done per request, checkpoint persists, and submits all key on the same `{base_path; keeper_name}` lane, each holding it 5–30 ms — a waiter can lose for the full floor and be rejected while the lane was in fact free thousands of times. The floor then measures wall-clock waiting, not wedging, while every consumer treats it as wedging, and `lane_unavailable_to_string`'s "a durable write is still in flight" becomes false. The draft asserted "the workload does not produce this"; that was written without evidence and is wrong.
+
+The draft justified polling by noting `Eio.Mutex` offers no way to observe whether a cancelled waiter had already taken the lock. That is true of `Eio.Mutex` and does not generalise: `Eio.Semaphore.acquire` has well-defined cancellation (a cancelled waiter is removed before the resource is transferred), and an explicit holder/ticket record in the lane also resolves it. A constraint on one data structure was generalised into "polling is the only option" without looking for an alternative.
+
+**The bound does not compose.** `set_status` holds `transition_lock` under `~protect:true` — uncancellable — across the persistence floor, and then `persist_failure_locked` re-acquires the same wedged lane for a second full floor: 120 s uncancellable, while `transition_lock` itself carries no bound at all. Operator cancel blocks behind it, N×120 s when calls queue. Bounding the lane relocated the unbounded wait one level up rather than removing it.
+
+**A typed transient failure was folded into permanent-failure handling.** See §3.2's error routing: `Lane_unavailable` shared an arm with `Write_failed (Not_published _)` on the grounds that both leave the same on-disk state. True, and irrelevant — the question that arm answers is whether retrying the original write is futile, and for lane contention it is not. In `set_status` the fold reaches `persist_failure_locked`, which flattens `Done { ok; body; data }` to the string `"done"` inside a `Persistence_failed` marker and then durably commits it after its own retry proves the lane is free again. A keeper turn that succeeded is recorded as failed and the answer is lost; `origin/main` blocks and writes `Done` correctly. That is a data-loss regression introduced by the routing, not by the bound.
+
+Corollaries worth keeping: `result_contract = Failed` on a never-started submission is a false contract (its sibling never-started rejections emit none, and `Failed` suppresses the retry the variant exists to make safe); `persistence_lane_waits` double-counts on a wedged lane, overstating waiters exactly when an operator is reading it; and measuring elapsed time with `Mtime_clock` while sleeping on the `Eio_context` clock leaves a latent full-CPU spin for any embedding that installs a virtual clock.
+
+Confirmed clean, and worth preserving in any replacement: no mutex leak, no counter leak, and no lane-table refcount hazard — `lock.users` is incremented before the acquisition attempt and therefore spans the whole wait, so table removal (`users = 0`) is unreachable while any waiter exists, which is what prevents two fibers from holding "the" lane for one keeper.
+
+## 3. Design (WITHDRAWN — see §2.4; retained as the record of what was tried)
 
 ### 3.1 Bounded acquisition in `with_lane_gate`
 
@@ -90,6 +106,17 @@ Behaviour change to accept knowingly: under sustained legitimate contention on o
 ### 3.4 Submission-lock scope (separate PR)
 
 The initial persist runs inside the submission lock (§1), so a hang currently wedges both lanes. With §3.1 in place the pile-up is already bounded on both, so narrowing the submission lock is a coupling improvement rather than the liveness fix — the reverse of how the earlier draft ranked it. Ships separately if the lock-scope analysis holds under review.
+
+### 3.5 Constraints on any replacement
+
+Derived from §2.4, not yet a design. A replacement must satisfy all four:
+
+1. **Starvation-free bounded acquisition.** No polling. Either `Eio.Semaphore` (cancel-safe FIFO) or an explicit ticket/holder record in the lane. A waiter must never be rejected while the lane repeatedly becomes free.
+2. **Bound only where rejection is safe.** Submission may reject; settling an already-running turn may not, because the result exists only in memory. Concretely this means `Lane_unavailable` must not appear in `persist_error` at all — removing it deletes the data-loss fold, the statically-dead arm, and the wildcard absorptions in one move.
+3. **One deadline per operation, not per acquisition.** The submit path takes two lanes and `set_status` floors twice; a per-acquisition floor multiplies.
+4. **`transition_lock` is in scope.** It is unbounded and held under `~protect:true` across the lane wait. Bounding only the lane moves the wedge rather than removing it. Any liveness claim must cover both locks.
+
+Testing constraints, from the mutation review of #25438: a revert of the bound must **fail** rather than hang (Eio does not detect this deadlock, Alcotest has no per-test timeout, and CI would burn a 40-minute job reporting only a timeout); each isolation case must assert the holder still holds rather than relying on a sibling case for validity; and the submit-level wiring — the typed error and its reservation cleanup — needs direct coverage, since mutations to both survived the existing suite.
 
 ## 4. Verification
 

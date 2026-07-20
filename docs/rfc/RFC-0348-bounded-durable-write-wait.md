@@ -1,83 +1,111 @@
-# RFC-0348 — Bounded durable-write wait with typed uncertain-publication escalation (#25398)
+# RFC-0348 — Bounded lane acquisition for durable keeper_msg writes (#25398)
 
 - Status: Draft
 - Author: vincent
-- Related: masc#25398 (bug, P0), RFC-0345 (streaming idle-timeout floor — same liveness-floor framing for the provider-stream path), RFC-0344/#25291 (durable store schema hardening), `lib/keeper/keeper_msg_async.ml` (lane gates), `lib/keeper_runtime/keeper_fs.ml` (durable write chain), RFC-0000 §1.2 (liveness)
+- Related: masc#25398 (bug, P0), RFC-0345 (streaming idle-timeout floor — same liveness-floor framing for the provider-stream path), RFC-0344/#25291 (durable store schema hardening), `lib/keeper/keeper_msg_async.ml` (lane gates), `lib/keeper/keeper_fs.ml` (durable write chain), RFC-0000 §1.2 (liveness)
 
 ## 0. Summary
 
-A hung durable persist (disk stall, NFS hang, blocked `fsync`/`rename`) permanently leaks the affected keeper's `keeper_msg` submission and persistence lanes. The write chain has no timeout anywhere, the lane gate deliberately defers cancellation until the write returns, and no watchdog or circuit breaker exists — recovery requires a process restart (#25398).
+A hung durable persist (disk stall, NFS hang, blocked `fsync`/`rename`) permanently wedges the affected keeper's `keeper_msg` pipeline. The write chain has no timeout, the lane gate holds until the write returns, and every later caller queues behind it without bound — recovery requires a process restart (#25398).
 
-This RFC separates two conflated concepts — the **uncancellable durable write** (sound: abandoning a started write is what invents uncertain publication states) versus the **unbounded wait on that write while holding admission lanes** (the defect). It proposes bounding the *wait*, not the write: after a liveness floor elapses, the waiting fiber stops waiting, maps the outcome into the existing typed `Published_uncertain` handling, and releases the lanes; the systhread runs to completion detached and its late result is observed, not consumed.
+This RFC bounds **lane acquisition**, not the write. The in-flight write keeps its lane until it finishes; callers that cannot acquire the lane within a liveness floor give up and return a typed rejection. Acquisition failure is unambiguous — nothing was written — so it needs no reconciliation, no rollback, and no uncertain-publication state.
+
+An earlier draft of this RFC proposed the opposite (abandon the wait, release the lane, let the systhread finish detached). §2 records why that is unsound and must not be reintroduced.
 
 ## 1. Problem (evidence)
 
-All references verified against `ba1be22a8e` (2026-07-20 audit, #25398).
+Verified against `b39c1027f6`.
 
-- `keeper_msg_async.ml:2171`: `submit_with_ops` enters `with_keeper_submission_lock`; at `:2182` the initial "Queued" persist runs `with_keeper_persistence_lock` **inside** that critical section. A hang here leaks both locks in one call; every later submit for the same keeper blocks forever on the submission lane.
-- `keeper_msg_async.ml:413-428` (`with_lane_gate`): `Fun.protect ~finally:unlock (fun () -> Eio.Cancel.protect f)` — cancellation is deliberately deferred until `f` returns ("A started durable systhread cannot be cancelled. Keep the lane held…"). The rationale is sound; the consequence is that the lane's lifetime equals the write's lifetime, unbounded.
-- Write chain: `persist_entry_unlocked` → `save_json_durable` → `Keeper_fs.save_json_durable_atomic` → `run_in_systhread_cancel_checked` (`keeper_fs.ml:238-242`) → `Eio_guard.run_in_systhread`. No timeout at any layer; the cancel check runs only **after** the systhread returns.
-- `Keeper_disk_pressure` (`keeper_disk_pressure.mli:1-4`) is observation-only and records typed `ENOSPC` — a stall raises nothing, so it is not even observed.
-- Metrics (`persistence_lane_pending`/`in_flight`) stay correctly elevated during a hang (the audit confirmed all decrement paths are sound), so operators can see the stuck lane — but nothing recovers it.
-- Later-persist variant: a hang in the daemon's own `Running`/`Done` persist leaks the persistence lane alone; the next submit's initial persist then blocks on it **while holding** the submission lane, converging on the same terminal state one hop later.
+- `keeper_msg_async.ml:2173`: `submit_with_ops` enters `with_keeper_submission_lock`; at `:2184` the initial persist runs `with_keeper_persistence_lock` **inside** that critical section. A hang there holds both locks, so every later submit for that keeper blocks forever.
+- `keeper_msg_async.ml:413-428` (`with_lane_gate`): `Fun.protect ~finally:unlock (fun () -> Eio.Cancel.protect f)`. The comment at `:419-422` states the rationale — a started durable systhread cannot be cancelled, so the lane is deliberately held until the write returns. The rationale is correct; the consequence is that the lane's lifetime equals the write's, unbounded.
+- Write chain: `persist_entry_unlocked` → `save_entry_durable` (`:1160`) → `ops.save_json_durable` → `Keeper_fs.save_json_durable_atomic` → `run_in_systhread_cancel_checked` (`keeper_fs.ml:238-242`). No timeout at any layer; the cancel check runs only **after** the systhread returns.
+- The systhread is not cancellable and does not become cancellable under load: `Eio_unix.run_in_systhread` checks the fiber context once at submit time and otherwise dispatches, installing no cancel function — "Systhreads do not respond to cancellation once running" (`eio/unix/thread_pool.mli:22-23`).
+- `Keeper_disk_pressure` (`keeper_disk_pressure.mli:1-4`) is observation-only and records typed `ENOSPC`; a stall raises nothing, so it is not observed at all.
+- Metrics (`persistence_lane_pending`/`in_flight`) stay correctly elevated during a hang — all decrement paths are sound — so the stuck lane is visible. Nothing recovers it.
 
-Disproven by the same audit (no action needed): submission↔persistence AB-BA deadlock (ordering is consistent), lane-table races (all under the module mutex), metric leaks, lane locks held across LLM calls.
+Disproven by the same audit (no action): submission↔persistence AB-BA deadlock (ordering is consistent), lane-table races (all under the module mutex), metric leaks, lane locks held across LLM calls.
 
-## 2. Non-goals
+### 1.1 Two victims, different remedies
 
-- Cancelling or timing out the durable write itself. A started write must run to completion; killing it mid-`rename` is precisely how uncertain publication states are created. This RFC never interrupts the systhread.
-- Tuning per-device or per-filesystem write timeouts. As with RFC-0345, the floor is a single generous liveness ceiling that only fires on genuine hangs, not a performance knob.
-- General disk-pressure admission control (`Keeper_disk_pressure` stays observation-only; #25139-adjacent work is out of scope).
-- Changing the `keeper_msg` public API (`submit`/`cancel`/`poll` signatures are unchanged).
+The hang damages two distinct resources, and conflating them is what produced the unsound draft:
+
+| Resource | Who holds it | Correct remedy |
+|---|---|---|
+| The lane held by the hung write | the write itself | **keep holding it** — releasing it breaks the exclusion invariant (§2) |
+| The unbounded queue of later callers | everyone else | **bound the wait** — typed rejection instead of an indefinite block |
+
+Liveness is restored by the second row alone. The first row is not a defect to fix; it is the invariant to preserve.
+
+## 2. Rejected design — abandon the wait and release the lane
+
+The earlier draft proposed: race the write against a floor, return `Durable_wait_floor_exceeded` on timeout, map it into the existing `Published_uncertain` arm, release the lanes, and let the systhread complete detached with its late result sent to an observer counter. This is unsound in two independent ways. Both were found by reading the code the draft claimed to have verified.
+
+**2.1 Stale-rename clobber.** The atomic write is write-to-temp plus `Unix.rename temp path` (`keeper_fs.ml:366`). Temp names are unique per call (`Filename.open_temp_file ~temp_dir ".atomic_" ".tmp"`, `lib/fs_compat/atomic_write.ml:31-39`), so two concurrent writers both survive to their rename, and the rename target is identical for a given record — it derives only from `base_path` + `request_id` (`keeper_msg_async.ml:1160-1166`, `:1216-1230`). There is **no generation, CAS, version, or expected-value comparison anywhere before that rename**. The per-keeper lane mutex is therefore the sole serializer of writes to a record path. Releasing it mid-write lets a write that started earlier and finished later rename over a newer record: silent loss, both writers returning `Ok`.
+
+A per-target guard does exist in the codebase — `Capability_mutation_lease.try_acquire` rejects a second writer with `Mutation_contended` (`atomic_write.ml:1295-1303`) — but production request persistence does not route through it (`keeper_msg_async.ml:314-316` → `keeper_fs.ml:509-517` → the bare-rename chain). Any future detach design must adopt a fencing guard of this kind **first**; detaching without one is a data-loss change.
+
+**2.2 Compensation races the in-flight write.** The `Published_uncertain` arm is not a passive label: it performs `rollback_rejected_record_file_unlocked` (`keeper_msg_async.ml:2209`), which deletes the record file. That arm assumes the write has *finished*. Mapping a still-running write into it produces delete-then-resurrect — the rollback removes the file and the detached systhread renames it back. The draft's claim that this needed "no new failure vocabulary" was exactly backwards: a still-running write is a state the existing vocabulary has no member for.
+
+**2.3 Why the draft looked easy.** Every mechanical part needed for detaching already exists — a long-lived switch (`server_background_switch ()`, `keeper_msg_async.ml:533-540`), an existing detached fiber on it (`Eio.Fiber.fork_daemon ~sw:background_sw`, `:2326`), and a promise-shaped offload (`Domain_pool.submit_io_async : 'a Eio.Promise.or_exn`, `domain_pool.mli:75,81`). The implementation would have gone in cleanly and the corruption would have been rare and silent. Availability of the mechanism is not evidence that the semantics are sound.
 
 ## 3. Design
 
-### 3.1 Bounded wait primitive
+### 3.1 Bounded acquisition in `with_lane_gate`
 
-Add to `Keeper_fs`:
+`with_lane_gate` already fast-paths with `Eio.Mutex.try_lock` (`:414`) before falling back to a blocking `Eio.Mutex.lock`. The change replaces the unbounded fallback with a bounded one and reports the outcome:
 
 ```ocaml
-val save_json_durable_atomic_with_wait_floor :
-  floor_s:float ->
-  (* existing save_json_durable_atomic parameters *) ... ->
-  (unit, durable_wait_outcome) result
+type lane_acquisition =
+  | Lane_acquired
+  | Lane_unavailable of { waited_s : float; floor_s : float }
 
-type durable_wait_outcome =
-  | Durable_completed of (unit, exn) result   (* systhread finished in time *)
-  | Durable_wait_floor_exceeded of { stage : durable_stage; floor_s : float }
+val with_lane_gate :
+  on_wait:(unit -> unit) ->
+  floor_s:float ->
+  Eio.Mutex.t ->
+  (unit -> 'a) ->
+  ('a, lane_acquisition) result
 ```
 
-Implementation shape: the systhread resolves an `Eio.Promise.t` instead of being awaited directly; the calling fiber races the promise against `Eio.Time.sleep floor_s` (`Fiber.first`). On floor exceed, the fiber returns `Durable_wait_floor_exceeded` immediately; the systhread keeps running detached and, on late completion, resolves the promise into an **observer** (log line + counter `DurableWaitLateCompletions{stage,outcome}`), never into the abandoned caller. Single-consumer discipline: the promise is consumed exactly once by whichever side loses the race; the loser's result goes to the observer. `Eio.Cancel.protect` semantics for the fiber-side wait are preserved for the non-floor path.
+Acquisition uses bounded `try_lock` polling rather than `Fiber.first` over `Eio.Mutex.lock`. `Fiber.first` cancels the loser, and `Eio.Mutex` offers no way to observe whether a cancelled waiter had already taken the lock — that race would leak the very lane this RFC protects. Polling has no such race: the lock is either held by this fiber or it is not.
 
-### 3.2 Typed escalation in keeper_msg_async
+Once acquired, everything downstream is unchanged: `Eio.Cancel.protect` still wraps the write, and the lane is still held for the write's full duration.
 
-`persist_entry_unlocked` maps `Durable_wait_floor_exceeded` into the **existing** `Write_failed (Published_uncertain { stage; … })` arm — the state is genuinely uncertain (the write may still land later), and `submit_with_ops` already owns that arm (`keeper_msg_async.ml:2196+`): it detaches the runtime preserving the reservation, settles the entry as reconciliation-required, and returns a typed rejection to the caller. No new failure vocabulary; the floor produces a state the reconciliation path (`recover_lost_disk_records`, durable-active inventory) was already designed to absorb.
+### 3.2 Caller handling — no reconciliation
 
-Net effect on the leak: `with_lane_gate`'s `f` now returns within `floor_s` even under a hang, so `Fun.protect`'s finally releases the persistence lane, `submit_with_ops` unwinds, and the submission lane releases. The keeper's pipeline stays live; the stuck write is visible as a typed reconciliation entry plus the late-completion counter instead of a wedged mutex.
+`Lane_unavailable` means **nothing was written**. There is no temp file, no rename, no partial state. The caller therefore takes the same shape as the existing `Not_published` arm (`:2228-2230`) — drop the runtime reservation and return a typed rejection — with a distinct error so operators can separate "lane wedged" from "disk error":
+
+```ocaml
+| Submit_lane_unavailable of { waited_s : float; floor_s : float }
+```
+
+Explicitly **not** routed through `Published_uncertain`: no rollback runs, because there is nothing to roll back, and any compensating write here would race the still-running holder (§2.2).
 
 ### 3.3 Floor value and configuration
 
-One constant, SSOT in `Env_config_keeper` (mirroring RFC-0345's posture): `MASC_KEEPER_DURABLE_WAIT_FLOOR_SEC`, default **60.0**, clamp `[10.0, 600.0]`. 60s is ~3 orders of magnitude above a healthy local `fsync`+`rename` and comfortably above worst observed APFS stalls; it exists to catch hangs, not slow disks. `0`/unset-to-disable is deliberately **not** offered: an operator who wants the old behavior is asking for an unbounded lane hold, which is the defect. (If a deployment genuinely needs it, the clamp ceiling of 600s is the escape hatch.)
+One constant, SSOT in `Env_config_keeper`: `MASC_KEEPER_LANE_ACQUIRE_FLOOR_SEC`, default **60.0**, clamp `[10.0, 600.0]`. Poll interval is a separate internal constant (**50 ms**), not configurable. 60 s is far above any healthy contended acquisition — the lane serializes one keeper's record writes — so the floor fires on hangs, not on load. Disabling is not offered: an unbounded lane wait is the defect.
 
-### 3.4 Blast-radius hardening (optional, separable)
+Behaviour change to accept knowingly: under sustained legitimate contention on one keeper's lane, polling gives up FIFO fairness, so a caller can lose repeatedly and time out where it would previously have queued. The floor is sized so this requires ~60 s of continuous contention on a single keeper's lane, which the workload does not produce; if it ever does, the answer is an Eio semaphore with cancel-safe FIFO acquisition, not a larger floor.
 
-Move the initial "Queued" persist out of the submission-lock critical section so a persistence-lane hang no longer takes the submission lane down in the same call. The audit shows the terminal outcome converges anyway (one hop later), so this is hardening, not the load-bearing fix; it can ship as a follow-up PR if the lock-scope analysis holds under review.
+### 3.4 Submission-lock scope (separate PR)
+
+The initial persist runs inside the submission lock (§1), so a hang currently wedges both lanes. With §3.1 in place the pile-up is already bounded on both, so narrowing the submission lock is a coupling improvement rather than the liveness fix — the reverse of how the earlier draft ranked it. Ships separately if the lock-scope analysis holds under review.
 
 ## 4. Verification
 
-- **Unit (red→green)**: fake durable op that blocks on a promise; assert (a) without the floor the caller never returns (bounded test via `Fiber.first` harness), (b) with the floor the caller returns `Durable_wait_floor_exceeded` within the floor, the lane mutex is released, and a subsequent submit for the same keeper succeeds; (c) late completion increments the observer counter and does not double-settle the entry.
-- **TLA+ bug model** (repo convention, `tla/`): `DurableWaitLeak` — model lane hold as a state; `BugAction` = wait without floor on a hung write; invariant `LaneEventuallyReleased` (leads-to). Clean spec (floored wait) passes; `NextBuggy` violates. Both `.cfg`s required per the mutation-testing convention.
-- **Live probe**: none required for merge; the late-completion counter and existing `persistence_lane_*` gauges are the runtime evidence surface.
+- **Unit (red→green)**: fake durable op that blocks on a promise the test controls. Assert (a) a second caller for the same keeper returns `Lane_unavailable` within the floor rather than blocking, (b) the blocked holder still owns the lane and its write completes normally when released, (c) a `Lane_unavailable` submit performs **no** rollback and leaves no record file, (d) the fast path still acquires without waiting when the lane is free.
+- **Regression guard against §2**: a test asserting the lane is still held for the write's full duration — i.e. that no code path releases it early. This is the executable form of the invariant the rejected design broke.
+- **TLA+ bug model** (`tla/`, repo convention): `LaneAcquireFloor` — `BugAction` = unbounded wait on a hung holder; invariant `AcquirerEventuallySettles`. Clean spec passes, `NextBuggy` violates. Both `.cfg`s per the mutation-testing convention. A second bug model for §2 (`BugAction` = release lane while write in flight, invariant `AtMostOneRenameInFlightPerPath`) documents the rejected design as a checked property rather than prose.
+- **Live probe**: none required for merge; existing `persistence_lane_*` gauges plus the new rejection counter are the runtime evidence surface.
 
 ## 5. Rollout
 
-1. PR-1: `Keeper_fs` bounded-wait primitive + observer counter + unit tests (no call-site change; dead until wired).
-2. PR-2: `keeper_msg_async` wiring (`persist_entry_unlocked` + `Published_uncertain` mapping) + lane-release tests + TLA+ pair.
-3. PR-3 (optional): submission-lock scope reduction (§3.4).
+1. PR-1: bounded acquisition in `with_lane_gate` + `Submit_lane_unavailable` threading + unit tests + TLA+ pair. Load-bearing on its own — no dead-code stage.
+2. PR-2 (optional): submission-lock scope reduction (§3.4).
 
-Rollback: each PR is independently revertible; PR-2 revert restores the current unbounded wait without touching the primitive.
+Rollback: PR-1 is independently revertible and restores the current unbounded wait.
 
 ## 6. Open questions
 
-- Should the same floor wrap the **other** durable stores' systhread waits (checkpoint store uses a separate `Eio_guard`-based path — the audit found it does not share these lanes, but it shares the unbounded-wait shape)? Proposed: separate follow-up survey, not this RFC.
-- Counter cardinality: `stage` label is bounded (enum) — confirm with the metrics-cardinality lint before PR-1.
+- Do the other durable stores share this shape? The checkpoint store uses `File_lock_eio.with_durable_lock` (`keeper_checkpoint_store.ml:415,648`), a different mechanism the audit did not cover. Proposed: separate survey, not this RFC.
+- Should the production request write path adopt `Capability_mutation_lease` (§2.1) regardless? It would make the exclusion invariant enforced at the fs layer instead of relying on callers holding a lane. That is the precondition for any future detach design and is worth its own RFC.

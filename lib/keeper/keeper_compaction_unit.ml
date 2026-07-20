@@ -41,6 +41,10 @@ type structural_error =
       { message_index : int
       ; tool_use_id : string
       }
+  (* Retained in the taxonomy for [show]/telemetry compatibility. No longer
+     produced by [partition]: a dangling ToolUse followed by a new ToolUse now
+     degrades gracefully into [protected_suffix] instead of aborting the whole
+     compaction (see [partition]). *)
   | Overlapping_tool_cycle of
       { message_index : int
       ; tool_use_id : string
@@ -162,8 +166,24 @@ let partition messages =
             Error (Non_assistant_tool_use { message_index = index; tool_use_id })
         | _ -> (
             match open_cycle, tool_ids, result_ids with
-            | Some _, tool_use_id :: _, _ ->
-                Error (Overlapping_tool_cycle { message_index = index; tool_use_id })
+            | Some cycle, _ :: _, _ ->
+                (* A dangling ToolUse never received its ToolResult, then a new
+                   ToolUse opens; the prior cycle can never close. [partition] is
+                   a total read-side function over histories produced by an
+                   external conversation owner (OAS) that masc cannot enforce at
+                   write time. Erroring here rejects the ENTIRE compaction and
+                   lets the keeper overflow. Preserve the unclosable region
+                   verbatim in [protected_suffix] (no drop, no repair), exactly
+                   as an open cycle at end-of-list is already protected by the
+                   [[]] case above; only the well-formed, fully-paired prefix in
+                   [units_rev] stays summarizable. Write-time prevention of the
+                   dangling ToolUse is RFC-0240 (tool-pair write-time
+                   enforcement), a separate boundary and follow-up. *)
+                Ok
+                  { closed_prefix = List.rev units_rev
+                  ; protected_suffix =
+                      List.rev_append cycle.messages_rev (message :: rest)
+                  }
             | None, _, _ -> (
                 match add_tool_ids ~message_index:index Id_set.empty tool_ids with
                 | Error _ as error -> error

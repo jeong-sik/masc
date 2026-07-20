@@ -45,6 +45,9 @@ type structural_error =
       { message_index : int
       ; tool_use_id : string
       }
+  (* Retained for [show]/telemetry compatibility. No longer produced by
+     {!partition}: a dangling ToolUse followed by a new ToolUse degrades into
+     [protected_suffix] rather than aborting the compaction. *)
   | Overlapping_tool_cycle of
       { message_index : int
       ; tool_use_id : string

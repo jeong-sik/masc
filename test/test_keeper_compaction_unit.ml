@@ -25,6 +25,37 @@ let require_ok = function
   | Ok value -> value
   | Error _ -> Alcotest.fail "expected structural partition"
 
+let flatten_units units =
+  List.concat_map
+    (function
+      | U.Ordinary_message m -> [ m ]
+      | U.Closed_tool_cycle ms -> ms)
+    units
+
+(* Top-level ToolUse ids and ToolResult ids across a message list, so a test can
+   assert the two sets match (every ToolUse paired, no orphan either way). *)
+let top_level_tool_id_sets messages =
+  let uses, results =
+    List.fold_left
+      (fun acc (m : T.message) ->
+         List.fold_left
+           (fun (uses, results) -> function
+              | T.ToolUse { id; _ } -> id :: uses, results
+              | T.ToolResult { tool_use_id; _ } -> uses, tool_use_id :: results
+              | T.Text _
+              | T.Thinking _
+              | T.ReasoningDetails _
+              | T.RedactedThinking _
+              | T.Image _
+              | T.Document _
+              | T.Audio _ -> uses, results)
+           acc
+           m.content)
+      ([], [])
+      messages
+  in
+  List.sort compare uses, List.sort compare results
+
 let test_signed_parallel_cycle_is_atomic () =
   let assistant =
     message T.Assistant
@@ -271,6 +302,51 @@ let test_invalid_identity_prevents_plan_callback () =
   Alcotest.(check int) "plan callback count" 0 !plan_calls
 ;;
 
+let test_overlapping_dangling_cycle_degrades_to_suffix () =
+  (* Reproduces the live analyst/idealist compaction block: a well-formed cycle,
+     then a dangling ToolUse whose ToolResult never arrives, a next-turn
+     world-state injection, then a SECOND dangling ToolUse (provider
+     [call_function_<base>_<index>] ids). Historically the second ToolUse raised
+     [Overlapping_tool_cycle], rejecting the ENTIRE compaction. [partition] now
+     degrades: the paired prefix stays summarizable, the unclosable region is
+     protected verbatim. Reverting to [Error Overlapping_tool_cycle] fails this
+     test (require_ok raises). *)
+  let closed_use = message T.Assistant [ use "call_paired" ] in
+  let closed_result = message T.User [ result "call_paired" ] in
+  let dangling_first =
+    message T.Assistant [ T.Text "board?"; use "call_function_mzi85j82orkf_0" ]
+  in
+  let world_state = text T.User "## Current World State ..." in
+  let dangling_second =
+    message T.Assistant [ T.Text "retry"; use "call_function_mzi85j82orkf_1" ]
+  in
+  let tail = text T.User "later prose" in
+  let messages =
+    [ closed_use
+    ; closed_result
+    ; dangling_first
+    ; world_state
+    ; dangling_second
+    ; tail
+    ]
+  in
+  let output = U.partition messages |> require_ok in
+  (* Closed prefix stops before the first dangling ToolUse and holds only the
+     fully-paired cycle. *)
+  check_exact "closed prefix is the paired cycle only"
+    [ U.Closed_tool_cycle [ closed_use; closed_result ] ]
+    output.closed_prefix;
+  (* No orphaned pair in the closed prefix: ToolUse ids and ToolResult ids match. *)
+  let prefix_uses, prefix_results =
+    top_level_tool_id_sets (flatten_units output.closed_prefix)
+  in
+  check_exact "closed prefix tool pairs balanced" prefix_uses prefix_results;
+  (* Everything from the first anomaly onward is preserved byte-exact. *)
+  check_exact "protected suffix from first anomaly, verbatim"
+    [ dangling_first; world_state; dangling_second; tail ]
+    output.protected_suffix
+;;
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -313,5 +389,7 @@ let () =
             test_nonblank_tool_ids_remain_exact
         ; Alcotest.test_case "invalid identity stops plan callback" `Quick
             test_invalid_identity_prevents_plan_callback
+        ; Alcotest.test_case "overlapping dangling cycle degrades to suffix"
+            `Quick test_overlapping_dangling_cycle_degrades_to_suffix
         ] )
     ]

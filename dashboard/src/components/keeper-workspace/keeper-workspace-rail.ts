@@ -414,19 +414,41 @@ function ContextSection({
       setCompacting(true)
       try {
         const raw = await callMcpTool('masc_keeper_compact', { name: keeper.name, force })
-        const parsed = JSON.parse(raw) as { before_tokens?: number; after_tokens?: number; phase_after?: string }
+        const parsed = JSON.parse(raw) as {
+          before_tokens?: number
+          after_tokens?: number
+          phase_after?: string
+          queued?: boolean
+          queue_outcome?: string
+        }
         const before = formatK(parsed.before_tokens)
         const after = formatK(parsed.after_tokens)
-        recordManualCompaction(
-          keeper.name,
-          parsed.before_tokens,
-          parsed.after_tokens,
-          keeperRuntimeLabel(keeper) ?? '—',
-        )
-        showToast(
-          before && after ? `${keeper.name} compact 완료: ${before} -> ${after}` : `${keeper.name} compact 완료`,
-          'success',
-        )
+        if (before && after) {
+          // Measured before/after present: a compaction actually ran and reduced tokens.
+          recordManualCompaction(
+            keeper.name,
+            parsed.before_tokens,
+            parsed.after_tokens,
+            keeperRuntimeLabel(keeper) ?? '—',
+          )
+          showToast(`${keeper.name} compact 완료: ${before} -> ${after}`, 'success')
+        } else if (parsed.queued) {
+          // masc_keeper_compact only ENQUEUES the request; the compaction runs later on the
+          // keeper's owning lane. Queuing is not completion: a queue stuck behind an
+          // unrecovered inflight turn stays pending indefinitely, so rendering it as "완료"
+          // is a false success. Surface the pending state, and do not record a phantom
+          // (null-token) compaction snapshot for a request that has not run.
+          const alreadyQueued = parsed.queue_outcome === 'already_present'
+          showToast(
+            alreadyQueued
+              ? `${keeper.name} compaction 이미 예약됨 — 대기열에서 실행 대기 중`
+              : `${keeper.name} compaction 예약됨 — 대기열에서 실행 대기 중`,
+            'warning',
+          )
+        } else {
+          // Unrecognized response shape: acknowledge receipt without claiming completion.
+          showToast(`${keeper.name} compaction 요청 접수됨 (상태 미확인)`, 'warning')
+        }
         await refreshAfterRuntimeAction()
       } catch (err) {
         showToast(`compact 실패: ${errorToString(err)}`, 'error', 8000)

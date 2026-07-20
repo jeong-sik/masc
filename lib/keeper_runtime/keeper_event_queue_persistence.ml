@@ -650,15 +650,8 @@ let claim_board_result
     | Ok (state, lease) -> Ok (state, lease))
 ;;
 
-let commit_settlement_unlocked
-      owner
-      ~after_commit
-      ~settled_at
-      ~lease
-      ~settlement
-      current
-  =
-  match State.settle ~settled_at ~lease ~settlement current with
+let commit_settlement_transition_unlocked owner ~after_commit transition current =
+  match transition current with
   | Error _ as error -> error
   | Ok (state, State.Already_settled receipt) ->
     Ok (Already_settled receipt, State.pending state)
@@ -733,12 +726,10 @@ let settle_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           commit_settlement_unlocked
+           commit_settlement_transition_unlocked
              owner
              ~after_commit
-             ~settled_at
-             ~lease
-             ~settlement
+             (State.settle ~settled_at ~lease ~settlement)
              state
            |> Result.map fst)
      with
@@ -747,6 +738,44 @@ let settle_result
        Error
          (Printf.sprintf
             "event queue settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let cancel_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_generation
+      ~settled_at
+      ~lease
+      ~cancellation
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.cancel_accepted
+                ~current_owner_generation
+                ~settled_at
+                ~lease
+                ~cancellation)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue accepted cancellation raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;
@@ -770,12 +799,13 @@ let prepare_registration_result
             | None -> Ok (State.pending state)
             | Some lease ->
               (match
-                 commit_settlement_unlocked
+                 commit_settlement_transition_unlocked
                    owner
                    ~after_commit
-                   ~settled_at
-                   ~lease
-                   ~settlement:(Requeue Registration_recovery)
+                   (State.settle
+                      ~settled_at
+                      ~lease
+                      ~settlement:(Requeue Registration_recovery))
                    state
                with
                | Error _ as error -> error

@@ -1,6 +1,8 @@
 module StringMap = Set_util.StringMap
 
-type purpose = Keeper_registry_types.lifecycle_transaction_purpose = Dead_revival
+type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
+  | Dead_revival
+  | Paused_work_disposition
 
 type snapshot = Keeper_registry_types.lifecycle_reservation_snapshot =
   { owner_id : string
@@ -46,6 +48,7 @@ let key_locks_mutex = Mutex.create ()
 
 let purpose_to_string = function
   | Dead_revival -> "dead_revival"
+  | Paused_work_disposition -> "paused_work_disposition"
 ;;
 
 let snapshot_to_string snapshot =

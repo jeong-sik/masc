@@ -649,6 +649,21 @@ let cancel_accepted
     settle_committed ~settled_at ~lease ~settlement state
 ;;
 
+let accepted_cancellation_replay (lease : lease) cancellation state =
+  let requested = Cancel_accepted cancellation in
+  match find_prior_receipt lease.lease_id state with
+  | None -> Ok None
+  | Some receipt when settlement_equal receipt.settlement requested ->
+    Ok (Some receipt)
+  | Some receipt ->
+    Error
+      (Printf.sprintf
+         "event queue lease %s already settled as %s; refusing %s"
+         lease.lease_id
+         (settlement_kind_label receipt.settlement)
+         (settlement_kind_label requested))
+;;
+
 let replay_transition_receipt receipt state =
   match
     List.find_opt

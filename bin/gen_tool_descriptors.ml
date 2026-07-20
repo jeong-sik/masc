@@ -36,7 +36,6 @@ let config_category_enum_strings =
   ; "keeper_guardrails"
   ; "autonomy"
   ; "dashboard"
-  ; "economy"
   ; "operations"
   ; "channel"
   ; "process"

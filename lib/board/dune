@@ -40,7 +40,6 @@
   masc_types
   masc_core
   masc_log
-  masc_economy
   masc_workspace
   masc_thompson
   masc_eio_context)

@@ -13,9 +13,6 @@ module Types = Masc_domain
 *)
 
 open Masc
-(* Economy moved to the masc_agent_economy leaf lib (wrapped false);
-   the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
-
 let () = Workspace_metric_hooks.install ()
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -159,15 +156,6 @@ let with_env key value f =
    | Some v -> Unix.putenv key v
    | None -> Unix.putenv key "");
   result
-;;
-
-let with_task_economy_enabled f =
-  Economy.reset_cache ();
-  with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
-    with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
-      with_env "MASC_ECONOMY_REWARD_TASK_DONE" "10.0" (fun () ->
-        with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-          Fun.protect ~finally:Economy.reset_cache f))))
 ;;
 
 let latest_ring_seq () =
@@ -1408,60 +1396,6 @@ let test_transition_done_idempotent () =
       Alcotest.failf
         "Expected Ok (no-op), got error: %s"
         (Masc_domain.masc_error_to_string e))
-;;
-
-let test_transition_done_awards_task_reward_once () =
-  with_task_economy_enabled (fun () ->
-    with_test_env (fun config ->
-      let claude = find_agent_name_by_prefix config "claude" in
-      let _ = Workspace.add_task config ~title:"Rewarded task" ~priority:1 ~description:"" in
-      let balance_before =
-        Economy.get_balance ~base_path:config.base_path ~agent_name:claude
-      in
-      Alcotest.(check (float 0.01)) "initial balance" 5.0 balance_before;
-      (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-       | Ok _ -> ()
-       | Error err ->
-         Alcotest.failf "claim_task_r failed: %s" (Masc_domain.show_masc_error err));
-      (match
-         Workspace.transition_task_r
-           config
-           ~agent_name:claude
-           ~task_id:"task-001"
-           ~action:Masc_domain.Start
-           ()
-       with
-       | Ok _ -> ()
-       | Error err ->
-         Alcotest.failf
-           "transition_task_r start failed: %s"
-           (Masc_domain.show_masc_error err));
-      (match
-         transition_done_r config ~agent_name:claude ~task_id:"task-001" ~notes:"done"
-       with
-       | Ok _ -> ()
-       | Error err ->
-         Alcotest.failf
-           "transition_task_r done failed: %s"
-           (Masc_domain.show_masc_error err));
-      let balance_after_done =
-        Economy.get_balance ~base_path:config.base_path ~agent_name:claude
-      in
-      Alcotest.(check (float 0.01)) "done reward applied once" 15.0 balance_after_done;
-      (match
-         transition_done_r config ~agent_name:claude ~task_id:"task-001" ~notes:"repeat"
-       with
-       | Ok msg ->
-         Alcotest.(check bool) "repeat done is no-op" true (str_contains msg "no-op")
-       | Error err ->
-         Alcotest.failf "repeat done failed: %s" (Masc_domain.show_masc_error err));
-      let balance_after_repeat =
-        Economy.get_balance ~base_path:config.base_path ~agent_name:claude
-      in
-      Alcotest.(check (float 0.01))
-        "repeat done does not double pay"
-        15.0
-        balance_after_repeat))
 ;;
 
 let test_transition_cancel_idempotent () =
@@ -2855,10 +2789,6 @@ let () =
             test_transition_submit_for_verification_requires_notes
         ; Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch
         ; Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent
-        ; Alcotest.test_case
-            "done awards task reward once"
-            `Quick
-            test_transition_done_awards_task_reward_once
         ; Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent
         ; Alcotest.test_case
             "cancel clears reclaim policy"

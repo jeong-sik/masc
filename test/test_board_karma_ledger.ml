@@ -128,22 +128,6 @@ let test_self_post_upvote_no_karma () =
       Alcotest.(check int) "self vote still affects board score" 1 updated.votes_up
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
-let test_self_post_upvote_no_economy_credit () =
-  with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
-    Economy.reset_cache ();
-    let base_path = Sys.getenv "MASC_BASE_PATH" in
-    let post = create_post_exn ~author:"alice" ~content:"economy self vote" in
-    let pid = Board.Post_id.to_string post.id in
-    let before =
-      Economy.get_balance ~base_path ~agent_name:"alice"
-    in
-    vote_exn ~voter:" alice " ~post_id:pid ~direction:Board.Up;
-    let after_self_vote =
-      Economy.get_balance ~base_path ~agent_name:"alice"
-    in
-    Alcotest.(check (float 0.0001)) "self upvote does not earn economy credit"
-      before after_self_vote)
-
 (** {1 Comment upvote produces an event} *)
 
 let test_comment_upvote_produces_event () =
@@ -546,8 +530,6 @@ let () =
         (with_eio test_downvote_no_event);
       Alcotest.test_case "self post upvote no karma" `Quick
         (with_eio test_self_post_upvote_no_karma);
-      Alcotest.test_case "self post upvote no economy credit" `Quick
-        (with_eio test_self_post_upvote_no_economy_credit);
       Alcotest.test_case "comment upvote event" `Quick
         (with_eio test_comment_upvote_produces_event);
       Alcotest.test_case "self comment upvote no karma" `Quick

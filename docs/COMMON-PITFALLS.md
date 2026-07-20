@@ -78,7 +78,7 @@ dune build --root .  # catches compilation errors in tests
 ```ocaml
 | Error e -> Log.BoardLog.warn "notification failed: %s" e
 ```
-SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit/economy 기록.
+SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit 기록.
 
 **로그 선택 (`debug`) — 읽다가 실패:**
 ```ocaml

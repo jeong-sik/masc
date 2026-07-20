@@ -335,11 +335,6 @@ let install () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn));
 
-  Atomic.set Workspace_hooks.agent_economy_earn_fn (fun ~base_path ~agent_name ~reason ->
-    match Economy.earn ~base_path ~agent_name ~kind:Earn_task_done ~reason () with
-    | Ok _bal -> ()
-    | Error msg -> Log.Misc.error "task earn failed: %s" msg);
-
   Atomic.set Workspace_hooks.relation_on_leave_fn Relation_materializer.on_agent_session_ended;
   Atomic.set Workspace_hooks.relation_on_task_done_fn Relation_materializer.on_task_done;
 

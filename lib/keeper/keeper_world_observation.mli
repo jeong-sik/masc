@@ -303,8 +303,8 @@ val read_scheduled_automation_observation :
 
 (** Build a world observation from workspace state and keeper metadata.
 
-    Reads workspace backlog, agent list, checkpoint context, economy state,
-    and recent board activity.
+    Reads workspace backlog, agent list, checkpoint context, and recent
+    board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
     @param pending_board_events Pre-collected board event summaries for this

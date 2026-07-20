@@ -37,7 +37,6 @@ Accountability data must never:
 - select or demote a Keeper
 - reroute, pause, stop, throttle, or ban a Keeper
 - determine whether a Task or Goal is complete
-- change reward or economy behavior
 - become evidence that unrelated work should wait
 
 Legacy derived quality-band and routing-advice fields are not part of the

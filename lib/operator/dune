@@ -111,7 +111,6 @@
   masc_workspace
   masc_goal
   masc_turn
-  masc_economy
   masc.masc_tool_dispatch
   masc_thompson
   masc.config

@@ -149,9 +149,6 @@
   ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
   ;; code using bare Turn_fsm.X resolves after the FSM carve.
   (re_export masc_turn)
-  ;; Agent token-ledger extracted to lib/agent_economy/ (masc_economy).
-  ;; Re-export so test code using bare Economy.X resolves after the carve.
-  (re_export masc_economy)
   ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
   ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
   ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X resolves

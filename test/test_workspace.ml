@@ -1058,21 +1058,23 @@ let find_task config task_id =
 
 (* === RFC-0323 G-3: completion side effects are state-keyed === *)
 
-(* Records economy-earn calls while [f] runs, restoring the previous hook. *)
-let with_economy_recorder f =
+(* Records done-hook dispatch targets while [f] runs, restoring the previous
+   hook.  Observes [relation_on_task_done_fn] because it receives the assignee
+   the completion side effects are keyed on. *)
+let with_done_hook_recorder f =
   let recorded = ref [] in
   let prev =
-    Atomic.exchange Workspace_hooks.agent_economy_earn_fn
-      (fun ~base_path:_ ~agent_name ~reason:_ ->
-        recorded := agent_name :: !recorded)
+    Atomic.exchange Workspace_hooks.relation_on_task_done_fn
+      (fun ~assignee ~active_agents:_ ->
+        recorded := assignee :: !recorded)
   in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Workspace_hooks.agent_economy_earn_fn prev)
+    ~finally:(fun () -> Atomic.set Workspace_hooks.relation_on_task_done_fn prev)
     (fun () -> f recorded)
 
 let test_approve_completion_credits_assignee () =
   with_test_env (fun config ->
-    with_economy_recorder (fun recorded ->
+    with_done_hook_recorder (fun recorded ->
       let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
       let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
@@ -1082,7 +1084,7 @@ let test_approve_completion_credits_assignee () =
       in
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
-      Alcotest.(check (list string)) "no earn before approve" [] !recorded;
+      Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
           ~task_id:"task-001" ~action:Masc_domain.Approve_verification
@@ -1090,7 +1092,8 @@ let test_approve_completion_credits_assignee () =
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
-      (* The acting agent is the verifier; the earn must credit the assignee. *)
+      (* The acting agent is the verifier; the done hook must fire for the
+         assignee. *)
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded))
 

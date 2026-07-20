@@ -1029,7 +1029,6 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1195,7 +1194,6 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client

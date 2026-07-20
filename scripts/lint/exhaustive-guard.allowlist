@@ -14,7 +14,6 @@ lib/activity_graph/activity_graph_types.ml:166
 lib/activity_graph/activity_graph_types.ml:200
 lib/activity_graph/activity_graph.ml:495
 lib/activity_graph/activity_graph.ml:513
-lib/agent_economy.ml:100
 lib/agent_identity.ml:137
 lib/agent_identity.ml:358
 lib/agent_registry_eio.ml:128

@@ -34,6 +34,7 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
+import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'
 import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
@@ -49,6 +50,11 @@ import {
 } from './keeper-config-state'
 
 async function refreshKeeperSurfacesAfterConfigSave(): Promise<void> {
+  // Re-fetch the right-rail runtime-trace evidence (drift badge) immediately;
+  // refreshKeeperRuntimeStatus below only updates the live-runtime slice, which
+  // does not change on save. Bump unconditionally so a failed status refresh
+  // still updates the assignment badge.
+  bumpKeeperRuntimeTraceRefresh()
   try {
     await refreshKeeperRuntimeStatus({ force: true })
   } catch (err) {

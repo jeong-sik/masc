@@ -73,6 +73,20 @@ type drain_report =
   ; remaining : int
   }
 
+type compaction_report =
+  { rewritten : bool
+  ; removed_rows : int
+  }
+
+type ledger_measurement =
+  { rows : int
+  ; bytes : int
+  }
+
+type ledger_operation =
+  | Append of ledger_measurement
+  | Rewrite of ledger_measurement
+
 module Candidate_map : Map.S with type key = string
 
 exception Candidate_unavailable of string
@@ -109,6 +123,12 @@ val candidate_of_json : Yojson.Safe.t -> (candidate, string) result
 
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
+
+val compact_for_process_start :
+  base_path:string -> keeper_name:string -> (compaction_report, string) result
+(** Canonically rewrite the durable ledger to one strict latest-state row per
+    candidate at process-worker startup. Runtime mutations append rows only.
+    Reports both physical rewrite and superseded-row removal. *)
 
 type ledger_read_error =
   { ledger_path : string
@@ -162,9 +182,9 @@ val apply_completed_judgments :
   (string * judgment) list ->
   (drain_report, string) result
 (** Idempotently apply already-completed partition results on the owner lane.
-    Pending rows become [Judged] in one ledger rewrite, relevant events are
-    enqueued by candidate identity, and all rows become [Consumed] in one
-    further rewrite. Replays require an exactly equal persisted judgment;
+    Pending rows become [Judged] in one atomic ledger append, relevant events
+    are enqueued by candidate identity, and all rows become [Consumed] in one
+    further append. Replays require an exactly equal persisted judgment;
     conflicting results fail without overwriting either value. *)
 
 val resume_judged_on_owner_lane :
@@ -173,10 +193,8 @@ val resume_judged_on_owner_lane :
     and durable delivery. Never calls a provider. *)
 
 module For_testing : sig
-  val set_ledger_rewrite_observer : (unit -> unit) -> unit
-  val reset_ledger_rewrite_observer : unit -> unit
-  (** Observe ledger-rewrite transaction calls in focused tests. Production
-      installs no observer. *)
+  val set_ledger_operation_observer : (ledger_operation -> unit) -> unit
+  val reset_ledger_operation_observer : unit -> unit
 
   val drain_pending_with_judge :
     base_path:string ->

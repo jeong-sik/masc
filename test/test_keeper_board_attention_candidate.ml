@@ -138,6 +138,28 @@ let only_loaded ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
+let load_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let candidate_ledger_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       "board_attention_candidates")
+    (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
+;;
+
+let ledger_path_or_fail ~base_path ~keeper_name =
+  let path = candidate_ledger_path ~base_path ~keeper_name in
+  if Sys.file_exists path
+  then path
+  else Alcotest.failf "ledger file for %s not found under %s" keeper_name base_path
+;;
+
 let test_roundtrip_preserves_full_evidence_and_pending_state () =
   let candidate = candidate () in
   (match candidate.status with
@@ -167,6 +189,48 @@ let test_roundtrip_preserves_full_evidence_and_pending_state () =
   match A.candidate_of_json (A.candidate_to_json candidate) with
   | Ok decoded -> Alcotest.(check bool) "strict roundtrip" true (decoded = candidate)
   | Error detail -> Alcotest.failf "candidate decode failed: %s" detail
+;;
+
+let test_candidate_codec_rejects_inner_identity_drift () =
+  let encoded = A.candidate_to_json (candidate ()) in
+  let invalid =
+    match encoded with
+    | `Assoc fields ->
+      let judgment_request =
+        match List.assoc_opt "judgment_request" fields with
+        | Some (`Assoc request_fields) ->
+          `Assoc
+            (("candidate_id", `String "different-candidate")
+             :: List.remove_assoc "candidate_id" request_fields)
+        | Some _ | None -> Alcotest.fail "judgment_request fixture is absent"
+      in
+      `Assoc
+        (("judgment_request", judgment_request)
+         :: List.remove_assoc "judgment_request" fields)
+    | _ -> Alcotest.fail "candidate fixture is not an object"
+  in
+  match A.candidate_of_json invalid with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "candidate codec accepted inner candidate identity drift"
+;;
+
+let test_record_rejects_inner_identity_drift () =
+  with_temp_base "keeper-board-attention-record-identity" @@ fun base_path ->
+  let candidate = candidate () in
+  ignore (record_or_fail ~base_path candidate : A.candidate);
+  let judgment_request =
+    match candidate.judgment_request with
+    | `Assoc fields ->
+      `Assoc
+        (("candidate_id", `String "different-candidate")
+         :: List.remove_assoc "candidate_id" fields)
+    | _ -> Alcotest.fail "judgment_request fixture is not an object"
+  in
+  match A.record ~base_path { candidate with judgment_request } with
+  | A.Record_error _ -> ()
+  | A.Recorded _ | A.Duplicate _ ->
+    Alcotest.fail
+      "record accepted an invalid duplicate that violates the codec identity invariant"
 ;;
 
 let test_record_dedupes_exact_candidate_identity () =
@@ -240,6 +304,36 @@ let test_not_relevant_transitions_directly_to_consumed () =
     "not relevant does not enqueue"
     0
     (Keeper_event_queue.length queue)
+;;
+
+let test_consumed_candidate_rejects_retryable_failure () =
+  with_temp_base "keeper-board-attention-consumed-failure" @@ fun base_path ->
+  let pending = record_or_fail ~base_path (candidate ()) in
+  let consumed =
+    match
+      A.process_with_judge
+        ~base_path
+        ~judge:(fun _ -> Ok (judgment J.Not_relevant))
+        pending
+    with
+    | Ok candidate -> candidate
+    | Error detail -> Alcotest.failf "candidate consumption failed: %s" detail
+  in
+  let path = ledger_path_or_fail ~base_path ~keeper_name:consumed.keeper_name in
+  let before = load_file path in
+  let failure : A.retryable_failure =
+    { kind = A.Provider_unavailable
+    ; detail = "late failure"
+    ; failed_at = 110.0
+    }
+  in
+  (match A.record_retryable_failure ~base_path consumed failure with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "Consumed candidate silently ignored retryable failure");
+  Alcotest.(check string)
+    "rejected late failure writes no durable row"
+    before
+    (load_file path)
 ;;
 
 let test_relevant_consumes_only_after_exact_durable_enqueue () =
@@ -412,13 +506,38 @@ let count_ledger_lines base_path =
        0
 ;;
 
-let test_update_ledger_compacts_to_distinct () =
+let with_ledger_operations operation =
+  let mutex = Stdlib.Mutex.create () in
+  let observed = ref [] in
+  A.For_testing.set_ledger_operation_observer (fun event ->
+    Stdlib.Mutex.protect mutex (fun () -> observed := event :: !observed));
+  Fun.protect
+    ~finally:A.For_testing.reset_ledger_operation_observer
+    (fun () ->
+       let result = operation () in
+       result, Stdlib.Mutex.protect mutex (fun () -> List.rev !observed))
+;;
+
+let append_ledger path rows =
+  match Fs_compat.append_private_jsonl_durable_locked_result path rows with
+  | Fs_compat.Private_file_succeeded () -> ()
+  | Fs_compat.Private_file_failed error ->
+    Alcotest.fail (Fs_compat.private_jsonl_append_error_to_string error)
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
+    Alcotest.fail
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Alcotest.fail
+      (Printf.sprintf
+         "%s; cleanup: %s"
+         (Fs_compat.private_jsonl_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+;;
+
+let test_runtime_appends_then_process_start_compacts () =
   with_temp_base "keeper-board-attention-compaction" @@ fun base_path ->
   let pending = record_or_fail ~base_path (candidate ()) in
   let keeper_name = pending.keeper_name in
-  (* Record several retryable failures against the same candidate id. Each is a
-     committed update; before compaction the ledger grew by one row per update
-     (and each update re-parsed the whole ledger, so writes were O(n^2)). *)
   let transitions = 6 in
   ignore
     (List.fold_left
@@ -436,31 +555,71 @@ let test_update_ledger_compacts_to_distinct () =
        (List.init transitions Fun.id)
      : A.candidate);
   Alcotest.(check int)
-    "ledger holds one row per distinct candidate_id"
+    "runtime writes one append row per changed state"
+    (transitions + 1)
+    (count_ledger_lines base_path);
+  let compaction, operations =
+    with_ledger_operations (fun () ->
+      A.compact_for_process_start ~base_path ~keeper_name)
+  in
+  (match compaction with
+   | Ok { rewritten = true; removed_rows } ->
+     Alcotest.(check int) "superseded rows removed" transitions removed_rows
+   | Ok { rewritten = false; _ } ->
+     Alcotest.fail "non-canonical process-start ledger was not rewritten"
+   | Error detail -> Alcotest.failf "process-start compaction failed: %s" detail);
+  (match operations with
+   | [ A.Rewrite { rows = 1; bytes } ] ->
+     Alcotest.(check bool) "compaction rewrite is non-empty" true (bytes > 0)
+   | _ -> Alcotest.fail "process-start compaction was not exactly one rewrite");
+  Alcotest.(check int)
+    "process-start compaction keeps one latest row"
     1
     (count_ledger_lines base_path);
-  match A.load_candidates ~base_path ~keeper_name with
-  | Ok [ latest ] ->
-    (match latest.status with
-     | A.Pending { last_failure = Some observed } ->
-       Alcotest.(check string)
-         "latest failure wins after compaction"
-         "provider unavailable 5"
-         observed.detail
-     | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
-       Alcotest.fail "compaction dropped the latest pending failure")
-  | Ok candidates ->
-    Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
-  | Error detail -> Alcotest.failf "load after compaction failed: %s" detail
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let compacted_bytes = load_file path in
+  let replay, replay_operations =
+    with_ledger_operations (fun () ->
+      A.compact_for_process_start ~base_path ~keeper_name)
+  in
+  (match replay with
+   | Ok { rewritten = false; removed_rows = 0 } -> ()
+   | Ok report ->
+     Alcotest.failf
+       "idempotent compaction reported rewritten=%b removed=%d"
+       report.rewritten
+       report.removed_rows
+   | Error detail -> Alcotest.failf "compaction replay failed: %s" detail);
+  Alcotest.(check int)
+    "idempotent compaction performs no ledger operation"
+    0
+    (List.length replay_operations);
+  Alcotest.(check string)
+    "idempotent compaction writes no bytes"
+    compacted_bytes
+    (load_file path);
+  (match A.load_candidates ~base_path ~keeper_name with
+   | Ok [ latest ] ->
+     (match latest.status with
+      | A.Pending { last_failure = Some observed } ->
+        Alcotest.(check string)
+          "latest failure survives compaction"
+          "provider unavailable 5"
+          observed.detail
+      | A.Pending { last_failure = None } | A.Judged _ | A.Consumed _ ->
+        Alcotest.fail "process-start compaction dropped the latest pending failure")
+   | Ok candidates ->
+     Alcotest.failf "expected one compacted candidate, got %d" (List.length candidates)
+   | Error detail -> Alcotest.failf "load after compaction failed: %s" detail);
+  with_temp_base "keeper-board-attention-compaction-cold" @@ fun cold_base ->
+  append_ledger
+    (candidate_ledger_path ~base_path:cold_base ~keeper_name)
+    compacted_bytes;
+  match A.load_candidates ~base_path:cold_base ~keeper_name with
+  | Ok [ { status = A.Pending { last_failure = Some _ }; _ } ] -> ()
+  | Ok _ -> Alcotest.fail "cold replay lost the compacted latest candidate"
+  | Error detail -> Alcotest.failf "cold compacted replay failed: %s" detail
 ;;
-
-(* --- read-side stat memo (#25003) -------------------------------------
-   The memo key is (dev, ino, mtime, size). Production writes always go
-   through atomic temp+rename (new inode), so the only way to observe a
-   cache HIT deterministically is to mutate the file while preserving all
-   four key fields: an in-place same-length byte flip plus [Unix.utimes]
-   restore. A stale (pre-flip) result then proves the parse was skipped;
-   bumping mtime afterwards proves invalidation. *)
 
 let loaded_ids ~base_path ~keeper_name =
   match A.load_candidates ~base_path ~keeper_name with
@@ -468,119 +627,250 @@ let loaded_ids ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "candidate load failed: %s" detail
 ;;
 
-(* µs-aligned so the utimes(float µs) -> stat(float ns) round trip is exact
-   and the memo key compares equal across the in-place mutation. *)
-let fixed_mtime = 1700000000.5
-let bumped_mtime = 1700000001.5
-
-let index_of_substring haystack needle =
-  let hay_len = String.length haystack
-  and needle_len = String.length needle in
-  let rec loop i =
-    if i + needle_len > hay_len
-    then None
-    else if String.equal (String.sub haystack i needle_len) needle
-    then Some i
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
-let rec find_file_named ~name path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then
-      Array.fold_left
-        (fun found entry ->
-           match found with
-           | Some _ -> found
-           | None -> find_file_named ~name (Filename.concat path entry))
-        None
-        (Sys.readdir path)
-    else if String.equal (Filename.basename path) name
-    then Some path
-    else None
-  else None
-;;
-
-let ledger_path_or_fail ~base_path ~keeper_name =
-  match find_file_named ~name:(keeper_name ^ ".jsonl") base_path with
-  | Some path -> path
-  | None -> Alcotest.failf "ledger file for %s not found under %s" keeper_name base_path
-;;
-
-let flip_candidate_id_in_place path =
-  let ic = open_in_bin path in
-  let len = in_channel_length ic in
-  let content = really_input_string ic len in
-  close_in ic;
-  let marker = {|"candidate_id":"|} in
-  let start =
-    match index_of_substring content marker with
-    | Some index -> index + String.length marker
-    | None -> Alcotest.fail "candidate_id marker not found in ledger"
-  in
-  let original = content.[start] in
-  let flipped = if Char.equal original 'f' then '0' else 'f' in
-  let mutated =
-    String.mapi (fun i c -> if i = start then flipped else c) content
-  in
-  Alcotest.(check int) "in-place mutation keeps length" len (String.length mutated);
-  let fd = Unix.openfile path [ Unix.O_WRONLY ] 0o600 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () ->
-      let written = Unix.write_substring fd mutated 0 len in
-      Alcotest.(check int) "in-place write is complete" len written)
-;;
-
-let test_load_memo_skips_reparse_when_stat_key_unchanged () =
-  with_temp_base "attention-read-memo-hit" (fun base_path ->
-    let keeper_name = "sangsu" in
-    let recorded = record_or_fail ~base_path (candidate ()) in
-    let path = ledger_path_or_fail ~base_path ~keeper_name in
-    Unix.utimes path fixed_mtime fixed_mtime;
-    (match loaded_ids ~base_path ~keeper_name with
-     | [ id ] ->
-       Alcotest.(check string) "first load parses the ledger" recorded.candidate_id id
-     | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
-    flip_candidate_id_in_place path;
-    Unix.utimes path fixed_mtime fixed_mtime;
-    (match loaded_ids ~base_path ~keeper_name with
-     | [ id ] ->
-       Alcotest.(check string)
-         "unchanged stat key serves the memoized parse"
-         recorded.candidate_id
-         id
-     | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
-    Unix.utimes path bumped_mtime bumped_mtime;
-    (* Invalidation proof: a re-read parses the mutated bytes, and the flipped
-       candidate_id no longer matches the content-identity digest, so the
-       loader must surface the integrity error. A stale cache hit would keep
-       returning [Ok] with the original id instead. *)
-    match A.load_candidates ~base_path ~keeper_name with
-    | Ok _ -> Alcotest.fail "mtime bump did not invalidate the memo (stale Ok served)"
-    | Error detail ->
-      (match index_of_substring detail "does not match" with
-       | Some _ -> ()
-       | None -> Alcotest.failf "unexpected load error after invalidation: %s" detail))
-;;
-
-let test_load_memo_invalidated_by_atomic_rewrite () =
-  with_temp_base "attention-read-memo-rewrite" (fun base_path ->
+let test_runtime_append_preserves_prefix_and_updates_delta_view () =
+  with_temp_base "attention-candidate-append-delta" (fun base_path ->
     let keeper_name = "sangsu" in
     let first = record_or_fail ~base_path (candidate ()) in
+    let path = ledger_path_or_fail ~base_path ~keeper_name in
+    let prefix = load_file path in
+    let first_stats = Unix.stat path in
     (match loaded_ids ~base_path ~keeper_name with
      | [ id ] -> Alcotest.(check string) "first load" first.candidate_id id
      | ids -> Alcotest.failf "expected one candidate, got %d" (List.length ids));
-    let second =
-      record_or_fail ~base_path (candidate ~signal:(signal ~post_id:"post-2" ()) ())
+    let second, operations =
+      with_ledger_operations (fun () ->
+        record_or_fail
+          ~base_path
+          (candidate ~signal:(signal ~post_id:"post-2" ()) ()))
     in
+    let appended = load_file path in
+    let suffix =
+      Yojson.Safe.to_string (A.candidate_to_json second) ^ "\n"
+    in
+    let second_stats = Unix.stat path in
+    Alcotest.(check int) "append preserves device" first_stats.st_dev second_stats.st_dev;
+    Alcotest.(check int) "append preserves inode" first_stats.st_ino second_stats.st_ino;
+    Alcotest.(check bool)
+      "second record appends without rewriting the first row"
+      true
+      (String.starts_with appended ~prefix);
+    Alcotest.(check string)
+      "append writes exactly the serialized candidate suffix"
+      (prefix ^ suffix)
+      appended;
+    (match operations with
+     | [ A.Append { rows = 1; bytes } ] ->
+       Alcotest.(check int) "append observer reports exact byte count" (String.length suffix) bytes
+     | _ -> Alcotest.fail "one candidate record was not exactly one append operation");
     let ids = loaded_ids ~base_path ~keeper_name in
-    Alcotest.(check int) "rename-rewrite is observed" 2 (List.length ids);
+    Alcotest.(check int) "delta view observes appended candidate" 2 (List.length ids);
     if not (List.exists (String.equal second.candidate_id) ids)
-    then Alcotest.fail "second candidate missing after atomic rewrite")
+    then Alcotest.fail "second candidate missing after cursor append")
+;;
+
+let test_cold_replay_rejects_illegal_status_transition () =
+  with_temp_base "attention-candidate-illegal-transition" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let pending = candidate ~keeper_name () in
+  let verdict = judgment J.Relevant in
+  let consumed =
+    { pending with
+      status =
+        A.Consumed
+          { judgment = verdict
+          ; delivery = A.Enqueued_to_keeper_lane
+          ; consumed_at = 120.0
+          }
+    }
+  in
+  let path = candidate_ledger_path ~base_path ~keeper_name in
+  append_ledger
+    path
+    (Yojson.Safe.to_string (A.candidate_to_json pending)
+     ^ "\n"
+     ^ Yojson.Safe.to_string (A.candidate_to_json consumed)
+     ^ "\n");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cold replay accepted Pending -> Consumed"
+;;
+
+let test_compacted_consumed_snapshot_replays_cold () =
+  with_temp_base "attention-candidate-consumed-source" @@ fun source_base ->
+  let keeper_name = "sangsu" in
+  let pending = record_or_fail ~base_path:source_base (candidate ~keeper_name ()) in
+  (match
+     A.process_with_judge
+       ~base_path:source_base
+       ~judge:(fun _ -> Ok (judgment J.Not_relevant))
+       pending
+   with
+   | Ok { status = A.Consumed _; _ } -> ()
+   | Ok _ -> Alcotest.fail "source candidate was not Consumed"
+   | Error detail -> Alcotest.failf "source consumption failed: %s" detail);
+  (match A.compact_for_process_start ~base_path:source_base ~keeper_name with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "Consumed compaction failed: %s" detail);
+  let bytes =
+    ledger_path_or_fail ~base_path:source_base ~keeper_name |> load_file
+  in
+  with_temp_base "attention-candidate-consumed-cold" @@ fun cold_base ->
+  append_ledger
+    (candidate_ledger_path ~base_path:cold_base ~keeper_name)
+    bytes;
+  match A.load_candidates ~base_path:cold_base ~keeper_name with
+  | Ok [ { status = A.Consumed { delivery = A.Not_relevant; _ }; _ } ] -> ()
+  | Ok _ -> Alcotest.fail "cold replay lost compacted Consumed receipt"
+  | Error detail -> Alcotest.failf "cold Consumed replay failed: %s" detail
+;;
+
+let test_cold_replay_rejects_failure_state_inversion () =
+  with_temp_base "attention-candidate-failure-inversion" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let pending = candidate ~keeper_name () in
+  let invalid =
+    { pending with
+      status =
+        A.Judged
+          { judgment = judgment J.Not_relevant
+          ; last_failure =
+              Some
+                { kind = A.Provider_unavailable
+                ; detail = "provider failure cannot be delivery evidence"
+                ; failed_at = 120.0
+                }
+          }
+    }
+  in
+  let path = candidate_ledger_path ~base_path ~keeper_name in
+  append_ledger path (Yojson.Safe.to_string (A.candidate_to_json invalid) ^ "\n");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cold replay accepted Provider failure on Judged"
+;;
+
+let test_cold_replay_rejects_candidate_storage_failure_status () =
+  let assert_rejected name status =
+    with_temp_base name @@ fun base_path ->
+    let keeper_name = "sangsu" in
+    let original = candidate ~keeper_name () in
+    let invalid = { original with status } in
+    let path = candidate_ledger_path ~base_path ~keeper_name in
+    append_ledger path (Yojson.Safe.to_string (A.candidate_to_json invalid) ^ "\n");
+    match A.load_candidates ~base_path ~keeper_name with
+    | Error _ -> ()
+    | Ok _ ->
+      Alcotest.fail "cold replay accepted candidate-storage failure as candidate state"
+  in
+  let failure : A.retryable_failure =
+    { kind = A.Durable_candidate_storage_unavailable
+    ; detail = "candidate storage unavailable"
+    ; failed_at = 120.0
+    }
+  in
+  assert_rejected
+    "attention-candidate-storage-failure-pending"
+    (A.Pending { last_failure = Some failure });
+  assert_rejected
+    "attention-candidate-storage-failure-judged"
+    (A.Judged
+       { judgment = judgment J.Not_relevant
+       ; last_failure = Some failure
+       })
+;;
+
+let test_cold_replay_rejects_pending_to_failed_judged () =
+  with_temp_base "attention-candidate-failed-judgment-transition" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let pending = candidate ~keeper_name () in
+  let invalid =
+    { pending with
+      status =
+        A.Judged
+          { judgment = judgment J.Relevant
+          ; last_failure =
+              Some
+                { kind = A.Durable_delivery_unavailable
+                ; detail = "delivery was not attempted from Pending"
+                ; failed_at = 120.0
+                }
+          }
+    }
+  in
+  append_ledger
+    (candidate_ledger_path ~base_path ~keeper_name)
+    (Yojson.Safe.to_string (A.candidate_to_json pending)
+     ^ "\n"
+     ^ Yojson.Safe.to_string (A.candidate_to_json invalid)
+     ^ "\n");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cold replay accepted Pending -> Judged-with-failure"
+;;
+
+let test_same_length_rewrite_invalidates_cached_cursor_explicitly () =
+  with_temp_base "attention-candidate-cursor-rewrite" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  ignore (record_or_fail ~base_path (candidate ~keeper_name ()) : A.candidate);
+  ignore (loaded_ids ~base_path ~keeper_name : string list);
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let bytes = load_file path in
+  (match
+     Fs_compat.rewrite_private_file_durable_locked_result path (fun _ ->
+       Some bytes, ())
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match A.load_candidates ~base_path ~keeper_name with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "same-length inode replacement served a stale cache");
+  match A.load_candidates ~base_path ~keeper_name with
+  | Ok [ _ ] -> ()
+  | Ok _ -> Alcotest.fail "cache invalidation did not recover on the next exact read"
+  | Error detail -> Alcotest.failf "cache did not recover after invalidation: %s" detail
+;;
+
+let test_concurrent_distinct_records_are_both_preserved () =
+  with_temp_base "attention-candidate-concurrent-record" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let first = candidate ~keeper_name ~signal:(signal ~post_id:"post-a" ()) () in
+  let second = candidate ~keeper_name ~signal:(signal ~post_id:"post-b" ()) () in
+  let first_domain = Domain.spawn (fun () -> A.record ~base_path first) in
+  let second_domain = Domain.spawn (fun () -> A.record ~base_path second) in
+  let results = [ Domain.join first_domain; Domain.join second_domain ] in
+  List.iter
+    (function
+      | A.Recorded _ -> ()
+      | A.Duplicate _ -> Alcotest.fail "distinct concurrent record became a duplicate"
+      | A.Record_error detail -> Alcotest.failf "concurrent record failed: %s" detail)
+    results;
+  let observed = loaded_ids ~base_path ~keeper_name |> List.sort String.compare in
+  let expected = [ first.candidate_id; second.candidate_id ] |> List.sort String.compare in
+  Alcotest.(check (list string))
+    "same-process mutation mutex preserves both records"
+    expected
+    observed
+;;
+
+let test_conflicting_judgment_is_explicit_and_writes_nothing () =
+  with_temp_base "attention-candidate-judgment-conflict" @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let pending = record_or_fail ~base_path (candidate ~keeper_name ()) in
+  let first = judgment J.Relevant in
+  let judged =
+    match A.record_judgment ~base_path pending first with
+    | Ok judged -> judged
+    | Error detail -> Alcotest.failf "first judgment failed: %s" detail
+  in
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let before = load_file path in
+  (match A.record_judgment ~base_path judged (judgment J.Not_relevant) with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "conflicting judgment was silently accepted");
+  Alcotest.(check string)
+    "conflicting judgment appends no row"
+    before
+    (load_file path)
 ;;
 
 let all_not_relevant candidates =
@@ -796,7 +1086,7 @@ let test_successful_drain_uses_one_unbounded_exact_context_cohort () =
   Alcotest.(check int) "nothing remains" 0 report.remaining
 ;;
 
-let test_successful_batch_uses_two_candidate_ledger_rewrites () =
+let test_successful_batch_appends_two_atomic_state_sets () =
   with_temp_base "board-attention-atomic-batch" @@ fun base_path ->
   let keeper_name = "sangsu" in
   List.iter
@@ -807,34 +1097,47 @@ let test_successful_batch_uses_two_candidate_ledger_rewrites () =
             ~base_path
             (candidate ~keeper_name ~signal:(signal ~post_id ()) ())))
     (List.init cohort_size (fun index -> index + 1));
-  let rewrites = ref 0 in
-  A.For_testing.set_ledger_rewrite_observer (fun () -> incr rewrites);
-  Fun.protect
-    ~finally:A.For_testing.reset_ledger_rewrite_observer
-    (fun () ->
-       let report =
-         match
-           A.For_testing.drain_pending_with_judge_batch
-             ~base_path
-             ~keeper_name
-             ~judge_batch:all_relevant
-         with
-         | Ok report -> report
-         | Error detail -> Alcotest.failf "atomic batch drain failed: %s" detail
-       in
-       Alcotest.(check int) "whole batch consumed" cohort_size report.consumed;
-       Alcotest.(check int)
-         "one judgment commit plus one consumed commit"
-         2
-         !rewrites;
-       let queued =
-         Keeper_event_queue_persistence.load ~base_path ~keeper_name
-         |> Keeper_event_queue.length
-       in
-       Alcotest.(check int)
-         "every relevant verdict has one durable event"
-         cohort_size
-         queued)
+  let path = ledger_path_or_fail ~base_path ~keeper_name in
+  let pending_prefix = load_file path in
+  let report, operations =
+    with_ledger_operations (fun () ->
+      match
+        A.For_testing.drain_pending_with_judge_batch
+          ~base_path
+          ~keeper_name
+          ~judge_batch:all_relevant
+      with
+      | Ok report -> report
+      | Error detail -> Alcotest.failf "atomic batch drain failed: %s" detail)
+  in
+  Alcotest.(check int) "whole batch consumed" cohort_size report.consumed;
+  let final_bytes = load_file path in
+  Alcotest.(check bool)
+    "batch state commits preserve the Pending prefix"
+    true
+    (String.starts_with final_bytes ~prefix:pending_prefix);
+  Alcotest.(check int)
+    "Pending, Judged, and Consumed each contribute one row per candidate"
+    (cohort_size * 3)
+    (count_ledger_lines base_path);
+  (match operations with
+   | [ A.Append judged; A.Append consumed ] ->
+     Alcotest.(check int) "Judged append row count" cohort_size judged.rows;
+     Alcotest.(check int) "Consumed append row count" cohort_size consumed.rows;
+     Alcotest.(check bool) "Judged append is non-empty" true (judged.bytes > 0);
+     Alcotest.(check bool) "Consumed append is non-empty" true (consumed.bytes > 0)
+   | _ ->
+     Alcotest.failf
+       "batch drain performed %d ledger operations instead of two appends"
+       (List.length operations));
+  let queued =
+    Keeper_event_queue_persistence.load ~base_path ~keeper_name
+    |> Keeper_event_queue.length
+  in
+  Alcotest.(check int)
+    "every relevant verdict has one durable event"
+    cohort_size
+    queued
 ;;
 
 let test_batch_delivery_failure_preserves_all_judgments () =
@@ -1002,6 +1305,14 @@ let () =
             `Quick
             test_record_dedupes_exact_candidate_identity
         ; Alcotest.test_case
+            "candidate codec rejects inner identity drift"
+            `Quick
+            test_candidate_codec_rejects_inner_identity_drift
+        ; Alcotest.test_case
+            "record rejects inner identity drift"
+            `Quick
+            test_record_rejects_inner_identity_drift
+        ; Alcotest.test_case
             "retryable judge failure remains Pending"
             `Quick
             test_retryable_judge_failure_remains_pending
@@ -1009,6 +1320,10 @@ let () =
             "not relevant transitions directly to Consumed"
             `Quick
             test_not_relevant_transitions_directly_to_consumed
+        ; Alcotest.test_case
+            "Consumed rejects retryable failure"
+            `Quick
+            test_consumed_candidate_rejects_retryable_failure
         ; Alcotest.test_case
             "relevant consumes only after exact durable enqueue"
             `Quick
@@ -1030,19 +1345,47 @@ let () =
             `Quick
             test_strict_judgment_contract_rejects_extra_fields
         ; Alcotest.test_case
-            "update ledger compacts to distinct candidate count"
+            "runtime appends then process start compacts"
             `Quick
-            test_update_ledger_compacts_to_distinct
+            test_runtime_appends_then_process_start_compacts
         ] )
-    ; ( "read memo"
+    ; ( "cursor view"
       , [ Alcotest.test_case
-            "unchanged stat key skips reparse"
+            "runtime append preserves prefix and updates delta view"
             `Quick
-            test_load_memo_skips_reparse_when_stat_key_unchanged
+            test_runtime_append_preserves_prefix_and_updates_delta_view
         ; Alcotest.test_case
-            "atomic rewrite invalidates memo"
+            "cold replay rejects illegal status transition"
             `Quick
-            test_load_memo_invalidated_by_atomic_rewrite
+            test_cold_replay_rejects_illegal_status_transition
+        ; Alcotest.test_case
+            "compacted Consumed snapshot replays cold"
+            `Quick
+            test_compacted_consumed_snapshot_replays_cold
+        ; Alcotest.test_case
+            "cold replay rejects failure state inversion"
+            `Quick
+            test_cold_replay_rejects_failure_state_inversion
+        ; Alcotest.test_case
+            "cold replay rejects candidate-storage failure status"
+            `Quick
+            test_cold_replay_rejects_candidate_storage_failure_status
+        ; Alcotest.test_case
+            "cold replay rejects Pending to failed Judged"
+            `Quick
+            test_cold_replay_rejects_pending_to_failed_judged
+        ; Alcotest.test_case
+            "same-length rewrite invalidates cached cursor explicitly"
+            `Quick
+            test_same_length_rewrite_invalidates_cached_cursor_explicitly
+        ; Alcotest.test_case
+            "concurrent distinct records are both preserved"
+            `Quick
+            test_concurrent_distinct_records_are_both_preserved
+        ; Alcotest.test_case
+            "conflicting judgment is explicit and writes nothing"
+            `Quick
+            test_conflicting_judgment_is_explicit_and_writes_nothing
         ] )
     ; ( "batch drain"
       , [ Alcotest.test_case
@@ -1070,9 +1413,9 @@ let () =
             `Quick
             test_successful_drain_uses_one_unbounded_exact_context_cohort
         ; Alcotest.test_case
-            "successful batch uses two candidate-ledger rewrites"
+            "successful batch appends two atomic state sets"
             `Quick
-            test_successful_batch_uses_two_candidate_ledger_rewrites
+            test_successful_batch_appends_two_atomic_state_sets
         ; Alcotest.test_case
             "batch delivery failure preserves all judgments"
             `Quick

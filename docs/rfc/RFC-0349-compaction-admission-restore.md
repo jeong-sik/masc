@@ -1,4 +1,4 @@
-# RFC-0346 — Restore a reachable compaction admission path
+# RFC-0349 — Restore a reachable compaction admission path
 
 - Status: Draft
 - Updated: 2026-07-20

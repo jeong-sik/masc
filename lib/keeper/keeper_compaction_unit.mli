@@ -65,8 +65,15 @@ type partition =
   }
 
 val partition
-  :  Agent_sdk.Types.message list
+  :  ?quarantine:bool
+  -> Agent_sdk.Types.message list
   -> (partition, structural_error) result
+(** With [~quarantine:true] the first structural break freezes the valid
+    [closed_prefix] and moves the open cycle plus the offending message and its
+    successors into [protected_suffix] instead of returning [Error]. Compaction
+    callers use this so a single broken tool cycle compacts the valid prefix
+    rather than rejecting the whole history. [validate] and persistence callers
+    keep the default [false] to reject broken structures. *)
 
 (** Validate the same structural contract as {!partition} without exposing a
     partition to persistence callers that must preserve every message exactly. *)

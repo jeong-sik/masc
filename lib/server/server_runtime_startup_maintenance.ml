@@ -4,18 +4,45 @@
 
 (* ── Startup pruning ───────────────────────────────── *)
 
+(* [is_real_directory path] is true only when [path] is a real directory on
+   disk. Unlike [Sys.is_directory] (which [stat]s and therefore follows a
+   symlink), this [lstat]s the final component, so a symlinked entry is
+   rejected. A missing path or any [lstat] failure counts as "not a real
+   directory" (the caller skips it). This is the no-follow guard startup
+   pruning needs: [prune_dir] leads to [Dated_jsonl.prune], which deletes
+   [YYYY-MM/*.jsonl] files, so following a symlink here would let a symlinked
+   workspace entry delete files at the link target with the server's
+   permissions. *)
+let is_real_directory path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | _ -> false
+  | exception Unix.Unix_error _ -> false
+
 (* Fold [prune_dir] over the immediate sub-directories of [root].
    A missing [root] counts 0 and stray files under [root] are skipped —
    [.masc/resilience_audit/<keeper>/] stores keep their day-files one
    level below the keeper dir, so per-keeper traversal needs the same
-   guard the keepers loop gets for free from its nested path concat. *)
+   guard the keepers loop gets for free from its nested path concat.
+   A single [lstat] classifies each entry: real directories are pruned,
+   symlinks are skipped with a warning (following one would let [prune_dir]
+   delete day-files at the link target outside the workspace), and any other
+   entry (stray file, missing, lstat error) is silently skipped as before. *)
 let prune_children_dirs ~prune_dir root =
   if not (Sys.file_exists root) then 0
   else
     Array.fold_left
       (fun acc name ->
         let dir = Filename.concat root name in
-        if Sys.is_directory dir then acc + prune_dir dir else acc)
+        match Unix.lstat dir with
+        | { Unix.st_kind = Unix.S_DIR; _ } -> acc + prune_dir dir
+        | { Unix.st_kind = Unix.S_LNK; _ } ->
+          Log.Misc.warn
+            "startup prune: skipping symlinked entry %s (not following link target)"
+            dir;
+          acc
+        | _ -> acc
+        | exception Unix.Unix_error _ -> acc)
       0
       (Sys.readdir root)
 
@@ -95,10 +122,17 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
           if not (Sys.file_exists keepers) then 0
           else
             Array.fold_left (fun acc name ->
-              acc
-              + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "execution-receipts")
+              (* Only descend into real keeper directories. A symlinked
+                 [keepers/<name>] would otherwise let [prune_dir] delete
+                 day-files at the link target (same no-follow guard as
+                 [prune_children_dirs]). *)
+              let keeper_dir = Filename.concat keepers name in
+              if not (is_real_directory keeper_dir) then acc
+              else
+                acc
+                + prune_dir (Filename.concat keeper_dir "metrics")
+                + prune_dir (Filename.concat keeper_dir "crash-events")
+                + prune_dir (Filename.concat keeper_dir "execution-receipts")
             ) 0 (Sys.readdir keepers))
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in

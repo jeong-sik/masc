@@ -70,6 +70,25 @@ let test_prune_flat_jsonl_removes_old_files () =
   Alcotest.(check bool) "recent file kept" true (Sys.file_exists recent_file);
   Alcotest.(check bool) "non-jsonl file kept" true (Sys.file_exists stray)
 
+(* Regression: a symlinked child must NOT be followed. [prune_dir] leads to
+   day-file deletion, so following a symlink here would prune the link target
+   outside the workspace. The symlink points at a real external directory, so
+   the previous [Sys.is_directory] guard (which follows symlinks) would call
+   [prune_dir] on the external target — reverting the [lstat]-based
+   [is_real_directory] guard turns this test RED (counter 2 instead of 1). *)
+let test_symlinked_child_not_followed () =
+  counter := 0;
+  let root = fresh_dir "masc_prune_children_symlink" in
+  let real_child = Filename.concat root "real-keeper" in
+  Fs_compat.mkdir_p real_child;
+  let external_target = fresh_dir "masc_prune_external_target" in
+  let link = Filename.concat root "linked-keeper" in
+  Unix.symlink external_target link;
+  let n = SM.prune_children_dirs ~prune_dir:record_prune root in
+  Alcotest.(check int) "prune called only for the real child" 1 !counter;
+  Alcotest.(check bool)
+    "return counts only the real child" true (n = String.length real_child)
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -79,6 +98,8 @@ let () =
             test_missing_root_counts_zero;
           Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
             test_subdirs_pruned_and_stray_files_skipped;
+          Alcotest.test_case "symlinked child is not followed" `Quick
+            test_symlinked_child_not_followed;
         ] );
       ( "prune_flat_jsonl_older_than",
         [

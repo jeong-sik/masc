@@ -603,6 +603,45 @@ let test_prune () =
   let result = Dated_jsonl.read_recent store 10 in
   check bool "today survives prune" true (List.length result > 0)
 
+(* Regression: a symlink NAMED like an old month must not be traversed.
+   [list_month_dirs] used to filter on the name only, so [2000-01 -> external]
+   passed and [prune_unlocked] deleted the day files at the link target and
+   rmdir'd it. Reverting [list_entries_of_kind] to a plain readdir turns this
+   RED: the external file disappears. *)
+let test_prune_does_not_follow_symlinked_month () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_prune_symlink_month" in
+  let external_dir = tmpdir "dated_jsonl_external_records" in
+  let external_file = Filename.concat external_dir "15.jsonl" in
+  Fs_compat.append_file external_file "{\"external\":true}\n";
+  Unix.symlink external_dir (Filename.concat dir "2000-01");
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  Dated_jsonl.append store (make_json 1);
+  let _deleted = Dated_jsonl.prune store ~days:30 in
+  check bool "external file behind the symlinked month survives" true
+    (Sys.file_exists external_file);
+  check bool "symlinked month itself survives" true
+    (Sys.file_exists (Filename.concat dir "2000-01"))
+
+(* Regression: a symlink named like a day file inside a real month must not be
+   removed either — [list_day_files] now lists regular files only. *)
+let test_prune_does_not_follow_symlinked_day_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_prune_symlink_day" in
+  let old_month = Filename.concat dir "2020-01" in
+  Fs_compat.mkdir_p old_month;
+  let external_dir = tmpdir "dated_jsonl_external_day" in
+  let external_file = Filename.concat external_dir "keep.jsonl" in
+  Fs_compat.append_file external_file "{\"external\":true}\n";
+  Unix.symlink external_file (Filename.concat old_month "15.jsonl");
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  Dated_jsonl.append store (make_json 1);
+  let _deleted = Dated_jsonl.prune store ~days:30 in
+  check bool "external day file behind the symlink survives" true
+    (Sys.file_exists external_file)
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -745,6 +784,10 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "does not follow a symlinked month" `Quick
+            test_prune_does_not_follow_symlinked_month;
+          test_case "does not follow a symlinked day file" `Quick
+            test_prune_does_not_follow_symlinked_day_file;
           test_case "max bytes prunes oldest completed day-files" `Quick
             test_max_bytes_prunes_oldest_completed_day_files;
           test_case "max bytes preserves current day-file" `Quick

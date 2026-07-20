@@ -641,14 +641,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let json =
-           Dashboard_goal_loop.status_json
-             ~base_path:(Mcp_server.workspace_config state).base_path ()
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   (* RFC-0266 §7 Phase 4: read-only snapshot of the in-memory fusion run registry
      (in-progress + recently completed). The fusion panel fetches this on load and
      re-fetches on the [fusion_run_status] SSE event. Registry reads are O(runs)

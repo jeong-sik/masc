@@ -1284,14 +1284,6 @@
   eio_main
   unix))
 
-; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
-; one event; unchanged / generated_at-only change emits none).
-
-(test
- (name test_goal_loop_broadcast)
- (modules test_goal_loop_broadcast)
- (libraries alcotest masc masc_server masc_test_deps eio_main))
-
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
 ; Memory-quality eval harness (Harness-First). Offline, deterministic, read-only.

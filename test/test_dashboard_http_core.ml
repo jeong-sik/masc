@@ -1776,8 +1776,6 @@ let test_dashboard_bootstrap_omits_eager_goal_tree () =
     (assoc_has "planning" json);
   Alcotest.(check bool) "bootstrap includes namespace truth" true
     (assoc_has "namespace_truth" json);
-  Alcotest.(check bool) "bootstrap includes goal-loop status" true
-    (assoc_has "goal_loop_status" json);
   Alcotest.(check bool) "bootstrap omits eager goal tree" false
     (assoc_has "goals" json)
 

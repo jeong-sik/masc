@@ -247,20 +247,6 @@ describe('SSEMessageSchema', () => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
   })
 
-  it('accepts a goal_loop_status event with an object payload', () => {
-    const r = SSEMessageSchema.safeParse({
-      type: 'goal_loop_status',
-      payload: { overall_status: 'on_track', loop_iteration: 4 },
-      ts_unix: 1_712_000_000,
-    })
-    expect(r.success).toBe(true)
-  })
-
-  it('rejects a goal_loop_status event with a non-object payload', () => {
-    const r = SSEMessageSchema.safeParse({ type: 'goal_loop_status', payload: 'not an object' })
-    expect(r.success).toBe(false)
-  })
-
   it('accepts a gate_mode_changed event with a null previous_mode', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'gate_mode_changed',
@@ -398,19 +384,6 @@ describe('parseSSEMessage', () => {
     })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('approval:summary_updated')
-    expect(warnSpy).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
-  })
-
-  it('keeps goal_loop_status events so the live goal-loop delta is not dropped', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const msg = parseSSEMessage({
-      type: 'goal_loop_status',
-      payload: { overall_status: 'on_track', loop_iteration: 4 },
-      ts_unix: 1_712_000_000,
-    })
-    expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('goal_loop_status')
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })

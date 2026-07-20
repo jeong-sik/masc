@@ -1,5 +1,5 @@
 // Planning Panel — Phase 7 unified view for planning section.
-// FilterChips toggle between goal-loop status, goal tree, and kanban.
+// FilterChips toggle between goal tree and kanban.
 // Revives GoalTree which became dead code after Phase 1 removed the
 // standalone goals section.
 
@@ -11,7 +11,6 @@ import { workspaceFsmSnapshot, goals, tasks } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals/planning'
 import { GoalTree } from './goals/goal-tree'
-import { GoalLoopPanel } from './goal-loop-panel'
 import { PlanningFocusPanel } from './planning-focus-panel'
 import { openTaskDetail } from './goals/task-detail-state'
 import type {
@@ -21,9 +20,9 @@ import type {
   DashboardWorkspaceFsmViolation,
 } from '../types'
 
-type PlanningView = 'default' | 'goal-tree' | 'goal-loop'
+type PlanningView = 'default' | 'goal-tree'
 
-const PLANNING_VIEWS: PlanningView[] = ['default', 'goal-tree', 'goal-loop']
+const PLANNING_VIEWS: PlanningView[] = ['default', 'goal-tree']
 
 function isPlanningView(v: string | undefined): v is PlanningView {
   return !!v && (PLANNING_VIEWS as string[]).includes(v)
@@ -35,7 +34,6 @@ const activeView = computed<PlanningView>(() => {
 })
 
 const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
-  { key: 'goal-loop', label: '목표 루프' },
   { key: 'goal-tree', label: '목표 관리자' },
   { key: 'default',   label: '백로그' },
 ]
@@ -277,11 +275,7 @@ export function PlanningPanel() {
       <${PlanningRouteFocusPanel} />
       <${WorkspaceHealthPanel} />
       <${PlanningFocusPanel} />
-      ${view === 'goal-loop'
-        ? html`<${GoalLoopPanel} />`
-      : view === 'goal-tree'
-        ? html`<${GoalTree} />`
-        : html`<${Planning} />`}
+      ${view === 'goal-tree' ? html`<${GoalTree} />` : html`<${Planning} />`}
     </div>
   `
 }

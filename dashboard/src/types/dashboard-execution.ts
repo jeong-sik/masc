@@ -262,7 +262,6 @@ export interface DashboardBootstrapResponse {
   planning?: DashboardBootstrapSlice<DashboardPlanningResponse>
   namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
   goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
-  goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
 }
 
 export interface DashboardNamespaceTruthFocus {

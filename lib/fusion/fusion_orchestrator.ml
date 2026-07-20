@@ -304,15 +304,17 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
                         ] )))
           in
           let judge_full, judge_nodes =
-            match Fusion_types.answered_of panel with
-            | [] ->
-              let reason = Fusion_types.No_panel_answers { total = List.length panel } in
+            match
+              Fusion_types.judge_skip_reason ~panel
+                ~min_answered:preset.Fusion_policy.min_answered
+            with
+            | Some reason ->
               (* typed 그대로 propagate — 문자열로 렌더해 [Internal_error]에 압축하면
-                 패널 전멸이 "judge failed"/failure_code=internal_error로 오귀속된다
-                 (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은 judge
-                 메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
+                 패널 전멸/정족수 미달이 "judge failed"/failure_code=internal_error로
+                 오귀속된다 (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은
+                 judge 메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
               (Error (Fusion_types.Panels_unavailable reason, Fusion_types.zero_usage), [])
-            | _ :: _ ->
+            | None ->
             match topology with
             | Fusion_types.Simple ->
               (match run_single_judge () with

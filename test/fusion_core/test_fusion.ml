@@ -1325,6 +1325,67 @@ let test_panels_unavailable_failure () =
     (judge_failure_text failure);
   Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
 
+(* --- min_answered 런타임 quorum 강제: judge 실행 전 panel 입력 계약 검사 ---
+   orchestrator는 judge dispatch 전에 [judge_skip_reason]을 호출해 미달 시 typed
+   [Panels_unavailable]로 skip한다 (미달 응답을 judge에 넘기는 silent degrade 금지 —
+   quorum은 입력 계약이다). 판정은 순수 함수로 분리해 여기서 exhaustive하게 핀다. *)
+
+let quorum_answered model : panel_outcome =
+  Answered { model; answer = "a"; usage = zero_usage }
+
+let quorum_failed model : panel_outcome =
+  Failed { failed_model = model; reason = Provider_error "boom" }
+
+let skip_reason_t = Alcotest.testable pp_skip_reason equal_skip_reason
+
+(* (a) min_answered=2인데 응답 1개 → typed skip (judge 미실행). *)
+let test_quorum_shortfall () =
+  let panel = [ quorum_answered "a"; quorum_failed "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "answered 1 < min_answered 2"
+    (Some (Quorum_shortfall { answered = 1; required = 2 }))
+    (judge_skip_reason ~panel ~min_answered:2)
+
+(* (b) min_answered=2, 응답 2개 → judge 진행 (skip 사유 없음). *)
+let test_quorum_met () =
+  let panel = [ quorum_answered "a"; quorum_answered "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "answered 2 >= min_answered 2" None
+    (judge_skip_reason ~panel ~min_answered:2)
+
+(* (c) 기본값(default_min_answered=1)은 강제 전과 정확히 같은 동작:
+   응답 1개면 judge 실행, 0개면 No_panel_answers. *)
+let test_quorum_default_preserves_current_behavior () =
+  Alcotest.(check (option skip_reason_t)) "1 answered, default -> judge runs" None
+    (judge_skip_reason
+       ~panel:[ quorum_answered "a"; quorum_failed "b" ]
+       ~min_answered:Fusion_policy.default_min_answered);
+  Alcotest.(check (option skip_reason_t)) "0 answered, default -> No_panel_answers"
+    (Some (No_panel_answers { total = 2 }))
+    (judge_skip_reason
+       ~panel:[ quorum_failed "a"; quorum_failed "b" ]
+       ~min_answered:Fusion_policy.default_min_answered)
+
+(* (d) min_answered=패널 수(3)인데 전원 실패 → 응답 0 = 입력 부재 typed skip.
+   전멸은 정족수 정책이 아니라 objective input absence라 No_panel_answers를 유지한다
+   (위 test_panels_unavailable_failure의 구분과 동일). *)
+let test_quorum_full_panel_all_failed () =
+  let panel = [ quorum_failed "a"; quorum_failed "b"; quorum_failed "c" ] in
+  Alcotest.(check (option skip_reason_t)) "min_answered 3, all failed -> typed skip"
+    (Some (No_panel_answers { total = 3 }))
+    (judge_skip_reason ~panel ~min_answered:3)
+
+(* quorum 미달도 패널-측 사유로 분류된다 — judge 메커니즘 실패로 오귀속하지 않게
+   failure_code는 panels_unavailable을 유지하고 텍스트에 도달/요구 수를 노출한다. *)
+let test_quorum_shortfall_failure_surface () =
+  let failure : judge_failure =
+    Panels_unavailable (Quorum_shortfall { answered = 1; required = 2 })
+  in
+  Alcotest.(check string) "failure_code tag" "panels_unavailable"
+    (judge_failure_tag failure);
+  Alcotest.(check string) "failure text = rendered skip reason"
+    "fusion aborted: panel quorum not met (1 of 2 required answers)"
+    (judge_failure_text failure);
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure)
+
 (* min_answered must be in the policy range 1..total panels (inclusive).
    base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
 let test_validated_bad_min_answered () =
@@ -1517,5 +1578,13 @@ let () =
         ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
         ; Alcotest.test_case "panels_unavailable_failure" `Quick
             test_panels_unavailable_failure
+        ; Alcotest.test_case "quorum_shortfall" `Quick test_quorum_shortfall
+        ; Alcotest.test_case "quorum_met" `Quick test_quorum_met
+        ; Alcotest.test_case "quorum_default_preserves_current_behavior" `Quick
+            test_quorum_default_preserves_current_behavior
+        ; Alcotest.test_case "quorum_full_panel_all_failed" `Quick
+            test_quorum_full_panel_all_failed
+        ; Alcotest.test_case "quorum_shortfall_failure_surface" `Quick
+            test_quorum_shortfall_failure_surface
         ] )
     ]

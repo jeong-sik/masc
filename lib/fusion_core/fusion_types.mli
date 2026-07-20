@@ -113,10 +113,24 @@ val answered_of : panel_outcome list -> panel_answer list
 (** 심판을 실행하지 않는 typed 사유. *)
 type skip_reason =
   | No_panel_answers of { total : int }
+  | Quorum_shortfall of
+      { answered : int  (** 실제로 응답한 패널 수 *)
+      ; required : int  (** preset.min_answered 요구치 *)
+      }
+      (** 응답은 있으나 런타임 quorum(min_answered) 미달 — N-of-M 정책.
+          전멸([No_panel_answers])과 구분되는 사유다. *)
 [@@deriving yojson, show, eq]
 
 val render_skip_reason : skip_reason -> string
 (** Operator/log boundary renderer for {!skip_reason}. *)
+
+(** judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
+    응답 0이면 [Some (No_panel_answers _)], 0 < 응답 < [min_answered]면
+    [Some (Quorum_shortfall _)], 응답 >= [min_answered]면 [None] = judge 진행.
+    [min_answered] 기본값(1)에서는 "응답 0일 때만 skip"으로 강제 전 동작과 동일.
+    순수 — 테스트 가능. *)
+val judge_skip_reason :
+  panel:panel_outcome list -> min_answered:int -> skip_reason option
 
 val no_panel_answers_error : string
 (** Legacy canonical string for callers that still need the pre-quorum

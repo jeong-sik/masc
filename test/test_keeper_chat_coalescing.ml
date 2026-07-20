@@ -425,7 +425,10 @@ let test_transition_observer_outside_lock_exactly_once () =
   Keeper_chat_queue.set_transition_observer
     (Some (fun ~keeper_name ~revision:_ ->
        incr calls;
-       match Keeper_chat_queue.pending_count ~keeper_name with
+       (* has_active_receipts takes the same entry lock the removed
+          pending_count probe took — the re-entrancy invariant is what
+          this test pins, not the count itself. *)
+       match Keeper_chat_queue.has_active_receipts ~keeper_name with
        | Ok _ -> nested_read_succeeded := true
        | Error _ -> ()));
   let receipt_id = Keeper_chat_queue.Receipt_id.generate () in

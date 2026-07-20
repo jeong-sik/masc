@@ -387,10 +387,11 @@ let run_plan
 
 type candidate =
   { runtime_id : string
+  ; lane_id : string option
   ; provider_cfg : Llm_provider.Provider_config.t
   }
 
-let eligible_candidate ~keeper_name (runtime : Runtime.t) =
+let eligible_candidate ~keeper_name ~lane_id (runtime : Runtime.t) =
   let runtime_id = runtime.Runtime.id in
   let provider_cfg = runtime.Runtime.provider_config in
   (* #25266: a provider is eligible when it can enforce the schema (strict
@@ -409,10 +410,10 @@ let eligible_candidate ~keeper_name (runtime : Runtime.t) =
        the compaction plan schema nor json mode"
       runtime_id;
     None)
-  else Some { runtime_id; provider_cfg }
+  else Some { runtime_id; lane_id; provider_cfg }
 
 let candidates_for_assignment ~keeper_name assignment_id =
-  let rec resolve_lane acc = function
+  let rec resolve_lane ~lane_id acc = function
     | [] -> Some (List.rev acc)
     | runtime_id :: rest ->
       (match Runtime.get_runtime_by_id runtime_id with
@@ -423,11 +424,11 @@ let candidates_for_assignment ~keeper_name assignment_id =
          None
        | Some runtime ->
          let acc =
-           match eligible_candidate ~keeper_name runtime with
+           match eligible_candidate ~keeper_name ~lane_id:(Some lane_id) runtime with
            | None -> acc
            | Some candidate -> candidate :: acc
          in
-         resolve_lane acc rest)
+         resolve_lane ~lane_id acc rest)
   in
   match Runtime.resolve_assignment assignment_id with
   | `Missing ->
@@ -436,9 +437,14 @@ let candidates_for_assignment ~keeper_name assignment_id =
       assignment_id;
     None
   | `Single_runtime runtime ->
-    Some (Option.to_list (eligible_candidate ~keeper_name runtime))
+    Some (Option.to_list (eligible_candidate ~keeper_name ~lane_id:None runtime))
   | `Lane lane ->
-    resolve_lane [] (Runtime_lane.ordered_candidates lane)
+    (* Sticky failover: start from the last-good lane candidate when one is
+       remembered, keeping the declared order for the rest. *)
+    let lane_id = Runtime_lane.id lane in
+    resolve_lane ~lane_id []
+      (Runtime_lane_preference.prefer_order ~lane_id
+         (Runtime_lane.ordered_candidates lane))
 
 (* Collapse duplicate runtime ids while keeping the first (highest-priority)
    occurrence, so a seed assignment that resolves to the same runtime as a
@@ -506,6 +512,13 @@ let make_resolved ?complete ~(runtime_ids : string list) ~(keeper_name : string)
                     ~provider_cfg:candidate.provider_cfg ~units ()
                 with
                 | Ok _ as plan ->
+                  (* Sticky failover: remember the winning candidate for the
+                     lane it came from, if any. *)
+                  (match candidate.lane_id with
+                   | Some lane_id ->
+                     Runtime_lane_preference.note_success ~lane_id
+                       ~candidate:candidate.runtime_id
+                   | None -> ());
                   Log.Keeper.info ~keeper_name
                     "compaction LLM candidate succeeded assignments=%s runtime=%s"
                     assignments_label candidate.runtime_id;

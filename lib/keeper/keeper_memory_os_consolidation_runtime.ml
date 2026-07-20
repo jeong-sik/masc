@@ -39,6 +39,7 @@ type outcome =
       { before : int
       ; after : int
       }
+  | Plan_rejected_total_deletion of { before : int }
 
 (* Serialize only the final snapshot validation + rewrite against the per-keeper
    facts file. The provider call runs without this lock, then the locked rewrite
@@ -190,7 +191,19 @@ let consolidate_keeper
                 let plan = Consolidation.plan_of_json json in
                 let survivors = Consolidation.apply_plan ~now ~facts plan in
                 let after = List.length survivors in
-                if dry_run
+                (* [before > 0] is guaranteed by the [Skipped_too_few] guard above,
+                   so [after = 0] here means the plan asked to erase the store. A
+                   plan that keeps nothing is treated as a malformed response, not
+                   as judgement: the store is the keeper's only durable memory and
+                   [rewrite_facts_atomically] renames over the sole copy, so the
+                   rows are unrecoverable. A truncated response that loses its
+                   [groups] array while retaining [drop_indices] produces exactly
+                   this shape. Only total erasure is refused — a large deletion
+                   over a mostly redundant store is a legitimate outcome, so no
+                   ratio or floor is imposed on [after > 0]. *)
+                if after = 0
+                then Plan_rejected_total_deletion { before }
+                else if dry_run
                 then Consolidated { before; after }
                 else
                   rewrite_if_snapshot_current

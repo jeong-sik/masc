@@ -69,6 +69,8 @@ class DeadExport(TypedDict):
     name: str
     module: str
     mli: str
+    # Facades republishing this module's whole signature; empty when none do.
+    reexported_by: list[str]
 
 
 def is_skipped(rel: Path) -> bool:
@@ -184,6 +186,7 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
         for token in set(TOKEN_RE.findall(text)) & wanted:
             seen[token].add(path)
 
+    republished = reexporting_modules(root)
     dead: list[DeadExport] = []
     for name, declared in owners.items():
         if len(declared) > 1:
@@ -194,8 +197,54 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
         pair = {mli, mli.with_suffix(".ml")}
         if seen.get(name, set()) - pair:
             continue
-        dead.append({"name": name, "module": module, "mli": str(mli.relative_to(root))})
+        dead.append({
+            "name": name,
+            "module": module,
+            "mli": str(mli.relative_to(root)),
+            "reexported_by": sorted(republished.get(module, [])),
+        })
     return sorted(dead, key=lambda d: (d["module"], d["name"]))
+
+
+def reexporting_modules(root: Path) -> dict[str, list[str]]:
+    """Module -> the modules that republish its whole signature.
+
+    Three shapes republish a module wholesale without ever naming the values
+    they carry, so a token scan cannot see them:
+
+        include module type of Foo          (in a .mli)
+        module Bar = Foo                    (in a .mli -- a signature alias)
+        include Foo                         (in a .ml, when the .mli also
+                                             republishes the signature)
+
+    Adversarial review of an earlier run of this audit found every one of its
+    28 false positives here: values with no call site anywhere, still exposed
+    through a facade's published signature. Deleting one of those means editing
+    the facade too, which makes it a different change from deleting a value
+    nothing can reach.
+    """
+    by_source: dict[str, list[str]] = defaultdict(list)
+    patterns = (
+        re.compile(r"include\s+module\s+type\s+of\s+(?:struct\s+include\s+)?([A-Z][A-Za-z0-9_]*)"),
+        re.compile(r"^\s*module\s+[A-Z][A-Za-z0-9_]*\s*=\s*([A-Z][A-Za-z0-9_]*)\s*$", re.M),
+        re.compile(r"^\s*include\s+([A-Z][A-Za-z0-9_]*)\s*$", re.M),
+    )
+    for base in SOURCE_ROOTS:
+        directory = root / base
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.rglob("*.ml*")):
+            if path.suffix not in (".ml", ".mli") or is_skipped(path.relative_to(root)):
+                continue
+            text = read_text(path)
+            facade = path.stem
+            for pattern in patterns:
+                for match in pattern.finditer(text):
+                    source = match.group(1)
+                    source_module = source[0].lower() + source[1:]
+                    if source_module != facade and facade not in by_source[source_module]:
+                        by_source[source_module].append(facade)
+    return dict(by_source)
 
 
 def find_orphan_stanzas(root: Path) -> list[str]:
@@ -258,6 +307,21 @@ def run_self_test() -> int:
         if "used_entry_helper" in dead_exports:
             failures.append("token reference from a test not counted")
 
+        # A value republished through a facade's signature must be flagged as
+        # such: nothing calls it, but deleting it means editing the facade.
+        (root / "lib" / "leaf_surface.mli").write_text("val republished_helper : unit -> int\n")
+        (root / "lib" / "leaf_surface.ml").write_text("let republished_helper () = 0\n")
+        (root / "lib" / "facade_surface.ml").write_text("include Leaf_surface\n")
+        (root / "lib" / "facade_surface.mli").write_text(
+            "include module type of Leaf_surface\n"
+        )
+        entries = {d["name"]: d for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
+        republished = entries.get("republished_helper")
+        if republished is None:
+            failures.append("value behind a facade not reported at all")
+        elif not republished.get("reexported_by"):
+            failures.append("facade re-export not recorded on the finding")
+
     for failure in failures:
         print(f"self-test FAIL: {failure}", file=sys.stderr)
     if failures:
@@ -304,10 +368,14 @@ def main(argv: list[str]) -> int:
         for entry in dead_exports:
             per_module[entry["module"]] += 1
         payload["dead_exports"] = dead_exports
+        behind_facade = [d for d in dead_exports if d.get("reexported_by")]
         if not args.json:
             print(f"dead exports: {len(dead_exports)} "
                   f"across {len(per_module)} modules "
                   f"(names >= {args.min_name_len} chars)")
+            print(f"  directly removable: {len(dead_exports) - len(behind_facade)}")
+            print(f"  behind a facade re-export (needs the facade edited too): "
+                  f"{len(behind_facade)}")
             for module, count in sorted(per_module.items(), key=lambda kv: (-kv[1], kv[0]))[:40]:
                 print(f"  {count:4d}  {module}")
     if args.stanzas:

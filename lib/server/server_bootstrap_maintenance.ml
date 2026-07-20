@@ -150,6 +150,15 @@ let run_memory_os_consolidation_tick
           keeper_id
           before
           after
+      | Plan_rejected_total_deletion { before } ->
+        (* Warn, not info: the store survived, but the model asked to erase it.
+           A recurring rejection for one keeper means its plans are malformed
+           (truncation is the likely cause), which info-level volume would bury. *)
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s plan_rejected_total_deletion \
+           before=%d"
+          keeper_id
+          before
       | Skipped_too_few n ->
         Log.Server.info
           "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"

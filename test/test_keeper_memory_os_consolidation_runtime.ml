@@ -145,6 +145,89 @@ let test_consolidate_applies_plan () =
           claims))))
 ;;
 
+(* A plan whose drop_indices cover every row is refused and the store is left
+   byte-for-byte intact. This is the shape a truncated response takes when its
+   groups array is lost but drop_indices survives. *)
+let test_consolidate_rejects_total_deletion () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "deploy uses blue-green"
+          ; fact "build runs on dune 3.x"
+          ; fact "tests live under test/"
+          ];
+        let plan = {|{"groups":[],"drop_indices":[0,1,2]}|} in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete plan)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Plan_rejected_total_deletion { before } ->
+           Alcotest.(check int) "before" 3 before
+         | _ -> Alcotest.fail "expected Plan_rejected_total_deletion");
+        let claims =
+          Io.read_facts_all ~keeper_id
+          |> List.map (fun f -> f.Types.claim)
+          |> List.sort String.compare
+        in
+        Alcotest.(check (list string))
+          "store untouched"
+          [ "build runs on dune 3.x"; "deploy uses blue-green"; "tests live under test/" ]
+          claims))))
+;;
+
+(* Counterpart to the guard: dropping all but one row is a legitimate outcome for
+   a store of near-duplicates and must still be applied. The guard refuses total
+   erasure only — it is not a ratio floor. *)
+let test_consolidate_allows_large_deletion () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "keeper is idle"
+          ; fact "keeper is idle this turn"
+          ; fact "no actionable signal"
+          ; fact "nothing actionable detected"
+          ];
+        let plan = {|{"groups":[],"drop_indices":[1,2,3]}|} in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete plan)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Consolidated { before; after } ->
+           Alcotest.(check int) "before" 4 before;
+           Alcotest.(check int) "after (3 of 4 dropped)" 1 after
+         | _ -> Alcotest.fail "expected Consolidated");
+        Alcotest.(check (list string))
+          "sole survivor persisted"
+          [ "keeper is idle" ]
+          (Io.read_facts_all ~keeper_id |> List.map (fun f -> f.Types.claim))))))
+;;
+
 let test_consolidate_judges_single_fact () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -552,6 +635,14 @@ let () =
     [ ( "loop"
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "judges a single fact" `Quick test_consolidate_judges_single_fact
+        ; Alcotest.test_case
+            "rejects a plan that deletes every fact"
+            `Quick
+            test_consolidate_rejects_total_deletion
+        ; Alcotest.test_case
+            "applies a large but partial deletion"
+            `Quick
+            test_consolidate_allows_large_deletion
 	        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
         ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
         ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store

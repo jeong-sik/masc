@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.217.1` to `v0.217.2` (`0fa8083b`). Single upstream change: `reasoning_replay_dropped` is logged at Info instead of Warn (oas#2721), removing ~973 expected WARN lines/day on thinking-model replay drops. No public surface change (fingerprint metadata refresh only).
+
 ## [0.21.1] - 2026-07-20
 
 ### Changed

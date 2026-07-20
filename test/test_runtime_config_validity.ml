@@ -1983,6 +1983,164 @@ let test_structured_judge_runtime_routing () =
            (Fs_compat.load_file path)
            "structured_judge"))
 
+(* #25394 slice 1: [runtime].structured_judge / .cross_verifier accept a
+   [runtime.lanes] id. The capability contract extends to every candidate
+   (the turn-driver lane walk does not re-filter by capability), and
+   validation follows [resolve_assignment]'s lane-over-runtime precedence. *)
+let judge_lane_base =
+  "[providers.local]\n\
+   display-name = \"Local\"\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://localhost:11434\"\n\
+   \n\
+   [models.chat]\n\
+   api-name = \"chat\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge]\n\
+   api-name = \"judge\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge.capabilities]\n\
+   supports-response-format-json = true\n\
+   supports-structured-output = true\n\
+   \n\
+   [models.judge2]\n\
+   api-name = \"judge2\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.judge2.capabilities]\n\
+   supports-response-format-json = true\n\
+   supports-structured-output = true\n\
+   \n\
+   [models.jsononly]\n\
+   api-name = \"jsononly\"\n\
+   max-context = 1024\n\
+   \n\
+   [models.jsononly.capabilities]\n\
+   supports-response-format-json = true\n\
+   supports-structured-output = false\n\
+   \n\
+   [local.chat]\n\
+   \n\
+   [local.judge]\n\
+   \n\
+   [local.judge2]\n\
+   \n\
+   [local.jsononly]\n\
+   \n\
+   [runtime]\n\
+   default = \"local.chat\"\n"
+
+let test_structured_judge_lane_target () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let capable_lane =
+    judge_lane_base
+    ^ "structured_judge = \"judges\"\n\
+       \n\
+       [runtime.lanes.judges]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.judge\", \"local.judge2\"]\n"
+  in
+  with_temp_runtime_toml capable_lane (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _, _, lanes) ->
+      check
+        (option string)
+        "structured_judge keeps the lane id"
+        (Some "judges")
+        structured_judge;
+      check bool "judges lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "judges")
+           lanes));
+  let incapable_candidate_lane =
+    judge_lane_base
+    ^ "structured_judge = \"judges\"\n\
+       \n\
+       [runtime.lanes.judges]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.judge\", \"local.jsononly\"]\n"
+  in
+  with_temp_runtime_toml incapable_candidate_lane (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ ->
+      failf
+        "structured_judge lane with a candidate lacking structured output must \
+         be rejected"
+    | Error msg ->
+      check bool "error names the route" true
+        (String_util.contains_substring msg "structured_judge");
+      check bool "error names the incapable candidate" true
+        (String_util.contains_substring msg "local.jsononly");
+      check bool "error names the missing capability" true
+        (String_util.contains_substring msg "supports-structured-output"))
+
+(* A lane that shadows a capable runtime id must be validated as the lane:
+   [resolve_assignment] hands consumers the lane, so validating the shadowed
+   runtime would approve a target the consumer never uses. *)
+let test_structured_judge_lane_shadow_precedence () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let shadowing_lane =
+    judge_lane_base
+    ^ "structured_judge = \"local.judge\"\n\
+       \n\
+       [runtime.lanes.\"local.judge\"]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.jsononly\"]\n"
+  in
+  with_temp_runtime_toml shadowing_lane (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ ->
+      failf
+        "structured_judge naming a lane that shadows a capable runtime must \
+         be judged as the lane (incapable candidate rejected)"
+    | Error msg ->
+      check bool "error names the incapable shadow candidate" true
+        (String_util.contains_substring msg "local.jsononly"))
+
+let test_cross_verifier_lane_target () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let json_capable_lane =
+    judge_lane_base
+    ^ "cross_verifier = \"verifiers\"\n\
+       \n\
+       [runtime.lanes.verifiers]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.judge\", \"local.jsononly\"]\n"
+  in
+  with_temp_runtime_toml json_capable_lane (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
+    | Ok (_, _, _, _, _, _, cross_verifier, _, _) ->
+      check
+        (option string)
+        "cross_verifier keeps the lane id"
+        (Some "verifiers")
+        cross_verifier);
+  let json_incapable_lane =
+    judge_lane_base
+    ^ "cross_verifier = \"verifiers\"\n\
+       \n\
+       [runtime.lanes.verifiers]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.judge\", \"local.chat\"]\n"
+  in
+  with_temp_runtime_toml json_incapable_lane (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ ->
+      failf
+        "cross_verifier lane with a candidate lacking JSON mode must be \
+         rejected"
+    | Error msg ->
+      check bool "error names the route" true
+        (String_util.contains_substring msg "cross_verifier");
+      check bool "error names the incapable candidate" true
+        (String_util.contains_substring msg "local.chat");
+      check bool "error names the missing capability" true
+        (String_util.contains_substring msg "supports-response-format-json"))
+
 let test_hitl_summary_runtime_routing () =
   let base =
     "[providers.local]\n\
@@ -2364,6 +2522,15 @@ let () =
           test_case
             "[runtime].structured_judge resolves and rejects unsupported models"
             `Quick test_structured_judge_runtime_routing;
+          test_case
+            "[runtime].structured_judge accepts capability-complete lanes"
+            `Quick test_structured_judge_lane_target;
+          test_case
+            "[runtime].structured_judge validates shadowing lanes as lanes"
+            `Quick test_structured_judge_lane_shadow_precedence;
+          test_case
+            "[runtime].cross_verifier accepts JSON-capable lanes"
+            `Quick test_cross_verifier_lane_target;
           test_case
             "[runtime].hitl_summary resolves, refreshes, and rejects unknown ids"
             `Quick test_hitl_summary_runtime_routing;

@@ -88,6 +88,13 @@ let public_mcp_surface_tools =
   ; "masc_keeper_waiting_inventory"
   ; "masc_keeper_up"
   ; "masc_keeper_down"
+  ; (* Compaction is the operator's escape hatch for a keeper whose context has
+       outgrown its provider window. It was reachable only from the keeper tool
+       surface, so an operator observing the overflow could not act on it from
+       the MCP front door. [masc_keeper_clear] stays off this surface on
+       purpose: it wipes transcript messages, which is a different decision
+       from asking a keeper to compact. *)
+    "masc_keeper_compact"
   ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
   ; "masc_persona_create"

@@ -1,4 +1,4 @@
-# RFC-0346 — Bounded durable-write wait with typed uncertain-publication escalation (#25398)
+# RFC-0348 — Bounded durable-write wait with typed uncertain-publication escalation (#25398)
 
 - Status: Draft
 - Author: vincent

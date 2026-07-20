@@ -84,6 +84,8 @@ let keeper_runtime_stores =
   ; Keeper_trajectories
   ]
 
+let keeper_reaction_database_filename = "reaction-ledger.sqlite3"
+
 let keeper_runtime_store_dirnames =
   List.map keeper_runtime_store_dirname keeper_runtime_stores
 

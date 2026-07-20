@@ -66,6 +66,10 @@ type keeper_runtime_store =
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
+
+val keeper_reaction_database_filename : string
+(** Canonical per-Keeper SQLite reaction authority filename. *)
+
 val keeper_runtime_store_dirnames : string list
 
 val auth_dir_from_base_path : base_path:string -> string

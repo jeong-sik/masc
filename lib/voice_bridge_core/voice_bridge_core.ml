@@ -454,8 +454,6 @@ let get_voice_for_agent agent_id =
    premade-name compatibility map and rejects arbitrary names before the
    network call. *)
 
-let trim_opt = Env_config_core.trim_opt
-
 let rec find_git_root_from path =
   let git_path = Filename.concat path ".git" in
   if Sys.file_exists git_path then Some path

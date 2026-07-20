@@ -53,8 +53,6 @@ open Result.Syntax
 
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
 
-let trim_opt = Env_config_core.trim_opt
-
 let voice_config_file_in root =
   let masc_dir =
     Workspace_utils.masc_root_dir_from
@@ -108,37 +106,6 @@ let trim_nonempty_json = function
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | _ -> None
-
-let string_list_opt = function
-  | `List items ->
-      let rec loop acc = function
-        | [] -> Some (List.rev acc)
-        | item :: rest -> (
-            match trim_nonempty_json item with
-            | Some value -> loop (value :: acc) rest
-            | None -> None)
-      in
-      loop [] items
-  | `Null -> Some []
-  | _ -> None
-
-let bool_or_default default = function
-  | `Bool value -> value
-  | _ -> default
-
-let int_opt = function
-  | `Int value -> Some value
-  | _ -> None
-
-let float_opt = function
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | _ -> None
-
-let float_or_default default = function
-  | `Float value -> value
-  | `Int value -> float_of_int value
-  | _ -> default
 
 let require_string ~ctx ~field json =
   match Json_util.get_string_nonempty json field with
@@ -517,13 +484,6 @@ let endpoint_public_json (endpoints : endpoint list) =
 
 let active_endpoint_json endpoints =
   endpoint_public_json endpoints
-
-let agent_voices_json config =
-  `List
-    (List.map
-       (fun (agent_id, voice) ->
-         `Assoc [ ("agent_id", `String agent_id); ("voice", `String voice) ])
-       config.tts.agent_voices)
 
 let public_json config =
   Tool_args.ok_assoc

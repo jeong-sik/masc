@@ -301,42 +301,6 @@ let cap_blocker_detail (s : string) : string =
     else truncate ~max_chars:blocker_detail_structured_max_chars s
   else truncate ~max_chars:blocker_detail_narrative_max_chars s
 
-let string_list_of_assoc key json =
-  match Json_field.list json key |> Json_field.to_option with
-  | None -> []
-  | Some values ->
-    values
-    |> List.filter_map (function
-         | `String value -> Some value
-         | _ -> None)
-;;
-
-let provider_rejection_of_json json =
-  let provider_label =
-    Json_field.string json "provider_label" |> Json_field.to_option
-    |> Option.value ~default:""
-  in
-  match Json_field.string json "reason" |> Json_field.to_option with
-  | Some reason -> Some { provider_label; reason }
-  | None -> None
-;;
-
-let provider_rejections_of_assoc key json =
-  match Json_field.list json key |> Json_field.to_option with
-  | None -> []
-  | Some values -> List.filter_map provider_rejection_of_json values
-;;
-
-let provider_rejection_reasons_of_assoc key json =
-  string_list_of_assoc key json
-  |> List.map (fun reason -> { provider_label = ""; reason })
-
-let provider_rejection_reasons rejections =
-  rejections
-  |> List.map (fun r -> String.trim r.reason)
-  |> List.filter (fun reason -> reason <> "")
-  |> Json_util.dedupe_keep_order
-
 let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
@@ -459,11 +423,6 @@ let masc_internal_error_to_json = function
         ("kind", `String "receipt_persistence_failed");
         ("detail", `String detail);
       ]
-
-let summarize_list ?(empty = "none") values =
-  match values with
-  | [] -> empty
-  | _ -> String.concat ", " values
 
 let accept_rejection_summary_max_bytes = 180
 

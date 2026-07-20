@@ -266,6 +266,18 @@ type judge_outcome =
   | Judge_failed of judge_error_node
 [@@deriving yojson, show, eq]
 
+(** One completed panel+judge computation before any Board/chat/wake
+    projection. This is the typed payload stored in the common async request's
+    canonical terminal record; projection failures are outside this record. *)
+type deliberation_evidence =
+  { question : string
+  ; panel : panel_outcome list
+  ; judge : (judge_synthesis, judge_failure) result
+  ; judges : judge_outcome list
+  ; judge_usage : usage
+  }
+[@@deriving yojson, show, eq]
+
 (** {1 트리거} *)
 
 (** fusion 발동 사유 — 게이트 입력(이유 라벨). catch-all 없음.

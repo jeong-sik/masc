@@ -654,17 +654,12 @@
   test_board_rest_routes
   test_board_context_inference_resolution)
  (libraries
-  masc_test_deps
-  masc.keeper_chat_delivery_identity
-  masc_schedule
-  multimodal
-  bigstringaf
-  masc.keeper_checkpoint_ref))
+  masc_test_deps masc.keeper_chat_delivery_identity masc_schedule multimodal
+  bigstringaf masc.keeper_checkpoint_ref))
 
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test
 ; group above.
-
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
@@ -709,11 +704,7 @@
  (name test_keeper_memory_os_generation_base_path)
  (modules test_keeper_memory_os_generation_base_path)
  (libraries masc_test_deps)
- (action
-  (setenv
-   MASC_CONFIG_DIR
-   ""
-   (run %{test}))))
+ (action (setenv MASC_CONFIG_DIR "" (run %{test}))))
 
 (test
  (name test_oas_canonical_delegation)
@@ -744,12 +735,7 @@
 (test
  (name test_fusion_delivery_obligation)
  (modules test_fusion_delivery_obligation)
- (libraries
-  alcotest
-  masc_test_deps
-  masc
-  masc.fusion_core
-  masc.keeper_runtime))
+ (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
 
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
@@ -1269,15 +1255,7 @@
 (test
  (name test_server_auth_dashboard_actor_resolution)
  (modules test_server_auth_dashboard_actor_resolution)
- (libraries
-  alcotest
-  masc
-  masc.auth
-  masc.masc_types
-  masc_server
-  eio_main
-  httpun
-  unix))
+ (libraries alcotest masc masc.auth masc.masc_types masc_server eio_main httpun unix))
 
 ; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
 ; into reload chat blocks (image / voice / attach) via the content-addressed store.
@@ -1646,7 +1624,6 @@
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
-
 (include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
@@ -1812,17 +1789,24 @@
 
 (include stanzas/test_goal_phase_all.inc)
 
+
+
+
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)
 
+
 (include stanzas/test_bind_required_guard_counter.inc)
+
 
 (include stanzas/test_k2_pipeline_e2e.inc)
 
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 
+
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
+
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)
 
@@ -1836,6 +1820,8 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 
+
+
 (include stanzas/test_keeper_context_isolation.inc)
 
 (include stanzas/test_keeper_turn_up_args.inc)
@@ -1847,6 +1833,7 @@
 (include stanzas/test_keeper_tool_name.inc)
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
+
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -1896,6 +1883,8 @@
 
 (include stanzas/test_keeper_mutex_coverage.inc)
 
+
+
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
@@ -1928,16 +1917,19 @@
 
 (include stanzas/test_keeper_tool_matrix.inc)
 
+
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
+
 (include stanzas/test_keeper_task_outcomes.inc)
+
+
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
 
 (include stanzas/test_keeper_transition_audit_types.inc)
 
 (include stanzas/test_keeper_path_rejection.inc)
-
 (include stanzas/test_keeper_path_containment_objective.inc)
 
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
@@ -1962,6 +1954,7 @@
 
 (include stanzas/test_runtime_oas_eio_context_classify.inc)
 
+
 (include stanzas/test_runtime_model_temperature_toml.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)
@@ -1972,7 +1965,9 @@
 
 (include stanzas/test_mcp_tool_matrix.inc)
 
+
 (include stanzas/test_normalized_actor.inc)
+
 
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
@@ -2008,7 +2003,9 @@
 
 (include stanzas/test_pr_open_script.inc)
 
+
 (include stanzas/test_release_train_guard_script.inc)
+
 
 (include stanzas/test_server_state_product.inc)
 
@@ -2438,6 +2435,7 @@
    (run %{test})))
  (libraries masc_test_deps))
 
+
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
 (include stanzas/test_keeper_meta_canonicalize.inc)
@@ -2497,15 +2495,9 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
-
 (include stanzas/test_keeper_turn_attempt_observer.inc)
-
 (include stanzas/test_keeper_gate_effect_coverage.inc)
-
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)
-
 (include stanzas/test_fs_compat_capability_write.inc)
-
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
-
 (include stanzas/test_eio_resource_scope.inc)

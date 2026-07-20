@@ -131,6 +131,38 @@ let test_clean_history_passes_both_gates () =
   | Error _ -> Alcotest.fail "clean history must partition"
 ;;
 
+(* The over-rejection guard. A turn that has issued a tool_use and not yet
+   received its result is the NORMAL mid-turn shape, not a break: [validate]
+   accepts a trailing open cycle (partition's [| [] ->] arm returns [Ok]
+   regardless of an open cycle). If that ever changed, the gate added to
+   [Keeper_compact_policy.requested_messages] would start refusing ordinary
+   histories and compaction would stop fleet-wide — a far worse failure than
+   the cost bleed the gate exists to stop. This is the single most important
+   case in this file. *)
+let test_trailing_open_cycle_is_not_a_break () =
+  let trailing_open =
+    [ text T.System "system preamble"
+    ; text T.User "first question"
+    ; message T.Assistant [ use "call-closed" ]
+    ; message T.Tool [ result "call-closed" ]
+    ; text T.Assistant "answered"
+    ; text T.User "second question"
+    ; message T.Assistant [ use "call-still-open" ]
+    ]
+  in
+  Alcotest.(check bool)
+    "persist gate accepts a history whose last tool cycle is still open"
+    true
+    (Result.is_ok (U.validate trailing_open));
+  match U.partition ~quarantine:true trailing_open with
+  | Ok partitioned ->
+    Alcotest.(check bool)
+      "an in-flight turn still yields a compactable prefix"
+      true
+      (partitioned.closed_prefix <> [])
+  | Error _ -> Alcotest.fail "a trailing open cycle must not fail partition"
+;;
+
 let () =
   Alcotest.run
     "keeper_compaction_persist_gate"
@@ -147,6 +179,10 @@ let () =
             "clean history passes both gates"
             `Quick
             test_clean_history_passes_both_gates
+        ; Alcotest.test_case
+            "trailing open cycle is not a break"
+            `Quick
+            test_trailing_open_cycle_is_not_a_break
         ] )
     ]
 ;;

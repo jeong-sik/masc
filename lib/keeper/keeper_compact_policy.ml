@@ -284,12 +284,38 @@ let requested_messages (meta : keeper_meta) messages =
        [protected_suffix], that break is carried into the compacted checkpoint
        and rejected there — after the summarizer call has already been paid
        for. [validate messages] failing therefore implies the compacted result
-       fails too, so rejecting here loses no reachable compaction and returns
-       the identical typed terminal the persist boundary would have produced.
+       fails too, so rejecting here refuses no compaction that could have
+       persisted.
 
-       This bounds cost only. It does not make a structurally broken history
-       compactable: the break has to be prevented at the write boundary that
-       admitted a tool_use with no matching tool_result. *)
+       The observable outcome is deliberately NOT identical to the late
+       failure, and the difference is the point:
+
+       - Late: [commit_prepared_compaction] returns [Error], which
+         [Keeper_manual_compaction.run_commit] folds into its catch-all
+         [Error (Recovery _)] -> [Manual_compaction_failed] -> [Requeue
+         Context_compaction_retry]. That settlement is not an ack
+         (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
+         every cycle — one summarizer call each time. This is the live
+         livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
+         after the #25413 build went live.
+       - Early: the typed [No_compaction] arm of
+         [Keeper_manual_compaction.finish_preparation] acks and settles
+         terminally, with a ledger row and a [compaction_rejected] log line.
+
+       Terminating is correct here because [validate] rejection is monotone
+       under append: appending messages never repairs an existing structural
+       break, so retrying the identical source cannot succeed.
+
+       Because this gate precedes summarizer selection, a keeper with BOTH a
+       broken history and an unavailable summarizer now reports
+       [Invalid_structure] (terminal) rather than [Summarizer_unavailable]
+       (retryable). That ordering is intended: the structural break is the
+       condition that no retry can clear.
+
+       Scope: this stops the retry loop and its cost. It does not make a
+       structurally broken history compactable — the break has to be prevented
+       at the write boundary that admitted a tool_use with no matching
+       tool_result (#25443). *)
     (match Keeper_compaction_unit.validate messages with
      | Error error -> Error (Invalid_structure error)
      | Ok () ->

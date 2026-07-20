@@ -93,6 +93,28 @@ let only_jsonl_row path =
   | _ -> Alcotest.failf "expected one memory row, got %d" (List.length rows)
 ;;
 
+let count_jsonl_rows path =
+  if not (Sys.file_exists path)
+  then 0
+  else
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.length
+;;
+
+(* No Unix.unsetenv in the stdlib; restore the prior value, or "true"
+   (the flag's default) when it was unset — behaviourally equivalent for the
+   other tests, which all expect bank writes enabled. *)
+let with_bank_write_disabled f =
+  let key = "MASC_KEEPER_MEMORY_BANK_WRITE" in
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key "false";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value prev ~default:"true"))
+    f
+;;
+
 let test_validation_taxonomy () =
   Runtime.validate_memory_write_args
     (make_args ~kind:"bogus" ~title:"" ~content:"body")
@@ -199,6 +221,39 @@ let test_source_round_trip () =
     (Bank.memory_row_source_of_string wire = source)
 ;;
 
+(* RFC keeper-memory-bank-write-reduction: the MASC_KEEPER_MEMORY_BANK_WRITE
+   kill-switch. When off, a valid explicit note is not persisted and reports
+   [Skipped_bank_writes_disabled]; when on (default), it persists. Counterfactual:
+   without the gate the disabled case would append a row and return [Persisted]. *)
+let test_bank_write_kill_switch () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "bank-write-gate" in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let write () =
+    Bank.append_explicit_memory_note
+      config
+      meta
+      ~turn:7
+      ~kind:Bank.Decision
+      ~text:"Release task-1851 due to the HITL approval loop blocking evidence"
+  in
+  with_bank_write_disabled (fun () ->
+    match write () with
+    | Ok Bank.Skipped_bank_writes_disabled -> ()
+    | Ok Bank.Persisted ->
+      Alcotest.fail "kill-switch off must skip the write, not persist"
+    | Error _ -> Alcotest.fail "a valid note under the kill-switch must not error");
+  Alcotest.(check int) "nothing persisted while disabled" 0 (count_jsonl_rows path);
+  (match write () with
+   | Ok Bank.Persisted -> ()
+   | Ok Bank.Skipped_bank_writes_disabled ->
+     Alcotest.fail "with the kill-switch restored (default on) the note must persist"
+   | Error _ -> Alcotest.fail "enabled write must not error");
+  Alcotest.(check int) "one row persisted once re-enabled" 1 (count_jsonl_rows path)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -219,6 +274,10 @@ let () =
             `Quick
             test_tool_write_persists_typed_provenance
         ; Alcotest.test_case "source round trips" `Quick test_source_round_trip
+        ; Alcotest.test_case
+            "bank write kill-switch skips and reports"
+            `Quick
+            test_bank_write_kill_switch
         ] )
     ]
 ;;

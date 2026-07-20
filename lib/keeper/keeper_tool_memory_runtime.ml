@@ -683,13 +683,26 @@ let keeper_memory_write_with_outcome
          ~ok:false
          ~error_kind:Persistence_failed
          [ "detail", `String detail ]
-     | Ok () ->
+     | Ok Keeper_memory_bank.Persisted ->
       let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
       respond
         ~ok:true
         ~error_kind:No_memory_write_error
         [ "rows_written", `Int 1
+        ; "outcome", `String "persisted"
         ; "kinds_written", `List [ `String kind_wire ]
+        ; "kind", `String kind_wire
+        ]
+     | Ok Keeper_memory_bank.Skipped_bank_writes_disabled ->
+      (* The memory-bank write kill-switch is off. Report accurately (0 rows,
+         not saved) rather than presenting the note as persisted — the caller
+         must not treat a skipped write as saved (spec/12 §Write Contract). *)
+      let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
+      respond
+        ~ok:true
+        ~error_kind:No_memory_write_error
+        [ "rows_written", `Int 0
+        ; "outcome", `String "skipped_bank_writes_disabled"
         ; "kind", `String kind_wire
         ])
 ;;

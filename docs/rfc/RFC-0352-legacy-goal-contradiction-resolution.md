@@ -1,6 +1,7 @@
 # RFC-0352 — Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청)
 
-- Status: **Draft — Decision-required (owner)**
+- Status: **Accepted — Path B (오너 결정 2026-07-21)**
+- Decision: §4의 1문항에 오너가 **(a) Goal은 1급 엔티티** 로 답함 → Path B 채택. RFC-0000 §3.2 카드 재작성·§11 D10 DECIDED 처리는 본 RFC와 같은 PR에서 집행됨.
 - Date: 2026-07-21
 - Evidence: 2026-07-21 dead-surface 적대적 감사 (`~/me/reports/masc-oas-dead-surface-adversarial-audit-2026-07-21.md`, 판정 4건: `retired/legacy-goal-*` 전부 **ALIVE**, `spec-map/goal-loop-spec-self-conflict` **ALIVE**)
 - Blocks: goal 일가족 정리 (감사 Tier B 최대 항목, 합계 ~13k LoC 규모)
@@ -46,11 +47,16 @@ git 이력: 2026-07-08 이후 `lib/goal`·goal-loop 표면의 커밋은 전부 p
 - **작업**: MCP tool 3종 + tool schema + dispatch 행 제거 → dashboard/서버 goal-loop 표면 제거 → `active_goal_ids` decode path 제거(~60파일) → `lib/goal` 삭제 + dune 6곳 → RFC-0111/0067/0267 Superseded 처리. 스택 PR 4~6개, 예상 순삭제 ~13k LoC.
 - **장점**: 로드맵 §3.2·Non-Goals(AutoGPT식 goal-decomposition 거부)와 정합. 유지보수 표면 대폭 축소. keeper meta 계약 단순화.
 - **단점/리스크**: 제품 스펙의 "Goal/Task 약한 결합"을 재해석해야 함 — Task 단독으로 충분한지 오너 판단 필요. `workspace_goal_index.ml`(RFC-0267 goal→task 투영)의 재배치 또는 동반 삭제. 퇴역 데이터(persisted goal rows)는 acceptance대로 migration 없이 버려짐.
-- **전제 갱신 문서**: RFC-0000 §3.15 표에서 goal 행 제거, §3.2 acceptance를 done으로, RFC-0111/0067/0267 Superseded, sse_event goal_loop 이벤트 타입(RFC-0291 closed sum), docs/GOAL-LOOP-* 2종, DASHBOARD-INTEGRATION.md, README(+ko) 로드맵 행.
+- **전제 갱신 문서**: RFC-0000 §3.15 표에서 goal 행 제거, §3.2 acceptance를 done으로, RFC-0111/0067/0267 Superseded, ~~sse_event goal_loop 이벤트 타입(RFC-0291 closed sum)~~ (정정 2026-07-21: `goal_loop_status`는 atd closed sum에 없음 — `broadcast.ml:27` 문자열 상수 + WS 브릿지로만 존재), docs/GOAL-LOOP-* 2종, DASHBOARD-INTEGRATION.md, README(+ko) 로드맵 행.
 
-### Path B — §3.2 개정: 현 Goal을 인정하고 legacy 기계만 절제
+### Path B — §3.2 개정: 현 Goal을 인정하고 legacy 기계만 절제 **[채택됨]**
 
 - **작업**: §3.2를 "Legacy goal-FSM 기계(stagnation counter, goal-loop OODA scheduler/status, legacy-status decode)만 RETIRED, Goal 엔티티+MCP tool+task 링키지는 KEEP"으로 재작성. legacy decode(`goal_store.ml:136-165`)를 typed 마이그레이션으로 정리하거나 명시 보존 결정. goal-loop dashboard 표면은 별도 keep/kill 판정.
+- **경계선 (모순 재발 방지의 핵심 — §1.3 Non-Goals와의 선)**:
+  - **KEEP = 엔티티와 수동 경로**: `goal_store.ml` SSOT(CRUD/persist), `goal_phase.ml` FSM 타입과 전이 검증 — `decide_transition` 소비자는 정확히 2곳(`workspace_goals.ml:328` 수동 tool 전이, `dashboard_goals_types_health.ml:51` 엔티티 건강도)이고 goal-loop 표면은 이 FSM을 참조하지 않는다(fresh grep 2026-07-21). MCP tool 3종 디스패치(`tool_workspace.ml:677-679` dispatch_bindings SSOT — HTTP·keeper 경로가 같은 테이블 공유), `workspace_goal_index.ml`(RFC-0267 goal→task 투영, `goal_store.ml:420` delete cascade 배선), keeper meta `active_goal_ids` typed 필드, dashboard `/goals` 엔티티 계열 라우트와 `dashboard/src/components/goals/` 표면. **`stagnation_seconds`도 KEEP** — 독립 "stagnation counter" 기계는 실존하지 않고, 실체는 /goals 트리 노드의 파생 표시 필드(`dashboard_goals_types_builder.ml:128`, now−last_activity; `stagnation_threshold` grep 0건). otel "Goal-loop Observe" 메트릭(`otel_metric_names.mli`)도 죽은 producer가 아니라 살아있는 keeper completion-contract loop detector가 방출하므로 KEEP(rename만 별도 DECIDE).
+  - **RETIRE = goal-loop OODA 기계 (dead-projection)**: 서버 부트의 refresh loop(`server_runtime_bootstrap.ml:1391-1394`), `/api/v1/dashboard/goal-loop/status` 라우트(`server_routes_http_routes_dashboard.ml:644-647`), broadcast 모듈(`lib/server/server_dashboard_http_goal_loop_broadcast.{ml,mli}` 158 LoC)과 projection(`lib/dashboard/dashboard_goal_loop.{ml,mli}` 114 LoC)+테스트 111, dashboard TS 표면 8파일 1,308 LoC(goal-loop-panel 614 등), WS 브릿지 1줄(`server_mcp_transport_ws.ml:423-424` "goal_loop_status"→"goals" — 이 줄만 끊으면 엔티티 슬라이스 무영향), composite 임베드(`server_dashboard_http.ml:603-610,872-883`). **out-of-process OODA producer는 #25477이 이미 삭제**했으므로 이 표면 전부가 아무도 생성하지 않는 파일을 읽는 dead-projection이다(`dashboard_goal_loop.ml:52-62` 상시 fallback) — 절제는 동작 제거가 아니라 죽은 코드 정리다. 판별 기준: **사람/Keeper의 tool 호출 없이 Goal 상태를 읽고 행동을 유발하는 모든 경로**. 참고: goal-loop의 observe/orient/... "phase"는 `Goal_phase.t`와 무관한 외부 JSON 문자열 필드(동명이인)였다.
+  - **판별 규칙**: 새 코드가 Goal을 "tool 호출의 인자/결과"로 다루면 KEEP 측, "스케줄러/루프의 입력"으로 다루면 RETIRE 측이다. 이 규칙이 §1.3 Non-Goals(AutoGPT식 goal-decomposition 차단)의 집행 형태다.
+- **절제 슬라이스 (구현 PR 순서)** (RETIRE 총량 ≈ OCaml 383 + TS 1,308 LoC + 임베드 ~30줄; scripts 4,844는 #25477로 삭제 완료): 1) legacy-status decode 정리(`goal_store.ml:136-165` read-path 추론, `:181` write 이중화, `:197-212` bridge, `:227-235` parse, `:498-499` upsert 검증; 깨지는 caller 5곳 = `dashboard_goals.ml:137,268`·`dashboard_goals_types_timeline.ml:20-23`·`workspace_goals.ml:105,215` → `.phase` 렌더링 전환 후 제거) — **persisted row 실측 완료(2026-07-21)**: 유일한 비어있지 않은 store `<base-path>/.masc/goals.json`(base path = 운영 워크스페이스 루트) 90행 전부 `phase` 필드 보유(phase-less legacy row **0건**; status↔phase 값 정합: active/executing 57·dropped 22·paused 7·done/completed 4), playground 5개 keeper의 goals.json은 전부 0바이트 빈 파일. 따라서 typed 마이그레이션 불요 — decode를 phase-필수로 강화하고 write 경로의 status 이중 기록을 중단(save가 전체 파일 재작성이라 첫 save에 수렴; 전환 릴리즈 동안만 decode가 status 필드를 수용-무시) 2) goal-loop server refresh loop + status 라우트 + broadcast 3) dashboard goal-loop 표면(엔티티 `/goals` 조회는 잔류). 각 슬라이스는 착수 시점 fresh grep으로 라인 재검증(본 RFC의 줄 번호는 2026-07-21 기준).
 - **장점**: 제품 스펙 "Goal/Task" 기능과 정합. 라이브 MCP tool 사용자(keeper) 무중단. 작업량 소(문서 개정 + decode 정리).
 - **단점/리스크**: §1.3 Non-Goals("AutoGPT식 goal-decomposition 차단")와의 경계를 다시 그어야 함 — "어디까지가 legacy FSM이고 어디부터가 살아있는 Goal인가"의 선을 이 RFC에서 명문화하지 않으면 모순이 형태만 바꿔 재발. goal-loop dashboard ~7.4k LoC의 거취가 여전히 미정.
 - **전제 갱신 문서**: RFC-0000 §3.2 재작성, §3.15 goal 행에 "KEEP 확정" 주석, goal-loop 표면 판정 추가.
@@ -59,9 +65,9 @@ git 이력: 2026-07-08 이후 `lib/goal`·goal-loop 표면의 커밋은 전부 p
 
 모순 상시화 + 양방향 재도입/삭제 사고 리스크 지속. **권장하지 않음.**
 
-## 4. 결정 요청
+## 4. 결정 요청 (답변됨)
 
-오너가 다음 1문항에 답하면 나머지는 기계적으로 집행 가능하다:
+오너가 다음 1문항에 답하면 나머지는 기계적으로 집행 가능하다 — **2026-07-21 (a)로 결정됨**:
 
 > **제품 스펙의 "Goal/Task 약한 결합"에서 Goal은 (a) 독립 엔티티로 유지해야 하는 1급 개념인가, (b) Task로 흡수 가능한 잔재인가?**
 

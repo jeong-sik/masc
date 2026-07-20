@@ -21,9 +21,17 @@ workflow is:
        compiler reports it (warning 32) and the implementation goes too
 
 Step 3 needs warning 32 forced on -- the root `dune` sets `-warn-error +8`, so
-it is off by default (see #25455):
+it is off by default (see #25455). Give it its own build directory:
 
-    OCAMLPARAM='_,w=+32' dune build @check
+    OCAMLPARAM='_,w=+32' DUNE_BUILD_DIR=/tmp/masc-w32 dune build @check
+
+Sharing `_build` with an ordinary build silently defeats this. Dune does not
+track `OCAMLPARAM` as a dependency, so after a normal build has populated the
+cache the warning-32 run considers every target up to date, compiles nothing,
+and exits 0 with no warnings -- a green that looks like a verified slice and
+proves nothing. Confirmed by appending a comment to `lib/runtime/runtime.ml`,
+which brought `unused value validate_runtime_model_capabilities` straight back
+(`touch` does not: dune digests contents, not mtimes).
 
 Matching is on token boundaries, not substrings: `cached_entry_count` is not
 considered referenced by a call to `reset_cached_entry_count`. Conversely the

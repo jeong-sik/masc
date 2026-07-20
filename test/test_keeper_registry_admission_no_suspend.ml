@@ -14,10 +14,20 @@
     [Cross_context_mutex.with_eio_lock] -> [Eio.Mutex.use_ro], a suspension
     point under contention). The fix hoists the key lock outside the fence.
 
-    A wedged scheduler cannot be observed from inside its own domain — an
-    [Eio.Time.with_timeout] fiber would never be scheduled either. The
-    watchdog therefore lives in a separate domain, which turns the pre-fix
-    behaviour into a clean non-zero exit instead of a hung test process. *)
+    Observed pre-fix failure (counterfactual run — this file kept,
+    [keeper_registry_setup.ml] reverted):
+
+      Fatal error: exception Sys_error("Mutex.lock: Resource deadlock avoided")
+
+    That is pthread EDEADLK, not a hang. Eio runs every fiber of a domain on
+    ONE OS thread, so the second [Stdlib.Mutex.lock] on [state_mu] is the same
+    thread re-locking a mutex it already owns, and macOS reports it
+    immediately. On a platform whose default mutex is not error-checking the
+    same interleaving is a silent hang instead, and across domains the wedge
+    described above is the failure mode. The watchdog therefore lives in a
+    separate domain so this test fails loudly on every platform rather than
+    hanging on some of them; on macOS the EDEADLK arrives first and the
+    watchdog never fires. *)
 
 module Reservation = Masc.Keeper_lifecycle_reservation
 module KR = Masc.Keeper_registry

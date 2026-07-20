@@ -166,9 +166,12 @@ let decr_running_count_clamped () =
 (** Lock-free CAS loop for registry writes. Atomic.t used instead of Eio.Mutex for non-Eio context compatibility (#7011 pattern). *)
 
 (* Precondition: the caller already holds the per-keeper lifecycle key lock.
-   Every step below is non-suspending: [authorize] reads the process-local
-   reservation table, [validate_registry_entry] is pure, the metric store and
-   [Log] use stdlib I/O rather than Eio flows, and the install is a CAS loop.
+   Every step below is non-suspending: [authorize] is an [Atomic.get] on the
+   process-local reservation table (NOT [Keeper_lifecycle_reservation.acquire],
+   which takes the key lock and would suspend — the two differ by exactly that,
+   and the whole argument here rests on it), [validate_registry_entry] is pure,
+   the metric store and [Log] use stdlib I/O rather than Eio flows, and the
+   install is a CAS loop.
    That totality is what makes this body legal to run inside
    [Keeper_turn_admission.commit_registration_if_open], whose critical section
    is guarded by a scheduler-blocking [Stdlib.Mutex]: a fiber that suspends

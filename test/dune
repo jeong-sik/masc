@@ -816,6 +816,14 @@
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
 
+; A keeper must not be offered its own authored tasks as claimable work —
+; otherwise a routing/report persona re-triggers on its own output.
+
+(test
+ (name test_keeper_self_authored_task_exclusion)
+ (modules test_keeper_self_authored_task_exclusion)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
 
 (test

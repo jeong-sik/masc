@@ -201,7 +201,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
    [masc_keeper_compactions_total] hides because that counter
    is incremented on the trigger rather than the savings.  This
    counter labels by [keeper, trigger] so dashboards separate
-   "context_overflow_imminent triggered noop" from "manual
+   "provider_overflow triggered noop" from "manual
    trigger noop" etc. and operators can attribute blame.  Pair
    with [masc_keeper_compaction_saved_tokens_total] (already
    shipping) — that one tracks the bytes saved by the 1.6%

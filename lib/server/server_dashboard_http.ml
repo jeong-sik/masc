@@ -372,6 +372,7 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
     let remember_rule =
       Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
     in
+    let rule_expires_at = Safe_ops.json_float_opt "rule_expires_at" args in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
@@ -389,6 +390,7 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
             ~id
             ~decision
             ~remember_rule
+            ?rule_expires_at
             ~created_by
             ()
         with

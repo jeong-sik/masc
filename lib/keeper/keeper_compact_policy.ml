@@ -272,6 +272,27 @@ let requested_messages (meta : keeper_meta) messages =
   | Error error -> Error (Invalid_structure error)
   | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
+    (* Persistence-gate precondition, checked BEFORE the summarizer runs.
+
+       [partition ~quarantine:true] tolerates a structural break by freezing
+       the valid prefix and moving the break plus its successors into
+       [protected_suffix]. The persist boundary does not tolerate it: a
+       checkpoint must preserve every message exactly, so it runs
+       [Keeper_compaction_unit.validate] with quarantine off
+       (keeper_context_core.ml:71 -> Tool_history_invalid ->
+       Invalid_structural_source). Because quarantine PRESERVES the break in
+       [protected_suffix], that break is carried into the compacted checkpoint
+       and rejected there — after the summarizer call has already been paid
+       for. [validate messages] failing therefore implies the compacted result
+       fails too, so rejecting here loses no reachable compaction and returns
+       the identical typed terminal the persist boundary would have produced.
+
+       This bounds cost only. It does not make a structurally broken history
+       compactable: the break has to be prevented at the write boundary that
+       admitted a tool_use with no matching tool_result. *)
+    (match Keeper_compaction_unit.validate messages with
+     | Error error -> Error (Invalid_structure error)
+     | Ok () ->
     if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
     then Error No_eligible_history
     else
@@ -309,7 +330,7 @@ let requested_messages (meta : keeper_meta) messages =
                        selected_message_count
                          units
                          (Keeper_compaction_llm_summarizer.dropped_indices plan)
-                   })))
+                   }))))
 ;;
 
 let tool_block_counts messages =

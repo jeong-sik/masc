@@ -20,10 +20,42 @@ workflow is:
     3. if the implementation is now unreachable inside its own `.ml`, the
        compiler reports it (warning 32) and the implementation goes too
 
+Step 3 needs warning 32 forced on -- the root `dune` sets `-warn-error +8`, so
+it is off by default (see #25455):
+
+    OCAMLPARAM='_,w=+32' dune build @check
+
 Matching is on token boundaries, not substrings: `cached_entry_count` is not
 considered referenced by a call to `reset_cached_entry_count`. Conversely the
 `.inc` and dune stanza files are scanned, so a test module registered only
 from `test/stanzas/*.inc` is correctly seen as live.
+
+WHAT THIS TOOL CANNOT DECIDE
+
+Unreachable is not the same as removable, and the difference is a judgement no
+scan makes for you. Categories found so far, each from an actual candidate:
+
+  Spec bridges. `keeper_composite_observer` exports `all_tla_actions`,
+  `tla_action_of_string` and siblings backing
+  `specs/keeper-state-machine/KeeperCompositeLifecycle.tla`; `recovery` exports
+  `all_error_mode_tla_symbols`. Nothing in OCaml or `scripts/` reads them. If
+  they exist so a conformance test can enumerate the symbol set, deleting them
+  removes the seam rather than dead weight -- ask whoever owns the spec.
+
+  Alternative entry points onto a live path. `Audit_log` exported six wrappers
+  over `log_action` and a second route into `Dated_jsonl.prune`. "Nothing calls
+  the audit logger" reads like an incident; it was not one, because the live
+  paths build the same variants directly and prune on a timer. Establish which
+  path actually runs before concluding either way.
+
+  Enumeration completeness. `tool_schema_dsl` exports one constructor per JSON
+  Schema type; `boolean_prop` and `string_array_prop` have no callers, but they
+  are two fifths of a five-value DSL that covers string/integer/boolean/array/
+  object. Removing them leaves the enumeration with holes and the next caller
+  writing a raw `` `Assoc `` instead.
+
+Density does not separate these: `tool_schema_dsl` is 40% dead by count, the
+same range as genuinely abandoned modules. Read the surface.
 
 Usage:
     python3 scripts/audit-dead-surface.py --modules

@@ -28,8 +28,40 @@ let is_real_directory path =
    symlinks are skipped with a warning (following one would let [prune_dir]
    delete day-files at the link target outside the workspace), and any other
    entry (stray file, missing, lstat error) is silently skipped as before. *)
+(* Prune one leaf store by a fixed path, refusing to follow a symlink into it.
+   [prune_children_dirs] keeps its own inline match instead of calling this,
+   because it classifies each discovered entry and reports symlink vs. stray
+   file separately — collapsing that into this helper would lose diagnostic
+   detail. A missing store counts 0, as before. *)
+let prune_store_dir ~prune_dir dir =
+  if is_real_directory dir
+  then prune_dir dir
+  else (
+    if Sys.file_exists dir
+    then
+      Log.Misc.warn
+        "startup prune: skipping store %s (not a real directory; not following \
+         link target)"
+        dir;
+    0)
+;;
+
 let prune_children_dirs ~prune_dir root =
-  if not (Sys.file_exists root) then 0
+  (* The root itself must be lstat'd, not just its children: [Sys.readdir] and
+     the per-entry [Unix.lstat root/name] both resolve a symlinked root, so a
+     [.masc/resilience_audit] pointing outside the workspace would present its
+     target's real directories as ordinary children and [prune_dir] would
+     delete day-files there. Checking only the final component leaves that
+     whole traversal reachable. *)
+  if not (is_real_directory root)
+  then (
+    if Sys.file_exists root
+    then
+      Log.Misc.warn
+        "startup prune: skipping traversal root %s (not a real directory; not \
+         following link target)"
+        root;
+    0)
   else
     Array.fold_left
       (fun acc name ->
@@ -61,7 +93,8 @@ let prune_keeper_scoped_stores ~prune_dir ~masc_root =
   prune_children_dirs
     ~prune_dir:(fun keeper_dir ->
       List.fold_left
-        (fun acc store -> acc + prune_dir (Filename.concat keeper_dir store))
+        (fun acc store ->
+          acc + prune_store_dir ~prune_dir (Filename.concat keeper_dir store))
         0
         keeper_scoped_dated_stores)
     (Filename.concat masc_root "keepers")

@@ -336,6 +336,8 @@ export type {
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
   KeeperMemoryHealthResponse,
+  AuditIntegrityKeeperEntry,
+  AuditIntegrityResponse,
   VerificationRequestStatus,
   VerificationRequestVerdict,
   VerificationRequest,
@@ -353,6 +355,7 @@ export type {
 export {
   fetchMemorySubsystems,
   fetchKeeperMemoryHealth,
+  fetchAuditIntegrity,
   fetchVerificationRequests,
   resolveVerificationRequest,
   fetchTlaSpecs,

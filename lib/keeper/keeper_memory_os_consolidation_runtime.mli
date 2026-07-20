@@ -21,6 +21,13 @@ type outcome =
       { before : int
       ; after : int
       }
+  | Plan_rejected_total_deletion of { before : int }
+      (** The plan retained no survivor from a non-empty store. Emptying a
+          keeper's whole long-term memory is not a consolidation judgement the
+          model is asked to make, so the plan is discarded and the store is left
+          untouched. Deliberately narrower than a ratio guard: a store whose rows
+          are mostly redundant has a legitimately large deletion, and only total
+          erasure is refused. *)
 
 module For_testing : sig
   val provider_for_consolidation

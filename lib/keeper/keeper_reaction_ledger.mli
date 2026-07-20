@@ -31,6 +31,7 @@ type reaction_kind =
   | Turn_started
   | Event_queue_ack
   | Event_queue_no_compaction
+  | Event_queue_cancelled
   | Event_queue_requeued
   | Event_queue_escalated
   | Cursor_ack
@@ -84,9 +85,11 @@ type event_queue_reaction_evidence =
   ; stimulus_seen : bool
   ; turn_started_seen : bool
   ; event_queue_ack_seen : bool
+  ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
   ; event_queue_ack_recorded_at : float option
+  ; event_queue_cancelled_recorded_at : float option
   ; latest_recorded_at : float option
   ; matched_record_count : int
   ; quarantined_record_count : int
@@ -115,8 +118,9 @@ val event_queue_reaction_evidence_result :
     semantic-invalid rows produce {!Evidence_quarantined}. Syntax-invalid rows
     and parseable rows without the queried identity remain visible through the
     operator summary, but cannot be attributed to this occurrence and therefore
-    do not become its negative evidence. Empty query identities and storage
-    failures remain typed errors. *)
+    do not become its negative evidence. Exact ACK and accepted-cancellation
+    terminals remain distinct typed evidence. Empty query identities and
+    storage failures remain typed errors. *)
 
 val record_board_cursor_ack :
   base_path:string ->

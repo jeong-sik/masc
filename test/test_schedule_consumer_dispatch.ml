@@ -53,6 +53,12 @@ let reaction_ledger_dir ~base_path ~keeper_name =
     "v4"
 ;;
 
+let event_queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+;;
+
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
   let month_dir =
     Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2026-01"
@@ -556,6 +562,116 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
          |> Keeper_event_queue.length))
 ;;
 
+let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let entry =
+    Keeper_registry.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
+  in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    (fun () ->
+      let request = create_keeper_wake_schedule config in
+      let signal =
+        match Schedule_runner.tick config ~now:201.0 with
+        | Ok { emitted = [ signal ]; _ } -> signal
+        | Ok _ -> fail "expected one durable schedule signal"
+        | Error err -> fail (Schedule_runner.runner_error_to_string err)
+      in
+      let running =
+        match
+          Schedule_store.start_due_candidate
+            config
+            ~now:201.5
+            ~schedule_id:request.schedule_id
+        with
+        | Ok running -> running
+        | Error err -> fail (Schedule_store.store_error_to_string err)
+      in
+      Atomic.set entry.fiber_wakeup false;
+      (match Server_schedule_consumers.consumer.dispatch config ~now:202.0 signal running with
+       | Ok _ -> ()
+       | Error _ -> fail "initial schedule occurrence dispatch failed");
+      check bool "initial cancelled dispatch wakes lane" true
+        (Atomic.get entry.fiber_wakeup);
+      let lease =
+        match
+          Keeper_registry_event_queue.claim_when_result
+            ~base_path
+            keeper_name
+            ~claimed_at:202.5
+            ~ready:(fun _ -> true)
+        with
+        | Ok (Some lease) -> lease
+        | Ok None -> fail "scheduled occurrence was not queued"
+        | Error detail -> fail detail
+      in
+      let claimed_state =
+        Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+        |> function
+        | Ok state -> state
+        | Error detail -> fail detail
+      in
+      let generation = entry.meta.runtime.generation in
+      let cancellation : Keeper_event_queue_state.accepted_cancellation =
+        { source_revision = Keeper_event_queue_state.revision claimed_state
+        ; owner_generation = generation
+        ; operator_operation_id = "cancel-schedule-occurrence"
+        ; reason = "operator cancelled retained schedule work"
+        }
+      in
+      let cancelled_state, cancellation_result =
+        Keeper_event_queue_state.cancel_accepted
+          ~current_owner_generation:generation
+          ~settled_at:203.0
+          ~lease
+          ~cancellation
+          claimed_state
+        |> function
+        | Ok result -> result
+        | Error detail -> fail detail
+      in
+      (match cancellation_result with
+       | Keeper_event_queue_state.Settled _ -> ()
+       | Keeper_event_queue_state.Already_settled _ ->
+         fail "first schedule cancellation was already settled");
+      write_file
+        (event_queue_snapshot_path ~base_path ~keeper_name)
+        (Yojson.Safe.to_string
+           (Keeper_event_queue_state.to_yojson cancelled_state));
+      (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match Schedule_store.recover_running_on_startup config ~now:204.0 with
+       | Ok (_, 1) -> ()
+       | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered
+       | Error err -> fail (Schedule_store.store_error_to_string err));
+      Atomic.set entry.fiber_wakeup false;
+      let retried = tick_ok config ~now:205.0 in
+      check bool "cancelled retry sends no second wake" false
+        (Atomic.get entry.fiber_wakeup);
+      (match List.hd retried.dispatches with
+       | { detail = Some detail; _ } ->
+         check string "retry observes terminal cancellation" "already_cancelled"
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+       | _ -> fail "cancelled retry completion receipt missing");
+      check int "cancelled retry enqueues no second occurrence" 0
+        (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.length);
+      let evidence =
+        Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+        |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+        |> Yojson.Safe.Util.member "keeper_reaction_evidence"
+      in
+      check string "dashboard preserves terminal cancellation"
+        "matched_terminal_cancelled"
+        Yojson.Safe.Util.(evidence |> member "projection_status" |> to_string);
+      check bool "dashboard exposes exact cancelled evidence" true
+        Yojson.Safe.Util.(evidence |> member "event_queue_cancelled_seen" |> to_bool))
+;;
+
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   with_workspace
   @@ fun config ->
@@ -1041,6 +1157,9 @@ let () =
             test_keeper_wake_durable_enqueue_failure_retries_same_occurrence
         ; test_case "acked occurrence recovery does not enqueue or wake again" `Quick
             test_acked_occurrence_recovery_does_not_enqueue_or_wake_again
+        ; test_case "cancelled occurrence recovery does not enqueue or wake again"
+            `Quick
+            test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

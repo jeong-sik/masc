@@ -7,6 +7,7 @@ type keeper_wake_reaction_ledger_status =
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
+  | Keeper_wake_already_cancelled
 
 type dispatch_receipt =
   | Keeper_wake_enqueued of

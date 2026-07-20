@@ -80,11 +80,14 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 2
+let pending_store_version = 3
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+(** Process projection of the next value persisted in each workspace snapshot. *)
+let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
+let first_sequence = 1
 
 (** Serialize one durable pending/delivery snapshot transition across both Eio
     fibers and non-Eio callers.  A plain [Stdlib.Mutex.protect] is invalid here:
@@ -137,6 +140,7 @@ let pending_entry_to_yojson (entry : pending_approval) =
     ; "tool_name", `String entry.tool_name
     ; "input_hash", `String entry.input_hash
     ; "input", entry.input
+    ; "sequence", `Int entry.sequence
     ; "requested_at", `Float entry.requested_at
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
     ; ( "request_context"
@@ -180,7 +184,7 @@ let map_values_for_base ~base_path map project =
     if String.equal (project value).audit_base_path base_path then Some value else None)
 ;;
 
-let snapshot_to_yojson ~base_path ~pending_map ~delivery_map =
+let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
   let pending_entries =
     map_values_for_base ~base_path pending_map Fun.id
     |> List.map pending_entry_to_yojson
@@ -191,12 +195,18 @@ let snapshot_to_yojson ~base_path ~pending_map ~delivery_map =
   in
   `Assoc
     [ "version", `Int pending_store_version
+    ; "next_sequence", `Int next_sequence
     ; "pending", `List pending_entries
     ; "deliveries", `List delivery_entries
     ]
 ;;
 
-let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
+let persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  =
   let path = pending_store_path ~base_path in
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
@@ -204,7 +214,7 @@ let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
     (try
        Fs_compat.mkdir_p (Filename.dirname path);
        let body =
-         snapshot_to_yojson ~base_path ~pending_map ~delivery_map
+         snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
          |> Yojson.Safe.pretty_to_string
        in
        (match Fs_compat.save_file_atomic path body with
@@ -213,6 +223,38 @@ let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error { path; reason = Printexc.to_string exn })
+;;
+
+type store_lifecycle =
+  | Uninstalled
+  | Ready of int
+  | Unavailable of storage_error
+
+let next_sequence_lifecycle ~base_path =
+  match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+  | Some error -> Unavailable error
+  | None ->
+    (match SMap.find_opt base_path (Atomic.get next_sequences) with
+     | Some sequence -> Ready sequence
+     | None -> Uninstalled)
+;;
+
+let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
+  match next_sequence_lifecycle ~base_path with
+  | Ready next_sequence ->
+    persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  | Uninstalled ->
+    Error
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; install_persistence must \
+           complete before publishing"
+      }
+  | Unavailable error -> Error error
 ;;
 
 let reject_unknown_fields ~surface ~allowed fields =
@@ -260,6 +302,13 @@ let optional_nonnegative_int ~surface field fields =
     Error (Printf.sprintf "%s.%s must be a non-negative integer or null" surface field)
 ;;
 
+let required_positive_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) when value > 0 -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a positive integer" surface field)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
 let required_float ~surface field fields =
   match List.assoc_opt field fields with
   | Some (`Float value) -> Ok value
@@ -296,6 +345,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "tool_name"
           ; "input_hash"
           ; "input"
+          ; "sequence"
           ; "requested_at"
           ; "turn_id"
           ; "request_context"
@@ -319,6 +369,7 @@ let pending_entry_of_yojson ~base_path json =
       then Ok ()
       else Error (Printf.sprintf "%s.input_hash does not match input" surface)
     in
+    let* sequence = required_positive_int ~surface "sequence" fields in
     let* requested_at = required_float ~surface "requested_at" fields in
     let* turn_id = optional_nonnegative_int ~surface "turn_id" fields in
     let* request_context =
@@ -366,6 +417,7 @@ let pending_entry_of_yojson ~base_path json =
       ; tool_name
       ; input_hash
       ; input
+      ; sequence
       ; requested_at
       ; turn_id
       ; request_context
@@ -502,6 +554,29 @@ let parse_list ~surface parse = function
   | _ -> Error (surface ^ " must be an array")
 ;;
 
+let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries =
+  let sequences =
+    List.map (fun (entry : pending_approval) -> entry.sequence) pending_entries
+    @ List.map
+        (fun (delivery : persisted_delivery) -> delivery.entry.sequence)
+        delivery_entries
+    |> List.sort Int.compare
+  in
+  let rec check previous = function
+    | [] -> Ok ()
+    | sequence :: _ when sequence >= next_sequence ->
+      Error
+        (Printf.sprintf
+           "gate_pending sequence %d must precede next_sequence %d"
+           sequence
+           next_sequence)
+    | sequence :: _ when previous = Some sequence ->
+      Error (Printf.sprintf "gate_pending contains duplicate sequence %d" sequence)
+    | sequence :: rest -> check (Some sequence) rest
+  in
+  check None sequences
+;;
+
 let snapshot_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
@@ -510,7 +585,7 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       reject_unknown_fields
         ~surface
-        ~allowed:[ "version"; "pending"; "deliveries" ]
+        ~allowed:[ "version"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
     let* () =
@@ -521,6 +596,7 @@ let snapshot_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
     in
+    let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
     let* pending_entries =
       parse_list ~surface:"gate_pending.pending" (pending_entry_of_yojson ~base_path) pending_json
@@ -549,15 +625,68 @@ let snapshot_of_yojson ~base_path json =
       | None -> Ok ()
       | Some id -> Error (Printf.sprintf "gate_pending id %s exists in both states" id)
     in
-    Ok (pending_map, delivery_map)
+    let* () =
+      validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
+    in
+    Ok (pending_map, delivery_map, next_sequence)
   | _ -> Error "gate_pending snapshot must be a JSON object"
+;;
+
+let snapshot_version_of_yojson = function
+  | `Assoc fields -> (
+    match List.assoc_opt "version" fields with
+    | Some (`Int version) -> Some version
+    | Some _ | None -> None)
+  | _ -> None
+;;
+
+let quarantine_path ~path ~version =
+  let base = Printf.sprintf "%s.v%d.quarantine" path version in
+  let rec find_free k =
+    let candidate =
+      if k = 0 then base else Printf.sprintf "%s.%d" base k
+    in
+    if Sys.file_exists candidate then find_free (k + 1) else candidate
+  in
+  find_free 0
+;;
+
+(* An unsupported snapshot version is a generational boundary, not
+   corruption: the durable file is preserved verbatim at a visible
+   quarantine path and the store starts a fresh generation. Only a rename
+   failure keeps the old fail-closed behavior — starting fresh while the
+   old file is still in place would let the next [put] overwrite the very
+   evidence the quarantine exists to preserve. *)
+let quarantine_snapshot_unlocked ~path ~version =
+  let target = quarantine_path ~path ~version in
+  try
+    Sys.rename path target;
+    Log.Server.error
+      "gate_pending snapshot version %d is unsupported (current %d); \
+       quarantined to %s and starting a fresh store generation"
+      version pending_store_version target;
+    Ok (SMap.empty, SMap.empty, first_sequence)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let reason =
+      Printf.sprintf
+        "gate_pending snapshot version %d is unsupported and quarantine \
+         rename to %s failed: %s"
+        version target (Printexc.to_string exn)
+    in
+    report_pending_read_drop
+      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~path
+      ~detail:reason;
+    Error { path; reason }
 ;;
 
 let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty)
+    then Ok (SMap.empty, SMap.empty, first_sequence)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -567,14 +696,18 @@ let load_snapshot_unlocked ~base_path =
           ~detail:reason;
         Error { path; reason }
       | Ok json ->
-        (match snapshot_of_yojson ~base_path json with
-         | Ok snapshot -> Ok snapshot
-         | Error reason ->
-           report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-             ~path
-             ~detail:reason;
-           Error { path; reason }))
+        (match snapshot_version_of_yojson json with
+         | Some version when version <> pending_store_version ->
+           quarantine_snapshot_unlocked ~path ~version
+         | Some _ | None ->
+           (match snapshot_of_yojson ~base_path json with
+            | Ok snapshot -> Ok snapshot
+            | Error reason ->
+              report_pending_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path
+                ~detail:reason;
+              Error { path; reason })))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1099,6 +1232,7 @@ let input_preview_of_json (json : Yojson.Safe.t) =
 
 let create_entry
       ~id
+      ~sequence
       ~keeper_name
       ~tool_name
       ~input
@@ -1117,6 +1251,7 @@ let create_entry
   ; tool_name
   ; input_hash
   ; input
+  ; sequence
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
   ; request_context
@@ -1136,6 +1271,7 @@ let pending_entry_json_fields
   [ "id", `String entry.id
   ; "keeper_name", `String entry.keeper_name
   ; "tool_name", `String entry.tool_name
+  ; "sequence", `Int entry.sequence
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
@@ -1178,8 +1314,9 @@ let broadcast_pending entry =
 
 let record_pending (entry : pending_approval) =
   Log.Keeper.info
-    "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s"
+    "HITL_APPROVAL_PENDING: id=%s sequence=%d keeper=%s tool=%s"
     entry.id
+    entry.sequence
     entry.keeper_name
     entry.tool_name;
   audit_approval_event
@@ -1619,14 +1756,6 @@ let find_pending_id_in_map
     None
 ;;
 
-let sort_entries_by_requested_at entries =
-  List.sort
-    (fun left right ->
-       let ts_of_json json = (match Json_util.assoc_member_opt "requested_at" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0) in
-       Float.compare (ts_of_json left) (ts_of_json right))
-    entries
-;;
-
 (* ── Nonblocking submission ───────────────────────────────── *)
 
 let submit_pending
@@ -1666,32 +1795,54 @@ let submit_pending
       | Some id -> Ok (id, None)
       | None ->
         let id = generate_id () in
-        let entry =
-          create_entry
-            ~id
-            ~keeper_name
-            ~tool_name
-            ~input
-            ?turn_id
-            ?request_context
-            ?task_id
-            ?goal_id
-            ~goal_ids
-            ~continuation_channel
-            ~audit_base_path:base_path
-            ()
-        in
-        let updated = SMap.add id entry map in
-        (match
-           persist_snapshot_unlocked
-             ~base_path
-             ~pending_map:updated
-             ~delivery_map:(Atomic.get deliveries)
-         with
-         | Error _ as error -> error
-         | Ok () ->
-           Atomic.set pending updated;
-           Ok (id, Some entry)))
+        (match next_sequence_lifecycle ~base_path with
+         | Uninstalled ->
+           Error
+             { path = pending_store_path ~base_path
+             ; reason =
+                 "gate_pending store is not installed; submit requires a completed install"
+             }
+         | Unavailable error -> Error error
+         | Ready sequence ->
+           if sequence = max_int
+           then
+             Error
+               { path = pending_store_path ~base_path
+               ; reason = "approval sequence exhausted its integer representation"
+               }
+           else
+             let entry =
+               create_entry
+                 ~id
+                 ~sequence
+                 ~keeper_name
+                 ~tool_name
+                 ~input
+                 ?turn_id
+              ?request_context
+              ?task_id
+              ?goal_id
+              ~goal_ids
+              ~continuation_channel
+              ~audit_base_path:base_path
+              ()
+          in
+          let updated = SMap.add id entry map in
+          let following_sequence = sequence + 1 in
+          (match
+             persist_snapshot_with_sequence_unlocked
+               ~base_path
+               ~next_sequence:following_sequence
+               ~pending_map:updated
+               ~delivery_map:(Atomic.get deliveries)
+           with
+           | Error _ as error -> error
+           | Ok () ->
+             Atomic.set pending updated;
+             Atomic.set
+               next_sequences
+               (SMap.add base_path following_sequence (Atomic.get next_sequences));
+             Ok (id, Some entry))))
   in
   match stored with
   | Error _ as error -> error
@@ -1905,6 +2056,14 @@ let complete_delivery delivery =
            | Ok () -> finish ())))
 ;;
 
+let compare_pending_order left right =
+  match String.compare left.audit_base_path right.audit_base_path with
+  | 0 ->
+    let sequence_order = Int.compare left.sequence right.sequence in
+    if sequence_order = 0 then String.compare left.id right.id else sequence_order
+  | workspace_order -> workspace_order
+;;
+
 let install_persistence_internal ~after_load ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
@@ -1919,7 +2078,7 @@ let install_persistence_internal ~after_load ~base_path =
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error storage_error
-      | Ok (loaded_pending, loaded_deliveries) ->
+      | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -1968,9 +2127,18 @@ let install_persistence_internal ~after_load ~base_path =
               clear_store_unavailable_unlocked ~base_path;
               Atomic.set pending pending_map;
               Atomic.set deliveries delivery_map;
+              Atomic.set
+                next_sequences
+                (SMap.add
+                   base_path
+                   loaded_next_sequence
+                   (Atomic.get next_sequences));
               Ok
                 ( SMap.cardinal loaded_pending
-                , SMap.bindings loaded_deliveries |> List.map snd ))))
+                , SMap.bindings loaded_deliveries
+                  |> List.map snd
+                  |> List.sort (fun left right ->
+                    compare_pending_order left.entry right.entry) ))))
   in
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
@@ -2017,7 +2185,8 @@ module For_testing = struct
     with_pending_store_lock (fun () ->
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
-      Atomic.set unavailable_stores SMap.empty)
+      Atomic.set unavailable_stores SMap.empty;
+      Atomic.set next_sequences SMap.empty)
   ;;
 
   let install_persistence_with_after_load_hook ~base_path ~after_load =
@@ -2111,34 +2280,26 @@ let resolve ~base_path ~id ~(decision : decision)
 (* ── Query ────────────────────────────────────────────────── *)
 
 (** List all pending approvals as JSON. *)
+let pending_entries_in_sequence_order () =
+  SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
+  |> List.sort compare_pending_order
+;;
+
 let list_pending_json () : Yojson.Safe.t =
-  let entries =
-    SMap.fold
-      (fun _id entry acc -> `Assoc (pending_entry_json_fields entry) :: acc)
-      (Atomic.get pending)
-      []
-  in
-  `List (sort_entries_by_requested_at entries)
+  pending_entries_in_sequence_order ()
+  |> List.map (fun entry -> `Assoc (pending_entry_json_fields entry))
+  |> fun entries -> `List entries
 ;;
 
 let list_pending_dashboard_json () : Yojson.Safe.t =
-  let entries =
-    SMap.fold
-      (fun _id entry acc ->
-         `Assoc
-           (pending_entry_json_fields
-              ~include_input:true
-              entry)
-         :: acc)
-      (Atomic.get pending)
-      []
-  in
-  `List (sort_entries_by_requested_at entries)
+  pending_entries_in_sequence_order ()
+  |> List.map (fun entry ->
+    `Assoc (pending_entry_json_fields ~include_input:true entry))
+  |> fun entries -> `List entries
 ;;
 
 let list_pending_entries () : pending_approval list =
-  SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
-  |> List.sort (fun left right -> Float.compare left.requested_at right.requested_at)
+  pending_entries_in_sequence_order ()
 ;;
 
 let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =

@@ -48,6 +48,10 @@ let require_some message = function
   | None -> Alcotest.fail message
 ;;
 
+let pending_entry_exn id =
+  AQ.get_pending_entry ~id |> require_some ("pending approval not found: " ^ id)
+;;
+
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
   match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
@@ -111,6 +115,12 @@ let reject_and_cleanup ~base_path id =
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
 
+let install_exn ~base_path =
+  match AQ.install_persistence ~base_path with
+  | Ok report -> report
+  | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+;;
+
 let test_pending_store_lock_serializes_eio_fibers () =
   Eio_main.run @@ fun _environment ->
   let first_entered, signal_first_entered = Eio.Promise.create () in
@@ -145,6 +155,7 @@ let test_dedup_never_merges_distinct_origins () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let input = `Assoc [ "target", `String "same-action" ] in
        let dashboard_a =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-a"
@@ -241,12 +252,6 @@ let delivery_json ~entry ~remember_rule =
     ]
 ;;
 
-let install_exn ~base_path =
-  match AQ.install_persistence ~base_path with
-  | Ok report -> report
-  | Error error -> Alcotest.fail (AQ.install_error_to_string error)
-;;
-
 let test_install_serializes_snapshot_read_with_same_base_mutation () =
   let base_path = temp_dir () in
   Fun.protect
@@ -258,7 +263,8 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -328,6 +334,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let input =
          `Assoc
            [ "target", `String "document"
@@ -394,6 +401,11 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
+       Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int)
+         "dedup does not consume sequence"
+         2
+         (pending_entry_exn changed).sequence;
        (match AQ.get_pending_entry ~id:first with
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
@@ -425,6 +437,7 @@ let test_unversioned_request_context_is_not_replayed_as_exact () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
        let id =
          submit_with_context
            ~request_context:(`Assoc [ "history_digest", `String "retired-projection" ])
@@ -464,6 +477,118 @@ let test_unversioned_request_context_is_not_replayed_as_exact () =
        reject_and_cleanup ~base_path id)
 ;;
 
+let test_monotonic_sequence_survives_restart () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let first = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 2) in
+       Alcotest.(check int) "first durable sequence" 1 (pending_entry_exn first).sequence;
+       Alcotest.(check int) "second durable sequence" 2 (pending_entry_exn second).sequence;
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let third = submit ~base_path ~keeper_name:"sequence-owner" ~input:(`Int 3) in
+       Alcotest.(check int) "restart continues sequence" 3 (pending_entry_exn third).sequence;
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "next sequence is durable"
+         4
+         (read_pending_snapshot ~base_path |> member "next_sequence" |> to_int))
+;;
+
+let test_same_owner_drain_uses_sequence_not_wall_clock () =
+  let base_path = temp_dir () in
+  let other_base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path;
+      cleanup_dir other_base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       ignore (install_exn ~base_path:other_base_path);
+       let first = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 1) in
+       let second = submit ~base_path ~keeper_name:"fifo-owner" ~input:(`Int 2) in
+       let other =
+         submit ~base_path:other_base_path ~keeper_name:"fifo-owner" ~input:(`Int 3)
+       in
+       let first = { (pending_entry_exn first) with requested_at = 500.0 } in
+       let second = { (pending_entry_exn second) with requested_at = 1.0 } in
+       let expected_global =
+         if String.compare base_path other_base_path < 0
+         then [ first.id; second.id; other ]
+         else [ other; first.id; second.id ]
+       in
+       Alcotest.(check (list string))
+         "global projection groups deterministic workspace-local FIFO"
+         expected_global
+         (AQ.list_pending_entries ()
+          |> List.map (fun (entry : AQ.pending_approval) -> entry.id));
+       match
+         Gate.For_testing.ready_auto_judges_for_owner
+           ~base_path
+           ~keeper_name:"fifo-owner"
+           [ second; first ]
+       with
+       | [ oldest; newest ] ->
+         Alcotest.(check string) "oldest sequence first" first.id oldest.id;
+         Alcotest.(check string) "next sequence second" second.id newest.id
+       | entries ->
+         Alcotest.failf "two same-owner entries expected, got %d" (List.length entries))
+;;
+
+let test_different_owners_claim_in_parallel () =
+  (* Real concurrent proof: fibers race the per-owner claim, so the
+     one-winner-per-owner invariant is exercised under actual Atomic
+     contention instead of sequential calls.  Unique owner names keep the
+     process-global active map isolated without a production reset. *)
+  let base_path = temp_dir () in
+  let suffix = string_of_int (int_of_float (Unix.gettimeofday () *. 1_000_000.0)) in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let owner_a = "owner-a-" ^ suffix in
+       let owner_b = "owner-b-" ^ suffix in
+       let entry_a1 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_a ~input:(`Int 1))
+       in
+       let entry_a2 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_a ~input:(`Int 2))
+       in
+       let entry_b1 =
+         pending_entry_exn (submit ~base_path ~keeper_name:owner_b ~input:(`Int 1))
+       in
+       let winners_a = Atomic.make 0 in
+       let winners_b = Atomic.make 0 in
+       let hammer entry winners =
+         for _ = 1 to 40 do
+           if Gate.For_testing.claim_auto_judge entry
+           then ignore (Atomic.fetch_and_add winners 1)
+         done
+       in
+       Eio_main.run (fun _env ->
+         Eio.Switch.run (fun sw ->
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_a1 winners_a);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b);
+           Eio.Fiber.fork ~sw (fun () -> hammer entry_b1 winners_b)));
+       Alcotest.(check int) "one winner for owner A under contention" 1 (Atomic.get winners_a);
+       Alcotest.(check int) "one winner for owner B in parallel" 1 (Atomic.get winners_b);
+       Gate.For_testing.release_auto_judge entry_a1;
+       Alcotest.(check bool) "same owner re-claims after release" true
+         (Gate.For_testing.claim_auto_judge entry_a2))
+;;
+
 let test_resolution_is_durable_and_origin_scoped () =
   let base_path = temp_dir () in
   let keeper_name = "queue-origin" in
@@ -471,6 +596,7 @@ let test_resolution_is_durable_and_origin_scoped () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let input = `Assoc [ "target", `String "document"; "body", `String "hello" ] in
        let id = submit ~base_path ~keeper_name ~input in
        let result =
@@ -568,6 +694,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let approval_id =
          submit_with_context
            ~turn_id:17
@@ -701,6 +828,7 @@ let test_summary_updates_never_resolve_pending_request () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let id = submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "x" ]) in
        check_update "mark pending" true (AQ.mark_summary_pending ~id);
        check_update
@@ -739,6 +867,7 @@ let test_all_summary_failures_accept_explicit_restart () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let retryable_id =
          submit ~base_path ~keeper_name ~input:(`Assoc [ "request", `String "retry" ])
        in
@@ -791,6 +920,7 @@ let test_operator_recovery_reopens_all_failed_summaries () =
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let request_context =
          `Assoc
            [ "history_messages", `List [ `String "exact prior evidence" ]
@@ -856,6 +986,7 @@ let test_dashboard_retry_rejects_cross_workspace_approval () =
       cleanup_dir base_b)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path:base_a);
        let approval_id =
          submit
            ~base_path:base_a
@@ -905,6 +1036,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
       cleanup_dir base_b)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path:base_a);
        let approval_id =
          submit
            ~base_path:base_a
@@ -961,6 +1093,7 @@ let test_lane_activity_does_not_retry_failed_auto_judge () =
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let id_a =
          submit
            ~base_path
@@ -1037,6 +1170,7 @@ let test_decisive_summary_finalizes_after_restart () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
        let id =
          submit
            ~base_path
@@ -1082,6 +1216,7 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
        let id =
          submit
            ~base_path
@@ -1135,7 +1270,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
             ]);
@@ -1165,7 +1301,8 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 3
+               ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
                ]));
@@ -1178,6 +1315,98 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        Alcotest.(check bool) "malformed snapshot observed" true (after -. before >= 1.0))
 ;;
 
+let test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List []
+            ; "deliveries", `List []
+            ]);
+       (match AQ.install_persistence ~base_path with
+        | Ok _ -> ()
+        | Error _ ->
+          Alcotest.fail "unsupported version must quarantine, not fail install");
+       let store_path = AQ.For_testing.pending_store_path ~base_path in
+       Alcotest.(check bool) "original moved away" false
+         (Sys.file_exists store_path);
+       let quarantine_path = store_path ^ ".v2.quarantine" in
+       Alcotest.(check bool) "quarantine file exists" true
+         (Sys.file_exists quarantine_path);
+       let preserved = Yojson.Safe.from_file quarantine_path in
+       Alcotest.(check bool) "content preserved verbatim" true
+         (Yojson.Safe.equal
+            preserved
+            (`Assoc
+               [ "version", `Int 2
+               ; "pending", `List []
+               ; "deliveries", `List []
+               ]));
+       let id =
+         submit ~base_path ~keeper_name:"queue-quarantine"
+           ~input:(`Assoc [ "target", `String "after-quarantine" ])
+       in
+       Alcotest.(check int) "fresh generation starts at sequence 1" 1
+         (pending_entry_exn id).sequence)
+;;
+
+let test_quarantine_name_collision_uses_next_free_name () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let store_path = AQ.For_testing.pending_store_path ~base_path in
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 2
+            ; "pending", `List []
+            ; "deliveries", `List []
+            ]);
+       let occupied = store_path ^ ".v2.quarantine" in
+       ensure_dir (Filename.dirname occupied);
+       Out_channel.with_open_text occupied (fun channel ->
+         output_string channel "prior quarantine");
+       (match AQ.install_persistence ~base_path with
+        | Ok _ -> ()
+        | Error _ -> Alcotest.fail "install must quarantine");
+       Alcotest.(check bool) "prior quarantine kept" true
+         (Sys.file_exists occupied);
+       Alcotest.(check bool) "next free name used" true
+         (Sys.file_exists (store_path ^ ".v2.quarantine.1")))
+;;
+
+let test_unreadable_json_snapshot_is_not_quarantined () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let store_path = AQ.For_testing.pending_store_path ~base_path in
+       ensure_dir (Filename.dirname store_path);
+       Out_channel.with_open_text store_path (fun channel ->
+         output_string channel "{not-json");
+       (match AQ.install_persistence ~base_path with
+        | Ok _ -> Alcotest.fail "unreadable snapshot must not install"
+        | Error _ -> ());
+       Alcotest.(check bool) "file left in place" true
+         (Sys.file_exists store_path);
+       Alcotest.(check bool) "no quarantine created" false
+         (Sys.file_exists (store_path ^ ".v2.quarantine")))
+;;
+
 let test_persisted_delivery_replays_before_origin_wake () =
   let base_path = temp_dir () in
   let keeper_name = "queue-replay-origin" in
@@ -1187,6 +1416,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
        let id =
          submit
            ~base_path
@@ -1204,7 +1434,8 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
               , `List
@@ -1265,17 +1496,14 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
-       let failing_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "remember-fails" ])
-       in
-       let successful_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "independent-success" ])
+       ignore (install_exn ~base_path);
+       let first_id, second_id, successful_id =
+         List.init 3 (fun index ->
+           submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `Int index ]))
+         |> List.sort (fun left right -> String.compare right left)
+         |> function
+         | [ first; second; third ] -> first, second, third
+         | _ -> Alcotest.fail "three approvals expected"
        in
        let pending_entries =
          let open Yojson.Safe.Util in
@@ -1291,18 +1519,28 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
          | Some entry -> entry
          | None -> Alcotest.fail ("missing persisted entry " ^ id)
        in
+       let entry_at sequence id =
+         match entry_for id with
+         | `Assoc fields ->
+           `Assoc (("sequence", `Int sequence) :: List.remove_assoc "sequence" fields)
+         | _ -> Alcotest.fail "persisted entry object expected"
+       in
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 3
+            ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ delivery_json
-                      ~entry:(entry_for failing_id)
+                      ~entry:(entry_at 1 first_id)
                       ~remember_rule:true
                   ; delivery_json
-                      ~entry:(entry_for successful_id)
+                      ~entry:(entry_at 2 second_id)
+                      ~remember_rule:true
+                  ; delivery_json
+                      ~entry:(entry_at 3 successful_id)
                       ~remember_rule:false
                   ] )
             ]);
@@ -1313,13 +1551,13 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        let report = install_exn ~base_path in
        Alcotest.(check int) "independent delivery replayed" 1 report.replayed_deliveries;
        Alcotest.(check int)
-         "one replay failure reported"
-         1
+         "two replay failures reported"
+         2
          (List.length report.delivery_replay_failures);
-       Alcotest.(check string)
-         "failing approval identified"
-         failing_id
-         (List.hd report.delivery_replay_failures).approval_id;
+       Alcotest.(check (list string))
+         "replay failures preserve durable sequence"
+         [ first_id; second_id ]
+         (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
        Alcotest.(check bool) "later delivery reached origin" true
          (Option.is_some
             (durable_resolution_opt
@@ -1331,7 +1569,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
             match durable_resolution_opt ~base_path ~keeper_name ~approval_id with
             | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
             | None -> ())
-         [ failing_id; successful_id ])
+         [ first_id; second_id; successful_id ])
 ;;
 
 let test_submit_surfaces_storage_failure () =
@@ -1364,6 +1602,7 @@ let test_default_auto_judge_defers_without_blocking () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
@@ -1404,6 +1643,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
        (match AQ.resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
@@ -1455,6 +1695,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
       AQ.For_testing.reset_runtime_state ();
       cleanup_dir base_path)
     (fun () ->
+       ignore (install_exn ~base_path);
        let reject_id =
          submit
            ~base_path
@@ -1537,6 +1778,18 @@ let () =
             `Quick
             test_unversioned_request_context_is_not_replayed_as_exact
         ; Alcotest.test_case
+            "durable sequence survives restart"
+            `Quick
+            test_monotonic_sequence_survives_restart
+        ; Alcotest.test_case
+            "same owner drains by durable sequence"
+            `Quick
+            test_same_owner_drain_uses_sequence_not_wall_clock
+        ; Alcotest.test_case
+            "different owners activate in parallel"
+            `Quick
+            test_different_owners_claim_in_parallel
+        ; Alcotest.test_case
             "dedup keeps distinct origins"
             `Quick
             test_dedup_never_merges_distinct_origins
@@ -1584,6 +1837,18 @@ let () =
             "malformed snapshot is explicit"
             `Quick
             test_malformed_snapshot_fails_install_and_is_observed
+        ; Alcotest.test_case
+            "unsupported version quarantines and restarts fresh"
+            `Quick
+            test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh
+        ; Alcotest.test_case
+            "quarantine name collision uses next free name"
+            `Quick
+            test_quarantine_name_collision_uses_next_free_name
+        ; Alcotest.test_case
+            "unreadable json is not quarantined"
+            `Quick
+            test_unreadable_json_snapshot_is_not_quarantined
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick

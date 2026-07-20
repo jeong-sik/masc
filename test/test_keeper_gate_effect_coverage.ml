@@ -65,6 +65,12 @@ let with_clean_gate_runtime f =
     f
 ;;
 
+let install_exn ~base_path =
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Ok report -> report
+  | Error error -> fail (Keeper_approval_queue.install_error_to_string error)
+;;
+
 let with_publication_recovery
       ~registry_root
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -179,6 +185,7 @@ let test_keeper_effects_defer_without_dispatch () =
   (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
    | Ok _ -> ()
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  ignore (install_exn ~base_path);
   let meta = make_meta "gate-deferred-keeper" in
   with_publication_recovery
     ~registry_root:base_path
@@ -295,6 +302,7 @@ let test_ollama_probe_defer_and_unavailable_do_not_dispatch () =
    with
    | Ok _ -> ()
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  ignore (install_exn ~base_path:deferred_base);
   let meta = make_meta "ollama-gate-deferred-keeper" in
   let deferred =
     Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome
@@ -383,6 +391,7 @@ let test_voice_effect_defers_without_gating_local_reads () =
   (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
    | Ok _ -> ()
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  ignore (install_exn ~base_path);
   let meta = make_meta "voice-gate-keeper" in
   let listen_input =
     `Assoc

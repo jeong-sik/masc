@@ -50,6 +50,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let install_exn ~base_path =
+  match AQ.install_persistence ~base_path with
+  | Ok report -> report
+  | Error error -> fail (AQ.install_error_to_string error)
+
 let rec wait_until ~clock ~deadline predicate =
   if predicate ()
   then true
@@ -344,6 +349,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       let _workspace =
         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
       in
+      ignore (install_exn ~base_path:config.base_path);
       let blocked = make_meta "hitl-blocked" in
       let clear = make_meta "hitl-clear" in
       List.iter
@@ -1034,6 +1040,7 @@ let test_sweep_reports_pending_hitl_approval () =
       Log.set_level Log.Info;
       let config = Masc.Workspace.default_config base_dir in
       let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      ignore (install_exn ~base_path:config.base_path);
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()

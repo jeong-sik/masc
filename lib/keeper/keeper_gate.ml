@@ -342,8 +342,7 @@ let compare_auto_judge_entries
       (left : Keeper_approval_queue.pending_approval)
       (right : Keeper_approval_queue.pending_approval)
   =
-  let by_time = Float.compare left.requested_at right.requested_at in
-  if by_time <> 0 then by_time else String.compare left.id right.id
+  Int.compare left.sequence right.sequence
 ;;
 
 let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
@@ -921,3 +920,12 @@ let decide ?cycle_grant ~keeper_always_allow request =
       ();
     Unavailable reason
 ;;
+
+module For_testing = struct
+  let ready_auto_judges_for_owner ~base_path ~keeper_name entries =
+    ready_auto_judges_for_owner ~base_path ~keeper_name entries
+  ;;
+
+  let claim_auto_judge = claim_auto_judge
+  let release_auto_judge = release_auto_judge
+end

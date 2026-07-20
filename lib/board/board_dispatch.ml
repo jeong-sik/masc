@@ -425,6 +425,56 @@ let rec stop_runtime_actor_owned_by ~sw actor =
       else stop_runtime_actor_owned_by ~sw actor
 ;;
 
+(* Publish [Actor_started] for the actor this switch already claimed.
+   [backend_state] holds every actor's status in one record, so a whole-record
+   CAS also loses when an unrelated actor's [on_release] runs between our claim
+   and this publish. Losing that race must not abandon our own transition: the
+   actor is still [Actor_starting sw] and nobody else will advance it, so the
+   caller would leave it starting forever and every later call would spin on a
+   live owner.
+
+   Re-read and retry on a fresh record — the same shape as
+   {!stop_runtime_actor_owned_by} — so peer updates are preserved instead of
+   overwritten. [false] means the claim genuinely no longer belongs to this
+   switch, which is a real replacement rather than a lost race. *)
+let rec publish_runtime_actor_started ~sw actor =
+  let current = Atomic.get backend_state in
+  match current with
+  | Uninitialized -> false
+  | Active (backend, actors) ->
+    if not (actor_status_owned_by sw (actor_status actors actor))
+    then false
+    else
+      let started_state =
+        Active (backend, with_actor_status actors actor (Actor_started sw))
+      in
+      if Atomic.compare_and_set backend_state current started_state
+      then true
+      else publish_runtime_actor_started ~sw actor
+;;
+
+(* A replacement actor starts on an inbox the cancelled owner may have already
+   drained: [routing_retry_loop] takes the wake token and clears
+   [routing_retry_requested] BEFORE running its callback, so cancelling it
+   mid-callback (or mid-backoff) leaves a committed outbox entry with no token
+   and no pending request. Forking alone would then block on [Stream.take]
+   until some later Board mutation happened to request a retry, and the durable
+   signal would sit unretried in the meantime.
+
+   Re-arm the signal so startup is itself a recovery point.
+   [request_routing_retry] is a no-op when a request is already pending, so an
+   unnecessary re-arm costs one extra sweep, never a duplicate token. The match
+   is exhaustive: a new actor kind must state its own startup recovery rather
+   than silently inherit "none". *)
+let rearm_runtime_actor_signal = function
+  | Routing_retry -> request_routing_retry ()
+  | Flusher ->
+    (* The flusher's wake token is level-triggered off the durable obligation
+       record, which a replacement re-reads on its first loop, so there is
+       nothing to re-arm here. *)
+    ()
+;;
+
 let retire_unavailable_actor_owner actor owner =
   if switch_is_available owner
   then false
@@ -479,14 +529,10 @@ let start_runtime_actor ~sw ~clock actor =
                       "Board runtime actor stopped with owner switch: actor=%s"
                       (runtime_actor_to_string actor));
                 spawn_runtime_actor_on_switch ~sw ~clock store actor;
-                let started_state =
-                  Active
-                    ( backend
-                    , with_actor_status starting_actors actor (Actor_started sw) )
-                in
-                if Atomic.compare_and_set backend_state starting_state started_state
+                if publish_runtime_actor_started ~sw actor
                 then begin
                   record Started;
+                  rearm_runtime_actor_signal actor;
                   Ok ()
                 end
                 else begin

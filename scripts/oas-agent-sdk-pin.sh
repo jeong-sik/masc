@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.217.1"
-# Pinned to the v0.217.1 release (tracks main). On top of 0.216.5:
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.217.3"
+# Pinned to the v0.217.3 release (tracks main). On top of 0.217.1:
+# - 0.217.2: reasoning_replay_dropped logs at Info, not Warn (oas#2721).
+# - 0.217.3 (behavioral hard-cut): Ollama native tool-loop replay/correlation
+#   is projected through an immutable occurrence-scoped Tool_result_projection;
+#   legacy User-role ToolResult and uncorrelated tool messages are rejected
+#   typed (AcceptRejected) on Gemini/Ollama-native instead of silently repaired
+#   (oas#2710, supersedes oas#2711). Live checkpoint audit 2026-07-20: 24/24
+#   primary checkpoints carry zero legacy shapes, so the cut is inert on the
+#   current fleet. Durable Error_occurred error_domain is classified from the
+#   error, not hardcoded "Api" (oas#2717).
+# On top of 0.216.5:
 # - 0.216.6/0.216.7: Kimi native token-count admission (oas#2705), projected
 #   provider input as the admission SSOT (oas#2707), exact provider turn
 #   identity shared with execution (oas#2709).
@@ -25,5 +35,5 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.217.1"
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="9fef71dedf1280e5f0daf083bccc06d53b2c065c"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.217.1"
+readonly OAS_AGENT_SDK_SHA="cbc5168e09254d9e48ea5708a12bbea2dc8be56d"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.217.3"

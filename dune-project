@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.21.1)
+(version 0.21.2)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -59,7 +59,7 @@
   ;; ordered multimodal delivery contracts;
   ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
   ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.217.1))
+  (agent_sdk (>= 0.217.3))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

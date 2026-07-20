@@ -163,6 +163,98 @@ let test_roundtrip_preserves_full_evidence_and_pending_state () =
   | Error detail -> Alcotest.failf "candidate decode failed: %s" detail
 ;;
 
+let context_key_or_fail candidate =
+  match A.Context_key.of_candidate candidate with
+  | Ok key -> key
+  | Error detail -> Alcotest.failf "context key failed: %s" detail
+;;
+
+let candidate_with_context context =
+  { (candidate ()) with
+    judgment_request = `Assoc [ "keeper_context", context ]
+  }
+;;
+
+let test_context_key_is_exact_and_object_order_independent () =
+  let left =
+    candidate_with_context
+      (`Assoc
+         [ "instructions", `String "continue"
+         ; "goals", `List [ `String "g-1"; `String "g-2" ]
+         ; "runtime", `Assoc [ "model", `String "judge"; "tools", `Bool true ]
+         ])
+    |> context_key_or_fail
+  in
+  let reordered =
+    candidate_with_context
+      (`Assoc
+         [ "runtime", `Assoc [ "tools", `Bool true; "model", `String "judge" ]
+         ; "goals", `List [ `String "g-1"; `String "g-2" ]
+         ; "instructions", `String "continue"
+         ])
+    |> context_key_or_fail
+  in
+  let changed_list_order =
+    candidate_with_context
+      (`Assoc
+         [ "runtime", `Assoc [ "tools", `Bool true; "model", `String "judge" ]
+         ; "goals", `List [ `String "g-2"; `String "g-1" ]
+         ; "instructions", `String "continue"
+         ])
+    |> context_key_or_fail
+  in
+  Alcotest.(check bool)
+    "object field order is not identity"
+    true
+    (A.Context_key.equal left reordered);
+  Alcotest.(check bool)
+    "list order remains identity"
+    false
+    (A.Context_key.equal left changed_list_order);
+  let positive_zero =
+    candidate_with_context (`Assoc [ "offset", `Float 0.0 ])
+    |> context_key_or_fail
+  in
+  let negative_zero =
+    candidate_with_context (`Assoc [ "offset", `Float (-0.0) ])
+    |> context_key_or_fail
+  in
+  Alcotest.(check string)
+    "signed zero has one durable identity"
+    (A.Context_key.to_canonical_string positive_zero)
+    (A.Context_key.to_canonical_string negative_zero)
+;;
+
+let test_context_key_rejects_ambiguous_authority () =
+  let expect_error label candidate =
+    match A.Context_key.of_candidate candidate with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s was accepted" label
+  in
+  expect_error
+    "missing keeper_context"
+    { (candidate ()) with judgment_request = `Assoc [] };
+  expect_error
+    "multiple keeper_context fields"
+    { (candidate ()) with
+      judgment_request =
+        `Assoc
+          [ "keeper_context", `Assoc [ "instructions", `String "first" ]
+          ; "keeper_context", `Assoc [ "instructions", `String "second" ]
+          ]
+    };
+  expect_error
+    "duplicate nested context key"
+    (candidate_with_context
+       (`Assoc
+          [ "instructions", `String "first"
+          ; "instructions", `String "second"
+          ]));
+  expect_error
+    "non-finite context number"
+    (candidate_with_context (`Assoc [ "temperature", `Float Float.nan ]))
+;;
+
 let test_record_dedupes_exact_candidate_identity () =
   with_temp_base "keeper-board-attention-dedup" @@ fun base_path ->
   let first = candidate () in
@@ -900,6 +992,14 @@ let () =
             "roundtrip preserves full evidence and Pending"
             `Quick
             test_roundtrip_preserves_full_evidence_and_pending_state
+        ; Alcotest.test_case
+            "context identity is exact and object-order independent"
+            `Quick
+            test_context_key_is_exact_and_object_order_independent
+        ; Alcotest.test_case
+            "context identity rejects ambiguous authority"
+            `Quick
+            test_context_key_rejects_ambiguous_authority
         ; Alcotest.test_case
             "record dedupes exact candidate identity"
             `Quick

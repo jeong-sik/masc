@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.21.1] - 2026-07-20
+
+### Changed
+- Re-cut of the 0.21.0 release line: the `v0.21.0` tag points at a commit whose generated `masc.opam` still carried version 0.20.1, so its own version-truth gate (and the tag-triggered release workflow) fail on it. 0.21.1 is the first version-truth-clean release commit; `v0.21.0` remains an unpublished historical tag. Also aligns the previously ungated `masc.opam.locked` version field (was 0.19.54) and the ROADMAP/PRODUCT-OPERATING-PLAN/SPEC-INDEX version headers.
+
 ## [0.21.0] - 2026-07-20
 
 ### Changed

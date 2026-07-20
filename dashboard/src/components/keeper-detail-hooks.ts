@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'preact/hooks'
+import { keeperRuntimeTraceRefreshNonce } from './keeper-runtime-trace-refresh'
 import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
@@ -66,6 +67,9 @@ export function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot 
 
 export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperRuntimeTraceResponse> {
   const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperRuntimeTraceResponse>>(loadingEvidence)
+  // Read the refresh nonce during render so the component subscribes to it;
+  // a config save bumps it, re-running the effect below to re-fetch the trace.
+  const refreshNonce = keeperRuntimeTraceRefreshNonce.value
   useEffect(() => {
     const controller = new AbortController()
     let cancelled = false
@@ -93,7 +97,7 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
       controller.abort()
       cleanup()
     }
-  }, [keeperName])
+  }, [keeperName, refreshNonce])
   return evidence
 }
 

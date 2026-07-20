@@ -134,7 +134,6 @@
   opentelemetry.client
   ambient-context
   ambient-context-eio
-  masc.autonomous
   masc.shared_audit
   masc.shared_types
   masc.resilience

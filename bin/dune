@@ -119,15 +119,6 @@
   agent_sdk
   agent_sdk.llm_provider))
 
-;; RFC-0264 P3 local substrate: recall ledger ⨝ execution receipts, no network.
-
-(executable
- (name masc_recall_outcome_eval)
- (modules masc_recall_outcome_eval)
- (public_name masc-recall-outcome-eval)
- (package masc)
- (libraries masc masc.config masc.config_dir_resolver masc_core unix yojson))
-
 (executable
  (name public_tool_manifest)
  (modules public_tool_manifest)
@@ -153,17 +144,6 @@
  (public_name masc-compaction-audit)
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
-
-;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
-;; Stamps the [mentions] field onto pre-P4 user rows; run with the
-;; server stopped.
-
-(executable
- (name keeper_chat_backfill_mentions)
- (modules keeper_chat_backfill_mentions)
- (public_name masc-keeper-chat-backfill-mentions)
- (package masc)
- (libraries masc))
 
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
@@ -265,14 +245,6 @@
   masc.mcp_transport_protocol
   agent_sdk
   agent_sdk.llm_provider))
-
-;; Offline Shell IR boundary probe — read-only. Parses a command, applies the
-;; typed structural gate, then validates the path jail without dispatching.
-
-(executable
- (name masc_shell_ir_probe)
- (modules masc_shell_ir_probe)
- (libraries masc.masc_exec masc.exec_policy masc.masc_exec_command_gate))
 
 ; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
 ; Depends on tool_schemas_specs (types-only sibling library) to share

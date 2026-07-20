@@ -92,7 +92,6 @@ type t =
   | OasTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
-  | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures

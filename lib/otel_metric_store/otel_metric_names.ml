@@ -201,7 +201,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
    [masc_keeper_compactions_total] hides because that counter
    is incremented on the trigger rather than the savings.  This
    counter labels by [keeper, trigger] so dashboards separate
-   "context_overflow_imminent triggered noop" from "manual
+   "provider_overflow triggered noop" from "manual
    trigger noop" etc. and operators can attribute blame.  Pair
    with [masc_keeper_compaction_saved_tokens_total] (already
    shipping) — that one tracks the bytes saved by the 1.6%
@@ -257,8 +257,6 @@ let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "
    [Keeper_metrics.(to_string ProactiveOutcome)] classifies every scheduled
    autonomous cycle into tool_called | noop | error, giving a fleet-wide
    health ratio in Grafana. *)
-(* PR-B: keeper turn skipped due to ollama saturation pre-check.
-   Labelled by [keeper] and [runtime]. *)
 let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"

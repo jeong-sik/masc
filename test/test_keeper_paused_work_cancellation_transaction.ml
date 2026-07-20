@@ -29,7 +29,7 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
   let base_path = Filename.temp_dir "keeper-paused-cancel-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       remove_tree base_path)
     (fun () ->
        let config = Workspace.default_config base_path in
@@ -70,7 +70,7 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
        |> require_ok "seed accepted source";
        if registered
        then (
-         ignore (Keeper_registry.register ~base_path keeper_name persisted);
+         ignore (Keeper_registry.For_testing.register ~base_path keeper_name persisted);
          if paused
          then
            match
@@ -163,7 +163,7 @@ let test_paused_owner_cancellation_commits_once () =
     in
     Keeper_meta_store.write_meta config resumed
     |> require_ok "persist replacement owner generation";
-    Keeper_registry.clear ();
+    Keeper_registry.For_testing.clear ();
     let replay =
       Transaction.cancel config ~keeper_name request
       |> Result.map_error Transaction.error_to_string

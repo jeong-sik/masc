@@ -282,16 +282,30 @@ let apply_hitl_summary_schema_to_config config =
   apply_to_provider_config hitl_context_summary_schema config
 ;;
 
-let apply_schema_or_prompt_tier ~log_label schema provider_cfg =
-  let native_cfg = apply_to_provider_config schema provider_cfg in
-  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-  | Ok () -> native_cfg
-  | Error detail ->
-    Log.Keeper.info
-      "%s: prompt tier (native schema unavailable: %s)"
-      log_label
-      detail;
-    provider_cfg
+(* Ask the provider for no wire response format. The call sites that use this
+   state their output contract in the prompt and re-validate it in a total
+   parser, so a native schema added no guarantee the parser did not already
+   provide. What it did add was a capability branch:
+   [validate_output_schema_request] rejects json_schema on every
+   json_object-only endpoint (GLM/DeepSeek/Kimi), so those lanes fell back to
+   the same prompt path anyway while logging one INFO line per keeper per tick.
+
+   Two failure modes traced to that branch are closed by not taking it. The
+   librarian schema marks every claim field [required] with nullable types, so
+   a schema-conforming provider emits ["claim_id": null] — which
+   [Keeper_librarian.optional_string_field_strict] rejects, dropping the whole
+   episode, while the prompt tells the model to omit the key instead. And the
+   json_object tier only 400s because a response_format was set at all.
+
+   Note the parse path never read a provider-side structured field:
+   [Agent_sdk_response.structured_json_of_response] extracts JSON from the
+   response's visible text, so native and prompt tiers converge on the same
+   parser byte for byte. *)
+let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
+  { provider_cfg with
+    response_format = Agent_sdk.Types.Off
+  ; output_schema = None
+  }
 ;;
 
 (* Capability-aware three-tier response-format selection for a request whose

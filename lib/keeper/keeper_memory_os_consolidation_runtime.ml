@@ -20,8 +20,10 @@ let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 ;;
 
 (* The plan can list many groups over a large store, so allow more than the
-   512-token summary budget. *)
-let consolidation_max_tokens = 2048
+   512-token summary budget. 2048 was too small for live stores: on 2026-07-20
+   per-keeper fact stores reached 300-635 rows, and a grouping plan over that
+   many indices does not fit in 2048 output tokens. *)
+let consolidation_max_tokens = 8192
 
 type outcome =
   | Skipped_too_few of int
@@ -63,9 +65,18 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
       Llm_provider.Provider_config.max_tokens
     ; tool_choice = None
     ; disable_parallel_tool_use = true
+      (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
+         otherwise spend the whole output budget on thinking and return an
+         empty visible text — observed live on 2026-07-20 as 256 consecutive
+         [Empty_response] outcomes while only trivial 2-fact stores
+         consolidated. *)
+    ; enable_thinking = Some false
+    ; preserve_thinking = Some false
+    ; thinking_budget = None
+    ; clear_thinking = Some true
     }
   in
-  Keeper_structured_output_schema.apply_schema_or_prompt_tier
+  Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
     ~log_label:"memory os consolidation output contract"
     Keeper_structured_output_schema.consolidation_plan_output_schema
     tuned_cfg
@@ -77,6 +88,18 @@ end
 
 let validate_provider_for_consolidation provider_cfg =
   Llm_provider.Provider_config.validate_output_schema_request provider_cfg
+;;
+
+(* The output-contract tier is a function of the provider capabilities and the
+   plan schema only — never of the keeper — so it is resolved once per
+   consolidation tick, not once per keeper. Re-resolving per keeper duplicated
+   the decision and emitted one identical contract log line per keeper per
+   tick. *)
+let resolve_provider_for_consolidation provider_cfg =
+  let tiered = provider_for_consolidation provider_cfg in
+  match validate_provider_for_consolidation tiered with
+  | Ok () -> Ok tiered
+  | Error msg -> Error msg
 ;;
 
 let messages_for_consolidation facts =
@@ -121,7 +144,11 @@ let invalid_structured_response_detail detail =
 (* Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it, and
    (unless [dry_run]) rewrite the store atomically. Returns what happened without
    raising for the expected failure modes (too few facts, transport error,
-   unparseable plan) so a caller fiber stays alive. *)
+   unparseable plan) so a caller fiber stays alive.
+
+   [provider_cfg] must already be tier-resolved via
+   [resolve_provider_for_consolidation]; this function no longer re-applies the
+   output contract per keeper (the tier is keeper-independent). *)
 let consolidate_keeper
       ?complete
       ?clock
@@ -144,13 +171,9 @@ let consolidate_keeper
       match messages_for_consolidation facts with
       | Error msg -> Unparseable msg
       | Ok messages ->
-        let config = provider_for_consolidation provider_cfg in
-        (match validate_provider_for_consolidation config with
-         | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
-         | Ok () ->
         (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
-             ~config ~messages ()
+             ~config:provider_cfg ~messages ()
          with
          | Error _ -> Transport_failed "consolidation provider transport error"
          | Ok response ->
@@ -179,6 +202,5 @@ let consolidate_keeper
                     ~after
                     ()
               | Ok _ -> invalid_structured_response Consolidation.Non_object_json)
-        )
         )
 ;;

@@ -65,7 +65,7 @@ let build_prompt ~keeper_name request =
 
 let apply_output_schema provider_config =
   Ok
-    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
+    (Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
        ~log_label:"keeper failure judgment output contract"
        Keeper_structured_output_schema.failure_judgment_output_schema
        provider_config)

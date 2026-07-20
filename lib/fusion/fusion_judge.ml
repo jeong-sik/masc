@@ -151,7 +151,10 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
 
    - Native tier: 모델/엔드포인트가 native structured output을 선언하면 JsonSchema를
      provider config에 싣는다 (와이어 레벨 강제).
-   - Prompt tier: 선언이 없으면 schema를 싣지 않는다. 계약은 프롬프트가 이미 항상
+   - JSON-mode tier (#25324): native 선언은 없지만 json_object response format을
+     선언한 provider(GLM/DeepSeek/Kimi)는 [JsonMode]를 싣는다 — 문법 레벨 JSON은
+     와이어에서 강제되고, 스키마 준수는 아래 prompt 계약 + strict 파싱이 담당한다.
+   - Prompt tier: 둘 다 없으면 schema를 싣지 않는다. 계약은 프롬프트가 이미 항상
      싣고 다니는 [Fusion_judge_parse.expected_json_doc]이 전달하고, 위반은
      [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
 
@@ -165,7 +168,7 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
 let apply_fusion_judge_output_contract provider_cfg =
   let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
   Ok
-    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
+    (Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
        ~log_label:"fusion judge output contract"
        schema
        provider_cfg)

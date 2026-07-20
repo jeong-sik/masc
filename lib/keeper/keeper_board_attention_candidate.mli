@@ -154,6 +154,10 @@ val drain_pending_on_owner_lane :
     - A successful response must cover the exact requested candidate-id set.
       Unknown, duplicate, or missing identities fail the attempted batch and
       persist retryable response-contract evidence on every requested row.
+    - An exact response commits all requested [Pending -> Judged] transitions
+      in one candidate-ledger rewrite or commits none. Durable queue delivery
+      and terminal [Consumed] transitions then proceed idempotently from the
+      committed judgments; they are not presented as a cross-file transaction.
     - Failure-evidence persistence errors propagate to the caller; they are
       never reduced to logs. *)
 

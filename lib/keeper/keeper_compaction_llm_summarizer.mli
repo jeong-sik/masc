@@ -25,12 +25,14 @@ type complete_fn = Keeper_provider_subcall.complete_fn
 (** [make ~runtime_ids ~keeper_name ()] resolves each id in [runtime_ids],
     most-preferred first, exactly as a single {!candidate_runtime_ids_for_assignment}
     would: a Runtime contributes its exact provider config, a Lane tries its
-    configured Runtime candidates in declared order. Every eligible candidate
-    across every seed id is tried, seed order first and then per-seed lane
-    order, with candidates that resolve to the same Runtime id collapsed to
-    their first (highest-priority) occurrence. Missing, ineligible, and failed
-    candidates are logged with their Runtime id. No default Runtime is
-    substituted. [complete] overrides the Provider boundary in tests.
+    configured Runtime candidates in declared order adjusted by the sticky
+    last-good lane preference ({!Runtime_lane_preference}). Every eligible
+    candidate across every seed id is tried, seed order first and then
+    per-seed lane order, with candidates that resolve to the same Runtime id
+    collapsed to their first (highest-priority) occurrence. Missing,
+    ineligible, and failed candidates are logged with their Runtime id. No
+    default Runtime is substituted. [complete] overrides the Provider boundary
+    in tests.
 
     The compaction owner imposes no wall-clock deadline. Cancellation belongs
     to the owning Keeper lane or to the Provider transport boundary. *)

@@ -98,7 +98,9 @@ val list_rules_dashboard_json :
   base_path:string -> unit -> (Yojson.Safe.t, rule_store_error) result
 
 (** Insert or fetch the rule for the exact
-    [(keeper_name, tool_name, canonical complete input)] identity. *)
+    [(keeper_name, tool_name, canonical complete input)] identity.
+    [expires_at] is an optional absolute Unix expiry; the identity match
+    ignores it, so an existing rule is returned unchanged. *)
 val upsert_rule :
   base_path:string ->
   keeper_name:string ->
@@ -106,20 +108,25 @@ val upsert_rule :
   input:Yojson.Safe.t ->
   ?created_by:string ->
   ?source_approval_id:string ->
+  ?expires_at:float ->
   unit ->
   (approval_rule * bool, rule_store_error) result
 
 val delete_rule :
   base_path:string -> id:string -> unit -> (approval_rule, rule_store_error) result
 
-(** Find the exact remembered request and atomically update its match audit. *)
+(** Find the exact remembered request and report whether it authorizes at
+    [now] (defaults to the wall clock; inject for deterministic evaluation).
+    An expired rule is reported as [Rule_match_expired], never applied, and
+    never deleted. *)
 val find_matching_rule :
   base_path:string ->
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  ?now:float ->
   unit ->
-  (rule_match option, rule_store_error) result
+  (rule_lookup, rule_store_error) result
 
 (** {1 Audit log} *)
 
@@ -202,13 +209,16 @@ type resolve_error =
 val resolve_error_to_string : resolve_error -> string
 
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
-    [Decision.Approve], then wake only the Keeper captured by the pending entry. *)
+    [Decision.Approve], then wake only the Keeper captured by the pending entry.
+    [rule_expires_at] is an absolute Unix expiry applied to the remembered
+    rule; it is ignored unless [remember_rule] is [true]. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->
   decision:decision ->
   ?source:decision_source ->
   ?remember_rule:bool ->
+  ?rule_expires_at:float ->
   ?created_by:string ->
   unit ->
   (resolution_result, resolve_error) result

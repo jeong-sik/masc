@@ -769,15 +769,6 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     // OAS bridge events
-    case 'oas:masc:autonomy:agent_selected': {
-      break
-    }
-    case 'oas:masc:autonomy:agent_decision': {
-      break
-    }
-    case 'oas:masc:autonomy:agent_action_executed': {
-      break
-    }
     case 'oas:masc:keeper:snapshot': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const snap = {

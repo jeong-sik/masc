@@ -29,15 +29,6 @@ end
     Primary env vars: MASC_AUTONOMY_*. *)
 
 module AgentSelection = struct
-  let max_starvation_ticks =
-    get_int ~default:12 "MASC_AUTONOMY_MAX_STARVATION_TICKS"
-
-  let starvation_bonus_coefficient =
-    get_float ~default:0.15 "MASC_AUTONOMY_STARVATION_BONUS_COEF"
-
-  let thompson_weight =
-    get_float ~default:0.7 "MASC_AUTONOMY_THOMPSON_WEIGHT"
-
   let vote_decay_factor =
     get_float ~default:0.95 "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
 end

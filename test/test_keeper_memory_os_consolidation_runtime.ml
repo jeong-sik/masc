@@ -440,6 +440,13 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_prompt_matches_template := String.equal expected_prompt rendered_prompt)
             plan
         in
+        let resolved_cfg =
+          match
+            Runtime.resolve_provider_for_consolidation (provider_cfg ~max_tokens:512 ())
+          with
+          | Ok cfg -> cfg
+          | Error msg -> Alcotest.failf "resolver rejected provider config: %s" msg
+        in
         let outcome =
           Runtime.consolidate_keeper
             ~complete
@@ -447,7 +454,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
             ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(provider_cfg ~max_tokens:512 ())
+            ~provider_cfg:resolved_cfg
             ~now
             ~keeper_id
             ()
@@ -478,6 +485,59 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           !seen_prompt_matches_template))))
 ;;
 
+(* #25324 tier 2 wiring: a provider that declares json_object but not native
+   json_schema (GLM/DeepSeek/Kimi) must get [JsonMode] from the consolidation
+   resolver — before this fix the 2-tier helper dropped such providers straight
+   to the prompt tier, forfeiting the wire-level JSON guarantee the endpoint
+   offers. *)
+let test_resolver_selects_json_mode_for_json_object_only_provider () =
+  let json_object_only_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"json-object-only"
+      ~base_url:"https://json-object-only.invalid/v1"
+      ~model_capabilities_override:
+        { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+          supports_structured_output = false
+        }
+      ()
+  in
+  match Runtime.resolve_provider_for_consolidation json_object_only_cfg with
+  | Error msg -> Alcotest.failf "resolver rejected json_object-only provider: %s" msg
+  | Ok resolved ->
+    Alcotest.(check bool)
+      "json_object-only provider gets JsonMode"
+      true
+      (match resolved.Llm_provider.Provider_config.response_format with
+       | Atypes.JsonMode -> true
+       | Atypes.JsonSchema _ | Atypes.Off -> false);
+    Alcotest.(check bool)
+      "JsonMode carries no output_schema"
+      true
+      (Option.is_none resolved.Llm_provider.Provider_config.output_schema)
+;;
+
+(* The OpenAI-compatible json_object contract rejects (HTTP 400) requests whose
+   messages lack the literal token "json" (DeepSeek/Kimi enforce; GLM is
+   lenient). The consolidation prompt must therefore always state that it
+   returns JSON — this locks the token in place for every JsonMode-tier
+   request. *)
+let test_consolidation_prompt_carries_json_token () =
+  with_prompts (fun () ->
+    let facts = [ fact "a"; fact "b" ] in
+    match
+      Prompt_registry.render_prompt_template
+        Keeper_prompt_names.librarian_memory_consolidation
+        [ "numbered_facts", Consolidation.render_numbered_facts facts ]
+    with
+    | Error msg -> Alcotest.failf "failed to render consolidation prompt: %s" msg
+    | Ok rendered ->
+      Alcotest.(check bool)
+        "consolidation prompt states the json contract"
+        true
+        (contains "json" (String.lowercase_ascii rendered)))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation_runtime"
@@ -504,5 +564,15 @@ let () =
             `Quick
             test_consolidate_respects_provider_config_and_prompt_template
 	        ] )
+    ; ( "output_contract"
+      , [ Alcotest.test_case
+            "resolver selects JsonMode for json_object-only provider"
+            `Quick
+            test_resolver_selects_json_mode_for_json_object_only_provider
+        ; Alcotest.test_case
+            "consolidation prompt carries the json token"
+            `Quick
+            test_consolidation_prompt_carries_json_token
+        ] )
     ]
 ;;

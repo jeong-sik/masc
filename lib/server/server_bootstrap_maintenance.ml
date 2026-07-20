@@ -107,7 +107,9 @@ let runtime_for_memory_os_consolidation () =
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
-   Provider transport owns the only LLM timeout boundary. *)
+   Provider transport owns the only LLM timeout boundary. The output contract is
+   resolved once here — not per keeper — because the tier is a function of the
+   provider capabilities and the plan schema only. *)
 let run_memory_os_consolidation_tick
       ?complete
       ~sw
@@ -118,6 +120,15 @@ let run_memory_os_consolidation_tick
       ~now
       ()
   =
+  match
+    Keeper_memory_os_consolidation_runtime.resolve_provider_for_consolidation
+      provider_cfg
+  with
+  | Error msg ->
+    Log.Server.warn
+      "memory_os_keeper_consolidation: provider config rejected: %s"
+      msg
+  | Ok provider_cfg ->
   let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
   let consolidate_one keeper_id () =
     try

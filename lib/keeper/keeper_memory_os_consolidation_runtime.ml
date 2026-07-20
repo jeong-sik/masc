@@ -65,7 +65,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
     ; disable_parallel_tool_use = true
     }
   in
-  Keeper_structured_output_schema.apply_schema_or_prompt_tier
+  Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
     ~log_label:"memory os consolidation output contract"
     Keeper_structured_output_schema.consolidation_plan_output_schema
     tuned_cfg
@@ -77,6 +77,18 @@ end
 
 let validate_provider_for_consolidation provider_cfg =
   Llm_provider.Provider_config.validate_output_schema_request provider_cfg
+;;
+
+(* The output-contract tier is a function of the provider capabilities and the
+   plan schema only — never of the keeper — so it is resolved once per
+   consolidation tick, not once per keeper. Re-resolving per keeper duplicated
+   the decision and emitted one identical contract log line per keeper per
+   tick. *)
+let resolve_provider_for_consolidation provider_cfg =
+  let tiered = provider_for_consolidation provider_cfg in
+  match validate_provider_for_consolidation tiered with
+  | Ok () -> Ok tiered
+  | Error msg -> Error msg
 ;;
 
 let messages_for_consolidation facts =
@@ -121,7 +133,11 @@ let invalid_structured_response_detail detail =
 (* Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it, and
    (unless [dry_run]) rewrite the store atomically. Returns what happened without
    raising for the expected failure modes (too few facts, transport error,
-   unparseable plan) so a caller fiber stays alive. *)
+   unparseable plan) so a caller fiber stays alive.
+
+   [provider_cfg] must already be tier-resolved via
+   [resolve_provider_for_consolidation]; this function no longer re-applies the
+   output contract per keeper (the tier is keeper-independent). *)
 let consolidate_keeper
       ?complete
       ?clock
@@ -144,13 +160,9 @@ let consolidate_keeper
       match messages_for_consolidation facts with
       | Error msg -> Unparseable msg
       | Ok messages ->
-        let config = provider_for_consolidation provider_cfg in
-        (match validate_provider_for_consolidation config with
-         | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
-         | Ok () ->
         (match
            Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
-             ~config ~messages ()
+             ~config:provider_cfg ~messages ()
          with
          | Error _ -> Transport_failed "consolidation provider transport error"
          | Ok response ->
@@ -179,6 +191,5 @@ let consolidate_keeper
                     ~after
                     ()
               | Ok _ -> invalid_structured_response Consolidation.Non_object_json)
-        )
         )
 ;;

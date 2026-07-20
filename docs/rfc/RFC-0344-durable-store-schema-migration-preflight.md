@@ -28,7 +28,7 @@ durable store schema version bump이 배포 경계에서 데이터 유실 또는
 
 공통 근본: 각 store가 version bump 시 (a) migration 도구 또는 (b) generation-bump(경로 분리) 중 하나를 **타입 수준에서 강제받지 않는다**. 현재는 주석(`keeper_reaction_ledger.ml`의 "namespace and row schema advance together")으로만 규율되고 컴파일러가 미강제 → 매번 hand-decision, 매번 라이브 state 확인 누락.
 
-**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 22개 중 **17개가 위험**임을 보인다 — hard-cut-reject 8개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에 **durable state의 구→신 변환을 책임지는 공용 preflight 경로가 없고**, 존재하는 startup 변환은 store별 ad-hoc이라 재사용·검증되지 않으며 boot 시점 버전 대조와 결속되지 않는다. event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
+**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 25개 중 **20개가 위험**임을 보인다 — hard-cut-reject 11개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에 **durable state의 구→신 변환을 책임지는 공용 preflight 경로가 없고**, 존재하는 startup 변환은 store별 ad-hoc이라 재사용·검증되지 않으며 boot 시점 버전 대조와 결속되지 않는다. event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
 
 RFC-0338은 durable persistence를 다루면서도 "데이터 파일 migration은 없다"(본문 §rollback)고 scope에서 명시적으로 제외한다. 즉 개별 durability RFC들은 각자 "내 변경엔 migration 불요"를 판단할 뿐, **"durable store 전반의 version bump 안전성"을 책임지는 RFC가 구조적으로 없다**. 이 공백이 위 4건이 반복되는 이유다.
 
@@ -182,11 +182,13 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 - **회귀 재현 테스트**: 위 4개 사고 각각을 fixture로 — 구 version 파일을 심고 boot preflight를 돌려 (a) migration 있으면 무손실 변환, (b) 없으면 fatal(silent Unavailable 아님)을 assert.
 - **counterfactual**: preflight의 version 대조를 삭제하면 재현 테스트가 red.
 - descriptor 미등록 durable store가 없음을 boot에서 열거 검증(meta guard).
+- **§3.5 등록 게이트가 vacuous하지 않음**: 게이트가 현재 트리에서 미등록 durable store를 **최소 1개 실제로 검출**해야 한다. 0건 검출로 통과하면 스캐너가 durable 쓰기 호출을 못 찾고 있다는 뜻이므로 게이트 자체를 red로 본다.
+- **첫 배포 quiescence 검증(§3.2.1 한계 대응)**: lock을 도입하는 그 배포에서는 구 바이너리가 `preflight.lock`을 애초에 열지 않으므로 lock이 상호배제를 제공하지 않는다. 따라서 이 1회 조건을 acceptance에 명시한다 — **배포 절차가 구 프로세스 종료를 확인한 뒤 신 바이너리를 기동**해야 하며, preflight는 시작 시 base-path에 살아 있는 다른 프로세스가 없음을 확인(예: 기존 pid/lease 파일 검사)하고 확인 불가면 **fatal**로 멈춘다. 이 항목이 없으면 구현과 배포가 acceptance를 만족하면서도 구 프로세스가 쓰는 중에 preflight가 backup/rewrite를 수행할 수 있다.
 
 ## 5. Blast radius
 
 - boot 시퀀스에 preflight 단계 삽입(keeper 시작 전, 단일 프로세스).
-- 위험 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 8개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). **Memory OS(episode `-g%04d`)는 안전 아님** — `-g%04d`는 schema namespace가 아니라 episode/trace generation이라 schema bump 시 구 파일이 자동 orphan되므로 hard-cut 그룹으로 분류해 descriptor 대상. 진짜 안전 참고는 shutdown projection의 backward-read와 reaction ledger의 경로-generation-bump 2개뿐.
+- 위험 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 11개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). **Memory OS(episode `-g%04d`)는 안전 아님** — `-g%04d`는 schema namespace가 아니라 episode/trace generation이라 schema bump 시 구 파일이 자동 orphan되므로 hard-cut 그룹으로 분류해 descriptor 대상. 진짜 안전 참고는 shutdown projection의 backward-read와 reaction ledger의 경로-generation-bump 2개뿐.
 - `Store_version` variant화로 각 store의 version 문자열 → typed. wire 호환 유지(디스크 표기 불변, 파싱만 typed).
 - version 표기 6가지 상이 컨벤션(schema-suffix / storage_generation / int schema_version / 문자열 rfc-vN / 경로-embed generation / 표기부재)을 descriptor의 `Store_version.t`로 수렴. 디스크 표기는 store별로 유지하되 **선언은 한 타입**으로.
 
@@ -207,11 +209,29 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 
 ---
 
-## §현황: durable store 인벤토리 (2026-07-19 code-verified)
+## §현황: durable store 인벤토리 (2026-07-19 code-verified, 07-20 보강)
 
-전수 조사 결과 durable store 약 **21개**(compaction evidence는 host store에 embed, fs lock은 payload 없음 — 제외). unknown-version 처리 방식으로 분류:
+### 이 목록은 "전수"를 보장하지 않는다 — 보장은 §3.5가 한다
 
-### 위험 A — hard-cut-reject (8개, 구 데이터 orphan / store Unavailable)
+초안은 이 표를 **전수 인벤토리**라고 주장했다. 그 주장은 틀렸다: 적대 리뷰가 세 차례에 걸쳐 누락을 찾아냈고(tool usage, Board attention partitions, direct-chat active checkpoint, runtime manifests), 매번 표에 한 줄을 더하는 대응은 **다음 누락을 막지 못한다**. 사람이 grep으로 센 목록이 exhaustive임을 사람이 다시 grep해서 증명하는 구조라, 누락은 발견될 때까지 조용히 남는다 — 이 RFC가 없애려는 실패 모드와 정확히 같은 모양이다.
+
+따라서 표의 역할을 **"완전한 대상 목록"에서 "롤아웃 우선순위를 매기기 위한 관측 표본"으로 격하**한다. exhaustiveness는 §3.5의 등록 게이트가 컴파일/CI 레벨에서 강제한다. 표에 없는 store가 발견되면 그것은 RFC의 결함이 아니라 게이트가 잡아야 할 미등록 store다.
+
+### 3.5 미등록 durable store 차단 (exhaustiveness의 실제 보장)
+
+descriptor 레지스트리에 등록되지 않은 durable store를 CI가 거부한다:
+
+1. **탐지**: durable 쓰기 primitive(`Fs_compat`의 durable append/rewrite 계열)를 호출하면서 descriptor 레지스트리에 등록되지 않은 모듈을 스캔한다. 호출 지점이 SSOT라 grep 대상이 "store 이름"이 아니라 **"durable 쓰기 API"**가 되어, 새 store가 이름을 뭐라 짓든 걸린다.
+2. **판정**: 미등록 호출자는 CI FAIL. 등록 면제가 필요하면(예: payload 없는 lock 파일) 명시적 allowlist 항목 + 근거 주석을 요구한다 — 침묵이 아니라 선언으로만 빠져나갈 수 있다.
+3. **근거**: 이 RFC 리뷰 중 발견된 4건은 전부 "durable 쓰기는 하는데 인벤토리에 없다"는 같은 모양이었다. 사람 목록 대신 호출 지점을 세면 그 계열이 통째로 닫힌다.
+
+§4 acceptance는 이 게이트가 **현재 트리에서 최소 1개 미등록 store를 실제로 잡아내는 것**을 통과 조건으로 포함한다(vacuous 통과 방지).
+
+---
+
+전수 조사 결과 durable store 약 **25개**(compaction evidence는 host store에 embed, fs lock은 payload 없음 — 제외). unknown-version 처리 방식으로 분류:
+
+### 위험 A — hard-cut-reject (11개, 구 데이터 orphan / store Unavailable)
 
 | store | 경로 | version | reject 지점 |
 |-------|------|---------|-------------|
@@ -223,6 +243,9 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 | Prompt overrides | `.masc/prompt_overrides.json` | `schema_version=1` | `prompt_override_persistence.ml:119-123` |
 | Chat queue (SQLite) | `…/chat-queue.sqlite3` | `keeper_chat_queue.sqlite.v2` | `keeper_chat_queue.ml:1477-1478` |
 | Keeper tool usage (per-keeper) | `.masc/keepers/tool_usage/<name>.json` | `schema_version=2` | `keeper_registry_tool_usage_persistence.ml:12`; `restore`(`:170-191`)가 decode 실패를 로그만 남기고 in-memory usage map을 빈 채로 둠 |
+| Board attention partitions (per-keeper) | `.masc/board_attention_partitions/<keeper>.jsonl` | `schema_version=2` | `keeper_board_attention_partition.ml:293-301` (v2 외 전부 거부); `keeper_board_attention_worker.ml:330`이 process-start recovery에서 로드 |
+| Direct-chat active checkpoint (per-keeper) | `.chat-direct-active-v1` | 경로-embed v1 | `keeper_chat_direct_delivery.ml:159-161`, 소비 `server_routes_http_keeper_stream.ml:1465`; decoder(`:384-390`)가 non-current를 hard-reject → lane inventory가 active record를 artifact로 오분류 |
+| Runtime manifests (per-keeper, per-trace) | `.masc/keepers/<name>/runtime-manifests/<trace>.jsonl` | v1 | `keeper_runtime_manifest.ml:609-615`(non-v1 행 거부); **`read_rows_from_path`(`:784-793`)가 `| Error _ -> acc`로 디코드 실패를 조용히 버림** — bump 후 구 manifest가 runtime-lens 읽기에서 무경고로 사라짐 |
 
 ### 위험 B — unversioned (9개, 암묵적 hard-cut; 필드 추가만 관대)
 

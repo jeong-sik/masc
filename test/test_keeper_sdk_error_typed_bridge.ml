@@ -508,13 +508,6 @@ let test_static_error_classification_preserves_retry_semantics () =
        (Llm_provider.Error.UnknownVariant { type_name = "provider"; value = "new" }))
 ;;
 
-let rate_limit_pool_of_runtime_id = function
-  | "same.a"
-  | "same.b" -> Some "pool:same"
-  | "other.c" -> Some "pool:other"
-  | _ -> Some "pool:same"
-;;
-
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "runtime-rate-limit-pool" ".toml" in
   let oc = open_out path in
@@ -641,28 +634,33 @@ let test_generic_accept_rejected_is_not_locally_recoverable () =
       (EC.degraded_retry_reason_to_string reason)
 ;;
 
-let test_soft_rate_limit_skips_same_credential_pool () =
+let test_soft_rate_limit_preserves_declared_same_credential_runtime () =
   init_rate_limit_pool_runtime ();
-  let retry =
+  match
     EC.degraded_rotation_after_recoverable_error
-      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
       ~attempted_runtimes:[ "same.a" ]
       soft_rate_limit_err
-  in
-  Alcotest.(check bool)
-    "same credential pool is not a rotation target"
-    false
-    (Option.is_some retry)
+  with
+  | Some { EC.next_runtime; fallback_reason = EC.Rate_limit } ->
+    Alcotest.(check string)
+      "declared same-credential runtime remains eligible"
+      "same.b"
+      next_runtime
+  | Some { fallback_reason; next_runtime } ->
+    Alcotest.failf
+      "expected rate_limit -> same.b, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected declared same-credential runtime fallback"
 ;;
 
-let test_soft_rate_limit_preserves_independent_pool_failover () =
+let test_soft_rate_limit_preserves_other_declared_runtime () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
-      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
@@ -671,7 +669,7 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
   with
   | Some { EC.next_runtime; fallback_reason = EC.Rate_limit } ->
     Alcotest.(check string)
-      "independent credential pool remains eligible"
+      "other declared runtime remains eligible"
       "other.c"
       next_runtime
   | Some { fallback_reason; next_runtime } ->
@@ -679,31 +677,36 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
       "expected rate_limit -> other.c, got %s -> %s"
       (EC.degraded_retry_reason_to_string fallback_reason)
       next_runtime
-  | None -> Alcotest.fail "expected independent credential pool failover"
+  | None -> Alcotest.fail "expected other declared runtime fallback"
 ;;
 
-let test_hard_quota_skips_same_credential_pool () =
+let test_hard_quota_preserves_declared_same_credential_runtime () =
   init_rate_limit_pool_runtime ();
-  let retry =
+  match
     EC.degraded_rotation_after_recoverable_error
-      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"same.b"
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
       ~attempted_runtimes:[ "same.a" ]
       hard_quota_err
-  in
-  Alcotest.(check bool)
-    "hard quota does not fan out to the same credential pool"
-    false
-    (Option.is_some retry)
+  with
+  | Some { EC.next_runtime; fallback_reason = EC.Hard_quota } ->
+    Alcotest.(check string)
+      "declared same-credential runtime remains eligible"
+      "same.b"
+      next_runtime
+  | Some { fallback_reason; next_runtime } ->
+    Alcotest.failf
+      "expected hard_quota -> same.b, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected declared same-credential runtime fallback"
 ;;
 
-let test_hard_quota_preserves_independent_pool_failover () =
+let test_hard_quota_preserves_other_declared_runtime () =
   init_rate_limit_pool_runtime ();
   match
     EC.degraded_rotation_after_recoverable_error
-      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
@@ -712,7 +715,7 @@ let test_hard_quota_preserves_independent_pool_failover () =
   with
   | Some { EC.next_runtime; fallback_reason = EC.Hard_quota } ->
     Alcotest.(check string)
-      "independent credential pool remains eligible"
+      "other declared runtime remains eligible"
       "other.c"
       next_runtime
   | Some { fallback_reason; next_runtime } ->
@@ -720,7 +723,7 @@ let test_hard_quota_preserves_independent_pool_failover () =
       "expected hard_quota -> other.c, got %s -> %s"
       (EC.degraded_retry_reason_to_string fallback_reason)
       next_runtime
-  | None -> Alcotest.fail "expected independent credential pool failover"
+  | None -> Alcotest.fail "expected other declared runtime fallback"
 ;;
 
 let test_server_error_classifies_as_runtime_recoverable () =
@@ -742,7 +745,6 @@ let test_rate_limit_exhaustion_stops_after_candidate_pass () =
   let attempted = [ "same.a"; "same.b"; "other.c" ] in
   match
     EC.degraded_rotation_after_recoverable_error
-      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
       ~fallback_hint:"other.c"
       ~base_runtime:"same.a"
       ~effective_runtime:"same.a"
@@ -839,21 +841,21 @@ let () =
             `Quick
             test_overloaded_with_quota_prose_is_not_hard_quota
         ; Alcotest.test_case
-            "soft rate limits skip same credential-pool candidates"
+            "soft rate limits preserve declared same-credential runtimes"
             `Quick
-            test_soft_rate_limit_skips_same_credential_pool
+            test_soft_rate_limit_preserves_declared_same_credential_runtime
         ; Alcotest.test_case
-            "soft rate limits preserve independent credential-pool failover"
+            "soft rate limits preserve other declared runtimes"
             `Quick
-            test_soft_rate_limit_preserves_independent_pool_failover
+            test_soft_rate_limit_preserves_other_declared_runtime
         ; Alcotest.test_case
-            "hard quota skips same credential-pool candidates"
+            "hard quota preserves declared same-credential runtimes"
             `Quick
-            test_hard_quota_skips_same_credential_pool
+            test_hard_quota_preserves_declared_same_credential_runtime
         ; Alcotest.test_case
-            "hard quota preserves independent credential-pool failover"
+            "hard quota preserves other declared runtimes"
             `Quick
-            test_hard_quota_preserves_independent_pool_failover
+            test_hard_quota_preserves_other_declared_runtime
         ; Alcotest.test_case
             "500 classifies as recoverable server_error"
             `Quick

@@ -120,8 +120,7 @@ val fallback_runtime_for_unavailable_profile :
     Typed rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:
     - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
-    - [RateLimited] provider throttles → ["rate_limit"] (rotation filters
-      candidates sharing the same credential pool)
+    - [RateLimited] provider throttles → ["rate_limit"]
     - [Overloaded] / [CapacityExhausted] → ["capacity_backpressure"]
     - API [ServerError] and transient provider [ServerError] → ["server_error"]
     - [AuthError] → ["auth_error"]
@@ -151,17 +150,13 @@ val degraded_retry_after_recoverable_error :
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
 
-    For ["hard_quota"] and ["rate_limit"], candidates sharing the effective
-    runtime's credential pool, as reported by [credential_pool_of_runtime_id],
-    are excluded before attempt filtering, preserving independent-provider
-    failover while avoiding same-account fan-out. If no pool function is
-    supplied, no credential-pool filtering is applied. Once every typed
-    candidate has been attempted, the current turn stops rotating. A later
-    Keeper turn may make a fresh attempt; this function does not synthesize a
-    timed retry cycle.
+    Quota and rate-limit observations do not imply account-wide scope: every
+    untried runtime in the declaratively selected recovery group remains
+    eligible. Once every typed candidate has been attempted, the current turn
+    stops rotating. A later Keeper turn may make a fresh attempt; this function
+    does not synthesize a timed retry cycle.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
-  ?credential_pool_of_runtime_id:(string -> string option) ->
   ?fallback_hint:string ->
   base_runtime:string ->
   effective_runtime:string ->

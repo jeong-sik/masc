@@ -495,6 +495,11 @@ let handle_keeper_task_tool_with_outcome
                   ~title
                   ~priority
                   ~description
+                    (* Attribute keeper-created tasks so the self-author filter
+                       (below, and in claimable counting) can recognize them.
+                       Without this the row has [created_by = None] and a keeper
+                       is offered its own routing/report tasks back as work. *)
+                  ~created_by:meta.name
               in
               Keeper_tool_execution.success
                 (Yojson.Safe.to_string
@@ -547,8 +552,14 @@ let handle_keeper_task_tool_with_outcome
         if requested_task_id <> "" then
           explicit_claim_result ()
         else
+          (* Auto-claim (no explicit task_id) must not select the keeper's own
+             authored tasks: that closes the routing/report feedback loop
+             (#25429) the claimable count already excludes. Explicit claim by
+             task_id above is intentional and left unfiltered. *)
           Workspace.claim_next_r config ~agent_name:meta.agent_name
-            ~task_filter:claim_goal_scope.task_filter
+            ~task_filter:(fun task ->
+              claim_goal_scope.task_filter task
+              && not (Keeper_world_observation_inputs.task_is_self_authored ~meta task))
             ~allow_scope_fallback:true
             ()
       in

@@ -847,18 +847,14 @@ let settle_unknown_sub_board_commit store content ~initial_detail =
     with_lock store (fun () -> store.dirty_sub_boards <- false);
     Ok ()
   | Error retry_error ->
-    let admission_detail =
-      match request_flush store with
-      | Ok () -> "dirty snapshot admitted to the Board flusher"
-      | Error detail -> "dirty snapshot flush admission failed: " ^ detail
-    in
+    request_flush store;
     Error
       (Persistence_commit_unknown
          (Printf.sprintf
-            "%s; idempotent snapshot settlement failed: %s; %s"
+            "%s; idempotent snapshot settlement failed: %s; dirty snapshot \
+             admitted to the Board flusher"
             initial_detail
-            (show_board_error retry_error)
-            admission_detail))
+            (show_board_error retry_error)))
 ;;
 
 let append_sub_board (sb : sub_board) =

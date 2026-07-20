@@ -78,9 +78,7 @@ let test_failed_flush_retries_without_new_board_activity () =
      | Error failures ->
        Alcotest.fail
          (Board_dispatch.runtime_actor_start_failures_to_string failures));
-    (match request_flush store with
-     | Ok () -> ()
-     | Error detail -> Alcotest.fail detail);
+    request_flush store;
     await ~clock (fun () -> Board.persist_error_count () > errors_before));
   Unix.unlink board_dir;
   Fs_compat.mkdir_p board_dir;

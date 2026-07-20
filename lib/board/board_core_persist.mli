@@ -41,9 +41,16 @@ val sweep :
   int * int
 val maybe_sweep : store -> unit
 
-val request_flush : store -> (unit, string) result
+val request_flush : store -> unit
 (** Merge an explicit dirty-state flush into the immutable flusher obligation
-    set and release at most one wake token. *)
+    set and release at most one wake token.
+
+    Total: the merge is a CAS retry loop and the wake token is bounded at 1, so
+    there is no failure to report. A [Sys_error] from the underlying semaphore
+    (documented for [max_int] overflow) would mean that bound was already
+    violated, and propagates rather than being reported as a recoverable
+    error — a producer that already returned on the coalescing path cannot be
+    told after the fact that its wake never arrived. *)
 
 val claim_flusher_requests : store -> (flusher_msg list, string) result
 (** Atomically claim every coalesced operation after acquiring

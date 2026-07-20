@@ -300,32 +300,27 @@ let with_flusher_request requests = function
   | Sweep -> { requests with sweep_requested = true }
 ;;
 
-(* Hand back the wake-token claim after a failed release.  The claim is
-   published by CAS *before* the release so exactly one producer owns the
-   release; without this compensation a failed release leaves
-   [wakeup_released = true] with no token in flight, and the early-exit in
-   [request_flusher_operations] then answers [Ok ()] to every later producer
-   forever while the consumer blocks in [Eio.Semaphore.acquire] — a permanent,
-   silent flusher stall.  Only the ownership bit is reverted: concurrent
-   producers may have merged obligations in the meantime and those must
-   survive, which is why this re-reads and retries instead of writing back the
-   record we last saw. *)
-let rec relinquish_wake_claim store =
-  let current = Atomic.get store.flusher_requests in
-  if not current.wakeup_released
-  then ()
-  else if
-    Atomic.compare_and_set
-      store.flusher_requests
-      current
-      { current with wakeup_released = false }
-  then ()
-  else relinquish_wake_claim store
-;;
+(* The wake claim is published by CAS *before* the release, so exactly one
+   producer owns the release while concurrent producers that add nothing new
+   return immediately, trusting that a token is on its way.
 
+   That trust is why this function does not catch a failed release.
+   [Eio.Semaphore.release] is documented to raise [Sys_error] only if the value
+   would overflow [max_int] (eio 1.3 semaphore.mli:17-20; the current
+   Sem_state.release has no such check at all, so it is a contract allowance
+   rather than an observed path).  Reaching it would mean the token this design
+   bounds at 1 had overflowed — the coalescing invariant is already destroyed,
+   not merely inconvenienced.
+
+   Recovering from that is not possible here: a producer that already returned
+   on the trust path cannot be told afterwards that the token never arrived, so
+   any compensation leaves obligations published with nobody scheduled to wake
+   them.  Letting the exception propagate keeps the failure loud and the state
+   machine total, instead of carrying an unreachable error variant that every
+   caller must pretend to handle. *)
 let rec request_flusher_operations store operations =
   match operations with
-  | [] -> Ok ()
+  | [] -> ()
   | _ ->
     let current = Atomic.get store.flusher_requests in
     let merged = List.fold_left with_flusher_request current operations in
@@ -333,24 +328,14 @@ let rec request_flusher_operations store operations =
       current.wakeup_released
       && current.flush_requested = merged.flush_requested
       && current.sweep_requested = merged.sweep_requested
-    then Ok ()
-    else
+    then ()
+    else (
       let next = { merged with wakeup_released = true } in
       if not (Atomic.compare_and_set store.flusher_requests current next)
       then request_flusher_operations store operations
       else if current.wakeup_released
-      then Ok ()
-      else
-        (try
-           Eio.Semaphore.release store.flusher_wakeup;
-           Ok ()
-         with
-         | Sys_error detail ->
-           relinquish_wake_claim store;
-           Error
-             (Printf.sprintf
-                "Board flusher wake-token release failed while obligations remain published: %s"
-                detail))
+      then ()
+      else Eio.Semaphore.release store.flusher_wakeup)
 ;;
 
 let request_flush store = request_flusher_operations store [ Flush ]
@@ -386,11 +371,8 @@ let settle_unknown_durable_snapshot
     on_settled ();
     Ok ()
   | Error retry_error ->
-    let admission_detail =
-      match request_flush store with
-      | Ok () -> "dirty snapshot admitted to the Board flusher"
-      | Error detail -> "dirty snapshot flush admission failed: " ^ detail
-    in
+    request_flush store;
+    let admission_detail = "dirty snapshot admitted to the Board flusher" in
     Error
       (Persistence_commit_unknown
          (Printf.sprintf
@@ -401,13 +383,11 @@ let settle_unknown_durable_snapshot
 ;;
 
 let maybe_sweep store =
-  (* The schedule clock is advanced under the lock (so a concurrent caller
-     cannot double-schedule the same tick) but the request happens outside it.
-     If the request then fails, the tick has been consumed for work that was
-     never queued, so the operation silently disappears until the next
-     interval.  Capture the previous marks and restore them on failure. *)
-  let previous_last_sweep = store.last_sweep in
-  let previous_last_flush = store.last_flush in
+  (* The schedule marks are advanced under the lock so a concurrent caller
+     cannot double-schedule the same tick.  Consuming the tick before the
+     request is safe because [request_flusher_operations] cannot fail: it
+     either publishes the obligations or raises, and there is no outcome where
+     the tick is spent on work that was never queued. *)
   let scheduled =
     with_lock store (fun () ->
       let now = Time_compat.now () in
@@ -432,15 +412,7 @@ let maybe_sweep store =
       in
       List.rev scheduled)
   in
-  match request_flusher_operations store scheduled with
-  | Ok () -> ()
-  | Error detail ->
-    with_lock store (fun () ->
-      store.last_sweep <- previous_last_sweep;
-      store.last_flush <- previous_last_flush);
-    Log.BoardLog.error
-      "%s; schedule marks restored so the tick is retried rather than skipped"
-      detail
+  request_flusher_operations store scheduled
 ;;
 
 let reset_sweep_schedule_for_test store =

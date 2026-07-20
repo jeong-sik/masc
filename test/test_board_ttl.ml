@@ -216,12 +216,7 @@ let test_concurrent_flush_requests_coalesce () =
     List.init 4 (fun _ ->
       Domain.spawn (fun () -> request_flush_for_test store))
   in
-  List.iter
-    (fun producer ->
-       match Domain.join producer with
-       | Ok () -> ()
-       | Error detail -> Alcotest.fail detail)
-    producers;
+  List.iter Domain.join producers;
   Alcotest.(check int) "one wake token for all producers" 1
     (Eio.Semaphore.get_value store.flusher_wakeup);
   Alcotest.(check (list string))

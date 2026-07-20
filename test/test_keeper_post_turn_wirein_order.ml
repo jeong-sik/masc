@@ -182,7 +182,6 @@ let test_invalid_plan_is_distinct_from_provider_unavailable () =
              Compact_policy.compact_for_request_typed
                ~meta
                ~trigger:Compaction_trigger.Manual
-               ~projection_request:(projection_request_of_meta meta)
                context)
         |> fun preparation -> preparation.Compact_policy.decision
       in
@@ -737,6 +736,7 @@ let test_malformed_structure_preserves_checkpoint () =
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
            ~meta
            ~trigger:Compaction_trigger.Manual
+           ~projection_request:(projection_request_of_meta meta)
        with
        | Error error ->
          failf

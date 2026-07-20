@@ -120,15 +120,10 @@ let run_memory_os_consolidation_tick
       ~now
       ()
   =
-  match
+  let provider_cfg =
     Keeper_memory_os_consolidation_runtime.resolve_provider_for_consolidation
       provider_cfg
-  with
-  | Error msg ->
-    Log.Server.warn
-      "memory_os_keeper_consolidation: provider config rejected: %s"
-      msg
-  | Ok provider_cfg ->
+  in
   let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
   let consolidate_one keeper_id () =
     try

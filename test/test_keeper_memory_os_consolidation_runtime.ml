@@ -466,19 +466,23 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           "configured max_tokens cap is preserved"
           (Some 512)
           !seen_max_tokens;
-        let expected_schema = Structured_schema.consolidation_plan_output_schema in
+        (* The contract lives in the prompt and the parser, not in a wire
+           response_format. Pinning [Off] keeps the request identical across
+           providers: reintroducing a schema demand would make every
+           json_object-only endpoint (GLM/DeepSeek/Kimi) fail capability
+           validation and silently fall back to this same prompt path. *)
         Alcotest.(check (option bool))
-          "json schema response format requested"
+          "no response format is requested"
           (Some true)
           (Option.map
              (function
-               | Atypes.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
-               | Atypes.JsonMode | Atypes.Off -> false)
+               | Atypes.Off -> true
+               | Atypes.JsonMode | Atypes.JsonSchema _ -> false)
              !seen_response_format);
-        Alcotest.(check (option bool))
-          "output schema mirrors response format"
-          (Some true)
-          (Option.map (Yojson.Safe.equal expected_schema) !seen_output_schema);
+        Alcotest.(check bool)
+          "no output schema is attached"
+          true
+          (Option.is_none !seen_output_schema);
         Alcotest.(check bool)
           "prompt registry output is passed through verbatim"
           true

@@ -28,15 +28,15 @@ module For_testing : sig
     -> Llm_provider.Provider_config.t
 end
 
-(** Apply the three-tier consolidation output contract (#25324: native
-    json_schema > json_object > prompt) to the runtime's provider config and
-    validate the tuned request. Call once per consolidation tick and pass the
-    result to every {!consolidate_keeper} in that tick — the tier depends only
-    on the provider capabilities and the plan schema, never on the keeper, so
-    per-keeper resolution duplicates the decision and its contract log line. *)
+(** Tune the runtime's provider config for the consolidation request: output
+    budget, no tool use, thinking disabled, and no wire response format. Call
+    once per consolidation tick and pass the result to every
+    {!consolidate_keeper} in that tick — the tuning depends only on the provider
+    config, never on the keeper. Total: the request asks for no output schema,
+    so no provider capability can reject it. *)
 val resolve_provider_for_consolidation
   :  Llm_provider.Provider_config.t
-  -> (Llm_provider.Provider_config.t, string) result
+  -> Llm_provider.Provider_config.t
 
 (** Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it,
     and (unless [dry_run]) rewrite the store atomically only if the fact snapshot

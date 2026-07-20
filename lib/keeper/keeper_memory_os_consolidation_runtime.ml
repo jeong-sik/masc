@@ -54,54 +54,49 @@ let with_facts_lock ?clock ~keeper_id f =
     f
 ;;
 
+(* The consolidation request carries no wire [response_format]: the prompt
+   states the output contract (config/prompts/keeper.librarian.memory_consolidation.md
+   spells out the object, its fields, and the empty-plan reply) and
+   [Consolidation.plan_of_json] is total, so a malformed reply becomes
+   [Unparseable] / [Invalid_structured_response] instead of a bad write. A
+   schema on top of that added no guarantee the parser did not already provide,
+   only a capability branch: [validate_output_schema_request] rejects
+   json_schema on every json_object-only endpoint, and the parse path never
+   read a provider-side field anyway — [structured_json_of_response] extracts
+   JSON from the response's visible text. *)
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some n
     | Some _ | None -> Some consolidation_max_tokens
   in
-  let tuned_cfg =
-    { provider_cfg with
-      Llm_provider.Provider_config.max_tokens
-    ; tool_choice = None
-    ; disable_parallel_tool_use = true
-      (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
-         otherwise spend the whole output budget on thinking and return an
-         empty visible text — observed live on 2026-07-20 as 256 consecutive
-         [Empty_response] outcomes while only trivial 2-fact stores
-         consolidated. *)
-    ; enable_thinking = Some false
-    ; preserve_thinking = Some false
-    ; thinking_budget = None
-    ; clear_thinking = Some true
-    }
-  in
-  Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-    ~log_label:"memory os consolidation output contract"
-    Keeper_structured_output_schema.consolidation_plan_output_schema
-    tuned_cfg
+  { provider_cfg with
+    Llm_provider.Provider_config.max_tokens
+  ; tool_choice = None
+  ; disable_parallel_tool_use = true
+    (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
+       otherwise spend the whole output budget on thinking and return an
+       empty visible text — observed live on 2026-07-20 as 256 consecutive
+       [Empty_response] outcomes while only trivial 2-fact stores
+       consolidated. *)
+  ; enable_thinking = Some false
+  ; preserve_thinking = Some false
+  ; thinking_budget = None
+  ; clear_thinking = Some true
+  ; response_format = Agent_sdk.Types.Off
+  ; output_schema = None
+  }
 ;;
 
 module For_testing = struct
   let provider_for_consolidation = provider_for_consolidation
 end
 
-let validate_provider_for_consolidation provider_cfg =
-  Llm_provider.Provider_config.validate_output_schema_request provider_cfg
-;;
-
-(* The output-contract tier is a function of the provider capabilities and the
-   plan schema only — never of the keeper — so it is resolved once per
-   consolidation tick, not once per keeper. Re-resolving per keeper duplicated
-   the decision and emitted one identical contract log line per keeper per
-   tick. *)
-let resolve_provider_for_consolidation provider_cfg =
-  let tiered = provider_for_consolidation provider_cfg in
-  match validate_provider_for_consolidation tiered with
-  | Ok () -> Ok tiered
-  | Error msg -> Error msg
-;;
-
+(* Request tuning is a function of the provider config alone — never of the
+   keeper — so it is resolved once per consolidation tick, not once per keeper.
+   No Result: with no schema requested there is nothing left that can reject
+   the config. *)
+let resolve_provider_for_consolidation = provider_for_consolidation
 let messages_for_consolidation facts =
   let numbered = Consolidation.render_numbered_facts facts in
   match

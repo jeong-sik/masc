@@ -1,4 +1,4 @@
-# RFC-0346 — Unbounded request-fiber admission (durable queue + owner-lane drain + typed saturation)
+# RFC-0350 — Unbounded request-fiber admission (durable queue + owner-lane drain + typed saturation)
 
 - Status: Draft
 - Author: MASC Agent (for vincent)

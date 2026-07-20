@@ -133,27 +133,30 @@ function taskGateRows(task: Task): Array<{ label: string; outcome: 'satisfied' |
   return rows
 }
 
-const GOAL_STATUS_LABEL: Record<string, string> = {
-  active: '진행 중',
-  completed: '완료',
+// Keyed by Goal_phase values — the only lifecycle representation after
+// RFC-0352 slice 1 (the legacy status duplicate is gone).
+const GOAL_PHASE_LABEL: Record<string, string> = {
+  executing: '진행 중',
+  blocked: '차단됨',
   paused: '일시정지',
-  cancelled: '취소',
+  completed: '완료',
+  dropped: '중단',
 }
 
-function goalStatusLabel(status: string): string {
-  return GOAL_STATUS_LABEL[status] ?? status
+function goalPhaseText(phase: string): string {
+  return GOAL_PHASE_LABEL[phase] ?? phase
 }
 
-// Goal status is rendered directly; phase remains a separate badge.
-const GOAL_STATUS_CLASS: Record<string, 'neutral' | 'ok' | 'warn' | 'bad'> = {
-  active: 'neutral',
-  completed: 'ok',
+const GOAL_PHASE_CLASS: Record<string, 'neutral' | 'ok' | 'warn' | 'bad'> = {
+  executing: 'neutral',
+  blocked: 'bad',
   paused: 'warn',
-  cancelled: 'bad',
+  completed: 'ok',
+  dropped: 'bad',
 }
 
-function goalStatusClass(status: string): 'neutral' | 'ok' | 'warn' | 'bad' {
-  return GOAL_STATUS_CLASS[status] ?? 'neutral'
+function goalPhaseClass(phase: string): 'neutral' | 'ok' | 'warn' | 'bad' {
+  return GOAL_PHASE_CLASS[phase] ?? 'neutral'
 }
 
 // Gate evidence outcome → Korean outcome word for the right-aligned
@@ -314,7 +317,6 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
     target_value: node.target_value,
     due_date: node.due_date,
     priority: node.priority,
-    status: node.status,
     phase: node.phase,
     parent_goal_id: node.parent_goal_id,
     last_review_note: null,
@@ -630,11 +632,11 @@ function GoalCard({
   const leadName = leadNameForGoal(goal)
 
   return html`
-    <div class=${`wk-goal ${open ? 'open' : ''} st-${goalStatusClass(goal.status)}`} data-testid="goal-card" data-goal-id=${goal.id}>
+    <div class=${`wk-goal ${open ? 'open' : ''} st-${goalPhaseClass(goal.phase)}`} data-testid="goal-card" data-goal-id=${goal.id}>
       <button type="button" class="wk-goal-h" onClick=${onToggle} aria-expanded=${open}>
         <span class="wk-caret" aria-hidden="true">${open ? '\u25BE' : '\u25B8'}</span>
         <span class="wk-prio mono" title=${`우선순위 ${goal.priority}`}>P${goal.priority}</span>
-        <span class=${`wk-gstatus ${goalStatusClass(goal.status)}`}>${goalStatusLabel(goal.status)}</span>
+        <span class=${`wk-gstatus ${goalPhaseClass(goal.phase)}`}>${goalPhaseText(goal.phase)}</span>
         <span class="wk-goal-title">${goal.title}</span>
         <!-- Prototype shows a namespace pill (.wk-goal-ns) here from g.ns.
              The live Goal type has no namespace/ns field (types/core.ts:603),

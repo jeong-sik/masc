@@ -100,8 +100,6 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
   return {
     id: 'G-1',
     title: 'Goal One',
-    status: 'active',
-    status_color: GOAL_FIXTURE_OK_COLOR,
     phase,
     phase_color: GOAL_FIXTURE_OK_COLOR,
     goal_fsm: {
@@ -240,8 +238,8 @@ describe('Work', () => {
 
     it('renders the reference 5 KPI counts from goals and tasks', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', title: 'Goal Two', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Goal Two', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'done' },
@@ -266,7 +264,7 @@ describe('Work', () => {
 
     it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
@@ -306,7 +304,7 @@ describe('Work', () => {
 
     it('renders the new-goal button as enabled and opens the form on click', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
 
       render(html`<${Work} />`)
@@ -327,7 +325,7 @@ describe('Work', () => {
 
     it('renders a collapsed goal card per goal and expands on click', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'in_progress' },
@@ -347,7 +345,7 @@ describe('Work', () => {
 
     it('renders all goals in a flat list regardless of any legacy horizon field', () => {
       goals.value = [
-        { id: 'G-X', title: 'Goal visible in flat list', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-X', title: 'Goal visible in flat list', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -359,7 +357,7 @@ describe('Work', () => {
 
     it('renders job rows with state, id, title, and blocker note', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Blocked job', goal_id: 'G-1', status: 'cancelled', handoff_context: { summary: '', reason: 'dependency missing' } },
@@ -384,7 +382,7 @@ describe('Work', () => {
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Assigned job', goal_id: 'G-1', status: 'in_progress', assignee: 'sangsu' },
@@ -406,7 +404,7 @@ describe('Work', () => {
 
     it('surfaces claimable backlog tasks in a dedicated backlog section', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
@@ -463,7 +461,7 @@ describe('Work', () => {
 
     it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -502,7 +500,7 @@ describe('Work', () => {
 
     it('expands inline task detail for execution links and contract evidence without synthetic lineage', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -554,7 +552,7 @@ describe('Work', () => {
 
     it('renders all defined gate evaluations including verify_to_review', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -582,10 +580,10 @@ describe('Work', () => {
       expect(detail?.textContent).toContain('verify check')
     })
 
-    it('maps known goal status IDs to Korean labels', () => {
+    it('maps known goal phase IDs to Korean labels', () => {
       goals.value = [
-        { id: 'G-1', title: 'Active goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', title: 'Completed goal', priority: 3, status: 'completed', phase: 'done', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Active goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Completed goal', priority: 3, phase: 'completed', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -596,12 +594,12 @@ describe('Work', () => {
       expect(cards[1]?.textContent).toContain('완료')
     })
 
-    it('styles only explicit stored goal statuses', () => {
+    it('styles only explicit stored goal phases', () => {
       goals.value = [
-        { id: 'G-ok', title: 'Active', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-done', title: 'Completed', priority: 2, status: 'completed', phase: 'completed', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-warn', title: 'Paused', priority: 2, status: 'paused', phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-bad', title: 'Cancelled', priority: 2, status: 'cancelled', phase: 'dropped', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-ok', title: 'Active', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-done', title: 'Completed', priority: 2, phase: 'completed', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-warn', title: 'Paused', priority: 2, phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-bad', title: 'Cancelled', priority: 2, phase: 'dropped', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -615,9 +613,9 @@ describe('Work', () => {
       expect(chipFor('G-bad')?.classList.contains('bad')).toBe(true)
     })
 
-    it('keeps unknown goal statuses neutral', () => {
+    it('keeps unknown goal phases neutral', () => {
       goals.value = [
-        { id: 'G-x', title: 'Mystery', priority: 2, status: 'something_new', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-x', title: 'Mystery', priority: 2, phase: 'something_new', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -625,7 +623,7 @@ describe('Work', () => {
 
       const chip = container.querySelector('[data-goal-id="G-x"] .wk-gstatus')
       expect(chip?.classList.contains('neutral')).toBe(true)
-      // unknown status text is passed through verbatim
+      // unknown phase text is passed through verbatim
       expect(chip?.textContent).toContain('something_new')
     })
 
@@ -636,7 +634,7 @@ describe('Work', () => {
         postId: null,
       }
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Selectable job', goal_id: 'G-1', status: 'todo' },
@@ -720,7 +718,7 @@ describe('Work', () => {
 
       it('renders the aside panel alongside the main goal list', () => {
         goals.value = [
-          { id: 'G-1', title: 'Active Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Active Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -734,7 +732,7 @@ describe('Work', () => {
 
       it('shows calm empty state when no flagged goals, no todos, and no recent tasks', () => {
         goals.value = [
-          { id: 'G-1', title: 'Normal Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Normal Goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -752,9 +750,9 @@ describe('Work', () => {
 
       it('flags blocked and paused goals without synthetic verification phases', () => {
         goals.value = [
-          { id: 'G-ok', title: 'Executing Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-bl', title: 'Blocked Goal', priority: 2, status: 'active', phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-pa', title: 'Paused Goal', priority: 3, status: 'active', phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-ok', title: 'Executing Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-bl', title: 'Blocked Goal', priority: 2, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-pa', title: 'Paused Goal', priority: 3, phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -774,7 +772,7 @@ describe('Work', () => {
 
       it('surfaces verify tasks (awaiting_verification status) with unsatisfied gate count', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           {
@@ -802,7 +800,7 @@ describe('Work', () => {
 
       it('surfaces tasks with a blocker note (cancelled with handoff_context.reason)', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           {
@@ -826,7 +824,7 @@ describe('Work', () => {
 
       it('surfaces claimable backlog tasks as a single aggregate claim button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Unassigned A', goal_id: 'G-1', status: 'todo' },
@@ -845,7 +843,7 @@ describe('Work', () => {
 
       it('surfaces done tasks in the 최근 한 일 section', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-done1', title: 'Finished Task', goal_id: 'G-1', status: 'done' },
@@ -866,7 +864,7 @@ describe('Work', () => {
 
       it('toggles to collapsed rail on collapse button click and back on railbtn click', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -902,7 +900,7 @@ describe('Work', () => {
         // Regression guard: goals in `executing` phase must never appear as flagged,
         // even if their title/status string contains substrings like 'blocked'.
         goals.value = [
-          { id: 'G-tricky', title: 'Not blocked — just named oddly', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-tricky', title: 'Not blocked — just named oddly', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -940,7 +938,7 @@ describe('Work', () => {
 
       it('switches to kanban board on clicking the 칸반 button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
@@ -994,7 +992,7 @@ describe('Work', () => {
 
       it('switches back to list view on clicking the 리스트 button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -1012,7 +1010,7 @@ describe('Work', () => {
 
       it('places tasks in the correct column by status using typed KANBAN_COLUMNS (no string-match classification)', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         // One task per non-cancelled status
         tasks.value = [
@@ -1042,7 +1040,7 @@ describe('Work', () => {
 
       it('renders an owning-goal jump button on kanban cards that returns to the list view', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
@@ -1065,8 +1063,8 @@ describe('Work', () => {
 
       it('includes recursive goal tree tasks in KPIs and kanban, normalizing completed to done', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-child', title: 'Child Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-child', title: 'Child Goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1106,7 +1104,7 @@ describe('Work', () => {
 
       it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [
@@ -1135,7 +1133,7 @@ describe('Work', () => {
 
       it('uses Goal Store fields as nullable fallback when merging execution tasks', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [
@@ -1165,7 +1163,7 @@ describe('Work', () => {
 
       it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
-          { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Target Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Some task', goal_id: 'G-1', status: 'in_progress', assignee: 'keeper-a' },
@@ -1187,7 +1185,7 @@ describe('Work', () => {
 
       it('opens the shared task detail overlay when a kanban card is clicked', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
@@ -1254,7 +1252,7 @@ describe('Work', () => {
 
       it('renders Goal Store projection dossier evidence on matching goal cards', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1323,7 +1321,6 @@ describe('Work', () => {
               id: 'G-tree',
               title: 'Tree Only Goal',
               priority: 4,
-              status: 'active',
               phase: 'blocked',
               goal_fsm: {
                 state: 'blocked',
@@ -1352,7 +1349,7 @@ describe('Work', () => {
 
       it('preserves blocked and unknown Goal Store task statuses instead of remapping them', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1380,7 +1377,7 @@ describe('Work', () => {
 
       it('falls back to Goal Store fields when execution fields are empty strings', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [

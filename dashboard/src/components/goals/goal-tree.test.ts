@@ -65,8 +65,6 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
   return {
     id,
     title,
-    status: 'active',
-    status_color: '',
     phase: 'executing',
     phase_color: '',
     goal_fsm: {

@@ -875,11 +875,10 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       if (!isRecord(row)) return null
       const id = asString(row.id)
       const title = asString(row.title)
-      const status = asString(row.status)
       const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
-      if (!id || !title || !status || !phase || !createdAt || !updatedAt) return null
+      if (!id || !title || !phase || !createdAt || !updatedAt) return null
       return {
         id,
         title,
@@ -887,7 +886,6 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         target_value: asString(row.target_value) ?? null,
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
-        status,
         phase,
         parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,

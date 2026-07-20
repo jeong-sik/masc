@@ -65,10 +65,21 @@ Next == PreflightMigrate \/ PreflightFailLoud \/ PreflightUpToDate
 
 \* ── Buggy boot (RFC-0344 §1: hard-cut reject) ────────────────
 
-\* Failure mode A — drop-on-mismatch (keeper memory bank, §현황 위험 C):
-\* boot is reported ok, the mismatched rows are rewritten out, and the durable
-\* file no longer holds them.
-HardCutAbsorb ==
+\* Failure mode A — quarantine-on-bump (gate approval order, #25135 4190faacf1):
+\* the loader renames the old-version file aside (`.v2.quarantine`) and starts
+\* the store empty at the live path, so boot reports ok while the rows that were
+\* readable before the bump are gone from the path the binary reads, and the
+\* on-disk version at that path has advanced to current.
+\*
+\* NOTE (adversarial review, 2026-07-20): this action was previously attributed
+\* to the keeper memory bank (§현황 위험 C). That citation was wrong — the
+\* memory bank refuses compaction on mismatch before any write
+\* (keeper_memory_bank.ml:567-582), so it never rewrites the file or advances
+\* the on-disk version; its loss is read-side only and is covered by
+\* HardCutOrphan's shape. #25135's quarantine is the real transition that
+\* removes rows from the live path, so the action is retained under its actual
+\* source rather than deleted.
+HardCutQuarantine ==
     /\ boot_outcome = "pending"
     /\ disk_version = "old"
     /\ boot_outcome' = "ok"          \* boot reported successful ...
@@ -91,7 +102,13 @@ HardCutOrphan ==
     /\ on_disk_rows' = OldRows       \* ... though the file is left on disk.
     /\ disk_version' = "old"         \* store never advanced; it is Unavailable.
 
-NextBuggy == Next \/ HardCutAbsorb \/ HardCutOrphan
+\* Each failure mode gets its own Next so it can be model-checked ALONE.
+\* A single combined NextBuggy would still report "invariant violated" if one
+\* of the two actions became unreachable or safe, because the other reaches the
+\* violation from Init in one step — the expected-violation check would keep
+\* passing while silently covering only one mode.
+NextBuggyQuarantine == Next \/ HardCutQuarantine
+NextBuggyOrphan == Next \/ HardCutOrphan
 
 \* ── Safety ───────────────────────────────────────────────────
 
@@ -102,5 +119,6 @@ NoDurableRowLostOnBump ==
     (boot_outcome = "ok") => (live_rows = OldRows)
 
 Spec == Init /\ [][Next]_vars
-SpecBuggy == Init /\ [][NextBuggy]_vars
+SpecBuggyQuarantine == Init /\ [][NextBuggyQuarantine]_vars
+SpecBuggyOrphan == Init /\ [][NextBuggyOrphan]_vars
 ====

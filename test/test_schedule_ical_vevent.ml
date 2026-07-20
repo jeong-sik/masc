@@ -113,6 +113,16 @@ let test_explicit_date_time_value () =
   | V.Start_utc _ -> ()
   | _ -> fail "explicit VALUE=DATE-TIME must be accepted"
 
+let test_datetime_literals_are_case_insensitive () =
+  let t = parse_ok [ "UID:lowercase-literals"; "DTSTART:19980118t230000z" ] in
+  match t.V.dtstart with
+  | V.Start_utc _ -> ()
+  | _ -> fail "lowercase DATE-TIME literals must be accepted"
+
+let test_explicit_uid_text_value () =
+  let t = parse_ok [ "UID;VALUE=TEXT:event-1"; "DTSTART:19980118T230000Z" ] in
+  check string "uid" "event-1" t.V.uid
+
 let test_uid_identity_is_exact () =
   let t = parse_ok [ "UID:  event-identity  "; "DTSTART:19980118T230000Z" ] in
   check string "uid bytes" "  event-identity  " t.V.uid
@@ -171,6 +181,15 @@ let test_invalid_uid_text () =
        | _ -> failf "invalid UID TEXT %S was accepted" value)
     invalid_values
 
+let test_invalid_uid_value_type () =
+  match
+    parse_error
+      [ "UID;VALUE=DATE:20260719"; "DTSTART:19980118T230000Z" ]
+  with
+  | Error (V.Invalid_uid { detail; _ }) ->
+    check string "detail" "unsupported VALUE=DATE" detail
+  | _ -> fail "UID with a non-TEXT value type was accepted"
+
 let test_duplicate_uid () =
   match
     parse_error [ "UID:a"; "UID:b"; "DTSTART:19980118T230000Z" ]
@@ -228,6 +247,11 @@ let test_duplicate_parameters_rejected () =
         ]
       , "RECURRENCE-ID"
       , "RANGE" )
+    ; ( [ "UID;VALUE=TEXT;VALUE=TEXT:e1"
+        ; "DTSTART:19980118T230000Z"
+        ]
+      , "UID"
+      , "VALUE" )
     ]
   in
   List.iter
@@ -243,16 +267,23 @@ let test_duplicate_parameters_rejected () =
     cases
 
 let test_multi_valued_parameter_rejected () =
-  match
-    parse_error
-      [ "UID:e1"; "DTSTART;VALUE=DATE,DATE-TIME:19980118" ]
-  with
-  | Error
-      (V.Parameter_error
-        (V.Multiple_parameter_values
-          { property = "DTSTART"; parameter = "VALUE" })) ->
-    ()
-  | _ -> fail "multi-valued VALUE was not rejected"
+  let cases =
+    [ ( [ "UID:e1"; "DTSTART;VALUE=DATE,DATE-TIME:19980118" ]
+      , "DTSTART" )
+    ; ( [ "UID;VALUE=TEXT,DATE:e1"; "DTSTART:19980118T230000Z" ]
+      , "UID" )
+    ]
+  in
+  List.iter
+    (fun (lines, property) ->
+       match parse_error lines with
+       | Error
+           (V.Parameter_error
+             (V.Multiple_parameter_values
+               { property = actual_property; parameter = "VALUE" })) ->
+         check string "property" property actual_property
+       | _ -> failf "%s multi-valued VALUE was not rejected" property)
+    cases
 
 let test_recurrence_id_form_mismatch () =
   match
@@ -357,6 +388,9 @@ let () =
             test_recurrence_id_matching_form
         ; test_case "range thisandfuture" `Quick test_range_this_and_future
         ; test_case "explicit date-time value" `Quick test_explicit_date_time_value
+        ; test_case "date-time literals case-insensitive" `Quick
+            test_datetime_literals_are_case_insensitive
+        ; test_case "explicit uid text value" `Quick test_explicit_uid_text_value
         ; test_case "uid identity exact" `Quick test_uid_identity_is_exact
         ; test_case "uid text decoding" `Quick test_uid_text_decoding
         ; test_case "tzid identity exact" `Quick test_tzid_identity_is_exact
@@ -367,6 +401,7 @@ let () =
       , [ test_case "missing uid" `Quick test_missing_uid
         ; test_case "empty uid" `Quick test_empty_uid
         ; test_case "invalid uid text" `Quick test_invalid_uid_text
+        ; test_case "invalid uid value type" `Quick test_invalid_uid_value_type
         ; test_case "duplicate uid" `Quick test_duplicate_uid
         ; test_case "missing dtstart" `Quick test_missing_dtstart
         ; test_case "duplicate dtstart" `Quick test_duplicate_dtstart

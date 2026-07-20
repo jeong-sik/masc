@@ -139,14 +139,18 @@ let single_param ~property name (line : Content_line.t) =
 (* A DATE-TIME value: YYYYMMDDTHHMMSS with an optional trailing Z. *)
 let parse_datetime raw =
   let n = String.length raw in
-  if n = 15 && raw.[8] = 'T' then (
+  if n = 15 && Char.uppercase_ascii raw.[8] = 'T' then (
     match
       ( Recur.parse_date_value (String.sub raw 0 8)
       , Recur.parse_time_of_day_value (String.sub raw 9 6) )
     with
     | Ok d, Ok t -> Ok (`Local (d, t))
     | _ -> Error "expected YYYYMMDDTHHMMSS")
-  else if n = 16 && raw.[8] = 'T' && raw.[15] = 'Z' then (
+  else if
+    n = 16
+    && Char.uppercase_ascii raw.[8] = 'T'
+    && Char.uppercase_ascii raw.[15] = 'Z'
+  then (
     match
       ( Recur.parse_date_value (String.sub raw 0 8)
       , Recur.parse_time_of_day_value (String.sub raw 9 6) )
@@ -242,13 +246,20 @@ let apply (line : Content_line.t) b =
   | "UID" -> (
     match b.b_uid with
     | Some _ -> Error Duplicate_uid
-    | None ->
+    | None -> (
       let value = line.Content_line.value in
       if String.equal value "" then Error Empty_uid
-      else (
-        match decode_text value with
-        | Ok uid -> Ok { b with b_uid = Some uid }
-        | Error detail -> Error (Invalid_uid { value; detail })))
+      else
+        match single_param ~property:"UID" "VALUE" line with
+        | Error _ as error -> error
+        | Ok (Some raw) when not (String.equal (String.uppercase_ascii raw) "TEXT") ->
+          Error
+            (Invalid_uid
+               { value; detail = Printf.sprintf "unsupported VALUE=%s" raw })
+        | Ok None | Ok (Some _) -> (
+          match decode_text value with
+          | Ok uid -> Ok { b with b_uid = Some uid }
+          | Error detail -> Error (Invalid_uid { value; detail }))))
   | "DTSTART" -> (
     match b.b_dtstart with
     | Some _ -> Error Duplicate_dtstart

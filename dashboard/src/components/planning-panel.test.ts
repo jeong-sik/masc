@@ -184,8 +184,7 @@ describe('PlanningPanel', () => {
         id: 'goal-runtime',
         title: 'Runtime context goal',
         priority: 1,
-        status: 'active',
-        phase: 'execute',
+        phase: 'executing',
         created_at: '2026-05-14T00:00:00Z',
         updated_at: '2026-05-14T00:00:00Z',
       },
@@ -199,7 +198,7 @@ describe('PlanningPanel', () => {
     expect(focus.textContent).toContain('ROUTE FOCUS')
     expect(screen.getByText('GOAL goal-runtime')).toBeTruthy()
     expect(screen.getByText('Runtime context goal')).toBeTruthy()
-    expect(screen.getByText('active')).toBeTruthy()
+    expect(screen.getByText('executing')).toBeTruthy()
   })
 
   it('opens task detail for task route params', async () => {

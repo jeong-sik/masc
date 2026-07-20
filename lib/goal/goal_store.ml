@@ -437,6 +437,9 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
   else
+    (* DET-OK: [phase] is a typed optional API parameter, not parsed external
+       input. A new goal created without an explicit phase starts Executing —
+       the same arm the removed phase/status resolution match had. *)
     let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
@@ -473,6 +476,8 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
               | Some existing ->
+                  (* DET-OK: typed optional param — omitted phase preserves
+                     the stored phase (same arm the removed match had). *)
                   let next_phase = Option.value phase ~default:existing.phase in
                   let next_goal =
                       {

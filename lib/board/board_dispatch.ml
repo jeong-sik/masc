@@ -282,10 +282,63 @@ type flusher_attempt_failure =
       backtrace : Printexc.raw_backtrace;
     }
 
-type flusher_retry_obligations = {
-  flush_retry_at : float option;
-  sweep_retry_at : float option;
+(* Why a flusher obligation is pending. A freshly claimed mailbox request and a
+   retry left behind by a failed attempt both carry a deadline, so a bare
+   [float option] cannot tell them apart — which is how the recovery log came to
+   fire after every successful flush. Keeping the reason in the type makes the
+   distinction impossible to drop at a call site. *)
+type flusher_obligation_origin =
+  | Fresh_request
+  | Failure_retry
+
+type flusher_obligation = {
+  retry_at : float;
+  origin : flusher_obligation_origin;
 }
+
+type flusher_retry_obligations = {
+  flush_obligation : flusher_obligation option;
+  sweep_obligation : flusher_obligation option;
+}
+
+(* Pure obligation bookkeeping, kept at module level to separate the scheduling
+   policy from the effectful flusher loop that consumes it.  These stay
+   unexported: making them public purely to unit-test them would widen the
+   module API for test convenience, which this repo treats as a backdoor. *)
+
+let pending_obligation obligations = function
+  | Board_types.Flush -> obligations.flush_obligation
+  | Board_types.Sweep -> obligations.sweep_obligation
+;;
+
+let retry_deadline obligations operation =
+  Option.map (fun o -> o.retry_at) (pending_obligation obligations operation)
+;;
+
+let without_retry obligations = function
+  | Board_types.Flush -> { obligations with flush_obligation = None }
+  | Board_types.Sweep -> { obligations with sweep_obligation = None }
+;;
+
+let with_obligation obligations operation obligation =
+  match operation with
+  | Board_types.Flush -> { obligations with flush_obligation = Some obligation }
+  | Board_types.Sweep -> { obligations with sweep_obligation = Some obligation }
+;;
+
+(* Returns the obligation itself, not just its deadline, so the caller learns
+   WHY the operation is due.  Returning a bare deadline is what previously
+   forced the caller to hardcode "recovering = true". *)
+let earliest_retry obligations =
+  match obligations.flush_obligation, obligations.sweep_obligation with
+  | None, None -> None
+  | Some o, None -> Some (o, Board_types.Flush)
+  | None, Some o -> Some (o, Board_types.Sweep)
+  | Some flush_o, Some sweep_o ->
+    if Float.compare flush_o.retry_at sweep_o.retry_at <= 0
+    then Some (flush_o, Board_types.Flush)
+    else Some (sweep_o, Board_types.Sweep)
+;;
 
 type 'a deadline_wait =
   | Wait_completed of 'a
@@ -401,29 +454,9 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
     | Board_types.Flush -> "flush_projection"
     | Board_types.Sweep -> "sweep_board"
   in
-  let retry_deadline obligations = function
-    | Board_types.Flush -> obligations.flush_retry_at
-    | Board_types.Sweep -> obligations.sweep_retry_at
-  in
-  let without_retry obligations = function
-    | Board_types.Flush -> { obligations with flush_retry_at = None }
-    | Board_types.Sweep -> { obligations with sweep_retry_at = None }
-  in
-  let with_retry_at obligations operation retry_at =
-    match operation with
-    | Board_types.Flush -> { obligations with flush_retry_at = Some retry_at }
-    | Board_types.Sweep -> { obligations with sweep_retry_at = Some retry_at }
-  in
-  let earliest_retry obligations =
-    match obligations.flush_retry_at, obligations.sweep_retry_at with
-    | None, None -> None
-    | Some retry_at, None -> Some (retry_at, Board_types.Flush)
-    | None, Some retry_at -> Some (retry_at, Board_types.Sweep)
-    | Some flush_at, Some sweep_at ->
-      if Float.compare flush_at sweep_at <= 0
-      then Some (flush_at, Board_types.Flush)
-      else Some (sweep_at, Board_types.Sweep)
-  in
+  (* Stamped by the failure path only, so the origin is [Failure_retry] even if
+     a fresh request was already pending for the same operation: once an attempt
+     has failed, the next run of that operation IS a recovery. *)
   let retry_obligation obligations operation =
     let proposed_retry_at = Eio.Time.now clock +. Board.flush_interval_sec in
     let retry_at =
@@ -431,7 +464,7 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
       | None -> proposed_retry_at
       | Some current_retry_at -> Float.min current_retry_at proposed_retry_at
     in
-    with_retry_at obligations operation retry_at
+    with_obligation obligations operation { retry_at; origin = Failure_retry }
   in
   let merge_claimed_requests obligations =
     match Board.claim_flusher_requests store with
@@ -442,25 +475,29 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
       let requested_at = Eio.Time.now clock in
       List.fold_left
         (fun obligations operation ->
-           match retry_deadline obligations operation with
+           match pending_obligation obligations operation with
            | Some _ -> obligations
-           | None -> with_retry_at obligations operation requested_at)
+           | None ->
+             with_obligation
+               obligations
+               operation
+               { retry_at = requested_at; origin = Fresh_request })
         obligations
         operations
   in
   let rec await_operation obligations =
     let now = Eio.Time.now clock in
     match earliest_retry obligations with
-    | Some (retry_at, operation) when Float.compare retry_at now <= 0 ->
-      operation, true, without_retry obligations operation
+    | Some (obligation, operation) when Float.compare obligation.retry_at now <= 0 ->
+      operation, obligation.origin, without_retry obligations operation
     | retry ->
       (match retry with
        | None ->
          Eio.Semaphore.acquire store.Board.flusher_wakeup;
          await_operation (merge_claimed_requests obligations)
-       | Some (retry_at, _) ->
+       | Some (obligation, _) ->
          (match
-            await_until ~deadline:retry_at (fun () ->
+            await_until ~deadline:obligation.retry_at (fun () ->
               Eio.Semaphore.acquire store.Board.flusher_wakeup)
           with
           | Wait_completed () ->
@@ -498,7 +535,7 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
   let flusher_loop () =
     Log.BoardLog.info "Board flusher actor started";
     let rec loop obligations =
-      let operation, recovering, obligations = await_operation obligations in
+      let operation, origin, obligations = await_operation obligations in
       let outcome =
         match operation with
         | Board_types.Flush -> flush_attempt ()
@@ -506,20 +543,26 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
       in
       match outcome with
       | Ok () ->
-        if recovering
-        then
-          Log.BoardLog.info
-            "Board flusher obligation settled operation=%s"
-            (operation_to_string operation);
+        (match origin with
+         | Failure_retry ->
+           Log.BoardLog.info
+             "Board flusher obligation settled operation=%s"
+             (operation_to_string operation)
+         | Fresh_request -> ());
         loop obligations
       | Error (retry_operation, failure) ->
         log_attempt_failure ~operation ~retry_operation failure;
         loop (retry_obligation obligations retry_operation)
     in
     let startup_reconciliation_at = Eio.Time.now clock in
+    (* Startup reconciliation is scheduled work, not recovery from a failed
+       attempt, so it must not emit the "obligation settled" line. *)
+    let startup_obligation =
+      { retry_at = startup_reconciliation_at; origin = Fresh_request }
+    in
     loop
-      { flush_retry_at = Some startup_reconciliation_at
-      ; sweep_retry_at = Some startup_reconciliation_at
+      { flush_obligation = Some startup_obligation
+      ; sweep_obligation = Some startup_obligation
       }
   in
   let routing_retry_loop () =

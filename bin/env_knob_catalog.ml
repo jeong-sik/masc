@@ -27,6 +27,19 @@ let ident_re = Str.regexp "[A-Za-z_][A-Za-z0-9_']*"
 let typed_get_re =
   Str.regexp "get_\\(int\\|int_nonneg\\|float\\|float_nonneg\\|float_in_range\\|ratio\\|string\\|bool\\)"
 
+(* Shared accessors that validate a knob into a concrete OCaml type without
+   spelling [get_<type>] at the call site.  Classification here is driven by
+   call shape, so a helper that is not registered silently downgrades every
+   knob using it to [string_literal] — which also drops it out of the
+   tag-enforcement check below.  Each entry states its resulting type
+   explicitly rather than inferring one from the helper's name. *)
+let typed_helpers = [ "positive_finite_interval_sec", "float" ]
+
+let typed_helper_re =
+  Str.regexp
+    ("\\(" ^ String.concat "\\|" (List.map fst typed_helpers) ^ "\\)")
+;;
+
 let feature_flag_re = Str.regexp "Feature_flag_registry\\.get_bool"
 let entry_env_re = Str.regexp "entry_env_overridable[ \t]+~env_var:"
 let category_re = Str.regexp "@category[ \t]+\\([A-Za-z_]+\\)"
@@ -157,6 +170,11 @@ let classify_line line =
   else if try_search typed_get_re line then
     let tag = try Str.matched_group 1 line with Not_found | Invalid_argument _ -> "?" in
     Some (Typed_get tag)
+  else if try_search typed_helper_re line then
+    let name = try Str.matched_group 1 line with Not_found | Invalid_argument _ -> "" in
+    (match List.assoc_opt name typed_helpers with
+     | Some tag -> Some (Typed_get tag)
+     | None -> None)
   else None
 
 let classification_of_doc = function

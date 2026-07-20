@@ -291,7 +291,10 @@ module Board = struct
               (Printf.sprintf "%s must be a positive finite float; got %S" key raw)))
 
   (** Flush scheduling and autonomous dirty-projection retry cadence in
-      seconds. Default: 30. *)
+      seconds. Default: 30.
+
+      @category Timeouts
+      @ops_class operator *)
   let flush_interval_sec =
     positive_finite_interval_sec
       ~key:"MASC_BOARD_FLUSH_INTERVAL_SEC"
@@ -300,7 +303,10 @@ module Board = struct
 
   (** Durable Board-signal routing retry cadence in seconds. Default: 30.
       Routing availability is independent from projection persistence, so it
-      must not inherit the flush policy. *)
+      must not inherit the flush policy.
+
+      @category Timeouts
+      @ops_class operator *)
   let routing_retry_interval_sec =
     positive_finite_interval_sec
       ~key:"MASC_BOARD_ROUTING_RETRY_INTERVAL_SEC"

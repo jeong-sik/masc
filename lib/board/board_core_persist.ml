@@ -300,6 +300,29 @@ let with_flusher_request requests = function
   | Sweep -> { requests with sweep_requested = true }
 ;;
 
+(* Hand back the wake-token claim after a failed release.  The claim is
+   published by CAS *before* the release so exactly one producer owns the
+   release; without this compensation a failed release leaves
+   [wakeup_released = true] with no token in flight, and the early-exit in
+   [request_flusher_operations] then answers [Ok ()] to every later producer
+   forever while the consumer blocks in [Eio.Semaphore.acquire] — a permanent,
+   silent flusher stall.  Only the ownership bit is reverted: concurrent
+   producers may have merged obligations in the meantime and those must
+   survive, which is why this re-reads and retries instead of writing back the
+   record we last saw. *)
+let rec relinquish_wake_claim store =
+  let current = Atomic.get store.flusher_requests in
+  if not current.wakeup_released
+  then ()
+  else if
+    Atomic.compare_and_set
+      store.flusher_requests
+      current
+      { current with wakeup_released = false }
+  then ()
+  else relinquish_wake_claim store
+;;
+
 let rec request_flusher_operations store operations =
   match operations with
   | [] -> Ok ()
@@ -323,6 +346,7 @@ let rec request_flusher_operations store operations =
            Ok ()
          with
          | Sys_error detail ->
+           relinquish_wake_claim store;
            Error
              (Printf.sprintf
                 "Board flusher wake-token release failed while obligations remain published: %s"
@@ -377,6 +401,13 @@ let settle_unknown_durable_snapshot
 ;;
 
 let maybe_sweep store =
+  (* The schedule clock is advanced under the lock (so a concurrent caller
+     cannot double-schedule the same tick) but the request happens outside it.
+     If the request then fails, the tick has been consumed for work that was
+     never queued, so the operation silently disappears until the next
+     interval.  Capture the previous marks and restore them on failure. *)
+  let previous_last_sweep = store.last_sweep in
+  let previous_last_flush = store.last_flush in
   let scheduled =
     with_lock store (fun () ->
       let now = Time_compat.now () in
@@ -403,7 +434,13 @@ let maybe_sweep store =
   in
   match request_flusher_operations store scheduled with
   | Ok () -> ()
-  | Error detail -> Log.BoardLog.error "%s" detail
+  | Error detail ->
+    with_lock store (fun () ->
+      store.last_sweep <- previous_last_sweep;
+      store.last_flush <- previous_last_flush);
+    Log.BoardLog.error
+      "%s; schedule marks restored so the tick is retried rather than skipped"
+      detail
 ;;
 
 let reset_sweep_schedule_for_test store =

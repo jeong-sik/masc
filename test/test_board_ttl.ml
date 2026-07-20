@@ -289,7 +289,7 @@ let () =
           Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick
             (with_eio test_maybe_sweep_concurrent_schedules_once);
           Alcotest.test_case "concurrent flush requests coalesce" `Quick
-            test_concurrent_flush_requests_coalesce;
+            (with_eio test_concurrent_flush_requests_coalesce);
         ] );
       ( "visibility_ssot",
         [

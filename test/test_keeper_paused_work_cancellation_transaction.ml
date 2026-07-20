@@ -97,7 +97,7 @@ let with_lane ?registered ?latched_reason ~paused ~generation f =
     (fun config keeper_name _source ->
        let lease =
          Persistence.claim_when_result
-           ~base_path
+           ~base_path:config.Workspace.base_path
            ~keeper_name
            ~claimed_at:2.0
            ~ready:(fun _ -> true)
@@ -106,7 +106,7 @@ let with_lane ?registered ?latched_reason ~paused ~generation f =
          |> require_some "accepted source lease"
        in
        let source_revision =
-         Persistence.load_state_result ~base_path ~keeper_name
+         Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
          |> require_ok "load accepted source revision"
          |> State.revision
        in

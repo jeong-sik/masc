@@ -164,11 +164,11 @@ let test_board_authors_share_one_neutral_observation_boundary () =
   let human_event = { sample_board_event with post_id = "human-1" } in
   let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
   let obs_human = { base_observation with pending_board_events = [ human_event ] } in
-  let _, peer_msg =
+  let { Masc.Keeper_unified_prompt.world_state = peer_msg; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs_peer ()
   in
-  let _, human_msg =
+  let { Masc.Keeper_unified_prompt.world_state = human_msg; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs_human ()
   in
@@ -213,7 +213,7 @@ let test_board_reaction_event_renders_reaction_context () =
     }
   in
   let obs = { base_observation with pending_board_events = [ reaction_event ] } in
-  let _, user_msg =
+  let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs ()
   in
@@ -240,7 +240,7 @@ let test_observation_tool_names_are_preserved () =
     }
   in
   let obs = { base_observation with pending_board_events = [ event ] } in
-  let _, user_msg =
+  let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs ()
   in
@@ -319,7 +319,7 @@ let test_scheduled_automation_prompt_section () =
   let obs =
     { base_observation with scheduled_automation = scheduled_automation_observation }
   in
-  let _, user_msg =
+  let { Masc.Keeper_unified_prompt.world_state = user_msg; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
       ~observation:obs ()
   in
@@ -331,6 +331,28 @@ let test_scheduled_automation_prompt_section () =
     (contains_sub "masc_schedule_get" user_msg);
   check bool "prompt includes ready next action" true
     (contains_sub "do not create a duplicate schedule" user_msg)
+
+(* Feedback-loop invariant (#25193): the observation frame must ride the
+   ephemeral [world_state] channel, never the persisted [user_message].
+   Under the pre-split behaviour (frame concatenated into the user message)
+   both checks below go red: the marker check because the user message
+   started with "## Current World State", and the containment check because
+   the frame text was present in the persisted channel. *)
+let test_world_state_never_in_persisted_user_message () =
+  let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
+  let { Masc.Keeper_unified_prompt.world_state; user_message; _ } =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "world_state carries the frame header" true
+    (contains_sub "## Current World State" world_state);
+  check bool "persisted user message is the wake marker" true
+    (String.equal user_message
+       Masc.Keeper_unified_prompt.autonomous_wake_marker);
+  check bool "persisted user message carries no frame header" false
+    (contains_sub "## Current World State" user_message);
+  check bool "persisted user message carries no board observation" false
+    (contains_sub "### Board Activity" user_message)
 
 let () =
   run "keeper_unified_verification_surface"
@@ -375,5 +397,8 @@ let () =
           test_case
             "prompt: scheduled automation section renders attention items"
             `Quick test_scheduled_automation_prompt_section;
+          test_case
+            "invariant: world-state frame never enters the persisted user message"
+            `Quick test_world_state_never_in_persisted_user_message;
         ] );
     ]

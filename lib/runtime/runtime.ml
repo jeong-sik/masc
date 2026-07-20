@@ -155,16 +155,86 @@ let validate_librarian_runtime ~(config_path : string)
               ~runtime_count:(List.length runtimes) id))
 ;;
 
+(* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
+   over a same-named runtime), so route validation must judge the same target
+   the consumer will actually get: lane first, runtime second. *)
+let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
+  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
+;;
+
+(* Every lane candidate must satisfy the route's capability contract: the
+   turn-driver lane walk attempts candidates without re-filtering by
+   capability, so one incapable candidate would silently downgrade the
+   contract mid-failover. [validate_lanes] already guarantees candidate ids
+   resolve; the [None] arm stays total for the error message anyway. *)
+let validate_lane_candidates_capability
+    ~(config_path : string)
+    ~(route_name : string)
+    ~(capability_key : string)
+    ~(runtime_supports : t -> bool)
+    (runtimes : t list)
+    (lane : Runtime_lane.t) : (unit, string) result =
+  let lane_id = Runtime_lane.id lane in
+  let rec check = function
+    | [] -> Ok ()
+    | candidate_id :: rest ->
+      (match
+         List.find_opt (fun (r : t) -> String.equal r.id candidate_id) runtimes
+       with
+       | None ->
+         Error
+           (Printf.sprintf
+              "%s: [runtime].%s = %S lane candidate %S is not a configured \
+               runtime"
+              config_path
+              route_name
+              lane_id
+              candidate_id)
+       | Some runtime ->
+         if runtime_supports runtime
+         then check rest
+         else
+           Error
+             (Printf.sprintf
+                "%s: [runtime].%s = %S lane candidate %S uses model %S, which \
+                 does not declare %s"
+                config_path
+                route_name
+                lane_id
+                candidate_id
+                runtime.model.id
+                capability_key))
+  in
+  check (Runtime_lane.ordered_candidates lane)
+;;
+
 (* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
    id is an operator typo rejected at load, not a silent fallback
    (Unknown→Permissive anti-pattern). [None] is the designed "inherit
-   [runtime].default" case. *)
+   [runtime].default" case. A lane id is accepted when every candidate
+   declares JSON mode (#25394). *)
 let validate_cross_verifier_runtime ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lanes : Runtime_lane.t list)
     (cross_verifier_id : string option) : (unit, string) result =
+  let supports_json (runtime : t) =
+    match runtime.model.capabilities with
+    | Some caps -> caps.supports_response_format_json
+    | None -> false
+  in
   match cross_verifier_id with
   | None -> Ok ()
   | Some id ->
+    (match find_declared_lane lanes id with
+     | Some lane ->
+       validate_lane_candidates_capability
+         ~config_path
+         ~route_name:"cross_verifier"
+         ~capability_key:"supports-response-format-json"
+         ~runtime_supports:supports_json
+         runtimes
+         lane
+     | None ->
     (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
      | None ->
       Error
@@ -175,9 +245,9 @@ let validate_cross_verifier_runtime ~(config_path : string)
            (unresolved_runtime_suffix ~dropped_bindings
               ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps when caps.supports_response_format_json -> Ok ()
-        | _ ->
+       if supports_json runtime
+       then Ok ()
+       else
           Error
             (Printf.sprintf
                "%s: [runtime].cross_verifier = %S uses model %S, which does \
@@ -191,13 +261,32 @@ let validate_cross_verifier_runtime ~(config_path : string)
    requests. Unlike the librarian lane, this lane must declare structured output,
    not just JSON mode. [None] remains a migration fallback for existing configs;
    unsupported resolved runtimes are rejected by each caller's OAS schema
-   validation instead of silently dropping the schema. *)
+   validation instead of silently dropping the schema. A [runtime.lanes] id is
+   accepted when every candidate declares structured output (#25394): every
+   consumer routes through [resolve_assignment]-aware paths
+   ([Keeper_turn_driver.run_named] or the compaction candidate expansion). *)
 let validate_structured_judge_runtime ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lanes : Runtime_lane.t list)
     (structured_judge_id : string option) : (unit, string) result =
+  let supports_structured (runtime : t) =
+    match runtime.model.capabilities with
+    | Some caps -> caps.supports_structured_output
+    | None -> false
+  in
   match structured_judge_id with
   | None -> Ok ()
   | Some id ->
+    (match find_declared_lane lanes id with
+     | Some lane ->
+       validate_lane_candidates_capability
+         ~config_path
+         ~route_name:"structured_judge"
+         ~capability_key:"supports-structured-output"
+         ~runtime_supports:supports_structured
+         runtimes
+         lane
+     | None ->
     (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
      | None ->
        Error
@@ -208,9 +297,9 @@ let validate_structured_judge_runtime ~(config_path : string)
             (unresolved_runtime_suffix ~dropped_bindings
                ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps when caps.supports_structured_output -> Ok ()
-        | _ ->
+       if supports_structured runtime
+       then Ok ()
+       else
           Error
             (Printf.sprintf
                "%s: [runtime].structured_judge = %S uses model %S, which does \
@@ -728,39 +817,6 @@ let degrade_loaded_for_missing_catalog
     then Some { route_name = runtime_default_route_name; runtime_id = configured_default.id }
     else None
   in
-  let drop_route route_name = function
-    | None -> None, None
-    | Some runtime_id when is_missing runtime_id -> None, Some { route_name; runtime_id }
-    | Some _ as value -> value, None
-  in
-  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
-  let structured_judge_id, structured_judge_drop =
-    drop_route "[runtime].structured_judge" structured_judge_id
-  in
-  let hitl_summary_id, hitl_summary_drop =
-    drop_route "[runtime].hitl_summary" hitl_summary_id
-  in
-  let cross_verifier_id, cross_verifier_drop =
-    drop_route "[runtime].cross_verifier" cross_verifier_id
-  in
-  let dropped_routes =
-    [ default_drop
-    ; librarian_drop
-    ; structured_judge_drop
-    ; hitl_summary_drop
-    ; cross_verifier_drop
-    ]
-    |> List.filter_map Fun.id
-  in
-  let kept_media_failover, dropped_media_failover =
-    List.fold_right
-      (fun runtime_id (kept, dropped) ->
-         if is_missing runtime_id
-         then kept, runtime_id :: dropped
-         else runtime_id :: kept, dropped)
-      media_failover
-      ([], [])
-  in
   let kept_lanes, dropped_lane_candidates, dropped_lanes =
     List.fold_right
       (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
@@ -797,6 +853,55 @@ let degrade_loaded_for_missing_catalog
            , dropped_lanes ))
       lanes
       ([], [], [])
+  in
+  (* A route id may name a lane (#25394). A lane-targeted route stays live
+     while any candidate survives (the lane itself degrades), and drops only
+     when the whole lane dropped; a runtime-targeted route drops when that
+     runtime is missing. Mirrors [resolve_assignment]'s lane precedence. *)
+  let is_declared_lane id =
+    List.exists (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
+  in
+  let lane_fully_dropped id =
+    List.exists
+      (fun (entry : dropped_runtime_lane) -> String.equal entry.lane_id id)
+      dropped_lanes
+  in
+  let route_unavailable id =
+    if is_declared_lane id then lane_fully_dropped id else is_missing id
+  in
+  let drop_route route_name = function
+    | None -> None, None
+    | Some runtime_id when route_unavailable runtime_id ->
+      None, Some { route_name; runtime_id }
+    | Some _ as value -> value, None
+  in
+  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
+  let structured_judge_id, structured_judge_drop =
+    drop_route "[runtime].structured_judge" structured_judge_id
+  in
+  let hitl_summary_id, hitl_summary_drop =
+    drop_route "[runtime].hitl_summary" hitl_summary_id
+  in
+  let cross_verifier_id, cross_verifier_drop =
+    drop_route "[runtime].cross_verifier" cross_verifier_id
+  in
+  let dropped_routes =
+    [ default_drop
+    ; librarian_drop
+    ; structured_judge_drop
+    ; hitl_summary_drop
+    ; cross_verifier_drop
+    ]
+    |> List.filter_map Fun.id
+  in
+  let kept_media_failover, dropped_media_failover =
+    List.fold_right
+      (fun runtime_id (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, runtime_id :: dropped
+         else runtime_id :: kept, dropped)
+      media_failover
+      ([], [])
   in
   let has_routing_references =
     (not (List.is_empty dropped_assignments))
@@ -894,8 +999,15 @@ let materialize_config
     validate_librarian_runtime ~config_path ~dropped_bindings runtimes
       cfg.librarian_runtime_id
   in
+  (* Lanes are materialized before the judge/verifier route validations so a
+     route id can name a lane (#25394); candidate resolution is enforced by
+     [validate_lanes] inside [lanes_of_decls]. *)
+  let* lanes =
+    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
+  in
   let* () =
     validate_structured_judge_runtime ~config_path ~dropped_bindings runtimes
+      lanes
       cfg.structured_judge_runtime_id
   in
   let* () =
@@ -904,6 +1016,7 @@ let materialize_config
   in
   let* () =
     validate_cross_verifier_runtime ~config_path ~dropped_bindings runtimes
+      lanes
       cfg.cross_verifier_runtime_id
   in
   let* () =
@@ -914,9 +1027,6 @@ let materialize_config
     if validate_max_context
     then validate_runtime_max_context ~config_path runtimes
     else Ok ()
-  in
-  let* lanes =
-    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.

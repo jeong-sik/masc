@@ -188,10 +188,12 @@ let run_memory_os_consolidation_tick
         keeper_id
         (Printexc.to_string exn)
   in
-  Eio.Fiber.all
-    (List.map
-       (fun keeper_id () -> consolidate_one keeper_id ())
-       keeper_ids)
+  (* Sequential on purpose: every keeper's consolidation call lands on the
+     same runtime, so a concurrent fan-out is an N-keeper burst against one
+     endpoint admission FIFO, starving turn/judge/compaction traffic for the
+     whole burst (#25401). The tick cadence (600s) dwarfs a serial sweep, and
+     [consolidate_one] already contains per-keeper failures. *)
+  List.iter (fun keeper_id -> consolidate_one keeper_id ()) keeper_ids
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =

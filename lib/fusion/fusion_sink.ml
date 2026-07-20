@@ -485,7 +485,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
       with
       | Error (Board.Already_exists detail) ->
         Error (Printf.sprintf "Fusion Board projection identity conflict: %s" detail)
-      | Ok (Board.Post_created post | Board.Post_already_present post) ->
+      | Ok (Board_core_persist.Post_created post | Board_core_persist.Post_already_present post) ->
         Ok (Ok post)
       | Error error -> Ok (Error error)
     in

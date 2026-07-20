@@ -405,8 +405,15 @@ let dashboard_config_string_list_fields =
     "allowed_paths";
   ]
 
+(* Control field (not persisted): explicit acknowledgement that reducing
+   [max_context_override] may force a compaction. Stripped before the config is
+   parsed/applied. RFC context: reactive Provider_overflow death-spiral
+   (#25062/#25268) — a silent shrink converts a settings edit into a next-turn
+   overflow. *)
+let confirm_context_shrink_field = "confirm_context_shrink"
+
 let dashboard_config_patch_allowed_fields =
-  [ "name"; "max_context_override" ]
+  [ "name"; "max_context_override"; confirm_context_shrink_field ]
   @
   dashboard_config_string_fields
   @ dashboard_config_bool_fields
@@ -544,6 +551,10 @@ let validate_dashboard_config_field key value =
     | other -> dashboard_field_type_error key "a string" other
   else if key = "max_context_override" then
     validate_dashboard_max_context_override value
+  else if key = confirm_context_shrink_field then
+    (match value with
+     | `Bool _ -> Ok ()
+     | other -> dashboard_field_type_error key "a boolean" other)
   else if List.mem key dashboard_config_string_fields then
     match value with
     | `String _ -> Ok ()
@@ -586,6 +597,21 @@ let validate_dashboard_config_patch ~meta:_ fields =
          | Error msg -> Error msg
          | Ok () -> Ok ())
 
+(* [Some (previous_display, new_value)] when the patch reduces the keeper's
+   context window below its current setting — introducing a cap where there was
+   none (full model window -> capped), or lowering an existing cap. [None] when
+   the field is absent, set to Null (removing the cap = expand), or raised.
+   Compares the persisted override only; a stricter check against the live
+   checkpoint token size is a follow-up. *)
+let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
+  match List.assoc_opt "max_context_override" fields with
+  | Some (`Int new_v) ->
+    (match meta.Keeper_meta_contract.max_context_override with
+     | None -> Some ("unset (full model window)", new_v)
+     | Some old_v when new_v < old_v -> Some (string_of_int old_v, new_v)
+     | Some _ -> None)
+  | _ -> None
+
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
@@ -627,6 +653,27 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  (match validate_dashboard_config_patch ~meta:meta0 fields with
                   | Error msg -> respond_error reqd msg
                   | Ok () ->
+                      let confirm_context_shrink =
+                        match
+                          List.assoc_opt confirm_context_shrink_field fields
+                        with
+                        | Some (`Bool b) -> b
+                        | _ -> false
+                      in
+                      (* Control field: consumed here, never persisted. *)
+                      let fields =
+                        List.remove_assoc confirm_context_shrink_field fields
+                      in
+                      (match context_shrink_of_patch ~meta:meta0 fields with
+                       | Some (previous, new_v) when not confirm_context_shrink ->
+                           respond_error reqd
+                             (Printf.sprintf
+                                "reducing max_context_override (%s -> %d) can push \
+                                 this keeper's existing context past the new window \
+                                 and force a compaction on its next turn. Re-send \
+                                 with %S: true to apply."
+                                previous new_v confirm_context_shrink_field)
+                       | _ ->
                       let args_with_name =
                         `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
                       in
@@ -675,7 +722,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                  name
                              in
                              Http.Response.json_value ~compress:true
-                               ~request:req json reqd)))
+                               ~request:req json reqd))))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

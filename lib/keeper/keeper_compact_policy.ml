@@ -268,7 +268,7 @@ let selected_message_count units selected =
     selected
 ;;
 let requested_messages (meta : keeper_meta) messages =
-  match Keeper_compaction_unit.partition messages with
+  match Keeper_compaction_unit.partition ~quarantine:true messages with
   | Error error -> Error (Invalid_structure error)
   | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->

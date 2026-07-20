@@ -4,6 +4,21 @@
 
 (* ── Startup pruning ───────────────────────────────── *)
 
+(* Fold [prune_dir] over the immediate sub-directories of [root].
+   A missing [root] counts 0 and stray files under [root] are skipped —
+   [.masc/resilience_audit/<keeper>/] stores keep their day-files one
+   level below the keeper dir, so per-keeper traversal needs the same
+   guard the keepers loop gets for free from its nested path concat. *)
+let prune_children_dirs ~prune_dir root =
+  if not (Sys.file_exists root) then 0
+  else
+    Array.fold_left
+      (fun acc name ->
+        let dir = Filename.concat root name in
+        if Sys.is_directory dir then acc + prune_dir dir else acc)
+      0
+      (Sys.readdir root)
+
 let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
      let days =
@@ -48,6 +63,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
               + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
               + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
             ) 0 (Sys.readdir keepers))
+       + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in
      if total > 0 then
          Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"

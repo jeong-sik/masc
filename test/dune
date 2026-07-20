@@ -892,6 +892,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_runtime_startup_maintenance
   test_server_hibernation
   test_server_base_path_diagnostics
   test_server_base_path_guard
@@ -1055,6 +1056,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_runtime_startup_maintenance
   test_server_hibernation
   test_server_base_path_diagnostics
   test_server_base_path_guard

@@ -532,12 +532,6 @@ let validate_dashboard_string_list_field key = function
       loop 0 items
   | other -> dashboard_field_type_error key "an array of strings" other
 
-let validate_dashboard_nonnegative_int key value =
-  if value >= 0 then Ok ()
-  else
-    Error
-      (Printf.sprintf "%s must be non-negative (received %d)" key value)
-
 let validate_dashboard_max_context_override = function
   | `Null -> Ok ()
   | `Int value ->

@@ -734,8 +734,6 @@ export interface GoalKeeperTrustSummary {
 }
 
 export interface GoalTreeStatusProjection {
-  status: string
-  status_color: string
   phase: string
   phase_color: string
   goal_fsm: GoalFsmProjection

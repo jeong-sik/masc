@@ -134,7 +134,7 @@ function PlanningRouteFocusPanel() {
               <span class="min-w-0 truncate text-sm font-semibold text-text-strong">
                 ${goal?.title ?? 'goal not loaded'}
               </span>
-              ${goal?.status ? html`<span class="font-mono text-3xs text-text-muted">${goal.status}</span>` : null}
+              ${goal?.phase ? html`<span class="font-mono text-3xs text-text-muted">${goal.phase}</span>` : null}
             ` : null}
             ${taskId ? html`
               <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">

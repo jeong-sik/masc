@@ -602,7 +602,6 @@ export interface Goal {
   target_value?: string | null
   due_date?: string | null
   priority: number
-  status: string
   phase: string
   parent_goal_id?: string | null
   last_review_note?: string | null

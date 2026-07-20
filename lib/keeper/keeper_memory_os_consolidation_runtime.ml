@@ -20,8 +20,10 @@ let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 ;;
 
 (* The plan can list many groups over a large store, so allow more than the
-   512-token summary budget. *)
-let consolidation_max_tokens = 2048
+   512-token summary budget. 2048 was too small for live stores: on 2026-07-20
+   per-keeper fact stores reached 300-635 rows, and a grouping plan over that
+   many indices does not fit in 2048 output tokens. *)
+let consolidation_max_tokens = 8192
 
 type outcome =
   | Skipped_too_few of int
@@ -63,6 +65,15 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
       Llm_provider.Provider_config.max_tokens
     ; tool_choice = None
     ; disable_parallel_tool_use = true
+      (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
+         otherwise spend the whole output budget on thinking and return an
+         empty visible text — observed live on 2026-07-20 as 256 consecutive
+         [Empty_response] outcomes while only trivial 2-fact stores
+         consolidated. *)
+    ; enable_thinking = Some false
+    ; preserve_thinking = Some false
+    ; thinking_budget = None
+    ; clear_thinking = Some true
     }
   in
   Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier

@@ -514,7 +514,15 @@ let test_resolver_selects_json_mode_for_json_object_only_provider () =
     Alcotest.(check bool)
       "JsonMode carries no output_schema"
       true
-      (Option.is_none resolved.Llm_provider.Provider_config.output_schema)
+      (Option.is_none resolved.Llm_provider.Provider_config.output_schema);
+    Alcotest.(check (option bool))
+      "thinking is disabled for the consolidation request"
+      (Some false)
+      resolved.Llm_provider.Provider_config.enable_thinking;
+    Alcotest.(check (option bool))
+      "thinking output is not preserved"
+      (Some false)
+      resolved.Llm_provider.Provider_config.preserve_thinking
 ;;
 
 (* The OpenAI-compatible json_object contract rejects (HTTP 400) requests whose

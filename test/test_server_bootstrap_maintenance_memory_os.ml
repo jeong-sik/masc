@@ -149,6 +149,57 @@ let test_skips_when_too_few () =
           Alcotest.(check int) "store unchanged when too few facts" 1 after_count))))
 ;;
 
+(* The tick must not fan out one provider call per keeper concurrently: every
+   call lands on the same runtime, so an N-keeper burst floods that endpoint's
+   admission FIFO and starves turn/judge/compaction traffic for the whole
+   burst (#25401). The fake yields inside the provider call so any concurrent
+   scheduling would be observed as in_flight > 1. *)
+let test_tick_serializes_provider_calls () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+        with_temp_keepers (fun () ->
+          let keeper_ids = [ "keeper-1"; "keeper-2"; "keeper-3" ] in
+          List.iter
+            (fun keeper_id ->
+               List.iter
+                 (Io.append_fact ~keeper_id)
+                 [ fact "deploy uses blue-green"
+                 ; fact "deployment is blue-green based"
+                 ; fact "build runs on dune 3.x"
+                 ; fact "tests live under test/"
+                 ; fact "ci runs on github actions"
+                 ])
+            keeper_ids;
+          let in_flight = ref 0 in
+          let max_in_flight = ref 0 in
+          let calls = ref 0 in
+          let observing_complete :
+                Masc.Keeper_memory_os_consolidation_runtime.complete_fn =
+            fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+              incr in_flight;
+              incr calls;
+              if !in_flight > !max_in_flight then max_in_flight := !in_flight;
+              Eio.Fiber.yield ();
+              decr in_flight;
+              Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
+          in
+          Server_bootstrap_maintenance.run_memory_os_consolidation_tick
+            ~complete:observing_complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ();
+          Alcotest.(check int) "every keeper consolidated" 3 !calls;
+          Alcotest.(check int)
+            "provider calls never overlap"
+            1
+            !max_in_flight))))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -161,6 +212,10 @@ let () =
             "skips when too few facts"
             `Quick
             test_skips_when_too_few
+        ; Alcotest.test_case
+            "tick serializes provider calls"
+            `Quick
+            test_tick_serializes_provider_calls
         ] )
     ]
 ;;

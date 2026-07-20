@@ -109,33 +109,71 @@ Per `spec/12-memory-systems.md` §Write Contract and §Compaction plus
   restatements as durable notes. This is enforced by *what is a valid memory
   operation*, not by scoring existing rows.
 - **LLM-judged consolidation (survival).** The only sanctioned decider of which
-  bank rows survive is the LLM librarian returning keep/rewrite/forget, with
+  rows survive is the LLM librarian returning keep/rewrite/forget, with
   deterministic code validating schema/provenance and atomically applying that
-  plan (spec-12 §Compaction). This is also the forward store's model: Memory OS
-  already runs scheduled per-keeper LLM consolidation
-  (`server_bootstrap_maintenance.ml` → `Keeper_memory_os_consolidation_runtime`).
+  plan (spec-12 §Compaction; RFC-0247 "a fact's value is the librarian's
+  judgment, not a number"). Memory OS *has* this pass
+  (`Keeper_memory_os_consolidation_runtime`, wired in
+  `server_bootstrap_maintenance.ml`) but it is **disabled by default**
+  (`Env_config.KeeperMemoryOs.consolidation_enabled_default = false`).
 
-Both levers point the same way as the parent RFC: **read from and consolidate in
-Memory OS; stop feeding the bank.** Continuity is unaffected — it comes from OAS
-checkpoint + typed MASC metadata, not `.memory.jsonl` (parent RFC §1.4).
+Both levers point the same way as the parent RFC: **consolidate in Memory OS via
+the LLM pass; stop feeding the bank.** Continuity is unaffected — it comes from
+OAS checkpoint + typed MASC metadata, not `.memory.jsonl` (parent RFC §1.4).
+
+## §4b Memory OS facts have the *same disease* — and its retention is off
+
+Re-pointing the dashboard to Memory OS facts (naive §5 S1) does **not** fix the
+complaint; it relocates it. Measured live (`idealist.facts.jsonl`, 2026-07-20):
+
+- **449 fact rows**; `valid_until` present on **0 of 449** — no fact carries an
+  expiry.
+- claim_kind: `durable_knowledge` 296, `self_observation` 86, `external_state`
+  57, absent 10. category: `lesson` 116, `ephemeral` 102, `constraint` 99,
+  `validated_approach` 68, … — the bulk is the same operating-constraint prose
+  the bank holds ("A constraint exists that limits tool calls to non-…",
+  "Operator action required: token identity separation"), mis-tagged
+  `durable_knowledge`.
+
+Why nothing decays: `fact_effective_valid_until fact = fact.valid_until`
+(`keeper_memory_os_types.ml`; the comment: "No category … only `valid_until` has
+that authority"). Per-kind / per-category TTL was **deliberately removed** — the
+RFC-0259 supersession (2026-06-25) states "retention/ranking effects … are no
+longer active policy," consistent with RFC-0247 (judgment = LLM, not a number).
+GC (`gc_enabled_default = true`) faithfully removes rows past `valid_until`, but
+since the librarian never emits one, GC is a no-op and every fact is permanent.
+
+**Consequence — the Memory OS fundamental fix is NOT deterministic.** Re-adding a
+TTL / category / cap rule would revert the same governance decision that rejected
+bank compaction (RFC-0332, #24721/#24727, the RFC-0259 supersession). The only
+in-contract levers are (i) **enable the LLM-judged consolidation** — an operator
+decision (scheduled per-keeper provider calls; the fleet has known provider-SPOF
+issues, so it needs shadow validation + cost sign-off, not a unilateral default
+flip), and (ii) **improve librarian extraction** so operating-constraint /
+task-sequencing prose is not extracted as a durable fact (KEEPER-STATE-OWNERSHIP:
+"not memory-note categories") — an LLM-boundary change verified by the memory
+eval harness, not a deterministic unit test.
 
 ## §5 Plan — staged, each an independent PR with rollback
 
-Operationalizes the parent RFC's Stages 2–3 for this bug; no new heuristic, no
-compaction re-wire.
+Ordered by §4b: the facts store must be bounded *before* the dashboard reads it,
+or S1 just relocates the junk. No new heuristic, no compaction/TTL re-wire.
 
-- **S1 (read repoint, smallest safe step, fixes the visible complaint).** Point
-  the operator `#keepers` memory panel to Memory OS facts instead of the raw bank
-  append log, one read surface at a time (parent §Stage 2). Read-only, reversible,
-  no write or continuity change. Operator immediately sees the LLM-consolidated,
-  retention-bounded store rather than idle-prose dups.
-- **S2 (write reduction at source).** Route explicit `keeper_memory_write` and
-  post-turn tool-result notes to the Memory OS typed producer; stop the bank
-  append. Enforce the Write Contract so operating-constraint prose is not a
-  persistable memory operation. Keeps continuity on snapshot cache.
-- **S3 (retire).** Once S1/S2 land and bake, remove `keeper_memory_bank*` + the
-  `.memory.jsonl` path + the dead compaction, per parent §Stage 4. Until then the
-  bank is written-but-not-read.
+- **S0 (bank write kill-switch — LANDED in this PR).** `MASC_KEEPER_MEMORY_BANK_WRITE`
+  (default true = no change); when false the three bank writers skip uniformly.
+  Deterministic operator gate that stops the *bank* half at the source. This is
+  the only piece here that is a clean deterministic change.
+- **S1 (bound the facts store — operator + LLM-boundary, not deterministic).**
+  (a) Enable the LLM-judged consolidation (`consolidation_enabled`) after a shadow
+  run validates it against live provider capacity; (b) tighten librarian
+  extraction so operating-constraint / task-sequencing prose is not extracted as a
+  durable fact. Verified by the memory eval harness, not a unit test. **Blocks S2.**
+- **S2 (read repoint).** Once facts are bounded (S1), point the `#keepers` memory
+  panel to Memory OS facts, one read surface at a time (parent §Stage 2).
+  Read-only, reversible, env-flag defaulting to current bank read.
+- **S3 (write reduction + retire).** Route explicit / tool-result notes to the
+  Memory OS typed producer; stop the bank append; then remove `keeper_memory_bank*`
+  + the `.memory.jsonl` path + dead compaction (parent §Stage 4).
 
 ## §6 Anti-workaround declaration
 
@@ -145,21 +183,26 @@ compaction `target_notes`/`trigger_bytes` to "run more often" (symptom
 suppression; the key is exact-match anyway); (c) a counter/telemetry that makes
 dups visible without stopping them; (d) an external heuristic cleanup script
 (non-deterministic, recurs — a one-time truncate + backup is *cleanup*, not
-*fix*).
+*fix*); (e) **re-adding a per-kind/per-category TTL or a cap to the Memory OS
+facts store** (§4b) — that reverts the RFC-0259 supersession and RFC-0247's
+"judgment = LLM, not a number". Facts survival is decided by the LLM
+consolidation, which must be *enabled*, not replaced with a deterministic rule.
 
-## §7 First PR and verification
+## §7 Landed here + next PR
 
-First PR = **S1 for the single `#keepers` panel surface** (`keeper_status.ml` /
-the dashboard keeper-detail read), gated behind an env flag defaulting to the
-current bank read so it is a no-op until validated (parent RFC Stage-1 flag
-convention, `Keeper_memory_bank_env` SSOT). Verification: read-only harness
-diffing panel JSON for a keeper with known bank dups vs its Memory OS facts;
-unit test pins the flag default (no behavior change) and the flipped path
-(facts source). Live sanity: `#keepers?keeper=idealist` renders facts, not the
-18 idle-note dups.
+- **Landed in this PR (S0):** the bank write kill-switch — the one clean
+  deterministic change. `dune build` + `test_keeper_memory_write` (kill-switch
+  counterfactual) green; SSOT/lint green.
+- **Next (S1, separate — needs operator decision):** a shadow-validation harness
+  for `consolidation_enabled` (read-only: run the consolidation pass against a
+  copy of each keeper's live facts, report before/after counts and what it would
+  forget), so enabling it is an evidence-backed operator decision rather than a
+  blind default flip. Then the librarian-extraction tightening, verified by the
+  memory eval harness.
 
 ## §8 Rollback
 
-Each stage is an independent PR. S1/S2 sit behind env flags defaulting to
-current behavior, so revert is an env flip. S3 is the only irreversible stage
-and lands only after S1/S2 bake.
+S0 is env-reversible (`MASC_KEEPER_MEMORY_BANK_WRITE=true`, the default). S1's
+consolidation enablement is env-reversible. S2 sits behind an env flag defaulting
+to current behavior. S3 (retire) is the only irreversible stage and lands only
+after S0–S2 bake.

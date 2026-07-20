@@ -63,12 +63,13 @@ let build_prompt ~keeper_name request =
     [ "failure_request_json", Yojson.Safe.to_string (request_json ~keeper_name request) ]
 ;;
 
+(* config/prompts/keeper.failure_judgment.md states the contract more tightly
+   than the schema can: it fixes the exact field set and couples decision to
+   guidance (null for await_external_input, non-empty otherwise), which JSON
+   Schema cannot express without oneOf. Keeper_failure_judgment_contract
+   re-checks every one of those on the way in. *)
 let apply_output_schema provider_config =
-  Ok
-    (Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-       ~log_label:"keeper failure judgment output contract"
-       Keeper_structured_output_schema.failure_judgment_output_schema
-       provider_config)
+  Ok (Keeper_structured_output_schema.without_response_format provider_config)
 ;;
 
 let reject_unregistered_tool ~name ~args:_ =

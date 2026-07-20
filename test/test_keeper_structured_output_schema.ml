@@ -123,49 +123,55 @@ let has_json_schema_response_format schema provider_cfg =
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_uses_native_when_supported () =
-  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = schema_capable_oas_provider_config () in
-  let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test native"
-      schema
-      base
-  in
-  check bool "native schema is attached" true
-    (has_json_schema_response_format schema configured);
-  check (option bool) "output_schema mirrors native schema" (Some true)
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema)
+let has_no_response_format provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.Off ->
+    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected () =
-  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = prompt_tier_oas_provider_config () in
-  let native_cfg = Keeper_structured_output_schema.apply_to_provider_config schema base in
-  (match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-   | Ok () -> fail "prompt-tier provider unexpectedly accepted native schema"
-   | Error _ -> ());
-  let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test prompt"
-      schema
-      base
+(* A schema-capable provider gets no response format either: capability is not
+   consulted. Without this the helper could silently regrow a native tier for
+   the one provider class that accepts it, which is the split these call sites
+   were changed to remove. *)
+let test_without_response_format_clears_schema_capable_provider () =
+  let base =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema
+      (schema_capable_oas_provider_config ())
   in
-  check bool "prompt tier has no native schema" false
-    (has_json_schema_response_format schema configured);
-  check (option bool) "prompt tier leaves output_schema empty" None
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema);
-  check
-    bool
-    "prompt-tier config still validates without native schema"
-    true
-    (match Llm_provider.Provider_config.validate_output_schema_request configured with
-     | Ok () -> true
-     | Error _ -> false)
+  check bool "schema-capable provider starts with a native schema attached" true
+    (has_json_schema_response_format
+       Keeper_structured_output_schema.librarian_episode_output_schema
+       base);
+  check bool "helper clears it anyway" true
+    (has_no_response_format (Keeper_structured_output_schema.without_response_format base))
+;;
+
+(* The point of the helper is that the request is byte-identical regardless of
+   what the provider advertises, so a capability fact that turns out to be a lie
+   (ollama.com cloud declared json_schema and ignored it — 2026-07-02 probe)
+   cannot change the request that was sent. *)
+let test_without_response_format_is_capability_independent () =
+  let schema_capable =
+    Keeper_structured_output_schema.without_response_format
+      (schema_capable_oas_provider_config ())
+  in
+  let json_object_only =
+    Keeper_structured_output_schema.without_response_format
+      (prompt_tier_oas_provider_config ())
+  in
+  check bool "schema-capable provider asks for no format" true
+    (has_no_response_format schema_capable);
+  check bool "json_object-only provider asks for no format" true
+    (has_no_response_format json_object_only);
+  check bool "both configs pass output-schema validation" true
+    (List.for_all
+       (fun cfg ->
+          match Llm_provider.Provider_config.validate_output_schema_request cfg with
+          | Ok () -> true
+          | Error _ -> false)
+       [ schema_capable; json_object_only ])
 ;;
 
 (* #25266: a json_object-only provider (structured_output=false,
@@ -405,13 +411,13 @@ let () =
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
         ; test_case
-            "schema-or-prompt helper uses native schema when supported"
+            "without_response_format clears a schema-capable provider too"
             `Quick
-            test_apply_schema_or_prompt_tier_uses_native_when_supported
+            test_without_response_format_clears_schema_capable_provider
         ; test_case
-            "schema-or-prompt helper keeps prompt tier when native rejected"
+            "without_response_format is capability-independent"
             `Quick
-            test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
+            test_without_response_format_is_capability_independent
         ; test_case
             "json_mode tier selects JsonMode for json_object-only provider"
             `Quick

@@ -440,12 +440,10 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_prompt_matches_template := String.equal expected_prompt rendered_prompt)
             plan
         in
+        (* Total: with no output schema requested there is nothing a provider
+           capability can reject, so the resolver returns a config directly. *)
         let resolved_cfg =
-          match
-            Runtime.resolve_provider_for_consolidation (provider_cfg ~max_tokens:512 ())
-          with
-          | Ok cfg -> cfg
-          | Error msg -> Alcotest.failf "resolver rejected provider config: %s" msg
+          Runtime.resolve_provider_for_consolidation (provider_cfg ~max_tokens:512 ())
         in
         let outcome =
           Runtime.consolidate_keeper
@@ -489,12 +487,13 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           !seen_prompt_matches_template))))
 ;;
 
-(* #25324 tier 2 wiring: a provider that declares json_object but not native
-   json_schema (GLM/DeepSeek/Kimi) must get [JsonMode] from the consolidation
-   resolver — before this fix the 2-tier helper dropped such providers straight
-   to the prompt tier, forfeiting the wire-level JSON guarantee the endpoint
-   offers. *)
-let test_resolver_selects_json_mode_for_json_object_only_provider () =
+(* Capability independence: a provider that declares json_object but not native
+   json_schema (GLM/DeepSeek/Kimi) gets exactly the request every other provider
+   gets. Tier selection existed only to decide how to ask for a schema; with no
+   schema requested, a declared capability — which this repo has recorded as
+   sometimes false (ollama.com cloud, 2026-07-02 probe) — can no longer change
+   what goes on the wire. The tuning that does matter is still asserted below. *)
+let test_resolver_is_capability_independent () =
   let json_object_only_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -506,34 +505,33 @@ let test_resolver_selects_json_mode_for_json_object_only_provider () =
         }
       ()
   in
-  match Runtime.resolve_provider_for_consolidation json_object_only_cfg with
-  | Error msg -> Alcotest.failf "resolver rejected json_object-only provider: %s" msg
-  | Ok resolved ->
-    Alcotest.(check bool)
-      "json_object-only provider gets JsonMode"
-      true
-      (match resolved.Llm_provider.Provider_config.response_format with
-       | Atypes.JsonMode -> true
-       | Atypes.JsonSchema _ | Atypes.Off -> false);
-    Alcotest.(check bool)
-      "JsonMode carries no output_schema"
-      true
-      (Option.is_none resolved.Llm_provider.Provider_config.output_schema);
-    Alcotest.(check (option bool))
-      "thinking is disabled for the consolidation request"
-      (Some false)
-      resolved.Llm_provider.Provider_config.enable_thinking;
-    Alcotest.(check (option bool))
-      "thinking output is not preserved"
-      (Some false)
-      resolved.Llm_provider.Provider_config.preserve_thinking
+  let resolved = Runtime.resolve_provider_for_consolidation json_object_only_cfg in
+  Alcotest.(check bool)
+    "json_object-only provider still gets no response format"
+    true
+    (match resolved.Llm_provider.Provider_config.response_format with
+     | Atypes.Off -> true
+     | Atypes.JsonMode | Atypes.JsonSchema _ -> false);
+  Alcotest.(check bool)
+    "no output_schema is attached"
+    true
+    (Option.is_none resolved.Llm_provider.Provider_config.output_schema);
+  Alcotest.(check (option bool))
+    "thinking is disabled for the consolidation request"
+    (Some false)
+    resolved.Llm_provider.Provider_config.enable_thinking;
+  Alcotest.(check (option bool))
+    "thinking output is not preserved"
+    (Some false)
+    resolved.Llm_provider.Provider_config.preserve_thinking
 ;;
 
-(* The OpenAI-compatible json_object contract rejects (HTTP 400) requests whose
-   messages lack the literal token "json" (DeepSeek/Kimi enforce; GLM is
-   lenient). The consolidation prompt must therefore always state that it
-   returns JSON — this locks the token in place for every JsonMode-tier
-   request. *)
+(* With no wire response format, the prompt is the only place the output
+   contract is stated, so it must keep saying the reply is JSON — a prompt that
+   stopped asking for JSON would leave [plan_of_json] rejecting every reply.
+   (This assertion previously existed for a different reason: the
+   OpenAI-compatible json_object tier 400s when the messages lack a literal
+   "json" token. That tier is gone; the contract reason outlives it.) *)
 let test_consolidation_prompt_carries_json_token () =
   with_prompts (fun () ->
     let facts = [ fact "a"; fact "b" ] in
@@ -578,9 +576,9 @@ let () =
 	        ] )
     ; ( "output_contract"
       , [ Alcotest.test_case
-            "resolver selects JsonMode for json_object-only provider"
+            "resolver output does not depend on provider capability"
             `Quick
-            test_resolver_selects_json_mode_for_json_object_only_provider
+            test_resolver_is_capability_independent
         ; Alcotest.test_case
             "consolidation prompt carries the json token"
             `Quick

@@ -60,15 +60,15 @@ val apply_hitl_summary_schema_to_config
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for {!hitl_context_summary_schema}. *)
 
-val apply_schema_or_prompt_tier
-  :  log_label:string
-  -> Yojson.Safe.t
+val without_response_format
+  :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Set [schema] only when the provider accepts native structured output.
-    Otherwise return the original provider config and log the prompt-tier
-    downgrade with the validation detail. Use only for keeper operation paths
-    whose parser remains fail-loud after the provider response. *)
+(** Clear both OAS structured-output fields: the request states its output
+    contract in its prompt and validates the parse downstream, so it asks the
+    provider for no wire format at all. Use for call sites whose prompt spells
+    out the object shape and whose parser is total — a malformed reply must
+    already become a typed error rather than a bad write. Every provider then
+    takes one identical request path with no capability branch. *)
 
 val apply_schema_json_mode_or_prompt_tier
   :  log_label:string

@@ -1488,19 +1488,23 @@ let test_librarian_runtime_appends_episode_bundle () =
              "thinking preservation disabled"
              (Some false)
              provider_cfg.Llm_provider.Provider_config.preserve_thinking;
-           let expected_schema = Structured_schema.librarian_episode_output_schema in
+           (* The contract lives in the prompt and in
+              [Keeper_librarian.episode_of_json_result], not in a wire format.
+              Reattaching the schema here would resurrect a concrete failure:
+              it marks every claim field required with nullable types, so a
+              conforming provider emits ["claim_id": null], which
+              [optional_string_field_strict] rejects — dropping the whole
+              episode — while the prompt tells the model to omit the key. *)
            Alcotest.(check bool)
-             "librarian json schema response format"
+             "librarian requests no response format"
              true
              (match provider_cfg.response_format with
-              | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
-              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-           Alcotest.(check (option bool))
-             "librarian output schema mirrors response format"
-             (Some true)
-             (Option.map
-                (Yojson.Safe.equal expected_schema)
-                provider_cfg.Llm_provider.Provider_config.output_schema);
+              | Agent_sdk.Types.Off -> true
+              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+           Alcotest.(check bool)
+             "librarian attaches no output schema"
+             true
+             (Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema);
            Alcotest.(check int) "system+user prompt" 2 (List.length messages);
            let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
            Alcotest.(check bool)

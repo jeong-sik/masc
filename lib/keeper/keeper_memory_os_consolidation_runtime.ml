@@ -83,9 +83,8 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true
-  ; response_format = Agent_sdk.Types.Off
-  ; output_schema = None
   }
+  |> Keeper_structured_output_schema.without_response_format
 ;;
 
 module For_testing = struct
@@ -97,6 +96,8 @@ end
    No Result: with no schema requested there is nothing left that can reject
    the config. *)
 let resolve_provider_for_consolidation = provider_for_consolidation
+;;
+
 let messages_for_consolidation facts =
   let numbered = Consolidation.render_numbered_facts facts in
   match

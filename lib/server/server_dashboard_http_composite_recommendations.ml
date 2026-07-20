@@ -32,7 +32,6 @@ let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
 ;;
 
 let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attention =
-  let stale_long_enough = attention.cra_stale_long_enough in
   let idle_attention = attention.cra_idle_attention in
   let reason = Option.value ~default:"runtime_attention" attention.cra_reason in
   let make action_type severity reason suggested_payload =

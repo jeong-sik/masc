@@ -331,9 +331,9 @@ let test_ollama_probe_allow_dispatches_exact_input () =
   Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
   let config = Workspace.default_config base_path in
   let meta = make_meta ~always_allow:true "ollama-gate-allow-keeper" in
-  ignore (Keeper_registry.register ~base_path meta.name meta);
+  ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
   Fun.protect
-    ~finally:(fun () -> Keeper_registry.unregister ~base_path meta.name)
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path meta.name)
   @@ fun () ->
   let result =
     Keeper_tool_in_process_runtime.handle_masc_local_runtime_with_outcome

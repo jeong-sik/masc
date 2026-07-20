@@ -75,13 +75,13 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
         version = 2;
       };
     ignore
-      (Keeper_registry.register
+      (Keeper_registry.For_testing.register
          ~base_path:config.Workspace.base_path
          keeper_name
          meta);
     Fun.protect
       ~finally:(fun () ->
-        Keeper_registry.unregister ~base_path:config.Workspace.base_path keeper_name)
+        Keeper_registry.For_testing.unregister ~base_path:config.Workspace.base_path keeper_name)
       (fun () ->
         check string "heartbeat task id" task_id
           (KK.current_task_id_for_agent ~config agent_name);
@@ -270,7 +270,7 @@ let persist_and_register_board_lane config meta =
    | Ok () -> ()
    | Error detail -> fail ("write_meta failed: " ^ detail));
   ignore
-    (Keeper_registry.register
+    (Keeper_registry.For_testing.register
        ~base_path:config.Workspace.base_path
        meta.Keeper_meta_contract.name
        meta)
@@ -293,7 +293,7 @@ let overwrite_file path contents =
 let test_exact_mentions_deliver_and_wake_each_lane_independently () =
   with_temp_workspace @@ fun config ->
   Fun.protect
-    ~finally:Keeper_registry.clear
+    ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let alpha = make_board_resume_meta "alpha" in
        let beta = make_board_resume_meta "beta" in
@@ -325,7 +325,7 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
 let test_paused_exact_mention_is_durable_without_wake () =
   with_temp_workspace @@ fun config ->
   Fun.protect
-    ~finally:Keeper_registry.clear
+    ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let meta = make_board_resume_meta "pausedlane" in
        persist_and_register_board_lane config meta;
@@ -359,7 +359,7 @@ let test_paused_exact_mention_is_durable_without_wake () =
 let test_restarting_exact_mention_is_durable_with_deferred_wake () =
   with_temp_workspace @@ fun config ->
   Fun.protect
-    ~finally:Keeper_registry.clear
+    ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let meta = make_board_resume_meta "restartlane" in
        (match Keeper_meta_store.write_meta config meta with
@@ -396,7 +396,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
 let test_lane_meta_failure_does_not_block_next_durable_delivery () =
   with_temp_workspace @@ fun config ->
   Fun.protect
-    ~finally:Keeper_registry.clear
+    ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let broken = make_board_resume_meta "zzzbroken" in
        let healthy = make_board_resume_meta "aaahealthy" in

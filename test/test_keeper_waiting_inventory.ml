@@ -665,12 +665,12 @@ let test_live_turn_keeper_is_busy_without_waiting_rows () =
   let keeper_name = "busy-keeper" in
   ensure_keeper config keeper_name;
   let meta = keeper_meta_exn config keeper_name in
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   Fun.protect
-    ~finally:(fun () -> Keeper_registry.clear ())
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
     (fun () ->
       ignore
-        (Keeper_registry.register
+        (Keeper_registry.For_testing.register
            ~base_path:config.Workspace_utils_backend_setup.base_path
            keeper_name
            meta);

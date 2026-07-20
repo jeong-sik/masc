@@ -70,7 +70,7 @@
 - **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
 - **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
 - **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
-- **Goal + Task** — Goal/Task는 MCP 툴로 만들고 상태 전이하며, active goal은 Keeper system prompt에 주입됩니다. *한계*: goal-loop 스케줄러는 Keeper turn을 구동하지 않습니다(관측용). turn은 채널/이벤트로 구동됩니다.
+- **Goal + Task** — Goal/Task는 MCP 툴로 만들고 상태 전이하며, active goal은 Keeper system prompt에 주입됩니다. turn은 채널/이벤트로 구동됩니다. (구 goal-loop OODA 스케줄러 스크립트는 2026-07-21 삭제 — RFC-0000:781 KILL; Goal 표면의 거취는 RFC-0352 결정 스코프)
 - **OpenTelemetry** — OTLP HTTP exporter와 GenAI semconv span/metric이 동작합니다. *한계*: 아직 수집되지 않는 signal과 instrumentation 공백이 많습니다. 예를 들어 Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등은 부분적으로만 커버됩니다.
 - **CODE / IDE (관망형, 미동작)** — 사람이 코드를 직접 수정하지 않고 에이전트에게 명령만 내리는 관망형 IDE를 지향합니다. LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, **관망형 명령 흐름이 검증되지 않아 현재 실사용 가능한 상태가 아닙니다.**
 
@@ -329,7 +329,7 @@ masc/
 | 1 | **Keepers / Fleet** | 배포된 `runtime.toml`에서 죽은 `[autonomous] concurrency` 키를 제거하고, 전역 상한이 없는 런타임 계약과 fleet 문서를 맞춥니다. | 🟡→✅ |
 | 2 | **Provider Failover** | provider healthcheck 기반 **자동 순서 failover**를 구현합니다. 장애 시 다음 후보 provider로 Keeper turn을 자동 전환하고, 복구 시 로그/메트릭을 남깁니다. | ❌→✅ |
 | 3 | **Fusion + JoJ** | `runtime.toml`에 JoJ(Judge of Judges)용 1차 심판 패널(`judges`) 설정을 추가하고, fusion 결과 registry를 디스크에 영속화합니다. | 🟡→✅ |
-| 4 | **Goal + Task** | goal-loop 스케줄러가 채널 이벤트 외에도 Keeper turn을 구동할 수 있도록 합니다. 예: goal 상태 변화·마감 임박·blocked 태스크 발견 시 자동 wake. | 🟡→✅ |
+| 4 | **Goal + Task** | (superseded) goal-loop 스케줄러는 2026-07-21 삭제됨. goal 기반 wake는 RFC-0352 결정 후 typed Scheduler 경유로만 재설계 가능. | RFC-0352 |
 | 5 | **TUI** | `masc-tui`를 실제로 사용 가능한 상태로 만듭니다. 실행 파일은 있으나 CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 공백으로 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |

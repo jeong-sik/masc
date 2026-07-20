@@ -320,6 +320,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_keeper_reaction_store
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper
@@ -634,6 +635,7 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_owner_lock
+  test_keeper_reaction_store
   test_cross_context_mutex
   test_keeper_event_queue_persist_poison
   test_workspace_routes_keeper

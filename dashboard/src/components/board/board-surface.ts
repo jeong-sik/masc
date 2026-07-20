@@ -25,6 +25,7 @@ import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
 import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mention-inbox'
 import { PostDetail, CommentThread, CommentForm } from './post-detail'
+import { PostAttachments } from './post-attachments'
 import { FusionBoardEvidence } from './fusion-evidence'
 import { ReactionBar } from './reaction-bar'
 import { PostShareActions } from './post-share-actions'
@@ -462,6 +463,11 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="bd-post-body">
         <${RichContent} text=${previewBody} previewLimit=${1} />
       </div>
+      ${post.attachments
+        ? html`<div onClick=${(event: Event) => event.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}>
+            <${PostAttachments} attachments=${post.attachments} compact />
+          </div>`
+        : null}
       <div class="bd-post-foot">
         <div onClick=${(event: Event) => event.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}>
           <${ReactionBar}

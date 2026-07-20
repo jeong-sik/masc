@@ -545,7 +545,9 @@ module KeeperKeepalive = struct
       wakes the lane within 0.5s instead of up to 2s; at ~2 CAS checks/sec/keeper
       the extra polling is negligible, and the dominant reaction cost remains the
       turn's own LLM call, not this floor.
-      Range: [0.1, 10.0]. *)
+      Range: [0.1, 10.0].
+      @category Thresholds
+      @ops_class operator *)
   let sleep_chunk_sec =
     Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;

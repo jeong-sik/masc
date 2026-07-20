@@ -1,4 +1,4 @@
-# RFC-0345 — Gateway redelivery dedup: transcript single-authority, attention as wake-hint
+# RFC-0346 — Gateway redelivery dedup: transcript single-authority, attention as wake-hint
 
 - Status: Draft
 - Updated: 2026-07-20

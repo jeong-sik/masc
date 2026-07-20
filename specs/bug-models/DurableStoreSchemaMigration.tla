@@ -79,12 +79,21 @@ Next == PreflightMigrate \/ PreflightFailLoud \/ PreflightUpToDate
 \* HardCutOrphan's shape. #25135's quarantine is the real transition that
 \* removes rows from the live path, so the action is retained under its actual
 \* source rather than deleted.
+\*
+\* NOTE 2 (same review): quarantine uses Sys.rename
+\* (keeper_approval_queue.ml:660-668), so the rows stay physically on disk at
+\* the .vN.quarantine path — on_disk_rows must NOT drop to 0, which would
+\* contradict this variable's definition and hide whether operator recovery is
+\* still possible. What quarantine loses is the LIVE path, and that is already
+\* what makes it a bug: boot reports ok with live_rows = 0. The distinction
+\* from HardCutOrphan is disk_version: quarantine advances the live path to
+\* current, orphan leaves it at old.
 HardCutQuarantine ==
     /\ boot_outcome = "pending"
     /\ disk_version = "old"
     /\ boot_outcome' = "ok"          \* boot reported successful ...
     /\ live_rows' = 0                \* ... yet no old row is readable ...
-    /\ on_disk_rows' = 0             \* ... and the durable rows are gone.
+    /\ on_disk_rows' = OldRows       \* ... though rename kept them at .vN.quarantine.
     /\ disk_version' = "current"
 
 \* Failure mode B — hard-cut reject / orphan (event queue #25078, gate #25135):

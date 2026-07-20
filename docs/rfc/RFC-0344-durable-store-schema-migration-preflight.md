@@ -28,7 +28,7 @@ durable store schema version bump이 배포 경계에서 데이터 유실 또는
 
 공통 근본: 각 store가 version bump 시 (a) migration 도구 또는 (b) generation-bump(경로 분리) 중 하나를 **타입 수준에서 강제받지 않는다**. 현재는 주석(`keeper_reaction_ledger.ml`의 "namespace and row schema advance together")으로만 규율되고 컴파일러가 미강제 → 매번 hand-decision, 매번 라이브 state 확인 누락.
 
-**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 21개 중 **16개가 위험**임을 보인다 — hard-cut-reject 7개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에 **durable state의 구→신 변환을 책임지는 공용 preflight 경로가 없고**, 존재하는 startup 변환은 store별 ad-hoc이라 재사용·검증되지 않으며 boot 시점 버전 대조와 결속되지 않는다. event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
+**이 4건은 표층이다.** 전수 인벤토리(§현황)는 durable store 약 22개 중 **17개가 위험**임을 보인다 — hard-cut-reject 8개(구 데이터 orphan/store Unavailable), unversioned 9개(암묵적 hard-cut). 리포 전체에 **durable state의 구→신 변환을 책임지는 공용 preflight 경로가 없고**, 존재하는 startup 변환은 store별 ad-hoc이라 재사용·검증되지 않으며 boot 시점 버전 대조와 결속되지 않는다. event queue는 오히려 migration을 명시적으로 거부한다(`keeper_event_queue_state.ml:228` "cannot migrate legacy inflight work"). 즉 다음 version bump가 어느 store에서 일어나도 5번째 사고가 된다.
 
 RFC-0338은 durable persistence를 다루면서도 "데이터 파일 migration은 없다"(본문 §rollback)고 scope에서 명시적으로 제외한다. 즉 개별 durability RFC들은 각자 "내 변경엔 migration 불요"를 판단할 뿐, **"durable store 전반의 version bump 안전성"을 책임지는 RFC가 구조적으로 없다**. 이 공백이 위 4건이 반복되는 이유다.
 
@@ -54,10 +54,21 @@ type on_disk_state =
 (* migrate의 출발점. on_disk_state의 Absent(migrate 대상 아님)와
    Present (Unknown _)(fatal)를 제외한 나머지를 그대로 옮긴 total 타입.
    Unversioned_legacy를 별도 생성자로 두므로 "최초 version" 상수를 지어낼
-   필요가 없다. *)
+   필요가 없다.
+
+   [Store_version.known]은 [t]와 다른 타입으로, [Unknown of string] 생성자를
+   갖지 않는다 — [t]는 on-disk 바이트를 파싱한 결과(미인식 값 포함)이고
+   [known]은 이 바이너리가 실제로 아는 version만 담는다. 둘을 잇는 유일한
+   경로는 [Store_version.to_known : t -> known option]이며, preflight가
+   [None]에서 fatal로 간다.
+
+   분리하는 이유: 한 타입이면 `From_version (Unknown s)`가 여전히
+   구성 가능해 모든 migrate 구현이 "미인식 version" 아암을 떠안고, preflight
+   가 아닌 다른 호출자나 이후 리팩터가 미인식 바이트를 legacy 파서에 넘겨도
+   타입 검사를 통과한다. hard-fail 경계를 주석이 아니라 API가 강제한다. *)
 type migration_source =
   | From_unversioned_legacy
-  | From_version of Store_version.t
+  | From_version of Store_version.known
 
 (* §3.4 분기 근거. raw-file 절차를 SQLite에 적용하면 사이드카(-wal/-shm)를
    깨뜨리므로, 어느 primitive를 쓰는지를 descriptor가 값으로 들고 있어야
@@ -101,14 +112,28 @@ for each registered descriptor d:
     match d.read_on_disk_state p with
     | Absent                -> ok (fresh install)
     | Present (Unknown s)   -> fatal "unrecognized version: %s" s   (* 비교보다 먼저 *)
-    | Unversioned_legacy    -> backup p; d.migrate ~from_:From_unversioned_legacy p
+    | Unversioned_legacy    -> run_migration d p From_unversioned_legacy
                                                                     (* legacy=별도 출발점, fresh 아님 *)
     | Present v ->
+        match Store_version.to_known v with
+        | None    -> fatal "unrecognized version"        (* known 으로만 migrate *)
+        | Some kv ->
         match Store_version.compare v d.current_version with        (* total; polymorphic (<) 금지 *)
         | Eq -> ok (up to date)
-        | Lt -> backup p; d.migrate ~from_:(From_version v) p  (* 성공 시 on-disk = current_version *)
+        | Lt -> run_migration d p (From_version kv)      (* 성공 시 on-disk = current_version *)
         | Gt -> fatal "downgrade: binary older than data"
+
+(* backup 생성은 preflight가 단독 소유한다. store class에 따라 backup 방식이
+   갈리므로 여기서 분기하고, migrate 구현은 backup을 만들지 않는다. *)
+run_migration d p from_ =
+  match d.store_class with
+  | Raw_file -> backup_raw_file p;  d.migrate ~from_ p
+  | Sqlite   -> backup_sqlite p;    d.migrate ~from_ p   (* VACUUM INTO / online backup *)
 ```
+
+**backup 소유권은 preflight 단독**이다. §3.4의 무손실 절차에서 backup 단계를 뺀 이유가 이것이다 — preflight와 `migrate`가 각자 `path.bak.<from>`을 만들면 같은 migration이 backup을 두 번 만든다. 배타 생성이면 모든 migration이 실패하고, 덮어쓰기면 이미 durable한 복구본을 교체하거나 부분 손상시킨다. 한 층만 책임진다.
+
+**store class 디스패치도 preflight가 한다.** descriptor에 `store_class`를 두는 것만으로는 아무것도 강제되지 않는다 — 위처럼 preflight가 그 값으로 분기해야 `Sqlite` 선언이 실제로 SQLite-aware 경로를 선택한다. 분기가 없으면 `migrate` 구현이 라이브 DB를 raw copy·rename해 `-wal`/`-journal`/`-shm` 사이드카를 깨뜨려도 타입이 통과한다.
 
 두 가지가 순서/전역성에 걸린다. (1) `Present (Unknown s)`를 `<`/`>` 비교보다 **먼저** 매칭한다 — OCaml 다형 비교(`(<)`)는 `Unknown`을 임의 순서로 정렬해 미인식 version이 migrate/downgrade 경로로 조용히 새기 때문(Silent Failure 방지). (2) 비교는 store별 **total `Store_version.compare`**로만 하고 다형 `(<)`를 쓰지 않는다.
 
@@ -135,10 +160,11 @@ exhaustive match만으로는 부족하다 — 새 arm이 **어느 version으로 
 `migrate` 구현이 공유하는 무손실 절차:
 
 ```
+(* backup은 §3.2의 run_migration 이 이미 만들어 둔 상태로 진입한다.
+   여기서 다시 만들지 않는다 — 한 migration 이 backup 을 두 번 만드는 문제. *)
 v_old = load raw (v_old parser)
 rows  = transform v_old → v_new
 validate rows (row-count / integrity invariant vs v_old; 손실 감지 시 fatal, replace 금지)
-backup original → path.bak.<from> → fsync(backup 파일 + 그 parent dir)
 write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 ```
 
@@ -160,7 +186,7 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 ## 5. Blast radius
 
 - boot 시퀀스에 preflight 단계 삽입(keeper 시작 전, 단일 프로세스).
-- 위험 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 7개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). **Memory OS(episode `-g%04d`)는 안전 아님** — `-g%04d`는 schema namespace가 아니라 episode/trace generation이라 schema bump 시 구 파일이 자동 orphan되므로 hard-cut 그룹으로 분류해 descriptor 대상. 진짜 안전 참고는 shutdown projection의 backward-read와 reaction ledger의 경로-generation-bump 2개뿐.
+- 위험 store 우선 배선: **drop-on-mismatch 1개(메모리 뱅크, 무경고 유실이라 최우선)** → hard-cut-reject 8개(즉시 descriptor + migration/generation-bump 결정) → unversioned 9개(version 필드 도입 + descriptor). **Memory OS(episode `-g%04d`)는 안전 아님** — `-g%04d`는 schema namespace가 아니라 episode/trace generation이라 schema bump 시 구 파일이 자동 orphan되므로 hard-cut 그룹으로 분류해 descriptor 대상. 진짜 안전 참고는 shutdown projection의 backward-read와 reaction ledger의 경로-generation-bump 2개뿐.
 - `Store_version` variant화로 각 store의 version 문자열 → typed. wire 호환 유지(디스크 표기 불변, 파싱만 typed).
 - version 표기 6가지 상이 컨벤션(schema-suffix / storage_generation / int schema_version / 문자열 rfc-vN / 경로-embed generation / 표기부재)을 descriptor의 `Store_version.t`로 수렴. 디스크 표기는 store별로 유지하되 **선언은 한 타입**으로.
 
@@ -185,7 +211,7 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 
 전수 조사 결과 durable store 약 **21개**(compaction evidence는 host store에 embed, fs lock은 payload 없음 — 제외). unknown-version 처리 방식으로 분류:
 
-### 위험 A — hard-cut-reject (7개, 구 데이터 orphan / store Unavailable)
+### 위험 A — hard-cut-reject (8개, 구 데이터 orphan / store Unavailable)
 
 | store | 경로 | version | reject 지점 |
 |-------|------|---------|-------------|
@@ -196,6 +222,7 @@ write temp → fsync(temp) → atomic rename over path → fsync(parent dir)
 | Checkpoint | `…/sessions/<id>.json` | SDK int version | `keeper_checkpoint_store.ml:233-234` |
 | Prompt overrides | `.masc/prompt_overrides.json` | `schema_version=1` | `prompt_override_persistence.ml:119-123` |
 | Chat queue (SQLite) | `…/chat-queue.sqlite3` | `keeper_chat_queue.sqlite.v2` | `keeper_chat_queue.ml:1477-1478` |
+| Keeper tool usage (per-keeper) | `.masc/keepers/tool_usage/<name>.json` | `schema_version=2` | `keeper_registry_tool_usage_persistence.ml:12`; `restore`(`:170-191`)가 decode 실패를 로그만 남기고 in-memory usage map을 빈 채로 둠 |
 
 ### 위험 B — unversioned (9개, 암묵적 hard-cut; 필드 추가만 관대)
 

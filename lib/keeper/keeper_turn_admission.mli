@@ -259,9 +259,22 @@ val restore_shutdown :
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   restore_shutdown_result
 
-(** Run the non-yielding registry [commit] only while no shutdown operation
-    owns the Keeper admission fence. Shutdown reservation and same-name lane
-    installation are therefore totally ordered. *)
+(** Run the registry [commit] only while no shutdown operation owns the Keeper
+    admission fence. Shutdown reservation and same-name lane installation are
+    therefore totally ordered.
+
+    PRECONDITION — [commit] must not suspend the calling fiber. It runs inside
+    a [Stdlib.Mutex] critical section, and [Stdlib.Mutex.lock] blocks the OS
+    thread that runs the Eio scheduler: a fiber that suspends here can never be
+    resumed, so any other fiber on the domain that touches this slot wedges the
+    entire domain with no timeout and no diagnostic. Concretely, [commit] must
+    not acquire the per-keeper lifecycle key lock
+    ([Keeper_lifecycle_reservation.with_key_lock] suspends via
+    [Cross_context_mutex]); acquire that lock around this call instead, as
+    [Keeper_registry_setup] does. The type cannot express this — OCaml has no
+    effect annotation for "does not suspend" — so the obligation is on the
+    caller and is covered by
+    [test/test_keeper_registry_admission_no_suspend.ml]. *)
 val commit_registration_if_open :
   base_path:string ->
   keeper_name:string ->

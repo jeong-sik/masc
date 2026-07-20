@@ -165,29 +165,43 @@ let decr_running_count_clamped () =
 
 (** Lock-free CAS loop for registry writes. Atomic.t used instead of Eio.Mutex for non-Eio context compatibility (#7011 pattern). *)
 
+(* Precondition: the caller already holds the per-keeper lifecycle key lock.
+   Every step below is non-suspending: [authorize] reads the process-local
+   reservation table, [validate_registry_entry] is pure, the metric store and
+   [Log] use stdlib I/O rather than Eio flows, and the install is a CAS loop.
+   That totality is what makes this body legal to run inside
+   [Keeper_turn_admission.commit_registration_if_open], whose critical section
+   is guarded by a scheduler-blocking [Stdlib.Mutex]: a fiber that suspends
+   there can never be resumed, because [Stdlib.Mutex.lock] blocks the very OS
+   thread that runs the Eio scheduler. Acquiring the key lock here instead
+   would reintroduce that suspension. *)
+let put_entry_key_locked ?lifecycle_token ~base_path name entry =
+  match
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
+  with
+  | Error owner -> Error (Lifecycle_transaction_reserved owner)
+  | Ok () ->
+    (match validate_registry_entry ~base_path name entry with
+     | Error err ->
+       record_invalid_registry_entry ~operation:"put" ~name err;
+       Error err
+     | Ok () ->
+       let key = registry_key ~base_path name in
+       let rec loop () =
+         let current = Atomic.get registry in
+         let updated = StringMap.add key entry current in
+         if Atomic.compare_and_set registry current updated then Ok () else loop ()
+       in
+       loop ())
+;;
+
 let put_entry_internal ?lifecycle_token ~base_path name entry =
   Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-    match
-      Keeper_lifecycle_reservation.authorize
-        ?token:lifecycle_token
-        ~base_path
-        ~keeper_name:name
-        ()
-    with
-    | Error owner -> Error (Lifecycle_transaction_reserved owner)
-    | Ok () ->
-      (match validate_registry_entry ~base_path name entry with
-       | Error err ->
-         record_invalid_registry_entry ~operation:"put" ~name err;
-         Error err
-       | Ok () ->
-         let key = registry_key ~base_path name in
-         let rec loop () =
-           let current = Atomic.get registry in
-           let updated = StringMap.add key entry current in
-           if Atomic.compare_and_set registry current updated then Ok () else loop ()
-         in
-         loop ()))
+    put_entry_key_locked ?lifecycle_token ~base_path name entry)
 ;;
 
 let put_entry ~base_path name entry = put_entry_internal ~base_path name entry
@@ -502,7 +516,8 @@ let register_with_state_result
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-  let commit () =
+  (* Runs with the lifecycle key lock already held, so it never suspends. *)
+  let commit_key_locked () =
     (match StringMap.find_opt key (Atomic.get registry) with
      | Some prior when prior.phase = Running ->
        Otel_metric_store.inc_counter
@@ -512,31 +527,38 @@ let register_with_state_result
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
      | Some _ | None -> ());
-    put_entry_internal ?lifecycle_token ~base_path name entry
+    put_entry_key_locked ?lifecycle_token ~base_path name entry
   in
+  (* The key lock is taken OUTSIDE the admission fence. Nesting it inside
+     [commit_registration_if_open] would suspend the fiber while it owns the
+     admission slot's [Stdlib.Mutex], wedging the whole domain. The fence check
+     and the registry install still happen together under that mutex, so
+     shutdown reservation and same-name lane installation stay totally
+     ordered. *)
   let commit_result =
-    if respect_shutdown_fence
-    then
-      match
-        Keeper_turn_admission.commit_registration_if_open
-          ~base_path
-          ~keeper_name:name
-          commit
-      with
-      | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
-        Error (Registration_shutdown_reserved operation_id)
-      | Keeper_turn_admission.Registration_committed
-          (Error (Lifecycle_transaction_reserved owner)) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Keeper_turn_admission.Registration_committed (Error validation_error) ->
-        Error (Registration_invalid validation_error)
-      | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ()
-    else
-      match commit () with
-      | Ok () -> Ok ()
-      | Error (Lifecycle_transaction_reserved owner) ->
-        Error (Registration_lifecycle_reserved owner)
-      | Error validation_error -> Error (Registration_invalid validation_error)
+    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+      if respect_shutdown_fence
+      then (
+        match
+          Keeper_turn_admission.commit_registration_if_open
+            ~base_path
+            ~keeper_name:name
+            commit_key_locked
+        with
+        | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+          Error (Registration_shutdown_reserved operation_id)
+        | Keeper_turn_admission.Registration_committed
+            (Error (Lifecycle_transaction_reserved owner)) ->
+          Error (Registration_lifecycle_reserved owner)
+        | Keeper_turn_admission.Registration_committed (Error validation_error) ->
+          Error (Registration_invalid validation_error)
+        | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ())
+      else (
+        match commit_key_locked () with
+        | Ok () -> Ok ()
+        | Error (Lifecycle_transaction_reserved owner) ->
+          Error (Registration_lifecycle_reserved owner)
+        | Error validation_error -> Error (Registration_invalid validation_error)))
   in
   match commit_result with
   | Error _ as error -> error
@@ -716,19 +738,20 @@ let register_restarting ~base_path name meta
     then Ok new_entry
     else loop ()
   in
-  let guarded_loop () =
-    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      match
-        Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
-      with
-      | Error owner -> Error (Restart_lifecycle_reserved owner)
-      | Ok () -> loop ())
+  (* Runs with the lifecycle key lock already held, so it never suspends. *)
+  let guarded_loop_key_locked () =
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Error (Restart_lifecycle_reserved owner)
+    | Ok () -> loop ()
   in
+  (* Key lock outside the admission fence — see the register path for why
+     nesting it inside would wedge the domain. *)
   match
-    Keeper_turn_admission.commit_registration_if_open
-      ~base_path
-      ~keeper_name:name
-      guarded_loop
+    Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+      Keeper_turn_admission.commit_registration_if_open
+        ~base_path
+        ~keeper_name:name
+        guarded_loop_key_locked)
   with
   | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
     Error (Restart_shutdown_reserved operation_id)

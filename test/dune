@@ -1623,6 +1623,7 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 

@@ -11,6 +11,7 @@
   yojson
   masc_log
   masc.config_dir_resolver
+  masc.fs_compat
   masc.masc_core
   masc.tool_types
   masc.config

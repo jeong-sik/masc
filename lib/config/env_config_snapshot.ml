@@ -328,7 +328,7 @@ let keeper_keepalive_entries =
       "Heartbeat cycle interval (positive integer, no implicit upper bound)";
     entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
-    entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"
+    entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
       "Successful workspace heartbeat after turn counts as presence proof (feature flag)";

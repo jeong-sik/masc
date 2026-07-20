@@ -51,15 +51,15 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | unclassified | unclassified | 650 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
-| `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 596 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
+| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | unclassified | unclassified | 655 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
+| `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 601 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | feature_flag | n/a | n/a | 20 | Enable startup keeper bootstrap scan |
 | `MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC` | typed:float | unclassified | unclassified | 41 | Polling interval (seconds) for the lazy-startup wait loop in [server_bootstrap_loops.ml]. The autoboot fiber wakes up... |
 | `MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC` | typed:float | unclassified | unclassified | 53 | Polling interval (seconds) for the keeper-lifecycle listener retry loop in [server_bootstrap_loops.ml]. After a liste... |
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 65 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 616 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; other CLI providers need an OAS upstream chan... |
+| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 621 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; other CLI providers need an OAS upstream chan... |
 | `MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT` | typed:int | Runtime | operator | 343 | Default item limit for [GET /keepers/:name/compaction-snapshots]. Default: 25. @category Runtime @ops_class operator |
 | `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER` | typed:int | Runtime | operator | 369 | Multiplier from requested item limit to manifest files scanned. Default: 4. @category Runtime @ops_class operator |
 | `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES` | typed:int | Runtime | operator | 359 | Minimum manifest files scanned before applying [limit * multiplier]. Default: 8. @category Runtime @ops_class operator |
@@ -71,7 +71,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` | typed:int | Policies | operator | 466 | Maximum total bytes retained in [<masc_dir>/media] after opportunistic cleanup. Default is 500 MiB. Range: [1, 5 GiB]... |
 | `MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES` | typed:int | Policies | operator | 455 | Maximum raw generated-media bytes accepted by the durable store and serve route. Default is 10 MiB. Range: [1, 50 MiB... |
 | `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` | typed:float | Policies | operator | 477 | Maximum generated-media file age retained by opportunistic cleanup. Default is 24 hours. Range: [1 second, 30 days]. ... |
-| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 629 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
+| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 634 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | Thresholds | operator | 489 | Shared keepalive interval, read early so WorkAsHeartbeat can reference it. Any positive interval is valid; the schedu... |
 | `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 510 | Maximum seconds since last successful workspace heartbeat before presence sync is required again. Floor = keepalive i... |
 | `MASC_KEEPER_MEMORY_OS_CONSOLIDATION` | typed:bool | Policies | operator | 317 | Per-keeper Memory OS consolidation maintenance fiber kill switch. Default: true; invalid values fail closed to false.... |
@@ -86,10 +86,10 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 224 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 73 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 76 | Number of rotated files to keep (default: 1, i.e. .1 only) |
-| `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | unclassified | unclassified | 545 | Interruptible sleep chunk size in seconds. Smaller = faster wakeup response but more CPU polling. Default: 2.0. Range... |
+| `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | unclassified | unclassified | 550 | Interruptible sleep chunk size in seconds: the upper bound on how long a keeper's heartbeat sleep takes to notice a w... |
 | `MASC_KEEPER_SNAPSHOT_SEC` | typed:int | unclassified | unclassified | 154 | Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. |
-| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | unclassified | unclassified | 639 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
-| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | string_literal | n/a | n/a | 556 |  |
+| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | unclassified | unclassified | 644 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
+| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | string_literal | n/a | n/a | 561 |  |
 | `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 416 | Base delay before trying the next vision runtime after a failed provider attempt. A small default avoids tight failov... |
 | `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 426 | Upper bound for the per-candidate vision failover delay. Range: [base, 30] seconds, so a typo cannot exceed the tool'... |
 | `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 406 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Default is 5 MiB t... |

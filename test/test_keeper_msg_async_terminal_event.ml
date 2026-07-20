@@ -133,16 +133,28 @@ let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
              (List.length reasons)));
         (match !settled with
          | [ Keeper_msg_async.Status_settlement
-               { status = Keeper_msg_async.Cancelled _
+               { entry
                ; durability = Keeper_msg_async.Durable
                ; origin = Keeper_msg_async.Transition_commit
                }
            ] ->
-           ()
-         | [ Keeper_msg_async.Status_settlement { status; _ } ] ->
+           (match entry.status with
+            | Keeper_msg_async.Cancelled _ -> ()
+            | status ->
+              failf
+                "unexpected settlement status=%s"
+                (Keeper_msg_async.status_to_string status));
+           check string "settlement carries request identity" request_id entry.request_id;
+           check string
+             "settlement carries Keeper identity"
+             "terminal-event-operator-cancel"
+             entry.keeper_name;
+           check string "settlement carries BasePath identity" base_path entry.base_path;
+           check string "settlement carries owner identity" caller entry.submitted_by
+         | [ Keeper_msg_async.Status_settlement { entry; _ } ] ->
            failf
              "unexpected settlement status=%s"
-             (Keeper_msg_async.status_to_string status)
+             (Keeper_msg_async.status_to_string entry.status)
          | [ Keeper_msg_async.Settlement_projection_error _ ] ->
            fail "unexpected settlement projection error"
          | settlements ->

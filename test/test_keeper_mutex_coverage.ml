@@ -756,15 +756,15 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
          (List.length !aborts);
        (match !settlements with
         | [ Keeper_msg_async.Status_settlement
-              { status = Persistence_failed _
+              { entry = { status = Persistence_failed _; _ }
               ; durability = Keeper_msg_async.Durable
               ; origin = Keeper_msg_async.Transition_commit
               }
           ] ->
           ()
-        | [ Keeper_msg_async.Status_settlement { status; _ } ] ->
+        | [ Keeper_msg_async.Status_settlement { entry; _ } ] ->
           Alcotest.failf "unexpected settlement status=%s"
-            (Keeper_msg_async.status_to_string status)
+            (Keeper_msg_async.status_to_string entry.status)
         | [ Keeper_msg_async.Settlement_projection_error _ ] ->
           Alcotest.fail "unexpected settlement projection error"
         | settlements ->
@@ -1566,16 +1566,16 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
        let callback_body =
          match !settlements with
          | [ Keeper_msg_async.Status_settlement
-               { status = Done { ok = true; body; _ }
+               { entry = { status = Done { ok = true; body; _ }; _ }
                ; durability = Keeper_msg_async.Durable
                ; origin = Keeper_msg_async.Canonical_reconciliation
                }
            ] ->
            body
-         | [ Keeper_msg_async.Status_settlement { status; _ } ] ->
+         | [ Keeper_msg_async.Status_settlement { entry; _ } ] ->
            Alcotest.failf
              "integrity conflict fabricated callback status=%s"
-             (Keeper_msg_async.status_to_string status)
+             (Keeper_msg_async.status_to_string entry.status)
          | [ Keeper_msg_async.Settlement_projection_error _ ] ->
            Alcotest.fail "canonical terminal projected an integrity error"
          | settlements ->
@@ -1603,10 +1603,20 @@ let test_keeper_stream_canonical_settlement_ignores_staged_worker_result () =
       { ok = true; body = "canonical-disk"; data = None }
   in
   let project origin =
+    let entry : Keeper_msg_async.entry =
+      { request_id = "canonical-settlement"
+      ; keeper_name = "keeper"
+      ; base_path = Filename.concat (Filename.get_temp_dir_name ()) "canonical-settlement"
+      ; submitted_by = "owner"
+      ; status
+      ; submitted_at = 0.
+      ; completed_at = Some 0.
+      }
+    in
     Server_routes_http_keeper_stream.For_testing.worker_settlement_terminal_body
       ~staged_body:(Some "staged-worker")
       (Keeper_msg_async.Status_settlement
-         { status; durability = Keeper_msg_async.Durable; origin })
+         { entry; durability = Keeper_msg_async.Durable; origin })
   in
   Alcotest.(check (option string))
     "canonical reconciliation uses disk body"
@@ -1668,16 +1678,18 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
          | [] -> Alcotest.fail "integrity projection error callback was dropped"
        in
        await_settlement 100;
-       let callback_reason =
+       let callback_reason, attempted_entry =
          match !settlements with
          | [ Keeper_msg_async.Settlement_projection_error
-               { poll_result = Keeper_msg_async.Unreadable reason }
+               { attempted_entry
+               ; poll_result = Keeper_msg_async.Unreadable reason
+               }
            ] ->
-           reason
-         | [ Keeper_msg_async.Status_settlement { status; _ } ] ->
+           reason, attempted_entry
+         | [ Keeper_msg_async.Status_settlement { entry; _ } ] ->
            Alcotest.failf
              "ambiguous evidence fabricated status=%s"
-             (Keeper_msg_async.status_to_string status)
+             (Keeper_msg_async.status_to_string entry.status)
          | [ Keeper_msg_async.Settlement_projection_error _ ] ->
            Alcotest.fail "ambiguous evidence projected the wrong load result"
          | settlements ->
@@ -1685,6 +1697,22 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
              "integrity projection callback count=%d"
              (List.length settlements)
        in
+       Alcotest.(check string)
+         "projection error carries request identity"
+         request_id
+         attempted_entry.request_id;
+       Alcotest.(check string)
+         "projection error carries Keeper identity"
+         "integrity-projection-error"
+         attempted_entry.keeper_name;
+       Alcotest.(check string)
+         "projection error carries BasePath identity"
+         base_path
+         attempted_entry.base_path;
+       Alcotest.(check string)
+         "projection error carries owner identity"
+         caller
+         attempted_entry.submitted_by;
        match Keeper_msg_async.poll ~base_path ~caller request_id with
        | Keeper_msg_async.Unreadable reason ->
          Alcotest.(check string) "callback carries exact poll error" reason

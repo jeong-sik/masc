@@ -214,11 +214,14 @@ type settlement_origin =
 
 type worker_settlement =
   | Status_settlement of
-      { status : request_status
+      { entry : entry
       ; durability : settlement_durability
       ; origin : settlement_origin
       }
-  | Settlement_projection_error of { poll_result : load_result }
+  | Settlement_projection_error of
+      { attempted_entry : entry
+      ; poll_result : load_result
+      }
 
 module Request_key = struct
   type t =
@@ -524,7 +527,7 @@ let with_keeper_persistence_lock ~base_path ~keeper_name f =
 
 exception CancelledByOperator
 exception Worker_preempted of string
-exception Worker_already_settled of request_status
+exception Worker_already_settled of entry
 let record_schema_version = 3
 
 let server_background_switch () =
@@ -1994,11 +1997,11 @@ let project_canonical_integrity_failure_locked ~ops key transition_lock
   match poll_result with
   | Found canonical when is_terminal_status canonical.status ->
     Status_settlement
-      { status = canonical.status
+      { entry = canonical
       ; durability = Durable
       ; origin = Canonical_reconciliation
       }
-  | poll_result -> Settlement_projection_error { poll_result }
+  | poll_result -> Settlement_projection_error { attempted_entry; poll_result }
 ;;
 
 let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) reason =
@@ -2017,14 +2020,14 @@ let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) re
   | Ok () ->
     remove_runtime_if_owned key transition_lock;
     Status_settlement
-      { status = failure_entry.status
+      { entry = failure_entry
       ; durability = Durable
       ; origin = Transition_commit
       }
   | Error (Write_failed (Published_uncertain _)) ->
     publish_if_owned key transition_lock failure_entry;
     Status_settlement
-      { status = failure_entry.status
+      { entry = failure_entry
       ; durability = Volatile_persistence_failure
       ; origin = Transition_commit
       }
@@ -2035,7 +2038,7 @@ let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) re
        row to typed [Lost]. *)
     publish_if_owned key transition_lock failure_entry;
     Status_settlement
-      { status = failure_entry.status
+      { entry = failure_entry
       ; durability = Volatile_persistence_failure
       ; origin = Transition_commit
       }
@@ -2089,7 +2092,7 @@ let set_status ~ops ?(preserve_terminal = false) key status =
            else publish_if_owned key transition_lock updated;
            Some
              (Status_settlement
-                { status = updated.status
+                { entry = updated
                 ; durability = Durable
                 ; origin = Transition_commit
                 })
@@ -2101,7 +2104,7 @@ let set_status ~ops ?(preserve_terminal = false) key status =
            publish_if_owned key transition_lock updated;
            Some
              (Status_settlement
-                { status = updated.status
+                { entry = updated
                 ; durability = Volatile_persistence_failure
                 ; origin = Transition_commit
                 })
@@ -2283,7 +2286,8 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
                     "keeper_msg_async: on_worker_settled callback failed request_id=%s status=%s error=%s"
                     request_id
                     (match settlement with
-                     | Status_settlement { status; _ } -> status_to_string status
+                     | Status_settlement { entry; _ } ->
+                       status_to_string entry.status
                      | Settlement_projection_error _ -> "projection_error")
                     (Printexc.to_string exn))
           in
@@ -2323,8 +2327,8 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
       set_status_protected ~ops ~preserve_terminal:true key Running
     in
     match running_settlement with
-    | Some (Status_settlement { status; _ } as settlement)
-      when is_terminal_status status ->
+    | Some (Status_settlement { entry; _ } as settlement)
+      when is_terminal_status entry.status ->
       (* A failed Running write can durably commit its Persistence_failed
          marker and remove the runtime row. Project that exact settlement
          before stopping: falling through to worker admission would
@@ -2353,18 +2357,17 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
               | Some { status = Queued | Running; _ } -> `Run
               | Some { status = Cancelling _; _ } -> `Operator_cancelled
               | Some
-                  { status =
-                      ((Done _ | Lost _ | Cancelled _ | Persistence_failed _) as
-                       status)
-                  ; _
-                  } ->
-                `Already_settled status
+                  ({ status =
+                       (Done _ | Lost _ | Cancelled _ | Persistence_failed _)
+                   ; _
+                   } as entry) ->
+                `Already_settled entry
               | None -> `Preempted "keeper_msg request disappeared before worker start")
           in
           (match admission with
            | `Run -> ()
            | `Operator_cancelled -> raise CancelledByOperator
-           | `Already_settled status -> raise (Worker_already_settled status)
+           | `Already_settled entry -> raise (Worker_already_settled entry)
            | `Preempted reason -> raise (Worker_preempted reason));
           let result = f req_sw in
           let data =
@@ -2399,15 +2402,15 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
               (Worker_cancelled { cancelled_by = Runtime_cancellation; reason })
             |> Option.iter notify_settled);
         runtime_cancelled_status ()
-      | Worker_already_settled status ->
+      | Worker_already_settled entry ->
         clear_active_switch key;
         notify_settled
           (Status_settlement
-             { status
+             { entry
              ; durability = Volatile_persistence_failure
              ; origin = Transition_commit
              });
-        status
+        entry.status
       | Eio.Cancel.Cancelled _ as e ->
         (* [notify_aborted] observes callback exceptions without letting one
            request fail the server root switch. The switch-table release must

@@ -156,16 +156,22 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
-       prune_dir (Filename.concat masc "audit")
-       + prune_dir (Filename.concat masc "telemetry")
-       + prune_dir tool_metrics_dir
-       + prune_dir (Filename.concat masc "messages")
-       + prune_dir (Filename.concat masc "events")
-       + prune_dir (Filename.concat masc "activity-events")
+       (* Every directly pruned leaf goes through [prune_store_dir]: any of
+          these can itself be a symlink to an external dated-JSONL store, and
+          [prune_dir]'s own [Sys.file_exists] follows it before
+          [Dated_jsonl.prune] deletes day files at the target. *)
+       prune_store_dir ~prune_dir (Filename.concat masc "audit")
+       + prune_store_dir ~prune_dir (Filename.concat masc "telemetry")
+       + prune_store_dir ~prune_dir tool_metrics_dir
+       + prune_store_dir ~prune_dir (Filename.concat masc "messages")
+       + prune_store_dir ~prune_dir (Filename.concat masc "events")
+       + prune_store_dir ~prune_dir (Filename.concat masc "activity-events")
        + prune_recall_injections ()
-       + prune_dir (Filename.concat masc "voice_sessions")
+       + prune_store_dir ~prune_dir (Filename.concat masc "voice_sessions")
        (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
-          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped. *)
+          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped.
+          [prune_children_dirs] lstat-guards the trajectories root and each
+          keeper child, so the flat prune inherits the no-follow guard. *)
        + prune_children_dirs
            ~prune_dir:(prune_flat_jsonl_older_than ~days)
            (Filename.concat masc "trajectories")

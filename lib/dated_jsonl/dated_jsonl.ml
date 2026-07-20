@@ -175,26 +175,43 @@ let parse_date s =
 
 (* ── Directory listing (sorted descending) ────────────── *)
 
-let list_subdirs path =
-  if not (Sys.file_exists path) then []
-  else
-    try
-      Sys.readdir path
-      |> Array.to_list
-      |> List.sort (fun a b -> String.compare b a)
-    with Sys_error _ -> []
+(* Entries of [path] whose own kind (lstat, so a symlink is never resolved)
+   is [kind], newest first.
 
-(** Month directories matching [YYYY-MM] pattern, newest first. *)
+   Kind is checked here rather than by the name filters below because this is
+   where pruning decides what to delete: [prune_unlocked] removes day files
+   inside each listed month and then rmdir's the month. A symlink named like a
+   month ([2000-01 -> /external/records]) satisfies a name-only filter, and the
+   deletion then lands at the link target outside the workspace. Guarding the
+   callers of [prune] cannot close that — the traversal happens in here. *)
+let list_entries_of_kind path ~kind =
+  if not (Sys.file_exists path)
+  then []
+  else (
+    try
+      Sys.readdir path |> Array.to_list
+      |> List.filter (fun name ->
+           match Unix.lstat (Filename.concat path name) with
+           | { Unix.st_kind; _ } -> st_kind = kind
+           | exception Unix.Unix_error _ -> false)
+      |> List.sort (fun a b -> String.compare b a)
+    with
+    | Sys_error _ -> [])
+;;
+
+(** Month directories matching [YYYY-MM] pattern, newest first. Symlinks are
+    excluded: only real directories are listed. *)
 let list_month_dirs base_dir =
-  list_subdirs base_dir
+  list_entries_of_kind base_dir ~kind:Unix.S_DIR
   |> List.filter (fun d ->
     String.length d = 7
     && d.[4] = '-'
     && Option.is_some (int_of_string_opt (String.sub d 0 4)))
 
-(** Day files matching [DD.jsonl], newest first. *)
+(** Day files matching [DD.jsonl], newest first. Symlinks are excluded: only
+    regular files are listed. *)
 let list_day_files month_path =
-  list_subdirs month_path
+  list_entries_of_kind month_path ~kind:Unix.S_REG
   |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
 
 type directory_presence =

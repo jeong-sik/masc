@@ -56,6 +56,102 @@ let parse json_str =
   let json = Yojson.Safe.from_string json_str in
   Vc.parse_json json
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+
+let rec mkdir_p path =
+  if path <> "" && not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
+(** Point MASC_BASE_PATH at a fresh empty dir so no runtime.toml
+    [voice] section and no voice_config.json exist. *)
+let with_unconfigured_voice f =
+  with_temp_dir "voice-config-load-" @@ fun root ->
+  with_env "MASC_BASE_PATH" (Some root) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" (Some root) @@ f
+
+(** Like {!with_unconfigured_voice} but with [contents] written to the
+    resolved voice_config.json path (an explicit configuration). *)
+let with_explicit_voice_config contents f =
+  with_unconfigured_voice (fun () ->
+    let path = Vc.config_path () in
+    mkdir_p (Filename.dirname path);
+    write_file path contents;
+    f ())
+
+let test_load_detailed_not_configured () =
+  with_unconfigured_voice (fun () ->
+    match Vc.load_detailed () with
+    | Error Vc.Not_configured -> ()
+    | Error (Vc.Invalid msg) ->
+      fail (Printf.sprintf "expected Not_configured, got Invalid: %s" msg)
+    | Ok _ -> fail "expected Not_configured, got Ok")
+
+let test_load_detailed_invalid_json () =
+  with_explicit_voice_config "{ this is not json" (fun () ->
+    match Vc.load_detailed () with
+    | Error (Vc.Invalid msg) ->
+      check bool "json syntax error surfaced" true
+        (contains_substring ~needle:"invalid voice config json" msg)
+    | Error Vc.Not_configured ->
+      fail "expected Invalid, got Not_configured"
+    | Ok _ -> fail "expected Invalid, got Ok")
+
+let test_load_detailed_schema_error_is_invalid () =
+  with_explicit_voice_config {|{"tts": {"default_model": "m"}}|} (fun () ->
+    match Vc.load_detailed () with
+    | Error (Vc.Invalid msg) ->
+      check bool "schema error surfaced" true
+        (contains_substring ~needle:"required" msg)
+    | Error Vc.Not_configured ->
+      fail "expected Invalid, got Not_configured"
+    | Ok _ -> fail "expected Invalid, got Ok")
+
+let test_load_detailed_valid_config () =
+  with_explicit_voice_config (minimal_config_json ~session_endpoints:"[]")
+    (fun () ->
+      match Vc.load_detailed () with
+      | Ok config ->
+        check string "stt model from config" "scribe_v1"
+          config.stt.default_model
+      | Error Vc.Not_configured ->
+        fail "expected Ok, got Not_configured"
+      | Error (Vc.Invalid msg) ->
+        fail (Printf.sprintf "expected Ok, got Invalid: %s" msg))
+
+(* [load ()] keeps its legacy error strings on top of [load_detailed]:
+   unconfigured reads as "missing", a broken explicit config surfaces
+   the parse error instead of falling through to a default. *)
+let test_load_legacy_strings_preserved () =
+  with_unconfigured_voice (fun () ->
+    match Vc.load () with
+    | Error msg ->
+      check bool "missing reported" true
+        (contains_substring ~needle:"voice config missing at" msg)
+    | Ok _ -> fail "expected missing-config Error, got Ok");
+  with_explicit_voice_config "{ this is not json" (fun () ->
+    match Vc.load () with
+    | Error msg ->
+      check bool "json error surfaced" true
+        (contains_substring ~needle:"invalid voice config json" msg)
+    | Ok _ -> fail "expected invalid-config Error, got Ok")
+
 let test_session_empty_endpoints_ok () =
   let json = minimal_config_json ~session_endpoints:"[]" in
   match parse json with
@@ -133,6 +229,19 @@ let test_config_path_survives_deleted_cwd_without_base () =
 let () =
   Alcotest.run "voice_config"
     [
+      ( "load_detailed",
+        [
+          test_case "unconfigured is Not_configured"
+            `Quick test_load_detailed_not_configured;
+          test_case "broken json is Invalid"
+            `Quick test_load_detailed_invalid_json;
+          test_case "schema error is Invalid"
+            `Quick test_load_detailed_schema_error_is_invalid;
+          test_case "valid config loads"
+            `Quick test_load_detailed_valid_config;
+          test_case "legacy load strings preserved"
+            `Quick test_load_legacy_strings_preserved;
+        ] );
       ( "session_endpoints",
         [
           test_case "empty session endpoints parses ok"

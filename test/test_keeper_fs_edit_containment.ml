@@ -79,13 +79,13 @@ let setup f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       Keeper_registry.clear ();
+       Keeper_registry.For_testing.clear ();
        let config = Workspace.default_config base in
        let meta = { (make_meta "tester") with always_allow = Some true } in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        let (_registered : Keeper_registry.registry_entry) =
-         Keeper_registry.register ~base_path:base meta.name meta
+         Keeper_registry.For_testing.register ~base_path:base meta.name meta
        in
        Masc_test_deps.with_publication_recovery_registry
          ~sw

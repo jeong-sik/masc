@@ -10,6 +10,20 @@
 
     @since Unified Keeper Loop *)
 
+type turn_prompt_parts = {
+  system_prompt : string;
+  world_state : string;
+  user_message : string;
+}
+
+(* Persisted user-turn content for autonomous wake turns. The observation
+   frame is carried in [world_state] (per-turn dynamic context) — persisting
+   it re-feeds the model its own observations and starves compaction
+   (#25193: 943/945 user messages were identical frames). *)
+let autonomous_wake_marker =
+  "(autonomous wake — the current observation frame is provided per-turn in \
+   system context)"
+
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
   : string
@@ -501,7 +515,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
-    () : string * string
+    () : turn_prompt_parts
     =
   ignore base_path;
   (* Total deterministic resolution between two known instruction sources
@@ -808,9 +822,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         Some (Buffer.contents ubuf))
       else None
   in
-  let user_message =
+  let world_state =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
+  let user_message = autonomous_wake_marker in
   (* Tool names and availability come exclusively from the typed schemas sent
      with this turn. Prompt markdown describes behaviour rather than attempting
      to mirror that catalog. World-state observations remain byte-for-byte
@@ -827,6 +842,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Float.of_int (String.length system_prompt));
   Otel_metric_store.set_gauge
     (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "world_state")]
+    (Float.of_int (String.length world_state));
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
     ~labels:[("keeper", meta.name); ("segment", "user_message")]
     (Float.of_int (String.length user_message));
   (* Instruction hash: emit a stable numeric fingerprint of the full prompt
@@ -834,7 +853,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      changes between turns without storing the prompt content itself.
      Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
   let prompt_hash =
-    let combined = system_prompt ^ user_message in
+    let combined = system_prompt ^ world_state ^ user_message in
     let hex =
       Digestif.SHA256.(to_hex (digest_string combined))
     in
@@ -844,4 +863,4 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Keeper_metrics.to_string KeeperTurnInstructionHash)
     ~labels:[("keeper", meta.name)]
     prompt_hash;
-  system_prompt, user_message
+  { system_prompt; world_state; user_message }

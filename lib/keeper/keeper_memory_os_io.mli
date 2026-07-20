@@ -15,6 +15,16 @@ val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> strin
 val list_fact_store_keeper_ids : unit -> string list
 val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
+(** Keeper ids that currently have an on-disk episode store ([<id>/episodes/]).
+    A keeper whose episodes all carried zero claims has no [*.facts.jsonl] but
+    still accumulates episode files, so episode sweeps cannot enumerate from
+    fact stores alone. Excludes the reserved shared id; sorted. *)
+val list_episode_store_keeper_ids : unit -> string list
+val list_episode_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+
+(** Read-only check for an on-disk episode store; never creates the directory. *)
+val has_episode_store_for_keepers_dir : keepers_dir:string -> keeper_id:string -> bool
+
 (** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
     config-dir reads in multi-workspace dashboard routes. *)
 val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
@@ -71,6 +81,12 @@ val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+
+(** Lock path used by {!with_episode_bundle_lock}; the episode retention sweep
+    serializes against episode writers on the same lock. *)
+val episode_bundle_lock_path : keeper_id:string -> string
+val episode_bundle_lock_path_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> string
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
@@ -130,6 +146,15 @@ val read_episodes_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_all : keeper_id:string -> episode list
 (** Read every persisted episode in source order. Any malformed row/file raises;
     no child episode is silently dropped. *)
+
+(** Strict episode-file read for destructive sweeps: every
+    [<keeper_id>/episodes/*.json] file as [(path, episode)] in filename order,
+    or [Error] on the first malformed file. Never creates the episodes
+    directory — a keeper with no episode store is [Ok []]. *)
+val read_episode_files_all_strict :
+  keeper_id:string -> ((string * episode) list, string) result
+val read_episode_files_all_strict_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> ((string * episode) list, string) result
 
 (** Read and parse every fact in the store. *)
 val read_all_facts : keeper_id:string -> fact list

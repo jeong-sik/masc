@@ -26,6 +26,9 @@ async function loadLab() {
   vi.doMock('./memory/keeper-memory-health', () => ({
     KeeperMemoryHealth: () => html`<div data-testid="lab-keeper-memory-health">KeeperMemoryHealth</div>`,
   }))
+  vi.doMock('./memory/audit-integrity', () => ({
+    AuditIntegrity: () => html`<div data-testid="lab-audit-integrity">AuditIntegrity</div>`,
+  }))
   vi.doMock('./common/surface-header', () => ({
     SurfaceHeader: () => html`<header data-testid="surface-header">Lab</header>`,
   }))
@@ -51,6 +54,7 @@ describe('Lab', () => {
     vi.doUnmock('./harness-health')
     vi.doUnmock('./lab-perf')
     vi.doUnmock('./memory/keeper-memory-health')
+    vi.doUnmock('./memory/audit-integrity')
     vi.doUnmock('./memory-subsystems')
     vi.doUnmock('./common/surface-header')
   })
@@ -86,6 +90,14 @@ describe('Lab', () => {
 
     render(html`<${Lab} />`, container)
     expect(container.querySelector('[data-testid="lab-keeper-memory-health"]')).not.toBeNull()
+  })
+
+  it('renders audit integrity section', async () => {
+    route.value.params = { section: 'audit-integrity' }
+    const { Lab } = await loadLab()
+
+    render(html`<${Lab} />`, container)
+    expect(container.querySelector('[data-testid="lab-audit-integrity"]')).not.toBeNull()
   })
 
   it('renders the live Memory OS subsystem section and passes through focus', async () => {

@@ -45,15 +45,21 @@ let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
     tool_choice = None
   ; disable_parallel_tool_use = true
   }
-  (* Full module path (not the [Schema] alias): the structured-output
-     coverage test resolves callees literally via Ast_grep.count_calls, so
-     this call must read [Keeper_structured_output_schema.apply_to_provider_config]
-     in source — same pattern as the other registry entries. *)
-  |> Keeper_structured_output_schema.apply_to_provider_config
+  (* Three-tier (#25266): json_schema when the provider enforces it, else JSON
+     mode for json_object-only providers (GLM/DeepSeek/Kimi), else prompt only.
+     The plan prompt already states the exact decisions schema and
+     [plan_of_response] validates every decision, so the json_object tier is
+     safe here — it lifts the minimax-native SPOF. Full module path (not the
+     [Schema] alias): the structured-output coverage test resolves callees
+     literally via Ast_grep.count_calls. *)
+  |> Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+       ~log_label:"compaction summarizer"
        Schema.compaction_plan_output_schema
 
 let plan_schema_supported provider_cfg =
-  Schema.provider_config_accepts_schema Schema.compaction_plan_output_schema provider_cfg
+  Schema.provider_config_accepts_schema_or_json_mode
+    Schema.compaction_plan_output_schema
+    provider_cfg
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
@@ -125,7 +131,8 @@ let messages_for_plan ~units =
      unit contributes no state, decision, evidence, constraint, unresolved \
      work, or outcome. For keep and drop, summary must be null. For summarize, \
      summary must be a non-empty string. Do not infer recency policy, merge \
-     units, relocate facts, invent facts, or include markdown fences."
+     units, relocate facts, invent facts, or include markdown fences. Respond \
+     with a single JSON object and no other text."
   in
   let user =
     Printf.sprintf
@@ -380,23 +387,33 @@ let run_plan
 
 type candidate =
   { runtime_id : string
+  ; lane_id : string option
   ; provider_cfg : Llm_provider.Provider_config.t
   }
 
-let eligible_candidate ~keeper_name (runtime : Runtime.t) =
+let eligible_candidate ~keeper_name ~lane_id (runtime : Runtime.t) =
   let runtime_id = runtime.Runtime.id in
   let provider_cfg = runtime.Runtime.provider_config in
+  (* #25266: a provider is eligible when it can enforce the schema (strict
+     json_schema) OR at least honor JSON mode (json_object). This admits the
+     json_object-only endpoints (GLM/DeepSeek/Kimi) that the strict-schema
+     gate used to drop, which had left the single json_schema-native endpoint
+     (minimax) as a SPOF — nearly every cloud model supports json_object, so
+     compaction now works across them. A provider that supports NEITHER is
+     still filtered: without any format guarantee, a prompt-only attempt would
+     just churn the parser. [provider_for_plan] then selects the strongest
+     available tier for the accepted provider. *)
   if not (plan_schema_supported provider_cfg)
   then (
     Log.Keeper.warn ~keeper_name
-      "compaction LLM candidate skipped runtime=%s: provider does not support \
-       the compaction plan schema"
+      "compaction LLM candidate skipped runtime=%s: provider supports neither \
+       the compaction plan schema nor json mode"
       runtime_id;
     None)
-  else Some { runtime_id; provider_cfg }
+  else Some { runtime_id; lane_id; provider_cfg }
 
 let candidates_for_assignment ~keeper_name assignment_id =
-  let rec resolve_lane acc = function
+  let rec resolve_lane ~lane_id acc = function
     | [] -> Some (List.rev acc)
     | runtime_id :: rest ->
       (match Runtime.get_runtime_by_id runtime_id with
@@ -407,11 +424,11 @@ let candidates_for_assignment ~keeper_name assignment_id =
          None
        | Some runtime ->
          let acc =
-           match eligible_candidate ~keeper_name runtime with
+           match eligible_candidate ~keeper_name ~lane_id:(Some lane_id) runtime with
            | None -> acc
            | Some candidate -> candidate :: acc
          in
-         resolve_lane acc rest)
+         resolve_lane ~lane_id acc rest)
   in
   match Runtime.resolve_assignment assignment_id with
   | `Missing ->
@@ -420,9 +437,14 @@ let candidates_for_assignment ~keeper_name assignment_id =
       assignment_id;
     None
   | `Single_runtime runtime ->
-    Some (Option.to_list (eligible_candidate ~keeper_name runtime))
+    Some (Option.to_list (eligible_candidate ~keeper_name ~lane_id:None runtime))
   | `Lane lane ->
-    resolve_lane [] (Runtime_lane.ordered_candidates lane)
+    (* Sticky failover: start from the last-good lane candidate when one is
+       remembered, keeping the declared order for the rest. *)
+    let lane_id = Runtime_lane.id lane in
+    resolve_lane ~lane_id []
+      (Runtime_lane_preference.prefer_order ~lane_id
+         (Runtime_lane.ordered_candidates lane))
 
 (* Collapse duplicate runtime ids while keeping the first (highest-priority)
    occurrence, so a seed assignment that resolves to the same runtime as a
@@ -490,6 +512,13 @@ let make_resolved ?complete ~(runtime_ids : string list) ~(keeper_name : string)
                     ~provider_cfg:candidate.provider_cfg ~units ()
                 with
                 | Ok _ as plan ->
+                  (* Sticky failover: remember the winning candidate for the
+                     lane it came from, if any. *)
+                  (match candidate.lane_id with
+                   | Some lane_id ->
+                     Runtime_lane_preference.note_success ~lane_id
+                       ~candidate:candidate.runtime_id
+                   | None -> ());
                   Log.Keeper.info ~keeper_name
                     "compaction LLM candidate succeeded assignments=%s runtime=%s"
                     assignments_label candidate.runtime_id;

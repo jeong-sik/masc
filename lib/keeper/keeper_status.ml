@@ -160,18 +160,13 @@ let handle_keeper_list ctx args : tool_result =
               ("handoff_count_total", `Int trace_history_count);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              ("compaction_profile", `String m.compaction.profile);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_compaction_check_ts", `Float m.runtime.compaction_rt.last_check_ts);
               ( "last_compaction_decision",
-                let decision =
-                  compaction_runtime_decision_to_string
-                    m.runtime.compaction_rt.last_decision
-                in
-                if String.trim decision = "" then `Null else `String decision );
+                compaction_decision_json_or_null m.runtime.compaction_rt.last_decision );
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
               ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);

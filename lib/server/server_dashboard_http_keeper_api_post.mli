@@ -69,6 +69,16 @@ val refresh_keeper_execution_surfaces :
 val invalidate_keeper_execution_surfaces :
   config:Workspace_utils.config -> unit -> unit
 
+(** [context_shrink_of_patch ~meta fields] is [Some (previous_display, new_value)]
+    when the config patch reduces the keeper's context window below its current
+    setting (introduces a cap where there was none, or lowers an existing cap),
+    else [None]. Used by {!handle_keeper_config_post} to require an explicit
+    [confirm_context_shrink] acknowledgement before applying a shrink. *)
+val context_shrink_of_patch :
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * Yojson.Safe.t) list ->
+  (string * int) option
+
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

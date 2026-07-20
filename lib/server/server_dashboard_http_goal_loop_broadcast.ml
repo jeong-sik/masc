@@ -1,10 +1,12 @@
 (** RFC-0284: push the goal-loop OODA status to dashboard clients over SSE
     when its content changes, instead of leaving the panel on HTTP pull.
 
-    The goal-loop worker is an out-of-process Python OODA loop
-    ([scripts/goal_loop_scheduler.py] and friends) that only writes
-    [<masc_dir>/goal-loop/status.json]; it cannot call the in-process
-    [Sse.broadcast]. So the broadcast trigger lives here on the server: a
+    The out-of-process Python OODA writer for
+    [<masc_dir>/goal-loop/status.json] was deleted on 2026-07-21
+    (RFC-0000:781 KILL row; nothing produces the file any more, so this
+    loop broadcasts only when a pre-existing file changes on disk).
+    This surface itself is RFC-0352 Path-decision scope. The broadcast
+    trigger lives here on the server: a
     periodic tick reads the (5 s TTL cached) status via
     [Dashboard_goal_loop.status_json], fingerprints the meaningful content,
     and broadcasts a [goal_loop_status] event only when it changed since the

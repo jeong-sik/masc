@@ -328,6 +328,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0341 | Keeper lifecycle projection SSOT | Draft | 7b62a87d44 2026-07-13 | - |
 | 0342 | Capability catalog overlay, deployment capability declarations, and boot posture | Draft | 25a1c593b5 2026-07-16 | - |
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | f463ec7b82 2026-07-15 | - |
+| 0347 | Typed EffectIntent + capability floor at the Keeper Gate | Draft | 354027d3ae 2026-07-20 | - |
 | conn | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 7b62a87d44 2026-07-13 | - |

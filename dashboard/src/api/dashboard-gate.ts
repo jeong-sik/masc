@@ -144,12 +144,14 @@ export function resolveGateApproval(
   decision: 'approve' | 'reject',
   rememberRule?: boolean,
   reason?: string,
+  ruleExpiresAt?: number,
 ): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
   return post('/api/v1/dashboard/gate/resolve', {
     id,
     decision,
     remember_rule: rememberRule,
     reason,
+    rule_expires_at: ruleExpiresAt,
   })
 }
 

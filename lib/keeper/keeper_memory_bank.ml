@@ -773,19 +773,31 @@ type explicit_memory_write_error =
   | Rejected_explicit_memory_text
   | Explicit_memory_write_failed of string
 
+(* Outcome of a valid explicit memory write. [Persisted] appended a row;
+   [Skipped_bank_writes_disabled] means the note passed validation but the
+   memory-bank write kill-switch (MASC_KEEPER_MEMORY_BANK_WRITE=false) is off, so
+   nothing was persisted. Reported so the tool never presents a skipped write as
+   saved (spec/12-memory-systems.md §Write Contract). RFC
+   keeper-memory-bank-write-reduction. *)
+type memory_write_outcome =
+  | Persisted
+  | Skipped_bank_writes_disabled
+
 let append_explicit_memory_note
     (config : Workspace.config)
     (meta : keeper_meta)
     ~(turn : int)
     ~(kind : memory_kind)
     ~(text : string)
-    : (unit, explicit_memory_write_error) result
+    : (memory_write_outcome, explicit_memory_write_error) result
   =
   let text = String.trim text in
   if not (memory_kind_is_writable kind)
   then Error (Explicit_memory_kind_not_writable kind)
   else if not (is_meaningful_memory_text text)
   then Error Rejected_explicit_memory_text
+  else if not (Keeper_memory_bank_env.bank_write_enabled ())
+  then Ok Skipped_bank_writes_disabled
   else
     let kind_wire = memory_kind_to_wire kind in
     let horizon = memory_horizon_of_kind kind in
@@ -811,7 +823,7 @@ let append_explicit_memory_note
              ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
              ; "text", `String text
              ]));
-       Ok ()
+       Ok Persisted
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Explicit_memory_write_failed (Printexc.to_string exn)))
@@ -857,6 +869,11 @@ let append_memory_notes_from_tool_results
     (meta : keeper_meta)
     ~(turn : int)
     ~(results : Yojson.Safe.t list) : int =
+  (* RFC keeper-memory-bank-write-reduction: honour the bank write kill-switch.
+     0 rows written is accurate (the caller reports this count). *)
+  if not (Keeper_memory_bank_env.bank_write_enabled ())
+  then 0
+  else
   let now_ts = Time_compat.now () in
   let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
@@ -915,6 +932,10 @@ let append_voice_output
   let text = String.trim message in
   if text = "" || not (is_meaningful_memory_text text)
   then Ok 0
+  else if not (Keeper_memory_bank_env.bank_write_enabled ())
+  then
+    (* RFC keeper-memory-bank-write-reduction: bank write kill-switch is off. *)
+    Ok 0
   else (
     let kind = Progress in
     let now_ts = Time_compat.now () in

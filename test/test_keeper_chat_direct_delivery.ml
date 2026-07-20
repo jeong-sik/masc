@@ -443,7 +443,7 @@ let await_settlement ~ops ~background_sw ~base_path ~request_id =
 
 let expect_durable_done = function
   | Keeper_msg_async.Status_settlement
-      { status = Keeper_msg_async.Done _
+      { entry = { status = Keeper_msg_async.Done _; _ }
       ; durability = Keeper_msg_async.Durable
       ; _
       } -> ()
@@ -548,7 +548,7 @@ let test_startup_checkpoint_rejects_volatile_poll_terminal _env =
       in
       (match settlement with
        | Keeper_msg_async.Status_settlement
-           { status = Keeper_msg_async.Done _
+           { entry = { status = Keeper_msg_async.Done _; _ }
            ; durability = Keeper_msg_async.Volatile_persistence_failure
            ; _
            } -> ()

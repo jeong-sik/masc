@@ -24,13 +24,15 @@ and summary_status =
   | Summary_available of hitl_context_summary
   | Summary_failed of { reason : string; retryable : bool }
 
-(** A pending request never owns or suspends a Keeper lane. *)
+(** A pending request never owns or suspends a Keeper lane. [sequence] is the
+    durable queue-issued order identity; [requested_at] is observation only. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
   ; tool_name : string
   ; input_hash : string
   ; input : Yojson.Safe.t
+  ; sequence : int
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option
@@ -61,7 +63,10 @@ type decision_source =
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;
     only JSON object-field order is canonicalized. Match observations belong in
-    the append-only Gate audit log, so reading a rule never rewrites it. *)
+    the append-only Gate audit log, so reading a rule never rewrites it.
+    [expires_at] is an optional absolute Unix expiry: at and after that time
+    the rule no longer authorizes. Expiry never deletes the rule; an operator
+    removes it through the existing delete path. *)
 type approval_rule =
   { id : string
   ; keeper_name : string
@@ -70,9 +75,17 @@ type approval_rule =
   ; created_at : float
   ; created_by : string option
   ; source_approval_id : string option
+  ; expires_at : float option
   }
 
 type rule_match = { rule_id : string }
+
+(** Exact rule lookup outcome. [Rule_match_expired] keeps the expired rule
+    identity observable instead of collapsing it into an absent match. *)
+type rule_lookup =
+  | Rule_match_active of rule_match
+  | Rule_match_expired of rule_match
+  | Rule_match_absent
 
 type rule_store_error =
   { path : string
@@ -90,6 +103,11 @@ val decision_source_of_string : string -> decision_source option
 val string_opt_of_json : Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
+
+val rule_expired : now:float -> approval_rule -> bool
+(** [rule_expired ~now rule] is [true] when [rule.expires_at] is set and lies
+    at or before [now]. Pure and deterministic; [now] is injected. *)
+
 val rule_store_error_to_string : rule_store_error -> string
 val approval_rule_to_yojson : approval_rule -> Yojson.Safe.t
 val hitl_context_summary_to_yojson : hitl_context_summary -> Yojson.Safe.t

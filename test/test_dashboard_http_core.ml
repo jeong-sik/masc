@@ -1933,6 +1933,45 @@ let test_composite_blocked_uses_terminal_contract_not_observational_metadata () 
           ~terminal_reason_code:"opaque_terminal_failure"
           ~operator_disposition_reason:"success"))
 
+(* Context-window shrink guard (#25062/#25268): reducing max_context_override
+   must be detected so the config POST can require an explicit
+   confirm_context_shrink, instead of silently applying a window smaller than the
+   live context and triggering a reactive Provider_overflow on the next turn. *)
+module Keeper_config_post = Server_dashboard_http_keeper_api_post
+
+let shrink_base_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String "shrink-fixture"); ("trace_id", `String "shrink-t") ])
+  with
+  | Ok m -> m
+  | Error e -> Alcotest.fail ("shrink meta fixture: " ^ e)
+
+let with_max_override meta o =
+  { meta with Masc.Keeper_meta_contract.max_context_override = o }
+
+let shrink_result = Alcotest.(option (pair string int))
+
+let test_context_shrink_detection () =
+  let base = shrink_base_meta () in
+  let shrink meta fields = Keeper_config_post.context_shrink_of_patch ~meta fields in
+  check shrink_result "cap introduced where there was none is a shrink"
+    (Some ("unset (full model window)", 1000))
+    (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "lowering an existing cap is a shrink"
+    (Some ("2000", 1000))
+    (shrink (with_max_override base (Some 2000)) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "raising the cap is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Int 2000) ]);
+  check shrink_result "removing the cap (Null) is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Null) ]);
+  check shrink_result "a patch without the field is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
+;;
+
 let () =
   run "dashboard_http_core"
     [
@@ -2048,5 +2087,9 @@ let () =
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
+        ] );
+      ( "context-window shrink guard (#25062/#25268)",
+        [ test_case "shrink of max_context_override is detected" `Quick
+            test_context_shrink_detection;
         ] );
     ]

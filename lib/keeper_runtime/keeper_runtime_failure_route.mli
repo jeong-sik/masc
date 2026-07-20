@@ -27,7 +27,7 @@
 
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
-  | Rate_limited  (** soft 429 throttle; rotation keeps the credential-pool filter *)
+  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
       (** typed provider overload / capacity-exhausted pools *)
@@ -124,7 +124,9 @@ val route_kind_label : route -> string
     "escalate_judgment"]. *)
 
 val retry_class_label : retry_class -> string
+val retry_class_of_label : string -> retry_class option
 val rotate_class_label : rotate_class -> string
+val rotate_class_of_label : string -> rotate_class option
 val judgment_class_label : judgment_class -> string
 
 val judgment_provenance_label : judgment_provenance -> string

@@ -547,9 +547,7 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
 (** {1 SubBoard Operations} *)
 
 let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
-let dedupe_agent_ids = Board_sub_board_json.dedupe_agent_ids
 let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
-let parse_sub_board_members_lenient = Board_sub_board_json.parse_sub_board_members_lenient
 let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
 let sub_boards_jsonl_unlocked store =

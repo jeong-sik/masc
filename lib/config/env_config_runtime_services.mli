@@ -31,15 +31,6 @@ end
 (** {1 Thompson sampling agent selection} *)
 
 module AgentSelection : sig
-  val max_starvation_ticks : int
-  (** [MASC_AUTONOMY_MAX_STARVATION_TICKS] (default [12]). *)
-
-  val starvation_bonus_coefficient : float
-  (** [MASC_AUTONOMY_STARVATION_BONUS_COEF] (default [0.15]). *)
-
-  val thompson_weight : float
-  (** [MASC_AUTONOMY_THOMPSON_WEIGHT] (default [0.7]). *)
-
   val vote_decay_factor : float
   (** [MASC_AUTONOMY_VOTE_DECAY_FACTOR] (default [0.95]). *)
 end

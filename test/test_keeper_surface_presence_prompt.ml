@@ -131,13 +131,13 @@ let init_prompt_config_for_tests () =
       Masc.Keeper_prompt_external.reset_cache ()
 
 let user_message observation =
-  let _system, user =
+  let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
   in
   user
 
 let system_prompt ?profile_defaults observation =
-  let system, _user =
+  let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?profile_defaults
       ~observation ()
   in

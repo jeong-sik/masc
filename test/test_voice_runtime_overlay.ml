@@ -840,6 +840,219 @@ let test_playback_timeout_parsers_and_budget () =
     (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:None)
 ;;
 
+(* No-silent-fallback contract for voice config loading:
+   - an explicit but broken config surfaces a typed load failure
+     (never proceeds with a hardcoded model name);
+   - no config at all means voice is explicitly disabled, reported
+     through the pre-existing "no ... endpoint" terminals;
+   - endpoint failover keeps every attempt observable. *)
+let remove_voice_config_file () =
+  let path = Voice_config.config_path () in
+  if Sys.file_exists path then Sys.remove path
+;;
+
+let with_voice_config_file contents f =
+  let path = Voice_config.config_path () in
+  mkdir_if_missing (Filename.dirname path);
+  write_file path contents;
+  Fun.protect ~finally:remove_voice_config_file f
+;;
+
+let broken_config_json = "{ this is not json"
+
+(* Valid config whose TTS/STT endpoints all fail deterministically without
+   network: the API key env var is unset in the test process. *)
+let failover_config_json =
+  {|
+{
+  "tts": {
+    "default_model": "test-tts-model",
+    "default_voice": "test-voice",
+    "endpoints": [
+      { "id": "tts-a", "kind": "elevenlabs_direct",
+        "api_key_env": "MASC_VOICE_TEST_UNSET_KEY", "enabled": true },
+      { "id": "tts-b", "kind": "elevenlabs_direct",
+        "api_key_env": "MASC_VOICE_TEST_UNSET_KEY", "enabled": true }
+    ]
+  },
+  "stt": {
+    "default_model": "test-stt-model",
+    "endpoints": [
+      { "id": "stt-a", "kind": "elevenlabs_direct",
+        "api_key_env": "MASC_VOICE_TEST_UNSET_KEY", "enabled": true },
+      { "id": "stt-b", "kind": "elevenlabs_direct",
+        "api_key_env": "MASC_VOICE_TEST_UNSET_KEY", "enabled": true }
+    ]
+  },
+  "session": {
+    "endpoints": []
+  }
+}
+|}
+;;
+
+let test_transcribe_invalid_config_surfaces_load_failure () =
+  with_voice_config_file broken_config_json (fun () ->
+    match
+      Masc.Voice_bridge.transcribe_audio ~audio_file:"/tmp/masc-voice-noaudio.wav" ()
+    with
+    | Ok _ -> fail "expected typed config failure, got Ok"
+    | Error msg ->
+      check
+        bool
+        "broken config surfaces load failure"
+        true
+        (String_util.contains_substring msg "voice config load failed");
+      check
+        bool
+        "does not masquerade as unconfigured"
+        false
+        (String_util.contains_substring msg "no enabled STT endpoints configured");
+      check
+        bool
+        "does not proceed with hardcoded scribe model"
+        false
+        (String_util.contains_substring msg "scribe"))
+;;
+
+let test_transcribe_unconfigured_is_explicitly_disabled () =
+  remove_voice_config_file ();
+  match
+    Masc.Voice_bridge.transcribe_audio ~audio_file:"/tmp/masc-voice-noaudio.wav" ()
+  with
+  | Ok _ -> fail "expected explicit disabled error, got Ok"
+  | Error msg ->
+    check
+      string
+      "STT explicitly disabled when voice is not configured"
+      "no enabled STT endpoints configured"
+      msg
+;;
+
+let test_transcribe_endpoint_failover_surfaces_each_attempt () =
+  with_voice_config_file failover_config_json (fun () ->
+    with_env "MASC_VOICE_TEST_UNSET_KEY" None (fun () ->
+      match
+        Masc.Voice_bridge.transcribe_audio ~audio_file:"/tmp/masc-voice-noaudio.wav" ()
+      with
+      | Ok _ -> fail "expected aggregate endpoint failure, got Ok"
+      | Error msg ->
+        check
+          bool
+          "aggregate failure reported"
+          true
+          (String_util.contains_substring msg "all enabled STT endpoints failed");
+        check
+          bool
+          "first endpoint attempt visible"
+          true
+          (String_util.contains_substring msg "stt-a:");
+        check
+          bool
+          "second endpoint attempt visible"
+          true
+          (String_util.contains_substring msg "stt-b:")))
+;;
+
+let test_agent_speak_invalid_config_surfaces_load_failure () =
+  with_voice_config_file broken_config_json (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    (match
+       Masc.Voice_bridge.agent_speak
+         ~sw
+         ~clock
+         ~net
+         ~agent_id:"voice-config-test"
+         ~message:"invalid config must surface"
+         ()
+     with
+     | Ok _ -> fail "expected typed config failure, got Ok"
+     | Error msg ->
+       check
+         bool
+         "broken config surfaces load failure"
+         true
+         (String_util.contains_substring msg "voice config load failed");
+       check
+         bool
+         "does not masquerade as unconfigured"
+         false
+         (String_util.contains_substring msg "no configured TTS endpoint");
+       check
+         bool
+         "does not proceed with hardcoded elevenlabs model"
+         false
+         (String_util.contains_substring msg "eleven_multilingual")))
+;;
+
+let test_agent_speak_unconfigured_is_explicitly_disabled () =
+  remove_voice_config_file ();
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  match
+    Masc.Voice_bridge.agent_speak
+      ~sw
+      ~clock
+      ~net
+      ~agent_id:"voice-config-test"
+      ~message:"unconfigured voice is explicitly disabled"
+      ()
+  with
+  | Ok _ -> fail "expected explicit disabled error, got Ok"
+  | Error msg ->
+    check
+      string
+      "TTS explicitly disabled when voice is not configured"
+      "no configured TTS endpoint"
+      msg
+;;
+
+let test_agent_speak_endpoint_failover_surfaces_each_attempt () =
+  with_voice_config_file failover_config_json (fun () ->
+    with_env "MASC_VOICE_TEST_UNSET_KEY" None (fun () ->
+      Eio_main.run
+      @@ fun env ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      let clock = Eio.Stdenv.clock env in
+      match
+        Masc.Voice_bridge.agent_speak
+          ~sw
+          ~clock
+          ~net
+          ~agent_id:"voice-config-test"
+          ~message:"failover attempts stay visible"
+          ()
+      with
+      | Ok _ -> fail "expected aggregate endpoint failure, got Ok"
+      | Error msg ->
+        check
+          bool
+          "aggregate failure reported"
+          true
+          (String_util.contains_substring msg "all configured TTS endpoints failed");
+        check
+          bool
+          "first endpoint attempt visible"
+          true
+          (String_util.contains_substring msg "tts-a:");
+        check
+          bool
+          "second endpoint attempt visible"
+          true
+          (String_util.contains_substring msg "tts-b:")))
+;;
+
 let write_local_playback_config () =
   let config_path = Voice_config.config_path () in
   mkdir_if_missing (Filename.dirname config_path);
@@ -955,6 +1168,32 @@ let () =
             "tts request elevenlabs rejects unknown name"
             `Quick
             test_tts_request_elevenlabs_rejects_unknown_name
+        ] )
+    ; ( "voice_config_state"
+      , [ test_case
+            "transcribe invalid config surfaces load failure"
+            `Quick
+            test_transcribe_invalid_config_surfaces_load_failure
+        ; test_case
+            "transcribe unconfigured is explicitly disabled"
+            `Quick
+            test_transcribe_unconfigured_is_explicitly_disabled
+        ; test_case
+            "transcribe failover surfaces each attempt"
+            `Quick
+            test_transcribe_endpoint_failover_surfaces_each_attempt
+        ; test_case
+            "agent_speak invalid config surfaces load failure"
+            `Quick
+            test_agent_speak_invalid_config_surfaces_load_failure
+        ; test_case
+            "agent_speak unconfigured is explicitly disabled"
+            `Quick
+            test_agent_speak_unconfigured_is_explicitly_disabled
+        ; test_case
+            "agent_speak failover surfaces each attempt"
+            `Quick
+            test_agent_speak_endpoint_failover_surfaces_each_attempt
         ] )
     ; ( "keeper_voice_speak"
       , [ test_case

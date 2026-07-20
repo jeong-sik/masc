@@ -160,7 +160,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
-  const compaction = isRecord(data.compaction) ? data.compaction : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
   const drift = isRecord(data.drift) ? data.drift : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
@@ -205,9 +204,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         ?? asNullableString(execution.selected_runtime_id)
         ?? '',
       runtime_options: normalizeStringList(execution.runtime_options),
-    },
-    compaction: {
-      profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
@@ -297,8 +293,6 @@ export type KeeperConfigUpdatePayload = {
   instructions?: string
   // Proactive
   proactive_enabled?: boolean
-  // Compaction
-  compaction_profile?: string
 }
 
 export async function patchKeeperConfig(

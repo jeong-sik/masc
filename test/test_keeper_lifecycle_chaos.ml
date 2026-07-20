@@ -70,8 +70,8 @@ let dispatch_expect_rejected name event =
   | Error (KSM.Precondition_violation _) -> ()
 
 let setup name =
-  R.clear ();
-  ignore (R.register ~base_path:bp name (make_meta name))
+  R.For_testing.clear ();
+  ignore (R.For_testing.register ~base_path:bp name (make_meta name))
 
 (** Drives keeper from Running → Failing → Crashed via heartbeat failure + fiber death. *)
 let crash_keeper name =
@@ -211,10 +211,10 @@ let test_full_chaos_sequence () =
   check phase_t "final stopped" KSM.Stopped tr.new_phase
 
 let test_fleet_chaos () =
-  R.clear ();
+  R.For_testing.clear ();
   let keepers = ["fleet-a"; "fleet-b"; "fleet-c"; "fleet-d"] in
   List.iter (fun name ->
-    ignore (R.register ~base_path:bp name (make_meta name))
+    ignore (R.For_testing.register ~base_path:bp name (make_meta name))
   ) keepers;
 
   ignore (dispatch "fleet-a" KSM.Heartbeat_ok);

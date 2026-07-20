@@ -233,14 +233,19 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
     ; clear_thinking = Some true
     }
   in
-  (* Native json_schema when the provider declares it; otherwise fall back to the
-     schema-free tuned config so json_object / free-text providers (GLM, MiMo,
-     ollama cloud) can still serve the librarian. Invalid structured output is
-     surfaced as a typed failure after the single provider attempt. *)
-  Keeper_structured_output_schema.apply_schema_or_prompt_tier
-    ~log_label:"keeper librarian output contract"
-    Keeper_structured_output_schema.librarian_episode_output_schema
-    tuned_cfg
+  (* No wire response format. config/prompts/keeper.librarian.episode_extraction.md
+     states the object shape and both enums, and [Keeper_librarian.episode_of_json_result]
+     re-validates every field into a closed [parse_error]; a bad reply defers the
+     next attempt instead of writing.
+
+     Dropping the schema also closes a live disagreement between the two. The
+     schema marked every claim field [required] with nullable types, so a
+     schema-conforming provider emits ["claim_id": null] — which
+     [optional_string_field_strict] rejects, failing [traverse] all-or-nothing and
+     dropping the whole episode. The prompt tells the model to omit the key
+     instead, which the parser accepts. Prompt and parser agree; the schema was
+     the one that disagreed. *)
+  Keeper_structured_output_schema.without_response_format tuned_cfg
 ;;
 
 let message role text =
@@ -250,7 +255,6 @@ let message role text =
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
-  | Provider_config_rejected of string
   | Provider_timeout
   | Provider_transport_failed of string
   | Provider_empty_response
@@ -264,7 +268,6 @@ let librarian_provider_clock_unavailable_error =
 let extraction_error_to_string = function
   | Prompt_render_failed msg -> msg
   | Provider_clock_unavailable -> librarian_provider_clock_unavailable_error
-  | Provider_config_rejected msg -> "librarian provider config rejected: " ^ msg
   | Provider_timeout -> "librarian provider timed out"
   | Provider_transport_failed msg -> msg
   | Provider_empty_response -> "librarian provider returned empty response"
@@ -280,7 +283,6 @@ let should_record_cadence_backoff_after_error = function
   | Provider_unparseable_response _ ->
     true
   | Provider_clock_unavailable
-  | Provider_config_rejected _
   | Prompt_render_failed _
   | Memory_fact_upsert_failed _ ->
     false
@@ -336,11 +338,7 @@ let extract_with_provider_classified
      | Error msg -> Error (Prompt_render_failed msg)
      | Ok messages ->
        let provider_cfg = provider_for_librarian provider_cfg in
-       (match
-          Llm_provider.Provider_config.validate_output_schema_request provider_cfg
-        with
-        | Error msg -> Error (Provider_config_rejected msg)
-        | Ok () ->
+       (
           let attempt messages =
             match
               Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock

@@ -173,7 +173,14 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
-  let consolidation_enabled_default = false
+  (* On by default (RFC keeper-memory-bank-write-reduction §4b, operator decision
+     2026-07-20): the LLM-judged per-keeper consolidation is the only sanctioned
+     decider of which facts survive (RFC-0247; spec/12 §Compaction) — deterministic
+     TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
+     the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
+     Failures are graceful no-ops (transport/parse errors never mutate the store),
+     and the runtime inherits the librarian's model. Set the env false to disable. *)
+  let consolidation_enabled_default = true
   let consolidation_runtime_id_default = None
 
   (* Env-key SSOT: the config-introspection registry
@@ -301,7 +308,7 @@ module KeeperMemoryOs = struct
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
-      Default: false; invalid values fail closed to false.
+      Default: true; invalid values fail closed to false.
       @category Policies
       @ops_class operator *)
   let consolidation_enabled () =
@@ -531,11 +538,18 @@ module KeeperKeepalive = struct
       snapshot, board scan, turn) runs at this cadence. *)
   let interval_sec = keepalive_interval_sec_
 
-  (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
-      response but more CPU polling. Default: 2.0.
-      Range: [0.1, 10.0]. *)
+  (** Interruptible sleep chunk size in seconds: the upper bound on how long a
+      keeper's heartbeat sleep takes to notice a wakeup atomic set by an incoming
+      stimulus (board/mention/goal/schedule/approval). Smaller = faster wakeup
+      response but more CPU polling. Default: 0.5 (was 2.0) — a queued event now
+      wakes the lane within 0.5s instead of up to 2s; at ~2 CAS checks/sec/keeper
+      the extra polling is negligible, and the dominant reaction cost remains the
+      turn's own LLM call, not this floor.
+      Range: [0.1, 10.0].
+      @category Thresholds
+      @ops_class operator *)
   let sleep_chunk_sec =
-    Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+    Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
   let parse_stream_idle_timeout_sec raw =

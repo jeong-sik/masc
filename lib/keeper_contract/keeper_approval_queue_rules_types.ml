@@ -29,6 +29,7 @@ type pending_approval =
   ; tool_name : string
   ; input_hash : string
   ; input : Yojson.Safe.t
+  ; sequence : int
   ; requested_at : float
   ; turn_id : int option
   ; request_context : Yojson.Safe.t option
@@ -62,9 +63,17 @@ type approval_rule =
   ; created_at : float
   ; created_by : string option
   ; source_approval_id : string option
+  ; expires_at : float option
   }
 
 type rule_match = { rule_id : string }
+
+(** Exact rule lookup outcome. An expired rule never authorizes; it stays
+    stored and observable until an operator deletes it. *)
+type rule_lookup =
+  | Rule_match_active of rule_match
+  | Rule_match_expired of rule_match
+  | Rule_match_absent
 
 type rule_store_error =
   { path : string
@@ -130,6 +139,12 @@ let rule_store_error_to_string error =
   Printf.sprintf "%s: %s" error.path error.reason
 ;;
 
+let rule_expired ~now (rule : approval_rule) =
+  match rule.expires_at with
+  | None -> false
+  | Some expires_at -> expires_at <= now
+;;
+
 let approval_rule_to_yojson (rule : approval_rule) =
   `Assoc
     [ "id", `String rule.id
@@ -139,6 +154,7 @@ let approval_rule_to_yojson (rule : approval_rule) =
     ; "created_at", `Float rule.created_at
     ; "created_by", Json_util.string_opt_to_json rule.created_by
     ; "source_approval_id", Json_util.string_opt_to_json rule.source_approval_id
+    ; "expires_at", Json_util.float_opt_to_json rule.expires_at
     ]
 ;;
 
@@ -325,6 +341,7 @@ let approval_rule_of_yojson_with_error json =
             ; "created_at"
             ; "created_by"
             ; "source_approval_id"
+            ; "expires_at"
             ]
           fields
       with
@@ -347,6 +364,13 @@ let approval_rule_of_yojson_with_error json =
     in
     let created_by = Json_util.get_string json "created_by" in
     let source_approval_id = Json_util.get_string json "source_approval_id" in
+    let* expires_at =
+      match List.assoc_opt "expires_at" fields with
+      | None | Some `Null -> Ok None
+      | Some (`Float value) -> Ok (Some value)
+      | Some (`Int value) -> Ok (Some (Float.of_int value))
+      | Some _ -> Error "expires_at must be a number or null"
+    in
     Ok
       { id
       ; keeper_name
@@ -355,6 +379,7 @@ let approval_rule_of_yojson_with_error json =
       ; created_at
       ; created_by
       ; source_approval_id
+      ; expires_at
       }
   | _ -> Error "approval rule must be a JSON object"
 ;;

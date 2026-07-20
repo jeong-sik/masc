@@ -123,50 +123,117 @@ let has_json_schema_response_format schema provider_cfg =
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_uses_native_when_supported () =
+let has_no_response_format provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.Off ->
+    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
+;;
+
+(* A schema-capable provider gets no response format either: capability is not
+   consulted. Without this the helper could silently regrow a native tier for
+   the one provider class that accepts it, which is the split these call sites
+   were changed to remove. *)
+let test_without_response_format_clears_schema_capable_provider () =
+  let base =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema
+      (schema_capable_oas_provider_config ())
+  in
+  check bool "schema-capable provider starts with a native schema attached" true
+    (has_json_schema_response_format
+       Keeper_structured_output_schema.librarian_episode_output_schema
+       base);
+  check bool "helper clears it anyway" true
+    (has_no_response_format (Keeper_structured_output_schema.without_response_format base))
+;;
+
+(* The point of the helper is that the request is byte-identical regardless of
+   what the provider advertises, so a capability fact that turns out to be a lie
+   (ollama.com cloud declared json_schema and ignored it — 2026-07-02 probe)
+   cannot change the request that was sent. *)
+let test_without_response_format_is_capability_independent () =
+  let schema_capable =
+    Keeper_structured_output_schema.without_response_format
+      (schema_capable_oas_provider_config ())
+  in
+  let json_object_only =
+    Keeper_structured_output_schema.without_response_format
+      (prompt_tier_oas_provider_config ())
+  in
+  check bool "schema-capable provider asks for no format" true
+    (has_no_response_format schema_capable);
+  check bool "json_object-only provider asks for no format" true
+    (has_no_response_format json_object_only);
+  check bool "both configs pass output-schema validation" true
+    (List.for_all
+       (fun cfg ->
+          match Llm_provider.Provider_config.validate_output_schema_request cfg with
+          | Ok () -> true
+          | Error _ -> false)
+       [ schema_capable; json_object_only ])
+;;
+
+(* #25266: a json_object-only provider (structured_output=false,
+   response_format_json=true — GLM/DeepSeek/Kimi's OpenAI-compat endpoints)
+   must get JsonMode from the three-tier selector, not be dropped to the
+   prompt tier. [prompt_tier_oas_provider_config] is exactly this shape:
+   openai_compat_chat_extended has response_format_json=true, and it disables
+   only structured_output. *)
+let test_json_mode_tier_selects_json_mode_for_json_object_only () =
   let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = schema_capable_oas_provider_config () in
+  let base = prompt_tier_oas_provider_config () in
   let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test native"
+    Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+      ~log_label:"test json_mode"
       schema
       base
   in
-  check bool "native schema is attached" true
-    (has_json_schema_response_format schema configured);
-  check (option bool) "output_schema mirrors native schema" (Some true)
+  check bool "json_object-only provider gets JsonMode" true
+    (match configured.Llm_provider.Provider_config.response_format with
+     | Agent_sdk.Types.JsonMode -> true
+     | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
+  check (option bool) "JsonMode carries no output_schema" None
     (Option.map
        (Yojson.Safe.equal schema)
        configured.Llm_provider.Provider_config.output_schema)
-;;
 
-let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected () =
+let test_json_mode_tier_uses_native_schema_when_supported () =
   let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = prompt_tier_oas_provider_config () in
-  let native_cfg = Keeper_structured_output_schema.apply_to_provider_config schema base in
-  (match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-   | Ok () -> fail "prompt-tier provider unexpectedly accepted native schema"
-   | Error _ -> ());
+  let base = schema_capable_oas_provider_config () in
   let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test prompt"
+    Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+      ~log_label:"test native over json_mode"
       schema
       base
   in
-  check bool "prompt tier has no native schema" false
-    (has_json_schema_response_format schema configured);
-  check (option bool) "prompt tier leaves output_schema empty" None
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema);
-  check
-    bool
-    "prompt-tier config still validates without native schema"
-    true
-    (match Llm_provider.Provider_config.validate_output_schema_request configured with
-     | Ok () -> true
-     | Error _ -> false)
-;;
+  check bool "schema-capable provider still gets strict json_schema" true
+    (has_json_schema_response_format schema configured)
+
+let test_accepts_schema_or_json_mode_admits_json_object_only () =
+  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
+  (* json_schema-capable and json_object-only are both eligible; neither is not. *)
+  check bool "json_schema provider is eligible" true
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema (schema_capable_oas_provider_config ()));
+  check bool "json_object-only provider is eligible" true
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema (prompt_tier_oas_provider_config ()));
+  let neither =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"neither-ratchet"
+      ~base_url:"https://neither.invalid/v1"
+      ~model_capabilities_override:
+        { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+          supports_structured_output = false
+        ; supports_response_format_json = false
+        }
+      ()
+  in
+  check bool "provider with neither capability is rejected" false
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema neither)
 
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   let schema_names =
@@ -344,13 +411,25 @@ let () =
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
         ; test_case
-            "schema-or-prompt helper uses native schema when supported"
+            "without_response_format clears a schema-capable provider too"
             `Quick
-            test_apply_schema_or_prompt_tier_uses_native_when_supported
+            test_without_response_format_clears_schema_capable_provider
         ; test_case
-            "schema-or-prompt helper keeps prompt tier when native rejected"
+            "without_response_format is capability-independent"
             `Quick
-            test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
+            test_without_response_format_is_capability_independent
+        ; test_case
+            "json_mode tier selects JsonMode for json_object-only provider"
+            `Quick
+            test_json_mode_tier_selects_json_mode_for_json_object_only
+        ; test_case
+            "json_mode tier still uses strict schema when supported"
+            `Quick
+            test_json_mode_tier_uses_native_schema_when_supported
+        ; test_case
+            "accepts-schema-or-json-mode admits json_object-only, rejects neither"
+            `Quick
+            test_accepts_schema_or_json_mode_admits_json_object_only
         ] )
     ; ( "dashboard schemas"
       , [ test_case

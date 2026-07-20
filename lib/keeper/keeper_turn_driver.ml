@@ -114,6 +114,16 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry
+  else if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
+  then
+    (* A typed ContextOverflow is a per-candidate capacity bound, not a request
+       defect: a later lane candidate with a larger context window can still
+       serve the same turn. [sdk_error_to_http_error] folds it into a generic
+       HTTP 400 which [Runtime_attempt_fsm.should_try_next] treats as terminal,
+       so the typed error must be read before that mapping. Overflow on the
+       last candidate still returns the typed error, keeping the reactive
+       compaction trigger ([context_overflow_event_of_error]) intact. *)
+    true
   else
     match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
@@ -123,6 +133,7 @@ let attempt_runtime_candidates
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
+    ?lane_id
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -149,6 +160,13 @@ let attempt_runtime_candidates
            ~status:"completed"
            ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
            Keeper_runtime_manifest.Runtime_completed;
+         (* Sticky failover: remember the winning candidate so later turns on
+            this lane start from it (idx 0 or a failover success alike). *)
+         (match lane_id with
+          | Some lane_id ->
+            Runtime_lane_preference.note_success ~lane_id
+              ~candidate:attempt_runtime_id
+          | None -> ());
          Ok value
        | Error error, _checkpoint_after ->
          emit_runtime_manifest
@@ -346,13 +364,19 @@ let run_named
     | _ -> ()
   in
   (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
-     operators can route through explicit failover groups. *)
+     operators can route through explicit failover groups.  Lane candidate
+     order passes through the sticky last-good preference so a known-healthy
+     failover candidate is tried before re-hitting a dead head candidate. *)
   let lane_resolution = Runtime.resolve_assignment runtime_id in
-  let lane_candidate_ids =
+  let lane_id_opt, lane_candidate_ids =
     match lane_resolution with
-    | `Missing -> []
-    | `Single_runtime runtime -> [ runtime.Runtime.id ]
-    | `Lane lane -> Runtime_lane.ordered_candidates lane
+    | `Missing -> None, []
+    | `Single_runtime runtime -> None, [ runtime.Runtime.id ]
+    | `Lane lane ->
+      let lane_id = Runtime_lane.id lane in
+      ( Some lane_id
+      , Runtime_lane_preference.prefer_order ~lane_id
+          (Runtime_lane.ordered_candidates lane) )
   in
   if lane_candidate_ids = []
   then
@@ -502,6 +526,7 @@ let run_named
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
+    ?lane_id:lane_id_opt
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed

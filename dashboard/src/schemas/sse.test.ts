@@ -24,7 +24,6 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts current and future oas-prefixed event types', () => {
     expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
-    expect(SSEEventTypeSchema.parse('oas:context_overflow_imminent')).toBe('oas:context_overflow_imminent')
     expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
     expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
   })

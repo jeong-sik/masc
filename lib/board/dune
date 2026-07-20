@@ -19,6 +19,7 @@
   board_metrics_hooks
   board_moderation
   board_paths
+  board_render
   board_sort
   board_sub_board_json
   board_votes
@@ -40,7 +41,6 @@
   masc_types
   masc_core
   masc_log
-  masc_economy
   masc_workspace
   masc_thompson
   masc_eio_context)

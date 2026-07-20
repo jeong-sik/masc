@@ -53,7 +53,7 @@ into 454 modules:
 
 ### 1.3 Concrete Harm
 
-1. **Discoverability**: To find where `compaction_policy` is *actually*
+1. **Discoverability**: To find where `keeper_meta` is *actually*
    defined, one must trace `keeper_types.mli → Keeper_meta_contract → ???`.
    `include` chains obscure ownership.
 
@@ -70,7 +70,7 @@ into 454 modules:
    `include`. Review cost scales linearly. Each PR is correct in isolation
    but collectively they deepen the include tangle.
 
-5. **Grep opacity**: `rg "type compaction_policy" lib/` returns hits in
+5. **Grep opacity**: `rg "type keeper_meta" lib/` returns hits in
    multiple .mli files (aliases) and one .ml file (owner). The aliases add
    noise and make type ownership unclear.
 
@@ -83,13 +83,11 @@ into 454 modules:
 Instead of:
 ```ocaml
 (* keeper_types.mli — facade that re-exports everything *)
-type compaction_policy = Keeper_meta_contract.compaction_policy = { ... }
 type keeper_meta = Keeper_meta_contract.keeper_meta = { ... }
 ```
 
 Require consumers to write:
 ```ocaml
-let policy : Keeper_meta_contract.compaction_policy = ...
 let meta : Keeper_meta_contract.keeper_meta = ...
 ```
 
@@ -112,8 +110,8 @@ zero or near-zero own type definitions — pure re-export:
 | `registry_types_turn_phase.mli` | ~8 | ~0 | Delete entirely |
 | `dashboard_goals_types.mli` | — | — | Same pattern (PR #19274) |
 
-After deletion, any consumer that used unqualified `compaction_policy` must
-use `Keeper_meta_contract.compaction_policy`. The compiler enforces this
+After deletion, any consumer that used unqualified `keeper_meta` must
+use `Keeper_meta_contract.keeper_meta`. The compiler enforces this
 migration — every broken reference is a compile error, zero silent failures.
 
 **Migration method**: `dune build --root .` after each deletion. Every error

@@ -86,6 +86,7 @@ end
 
 type delivery_key =
   | Direct_request of Request_id.t
+  | Async_request of Request_id.t
   | Queue_receipts of Receipt_ids.t
 
 type transcript_slot =
@@ -133,6 +134,11 @@ let delivery_key_to_yojson = function
       [ "kind", `String "direct_request"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
+  | Async_request request_id ->
+    `Assoc
+      [ "kind", `String "async_request"
+      ; "request_id", `String (Request_id.to_string request_id)
+      ]
   | Queue_receipts receipt_ids ->
     `Assoc
       [ "kind", `String "queue_receipts"
@@ -158,6 +164,16 @@ let delivery_key_of_yojson = function
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
        Ok (Direct_request request_id)
+     | "async_request" ->
+       let* () =
+         validate_fields
+           ~context:"async request delivery identity"
+           ~expected:[ "kind"; "request_id" ]
+           fields
+       in
+       let* request_id = string_field "request_id" fields in
+       let* request_id = Request_id.of_string request_id in
+       Ok (Async_request request_id)
      | "queue_receipts" ->
        let* () =
          validate_fields
@@ -194,6 +210,7 @@ let delivery_key_of_yojson = function
 let delivery_key_equal left right =
   match left, right with
   | Direct_request left, Direct_request right -> Request_id.equal left right
+  | Async_request left, Async_request right -> Request_id.equal left right
   | Queue_receipts left, Queue_receipts right ->
     let rec equal_lists left right =
       match left, right with
@@ -203,8 +220,9 @@ let delivery_key_equal left right =
       | [], _ :: _ | _ :: _, [] -> false
     in
     equal_lists (Receipt_ids.to_list left) (Receipt_ids.to_list right)
-  | Direct_request _, Queue_receipts _
-  | Queue_receipts _, Direct_request _ -> false
+  | Direct_request _, (Async_request _ | Queue_receipts _)
+  | Async_request _, (Direct_request _ | Queue_receipts _)
+  | Queue_receipts _, (Direct_request _ | Async_request _) -> false
 ;;
 
 let delivery_key_file_stem key =
@@ -217,6 +235,7 @@ let delivery_key_file_stem key =
   in
   match key with
   | Direct_request _ -> "direct-" ^ digest
+  | Async_request _ -> "async-" ^ digest
   | Queue_receipts _ -> "queue-" ^ digest
 ;;
 

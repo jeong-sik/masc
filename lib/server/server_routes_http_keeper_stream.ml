@@ -1276,7 +1276,7 @@ let completion_of_worker_settlement ~queued_turn ~staged_completion
     if queued_turn then Some (Failed { kind; detail }) else None
   in
   match settlement with
-  | Keeper_msg_async.Settlement_projection_error { poll_result } ->
+  | Keeper_msg_async.Settlement_projection_error { poll_result; _ } ->
     let body =
       match poll_result with
       | Keeper_msg_async.Unreadable reason -> reason
@@ -1296,7 +1296,8 @@ let completion_of_worker_settlement ~queued_turn ~staged_completion
          ; body
          ; queued_outcome = queued_failure Transcript_persist_failed body
          })
-  | Keeper_msg_async.Status_settlement { status; durability; origin } ->
+  | Keeper_msg_async.Status_settlement { entry; durability; origin } ->
+    let status = entry.Keeper_msg_async.status in
     (match durability, origin, status with
      | Keeper_msg_async.Volatile_persistence_failure, _, _ ->
        let body =
@@ -1584,8 +1585,8 @@ let process_single_turn ~user_row_origin ~queued_turn
     | None ->
       let status =
         match settlement with
-        | Keeper_msg_async.Status_settlement { status; _ } ->
-          Keeper_msg_async.status_to_string status
+        | Keeper_msg_async.Status_settlement { entry; _ } ->
+          Keeper_msg_async.status_to_string entry.status
         | Keeper_msg_async.Settlement_projection_error _ -> "projection_error"
       in
       Log.Keeper.error
@@ -1681,8 +1682,10 @@ let process_single_turn ~user_row_origin ~queued_turn
     match queued_turn, delivery_key with
     | true, Some (Keeper_chat_delivery_identity.Queue_receipts _ as key) ->
       Ok key
-    | true, Some (Keeper_chat_delivery_identity.Direct_request _) ->
-      Error "queued Keeper turn received a direct-request delivery identity"
+    | true, Some
+        (Keeper_chat_delivery_identity.Direct_request _
+        | Keeper_chat_delivery_identity.Async_request _) ->
+      Error "queued Keeper turn received a non-queue delivery identity"
     | true, None ->
       Error "queued Keeper turn is missing its receipt delivery identity"
     | false, _ -> Error "non-queued Keeper turn requested queue delivery identity"

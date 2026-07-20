@@ -121,10 +121,10 @@ type keepalive_turn_outcome = {
 
 exception Event_queue_settlement_failed of string
 
-type board_attention_drain_outcome =
-  | Board_attention_drained of
-      Keeper_board_attention_candidate.drain_report
-  | Board_attention_drain_deferred of
+type board_attention_settlement_outcome =
+  | Board_attention_settled of
+      Keeper_board_attention_worker.settlement
+  | Board_attention_settlement_deferred of
       Keeper_turn_admission.autonomous_block
 
 let connector_attention_event_ids_of_stimuli stimuli =
@@ -430,19 +430,19 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   else Keeper_state_machine.Turn_succeeded
 ;;
 
-let drain_board_attention_candidates_on_owner_lane ~base_path ~keeper_name =
+let settle_board_attention_on_owner_lane ~base_path ~keeper_name =
   match
     Keeper_turn_admission.run_if_free
       ~base_path
       ~keeper_name
       (fun () ->
-         Keeper_board_attention_candidate.drain_pending_on_owner_lane
+         Keeper_board_attention_worker.settle_one_completed
            ~base_path
            ~keeper_name)
   with
-  | `Ran (Ok report) -> Ok (Board_attention_drained report)
+  | `Ran (Ok settlement) -> Ok (Board_attention_settled settlement)
   | `Ran (Error detail) -> Error detail
-  | `Busy block -> Ok (Board_attention_drain_deferred block)
+  | `Busy block -> Ok (Board_attention_settlement_deferred block)
 ;;
 
 let run_keepalive_unified_turn
@@ -523,49 +523,46 @@ let run_keepalive_unified_turn
        | Ok () -> ()
        | Error message -> raise (Event_queue_settlement_failed message));
       (match
-         drain_board_attention_candidates_on_owner_lane
+         settle_board_attention_on_owner_lane
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
        with
        | Error detail ->
          raise (Keeper_board_attention_candidate.Candidate_unavailable detail)
+       | Ok (Board_attention_settled Keeper_board_attention_worker.No_completed_partition) ->
+         ()
        | Ok
-           (Board_attention_drained
-              ({ attempted; consumed; remaining }
-                : Keeper_board_attention_candidate.drain_report)) ->
-         if attempted > 0
-         then
-           Log.Keeper.info
-             "Board attention owner-lane drain keeper=%s attempted=%d consumed=%d \
-              remaining=%d"
-             meta_after_triage.name
-             attempted
-             consumed
-             remaining
+           (Board_attention_settled
+              (Keeper_board_attention_worker.Partition_settled
+                 { candidate_id; continuation_wake = _ })) ->
+         Log.Keeper.info
+           "Board attention completed judgment settled on owner lane keeper=%s candidate=%s"
+           meta_after_triage.name
+           candidate_id
        | Ok
-           (Board_attention_drain_deferred
+           (Board_attention_settlement_deferred
               (Keeper_turn_admission.Turn_busy in_flight)) ->
          Log.Keeper.debug
-           "Board attention owner-lane drain check deferred keeper=%s holder=%s"
+           "Board attention owner-lane settlement deferred keeper=%s holder=%s"
            meta_after_triage.name
            (match in_flight with
             | None -> "admission_in_progress"
             | Some { lane; _ } -> Keeper_turn_admission.lane_to_string lane)
        | Ok
-           (Board_attention_drain_deferred
+           (Board_attention_settlement_deferred
               (Keeper_turn_admission.Chat_backlog
                  { pending_count; inflight_count })) ->
          Log.Keeper.info
-           "Board attention owner-lane drain deferred to chat backlog \
+           "Board attention owner-lane settlement deferred to chat backlog \
             keeper=%s pending=%d inflight=%d"
            meta_after_triage.name
            pending_count
            inflight_count
        | Ok
-           (Board_attention_drain_deferred
+           (Board_attention_settlement_deferred
               (Keeper_turn_admission.Shutdown_requested operation_id)) ->
          Log.Keeper.info
-           "Board attention owner-lane drain check deferred by shutdown \
+           "Board attention owner-lane settlement deferred by shutdown \
             keeper=%s operation=%s"
            meta_after_triage.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id));

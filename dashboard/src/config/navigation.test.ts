@@ -156,6 +156,7 @@ describe('lab navigation', () => {
       'performance',
       'memory-subsystems',
       'keeper-memory-health',
+      'audit-integrity',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
@@ -164,6 +165,7 @@ describe('lab navigation', () => {
       'Performance',
       'Memory OS',
       '키퍼 메모리 상태',
+      '감사 무결성',
     ])
     expect(labSections.find(item => item.id === 'memory-subsystems')?.description).toBe(
       'Live episodes, user model projection, Hebbian synapses, and gated memory entries.',

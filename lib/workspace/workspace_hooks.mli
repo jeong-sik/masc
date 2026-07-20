@@ -1,7 +1,7 @@
 (** Workspace lifecycle hook registry.
 
     Atomic refs filled at boot by the runtime so the workspace layer
-    can call back into keeper / agent / economy / relation
+    can call back into keeper / agent / relation
     subsystems without a static dependency. Default values are
     no-ops; the runtime overrides each ref via the wiring in
     [lib/workspace.ml]. *)
@@ -33,8 +33,6 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
             ?subject:activity_entity ->
             kind:string ->
             payload:Yojson.Safe.t -> tags:string list -> unit -> unit)
-           Atomic.t
-val agent_economy_earn_fn : (base_path:string -> agent_name:string -> reason:string -> unit)
            Atomic.t
 val runtime_agents_fn :
   (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t

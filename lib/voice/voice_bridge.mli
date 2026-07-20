@@ -41,6 +41,12 @@ val agent_speak :
     an invalid provider completion payload return [Error] so the caller — and
     the LLM driving it — sees the failure instead of a fake success.
 
+    Config-state semantics (no silent fallback): an explicit but broken
+    voice config surfaces its load error; when no voice config exists at
+    all, TTS is reported as explicitly disabled ([Error
+    "no configured TTS endpoint"]) instead of substituting a hardcoded
+    model name.
+
     This is the only speak path: the former fire-and-forget
     [enqueue_agent_speak] queue was removed after the 2026-06-10 voice
     repeat incident (schema promised blocking semantics while the
@@ -57,6 +63,12 @@ val transcribe_audio :
   ?language_code:string ->
   unit ->
   (Yojson.Safe.t, string) result
+(** Transcribe [audio_file] through the enabled STT endpoint chain.
+    A broken explicit voice config surfaces its load error; when no
+    voice config exists, STT is reported as explicitly disabled
+    ([Error "no enabled STT endpoints configured"]).  If every enabled
+    endpoint fails, the returned error names each attempted endpoint
+    and its failure. *)
 
 (** {1 Microphone record + transcribe} *)
 

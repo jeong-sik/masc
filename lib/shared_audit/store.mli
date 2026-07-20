@@ -59,5 +59,21 @@ val verify_chain : Envelope.t list -> (unit, int * string) result
     [Error (idx, reason)] at the first broken link. The first entry
     must have [prev_hash = None]. *)
 
+type verify_report = {
+  entries_checked : int;
+  (** Entries whose chain link verified before the first failure; equals
+      the total on-disk entry count when the chain is intact. *)
+  failure : (int * string) option;
+  (** [Some (idx, reason)] at the first broken link; [None] when intact. *)
+}
+
+val verify : t -> verify_report
+(** Read the full on-disk log and verify the [prev_hash] chain with
+    {!verify_chain}. This is the runtime entry point that makes the chain
+    more than a write-only cost: callers (e.g. the audit-integrity
+    dashboard surface) run it against the persisted log and surface the
+    result. Raises {!Corrupt_jsonl} when persisted audit evidence is
+    malformed. *)
+
 val base_dir : t -> string
 (** Inspector for the base directory (mainly for tests). *)

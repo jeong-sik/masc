@@ -213,14 +213,23 @@ type explicit_memory_write_error =
   | Rejected_explicit_memory_text
   | Explicit_memory_write_failed of string
 
+(** Outcome of a validated explicit memory write. [Persisted] appended a row;
+    [Skipped_bank_writes_disabled] means the memory-bank write kill-switch
+    ([MASC_KEEPER_MEMORY_BANK_WRITE=false]) is off so nothing was persisted.
+    RFC keeper-memory-bank-write-reduction. *)
+type memory_write_outcome =
+  | Persisted
+  | Skipped_bank_writes_disabled
+
 val append_explicit_memory_note :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   turn:int ->
   kind:memory_kind ->
   text:string ->
-  (unit, explicit_memory_write_error) result
-(** Persist one note produced by the explicit memory tool. The result carries
+  (memory_write_outcome, explicit_memory_write_error) result
+(** Persist one note produced by the explicit memory tool, unless the bank write
+    kill-switch is off (then [Skipped_bank_writes_disabled]). The result carries
     validation and persistence failures instead of silently dropping the note. *)
 
 (** Promote explicitly tagged tool results into durable [long_term]

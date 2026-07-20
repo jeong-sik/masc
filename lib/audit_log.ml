@@ -554,38 +554,11 @@ let log_action
 
 (** Convenience functions for common events *)
 
-let log_claim_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:ClaimTask
-    ~details:(`Assoc [("task_id", `String task_id)])
-    ?cost_estimate ?token_count ~outcome:Success ()
-
-let log_done_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:DoneTask
-    ~details:(`Assoc [("task_id", `String task_id)])
-    ?cost_estimate ?token_count ~outcome:Success ()
-
-let log_cancel_task config ~agent_id ~task_id ~reason ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:CancelTask
-    ~details:(`Assoc [
-      ("task_id", `String task_id);
-      ("reason", `String reason);
-    ])
-    ?cost_estimate ?token_count ~outcome:Success ()
-
 let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count () =
   (* Truncate message for privacy/size *)
   let preview = preview ~max_len:100 message_preview in
   log_action config ~agent_id ~action:Broadcast
     ~details:(`Assoc [("preview", `String preview)])
-    ?cost_estimate ?token_count ~outcome:Success ()
-
-let log_suspend config ~agent_id ~target_agent ~reason ~workspaces_affected ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Suspend
-    ~details:(`Assoc [
-      ("target_agent", `String target_agent);
-      ("reason", `String reason);
-      ("workspaces_affected", `Int workspaces_affected);
-    ])
     ?cost_estimate ?token_count ~outcome:Success ()
 
 let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count ?trace_id () =
@@ -638,19 +611,6 @@ let log_client_tool_host_failure config ~agent_id ~client_name ~tool_name
   log_action config ~agent_id ~action:(Custom "client_tool_host_failure")
     ~details ?trace_id ~outcome:(Failure message) ()
 
-let log_auth_attempt config ~agent_id ~success ~method_name ?cost_estimate ?token_count () =
-  let action = if success then AuthSuccess else AuthFailure in
-  log_action config ~agent_id ~action
-    ~details:(`Assoc [("method", `String method_name)])
-    ?cost_estimate ?token_count
-    ~outcome:(if success then Success else Failure "auth_failed") ()
-
-let log_circuit_breaker config ~agent_id ~opened ~reason ?cost_estimate ?token_count () =
-  let action = if opened then CircuitOpen else CircuitClose in
-  log_action config ~agent_id ~action
-    ~details:(`Assoc [("reason", `String reason)])
-    ?cost_estimate ?token_count ~outcome:Success ()
-
 let log_gate_decision config ~agent_id ~trace_id ~decision ~action_type ~confirmation_state () =
   log_action config ~agent_id
     ~action:(GateDecision decision)
@@ -665,12 +625,6 @@ let log_gate_decision config ~agent_id ~trace_id ~decision ~action_type ~confirm
 
 (** Prune audit entries older than [days] days.
     Date-split storage makes rotation unnecessary. *)
-let prune_old (config : config) ~days =
-  let store = get_audit_store config in
-  let deleted = Dated_jsonl.prune store ~days in
-  if deleted > 0 then
-    Log.Misc.info "Pruned %d old audit day-files" deleted
-
 (** {1 Statistics} *)
 
 type stats = {

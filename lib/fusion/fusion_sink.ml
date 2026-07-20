@@ -300,12 +300,12 @@ let broadcast_run_status ~registry ~run_id =
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
-  let ( let* ) = Result.bind in
-  let* channel =
-    match Fusion_wake_route.peek ~run_id with
-    | Some channel -> Ok channel
-    | None ->
-      Ok (Keeper_continuation_channel.unrouted "no originating connector")
+  let route = Fusion_wake_route.peek ~keeper ~run_id in
+  let channel =
+    match route with
+    | Some { Fusion_wake_route.channel = Some channel; _ } -> channel
+    | Some { channel = None; _ } | None ->
+      Keeper_continuation_channel.unrouted "no originating connector"
   in
   let terminal =
     if ok
@@ -338,30 +338,44 @@ let wake_keeper_on_fusion_completion
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
   | Ok () ->
-    ignore (Fusion_wake_route.take ~run_id);
+    (match Fusion_wake_route.take ~keeper ~run_id with
+     | Some _ | None -> ());
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
     (try
-       match
-         Keeper_registry.wakeup_running
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path:base_dir
-           keeper
-       with
-       | Keeper_registry.Signaled -> ()
-       | Keeper_registry.Deferred_unregistered ->
+       match Option.bind route (fun route -> route.Fusion_wake_route.owner) with
+       | None ->
          Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: keeper is no longer registered run_id=%s"
+           "fusion completion exact wake deferred: no owner captured run_id=%s"
            run_id
-       | Keeper_registry.Deferred_not_running phase ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: phase=%s run_id=%s"
-           (Keeper_state_machine.phase_to_string phase)
-           run_id
-       | Keeper_registry.Deferred_lifecycle denial ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred by lifecycle: reason=%s run_id=%s"
-           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-           run_id
+       | Some owner ->
+         (match
+            Keeper_registry.wakeup_running_exact
+              ~intent:Keeper_registry.Reactive_signal
+              owner
+          with
+          | Keeper_registry.Exact_wake_signaled -> ()
+          | Keeper_registry.Exact_wake_missing ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: owner missing run_id=%s"
+              run_id
+          | Keeper_registry.Exact_wake_replaced ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: owner replaced run_id=%s"
+              run_id
+          | Keeper_registry.Exact_wake_not_running phase ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: phase=%s run_id=%s"
+              (Keeper_state_machine.phase_to_string phase)
+              run_id
+          | Keeper_registry.Exact_wake_lifecycle_denied denial ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred by lifecycle: reason=%s run_id=%s"
+              (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+              run_id
+          | Keeper_registry.Exact_wake_lifecycle_reserved _ ->
+            Log.Keeper.info ~keeper_name:keeper
+              "fusion completion exact wake deferred: lifecycle reserved run_id=%s"
+              run_id)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -373,6 +387,14 @@ let wake_keeper_on_fusion_completion
 
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
     (unit, string) result =
+  let ( let* ) = Result.bind in
+  let* delivery_key =
+    Keeper_chat_delivery_identity.Request_id.of_string run_id
+    |> Result.map (fun request_id ->
+      Keeper_chat_delivery_identity.Async_request request_id)
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
+  in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -454,10 +476,18 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
     let origin : Board.post_origin =
       { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
     in
-    let board_result =
-      Board_dispatch.create_post ~author:keeper ~content:board_headline
-        ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-        ~ttl_hours:board_post_ttl_hours ~origin ()
+    let* board_result =
+      match
+        Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
+          ~author:keeper ~content:board_headline
+          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+          ~ttl_hours:board_post_ttl_hours ~origin ()
+      with
+      | Error (Board.Already_exists detail) ->
+        Error (Printf.sprintf "Fusion Board projection identity conflict: %s" detail)
+      | Ok (Board_core_persist.Post_created post | Board_core_persist.Post_already_present post) ->
+        Ok (Ok post)
+      | Error error -> Ok (Error error)
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
@@ -500,13 +530,14 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
          surface한다. 성공한 경우에만 broadcast한다. *)
       match
-        Keeper_chat_store.append_assistant_message_result ~base_dir
-          ~keeper_name:keeper ~content ?blocks ()
+        Keeper_chat_store.append_assistant_message_once ~base_dir
+          ~keeper_name:keeper ~delivery_key ~content ?blocks ()
       with
-      | Ok () ->
+      | Ok (Keeper_chat_store.Appended _) ->
         Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
           ~source:"fusion" ~content ();
         Ok ()
+      | Ok (Keeper_chat_store.Already_present _) -> Ok ()
       | Error _ as e -> e
     in
     (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*

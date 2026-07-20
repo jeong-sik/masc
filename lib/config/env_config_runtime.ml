@@ -354,6 +354,20 @@ module Oas_sse = struct
     if v < 0.1 then 2.0 else v
 end
 
+(** {1 Lane failover} *)
+
+module Lane = struct
+  (** Sticky lane-candidate preference TTL (seconds). After a lane candidate
+      succeeds, later turns on the same lane try it first instead of
+      re-attempting candidates declared before it; [0] disables stickiness.
+      Default: 3600 (1 hour), matching common hourly provider rate-limit
+      windows.
+      @category Timeouts
+      @ops_class operator *)
+  let preference_ttl_s () =
+    get_float_nonneg ~default:3600.0 "MASC_LANE_PREFERENCE_TTL_S"
+end
+
 (** {1 Dashboard Signal Thresholds} *)
 
 module Dashboard = struct

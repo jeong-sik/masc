@@ -30,5 +30,5 @@ val capacity_backpressure_of_pending :
 
 (* [capacity_backpressure_of_sdk_error] was removed (#23438): a dead substring
    classifier that laundered opaque [Internal] errors into the auto-recoverable
-   capacity-backpressure class.  The typed [cooldown_cause] on the pre-dispatch
-   cooldown gate replaces it. *)
+   capacity-backpressure class. Legacy decoded [cooldown_cause] values are
+   diagnostic-only. *)

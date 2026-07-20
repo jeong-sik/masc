@@ -50,6 +50,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let install_exn ~base_path =
+  match AQ.install_persistence ~base_path with
+  | Ok report -> report
+  | Error error -> fail (AQ.install_error_to_string error)
+
 let rec wait_until ~clock ~deadline predicate =
   if predicate ()
   then true
@@ -168,23 +173,23 @@ let test_keep_last_n_over_limit () =
 (* ── Registry-based tests (replacing removed supervisor Hashtbl queries) *)
 
 let test_fiber_health_unknown () =
-  Reg.clear ();
+  Reg.For_testing.clear ();
   let health = Reg.fiber_health_of ~base_path:"/tmp" "nonexistent-keeper" in
   check bool "unknown for unregistered"
     true (health = KT.Fiber_unknown)
 
 let test_registry_count_initially_zero () =
-  Reg.clear ();
+  Reg.For_testing.clear ();
   check int "no keepers initially" 0 (Reg.count_running ())
 
 let test_crash_log_empty_for_unknown () =
-  Reg.clear ();
+  Reg.For_testing.clear ();
   check int "empty crash log" 0
-    (List.length (Reg.crash_log_of ~base_path:"/tmp" "nonexistent"))
+    (List.length (Reg.For_testing.crash_log_of ~base_path:"/tmp" "nonexistent"))
 
 let test_should_cleanup_dead_true () =
-  Reg.clear ();
-  let _entry = Reg.register ~base_path:"/tmp" "dead1"
+  Reg.For_testing.clear ();
+  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead1"
       (let json = `Assoc [
         ("name", `String "dead1");
         ("agent_name", `String "agent-dead1");
@@ -202,8 +207,8 @@ let test_should_cleanup_dead_true () =
     (Sup.should_cleanup_dead ~now:4000.0 ~dead_ttl_sec:3600.0 entry)
 
 let test_should_cleanup_dead_false_when_recent () =
-  Reg.clear ();
-  let _entry = Reg.register ~base_path:"/tmp" "dead2"
+  Reg.For_testing.clear ();
+  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead2"
       (let json = `Assoc [
         ("name", `String "dead2");
         ("agent_name", `String "agent-dead2");
@@ -344,6 +349,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       let _workspace =
         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
       in
+      ignore (install_exn ~base_path:config.base_path);
       let blocked = make_meta "hitl-blocked" in
       let clear = make_meta "hitl-clear" in
       List.iter
@@ -550,7 +556,7 @@ let test_declarative_boot_materializes_instructions () =
   let instructions = "watch fleet safety and repair keeper bootstrap" in
   write_keeper_toml_with_instructions config_dir ~name ~instructions;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -578,7 +584,7 @@ let test_declarative_boot_allows_empty_goal_links () =
   let name = "empty-intent" in
   write_empty_keeper_toml config_dir ~name;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -608,7 +614,7 @@ let test_declarative_boot_records_typed_invalid_config_failure () =
   write_file keeper_path "[broken";
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -645,7 +651,7 @@ let test_reconcile_materializes_configured_keeper_without_meta () =
   let name = "hot-restored" in
   write_keeper_toml config_dir ~name;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -681,7 +687,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
   let name = "hot-registered" in
   write_keeper_toml config_dir ~name;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -721,7 +727,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
   let name = "manual-paused-owner" in
   write_keeper_toml config_dir ~name;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -775,7 +781,7 @@ let test_reconcile_materialize_failure_continues_with_metric () =
   write_keeper_toml config_dir ~name:failing;
   write_keeper_toml config_dir ~name:healthy;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -815,7 +821,7 @@ let test_reconcile_supervise_exception_continues () =
   write_keeper_toml config_dir ~name:failing;
   write_keeper_toml config_dir ~name:healthy;
   Eio.Switch.on_release sw (fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
@@ -844,9 +850,9 @@ let test_reconcile_supervise_exception_continues () =
     (Masc.Otel_metric_store.metric_total metric)
 
 let registered_entries names =
-  Reg.clear ();
+  Reg.For_testing.clear ();
   List.map
-    (fun name -> Reg.register ~base_path:bp name (make_meta name))
+    (fun name -> Reg.For_testing.register ~base_path:bp name (make_meta name))
     names
 
 let test_supervision_cohorts_64_keepers_8x8 () =
@@ -909,8 +915,8 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
     | [ cohort ] -> cohort
     | _ -> fail "expected one cohort"
   in
-  Reg.unregister ~base_path:bp "alpha";
-  Reg.unregister ~base_path:bp "bravo";
+  Reg.For_testing.unregister ~base_path:bp "alpha";
+  Reg.For_testing.unregister ~base_path:bp "bravo";
   let _entry = Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo") in
   let fresh = Sup.fresh_supervision_cohort_keepers ~base_path:bp cohort in
   check (list string) "removed entries omitted"
@@ -956,7 +962,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir "paused-reconcile";
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1027,13 +1033,14 @@ let test_sweep_reports_pending_hitl_approval () =
                 ~id
                 ~decision:(AQ.Decision.Reject "test cleanup")))
         !approval_id;
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
       Log.set_level Log.Info;
       let config = Masc.Workspace.default_config base_dir in
       let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      ignore (install_exn ~base_path:config.base_path);
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -1089,7 +1096,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir name;
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1100,7 +1107,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
@@ -1153,14 +1160,14 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
   let name = "restart-missing-meta-metric-keeper" in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let meta = make_meta name in
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
@@ -1214,7 +1221,7 @@ let test_restart_denies_persisted_dead_tombstone () =
   let name = "restart-dead-tombstone-admission" in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1233,7 +1240,7 @@ let test_restart_denies_persisted_dead_tombstone () =
       (match Keeper_meta_store.write_meta config dead_meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name active_meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name active_meta in
       resolve_done_for_test reg (`Crashed "crash before terminal persist");
       Reg.restore_supervisor_state
         ~base_path:config.base_path
@@ -1304,7 +1311,7 @@ let with_reap_ready_dead_keeper name f =
       Subprocess_registry.reset_for_testing ();
       Masc.Keeper_process_switch.For_testing.clear ();
       KLH.reset_for_testing ();
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1314,7 +1321,7 @@ let with_reap_ready_dead_keeper name f =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      ignore (Reg.register ~base_path:config.base_path name meta);
+      ignore (Reg.For_testing.register ~base_path:config.base_path name meta);
       Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
       let completion_bus = Agent_sdk.Event_bus.create () in
       Masc_event_bus.set completion_bus;
@@ -1410,7 +1417,7 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1421,7 +1428,7 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1471,7 +1478,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1484,7 +1491,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       (match
          Lane.reject_before_start reg.lane ~reason:(Failure "pre-claimed for test")
        with
@@ -1527,7 +1534,7 @@ let test_fork_rejection_preserves_replacement_lane () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1535,13 +1542,13 @@ let test_fork_rejection_preserves_replacement_lane () =
       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
       let name = "fork-reject-replacement" in
       let meta = make_meta name in
-      let rejected = Reg.register ~base_path:config.base_path name meta in
+      let rejected = Reg.For_testing.register ~base_path:config.base_path name meta in
       (match
          Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
        with
        | Ok () -> ()
        | Error error -> fail (Lane.start_error_to_string error));
-      let replacement = Reg.register ~base_path:config.base_path name meta in
+      let replacement = Reg.For_testing.register ~base_path:config.base_path name meta in
       let ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = supervisor_agent_name
@@ -1580,7 +1587,7 @@ let test_fork_rejection_unregisters_non_terminalizable_owner () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1588,7 +1595,7 @@ let test_fork_rejection_unregisters_non_terminalizable_owner () =
       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
       let name = "fork-reject-terminal-owner" in
       let meta = make_meta name in
-      let rejected = Reg.register ~base_path:config.base_path name meta in
+      let rejected = Reg.For_testing.register ~base_path:config.base_path name meta in
       Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
       (match
          Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
@@ -1625,7 +1632,7 @@ let test_sweep_waits_for_lane_join_before_unregister () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1633,7 +1640,7 @@ let test_sweep_waits_for_lane_join_before_unregister () =
       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
       let name = "joined-before-unregister" in
       let meta = make_meta name in
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Stop_requested);
       ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Drain_complete);
       ignore (Reg.resolve_done reg ~source:"test_unjoined_terminal" `Stopped);
@@ -1675,7 +1682,7 @@ let test_idle_duration_never_stops_keeper () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1700,8 +1707,8 @@ let test_idle_duration_never_stops_keeper () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
-      Reg.set_started_at_for_test
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
+      Reg.For_testing.set_started_at_for_test
         ~base_path:config.base_path
         name
         (Unix.time () -. 3600.0);
@@ -1752,7 +1759,7 @@ let test_non_storm_crashed_restarts_normally () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1764,7 +1771,7 @@ let test_non_storm_crashed_restarts_normally () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:50 ~last_restart_ts:0.0 ~crash_log:[];
@@ -1813,7 +1820,7 @@ let test_persisted_blocker_survives_unregister () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Reg.clear ();
+      Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1834,7 +1841,7 @@ let test_persisted_blocker_survives_unregister () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let reg = Reg.register ~base_path:config.base_path name meta in
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "observed failure");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
@@ -1866,7 +1873,7 @@ let test_persisted_blocker_survives_unregister () =
        | Error err -> fail ("read_meta failed: " ^ err));
       
       (* Unregister the keeper *)
-      Reg.unregister ~base_path:config.base_path name;
+      Reg.For_testing.unregister ~base_path:config.base_path name;
       
       (* Read again and verify *)
       (match Keeper_meta_store.read_meta config name with

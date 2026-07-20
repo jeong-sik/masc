@@ -87,10 +87,57 @@ let test_nonempty_live_meta_still_reports_profile_override () =
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 
+(* SSOT: last_compaction_decision null-guard policy (issue #25323). Extracted to
+   Keeper_meta_contract.compaction_decision_json_or_null and reused by
+   keeper_status.ml / dashboard_http_keeper.ml. Pin the policy so the guard can't
+   silently diverge across projection sites again. Counterfactual: dropping the
+   [String.trim = ""] guard turns the empty/whitespace cases red. *)
+let test_compaction_decision_empty_is_null () =
+  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "" in
+  Alcotest.(check bool)
+    "empty decision serializes to `Null"
+    true
+    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
+;;
+
+let test_compaction_decision_whitespace_is_null () =
+  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "   " in
+  Alcotest.(check bool)
+    "whitespace-only decision serializes to `Null"
+    true
+    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
+;;
+
+let test_compaction_decision_value_is_string () =
+  let d =
+    Keeper_meta_contract.compaction_runtime_decision_of_string "provider_overflow"
+  in
+  Alcotest.(check bool)
+    "non-empty decision serializes to `String"
+    true
+    (Keeper_meta_contract.compaction_decision_json_or_null d
+     = `String "provider_overflow")
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
     [
+      ( "last_compaction_decision null-guard SSOT",
+        [
+          Alcotest.test_case
+            "empty decision -> `Null"
+            `Quick
+            test_compaction_decision_empty_is_null;
+          Alcotest.test_case
+            "whitespace decision -> `Null"
+            `Quick
+            test_compaction_decision_whitespace_is_null;
+          Alcotest.test_case
+            "value decision -> `String"
+            `Quick
+            test_compaction_decision_value_is_string;
+        ] );
       ( "profile default override provenance",
         [
           Alcotest.test_case

@@ -22,9 +22,7 @@ let print_summary () =
   Log.Env.info "Autonomy: quiet_hours=%d-%d"
     Env_config_runtime_services.Autonomy.quiet_start
     Env_config_runtime_services.Autonomy.quiet_end;
-  Log.Env.info "AgentSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f"
-    Env_config_runtime_services.AgentSelection.max_starvation_ticks
-    Env_config_runtime_services.AgentSelection.thompson_weight
+  Log.Env.info "AgentSelection: decay=%.2f"
     Env_config_runtime_services.AgentSelection.vote_decay_factor;
   Log.Env.info "KeeperBootstrap: enabled=%b stale_turn=%.0fs max_scan=%d"
     Env_config_keeper.KeeperBootstrap.enabled

@@ -634,7 +634,7 @@ let run_keeper_cycle
                      | None -> (goal_id, ""))
                    meta.active_goal_ids
                in
-               let system_prompt, user_message =
+               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
@@ -679,10 +679,14 @@ let run_keeper_cycle
                let build_turn_prompt ~base_system_prompt:_ ~messages:_
                  : Keeper_agent_run.turn_prompt
                  =
-                 (* Unified path already places soft context (continuity, worktree)
-           in the user_message via Keeper_unified_prompt.build_prompt.
-           No dynamic_context needed here. *)
-                 { system_prompt; dynamic_context = "" }
+                 (* The observation frame rides [dynamic_context]: rebuilt fresh
+                    every turn and composed into the per-turn system prompt, so
+                    it never enters the persisted OAS conversation. Persisting
+                    it as a user message re-fed the model its own observations
+                    (943/945 identical frames in one live checkpoint, #25193)
+                    and starved compaction. Persisted user content is utterances
+                    only (wake marker + HITL resolutions). *)
+                 { system_prompt; dynamic_context = world_state }
                in
                (* 5. Run via OAS Agent.run() with transient-error retry.
                   The turn-local OAS Event_bus preserves factual
@@ -999,7 +1003,9 @@ let run_keeper_cycle
                      with
                      | Some requested -> string_of_int requested
                      | None -> "none")
-                    (String.length system_prompt + String.length user_message)
+                    (String.length system_prompt
+                     + String.length world_state
+                     + String.length user_message)
                     latency_ms
                     (if is_server_parse_rejection
                      then " (server parse rejection, auto-recoverable)"

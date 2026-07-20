@@ -226,34 +226,23 @@ stateDiagram-v2
 - 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Compaction Policy
+### 4.3 Compaction Runtime
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Check
-  Check --> Blocked : ratio < ratio_gate AND messages < message_gate AND tokens < token_gate
-  Check --> CooldownHold : continuity_reflection 쿨다운 미충족
-  Check --> LlmPlan : threshold 초과 + 쿨다운 충족
+  [*] --> Requested : typed Compaction_started 또는 provider overflow
+  Requested --> LlmPlan : owner Keeper lane
   LlmPlan --> Apply : configured LLM의 유효한 plan
-  LlmPlan --> Preserve : runtime/plan 오류 또는 deterministic mode
+  LlmPlan --> Preserve : runtime/plan 오류
   Apply --> [*] : LLM plan이 만든 context
   Preserve --> [*] : 원문 checkpoint 유지
-  Blocked --> [*]
-  CooldownHold --> [*]
 ```
 
 MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
-실제 provider context-window compaction과 overflow retry는 OAS가 소유하며,
-MASC의 post-turn 경로는 configured LLM plan만 선택적으로 적용한다.
-
-Compaction profile별 gate 기본값:
-
-| Profile | ratio_gate | message_gate | token_gate |
-|---------|-----------|--------------|------------|
-| `aggressive` | 0.35 | 120 | 60,000 |
-| `balanced` | 0.50 | 240 | 120,000 |
-| `conservative` | 0.70 | 480 | 250,000 |
-| `custom` | env 기반 | env 기반 | env 기반 |
+MASC는 typed compaction stimulus와 provider overflow를 Keeper owner lane에서
+처리하고 configured LLM plan만 적용한다. OAS는 model call과 provider 오류를
+typed 결과로 전달하며, MASC의 compaction profile이나 ratio/message/token gate를
+알지 않는다.
 
 ### 4.4 Deliberation Pipeline
 

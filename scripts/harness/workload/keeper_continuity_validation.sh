@@ -31,8 +31,6 @@ HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-20}"
 HEARTBEAT_WAIT_SEC="${HEARTBEAT_WAIT_SEC:-15}"
 PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
-KEEPER_COMPACTION_RATIO_GATE="${KEEPER_COMPACTION_RATIO_GATE:-0.10}"
-KEEPER_COMPACTION_MESSAGE_GATE="${KEEPER_COMPACTION_MESSAGE_GATE:-2}"
 
 SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
@@ -530,17 +528,11 @@ create_keeper() {
     --arg goal "Validate real keeper continuity under isolated load." \
     --arg instructions "모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
     --arg runtime_id "$KEEPER_RUNTIME_NAME" \
-    --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
-    --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
     '{
       name:$name,
       goal:$goal,
       instructions:$instructions,
       proactive_enabled:false,
-      compaction_profile:"custom",
-      compaction_ratio_gate:$compaction_ratio_gate,
-      compaction_message_gate:$compaction_message_gate,
-      compaction_token_gate:0,
       drift_enabled:false
     } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60

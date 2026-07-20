@@ -236,6 +236,15 @@ let retry_class_label = function
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
 
+let retry_class_of_label = function
+  | "rate_limited" -> Some Rate_limited
+  | "hard_quota" -> Some Hard_quota
+  | "capacity_backpressure" -> Some Capacity_backpressure
+  | "server_error" -> Some Server_error
+  | "network_transient" -> Some Network_transient
+  | "provider_timeout" -> Some Provider_timeout
+  | _ -> None
+
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
   | Model_unavailable -> "model_unavailable"
@@ -244,6 +253,16 @@ let rotate_class_label = function
   | Runtime_exhausted -> "runtime_exhausted"
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
+
+let rotate_class_of_label = function
+  | "auth_failed" -> Some Auth_failed
+  | "model_unavailable" -> Some Model_unavailable
+  | "resumable_cli_session" -> Some Resumable_cli_session
+  | "candidates_filtered" -> Some Candidates_filtered
+  | "runtime_exhausted" -> Some Runtime_exhausted
+  | "no_progress_empty" -> Some No_progress_empty
+  | "no_progress_thinking_only" -> Some No_progress_thinking_only
+  | _ -> None
 
 let judgment_class_label = function
   | Deterministic_request -> "deterministic_request"

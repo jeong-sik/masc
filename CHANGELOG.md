@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.21.0] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.216.5` to `v0.217.1` (`8147cfc7` chain). Absorbs the 0.217.0 breaking change — streaming rejects malformed tool-call batches whole-batch (oas#2702) — plus resume totality over crash-reachable journal states (oas#2713/oas#2715), overflow wire finish_reason decoding (oas#2703), finite retry_after parsing (oas#2708), admission-warning URL sanitisation (oas#2706), Kimi native token-count admission (oas#2705), admission-SSOT projected input (oas#2707), exact provider turn identity (oas#2709), and typed rejection of unencodable explicit thinking (oas#2716).
+- Runtime prep for oas#2716: the deployment `oas-models-overlay.toml` now declares `thinking_control_format = "none"` + `supports_reasoning = true` for the OpenAI-compatible `ollama_cloud` rows (`kimi-k2.6`, `minimax-m3`, `deepseek-v4-pro`), so `enable_thinking=true` keeper turns admit as declared-inherent reasoning instead of failing with `Enable_not_encodable` on the /v1 wire (2026-07-20 flip-risk audit).
+
 ### Fixed
 - CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
 - The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.

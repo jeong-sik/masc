@@ -164,10 +164,28 @@ and recovery_record_error_kind =
   | Recovery_source_cleanup_failed
   | Recovery_entry_exception of string
 
+(** A keeper lane could not be acquired within the liveness floor. The lane is
+    still held by an in-flight durable write, which keeps it deliberately: the
+    lane mutex is the only serialiser of writes to a record path, so releasing
+    it mid-write would let a stale write rename over a newer record (RFC-0348
+    §2). Acquisition failure itself wrote nothing. *)
+type lane_unavailable =
+  { waited_s : float
+  ; floor_s : float
+  }
+
+val lane_unavailable_to_string : lane_unavailable -> string
+
 type submit_error =
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
+  | Submit_lane_unavailable of lane_unavailable
+      (** A keeper lane stayed held past the liveness floor because a durable
+          write for that keeper is still in flight. Distinct from
+          {!Initial_persistence_failed}: nothing was written on this path, so
+          the request is unambiguously unpublished and needs no
+          reconciliation. *)
   | Acceptance_persistence_failed of
       { request_id : string
       ; reason : string
@@ -461,4 +479,15 @@ module For_testing : sig
   val active_switch_count : unit -> int
   val persistence_lane_observation : unit -> int * int * int
   val persistence_lane_samples : unit -> Otel_metrics.sample list
+
+  val bounded_lane_gate
+    :  floor_s:float
+    -> Eio.Mutex.t
+    -> (unit -> 'a)
+    -> ('a, lane_unavailable) result
+  (** The bounded lane acquisition used by every keeper lane, exposed so the
+      floor can be exercised without a 60 s wait. Pure with respect to module
+      state: it takes the mutex it is given and installs no overrides. *)
+
+  val lane_acquire_floor_seconds : float
 end

@@ -144,10 +144,28 @@ and recovery_record_error_kind =
   | Recovery_source_cleanup_failed
   | Recovery_entry_exception of string
 
+type lane_unavailable =
+  { waited_s : float
+  ; floor_s : float
+  }
+
+let lane_unavailable_to_string { waited_s; floor_s } =
+  Printf.sprintf
+    "keeper lane unavailable after %.1fs (floor %.1fs); a durable write for \
+     this keeper is still in flight"
+    waited_s
+    floor_s
+;;
+
 type submit_error =
   | Submit_rejected of access_rejection
   | Submit_invalid_keeper_name of { reason : string }
   | Initial_persistence_failed of { reason : string }
+  (* A keeper lane stayed held past the liveness floor because a durable write
+     for that keeper is still in flight. Kept separate from
+     [Initial_persistence_failed] so operators can tell a wedged lane from a
+     disk error: nothing was written, so there is nothing to reconcile. *)
+  | Submit_lane_unavailable of lane_unavailable
   | Acceptance_persistence_failed of
       { request_id : string
       ; reason : string
@@ -410,21 +428,66 @@ let elapsed_seconds started =
   Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
 ;;
 
-let with_lane_gate ~on_wait mutex f =
-  let acquired_without_wait = Eio.Mutex.try_lock mutex in
-  if not acquired_without_wait
-  then (
-    on_wait ();
-    Eio.Mutex.lock mutex);
+(* A hung durable write keeps its lane until the write returns. That is the
+   exclusion invariant the lane exists to provide, not a defect to fix: the lane
+   mutex is the only serialiser of writes to a record path (no generation, CAS,
+   or version comparison runs before [Unix.rename]), so releasing it while a
+   write is in flight would let a write that started earlier and finished later
+   rename over a newer record. What must not be unbounded is every *later*
+   caller's wait for that lane. RFC-0348 §2 records the rejected alternative. *)
+let lane_acquire_floor_seconds = 60.0
+
+(* Bounded acquisition polls instead of racing [Eio.Mutex.lock] under
+   [Fiber.first]. [Fiber.first] cancels the loser, and [Eio.Mutex] offers no way
+   to observe whether a cancelled waiter had already taken the lock — that race
+   would leak the very lane this bound protects. Polling carries no such
+   ambiguity: the lock is either held by this fiber or it is not. *)
+let lane_acquire_poll_interval_seconds = 0.05
+
+let hold_lane_gate mutex f =
   (* A started durable systhread cannot be cancelled. Keep the lane held until
      its transaction and lock release finish. Deliberately do not re-check the
      parent cancellation here: the caller must first settle the committed
      receipt/status, matching [Keeper_event_queue_owner_lock.with_durable_lock]. *)
   (* fun-protect-finally-ok: [Eio.Mutex.unlock] is non-suspending and releases
-     only the lane gate acquired immediately above. *)
+     only the lane gate acquired by the caller. *)
   Fun.protect
     ~finally:(fun () -> Eio.Mutex.unlock mutex)
     (fun () -> Eio.Cancel.protect f)
+;;
+
+let with_lane_gate ~on_wait ?(floor_s = lane_acquire_floor_seconds) mutex f =
+  if Eio.Mutex.try_lock mutex
+  then Ok (hold_lane_gate mutex f)
+  else (
+    on_wait ();
+    match Eio_context.get_clock_opt () with
+    | None ->
+      (* No ambient clock, so the wait cannot be bounded here. Server bootstrap
+         installs one via [Eio_context.set_clock]; reaching this branch means
+         some other embedding (a tool, or a test that skipped the context) is
+         driving keeper lanes, and for those the pre-existing blocking
+         behaviour is kept rather than rejecting a caller that would otherwise
+         have succeeded. Logged rather than silent: this is the one path where
+         the liveness floor does not apply. *)
+      Log.Keeper.warn
+        "keeper_msg_async: lane acquisition unbounded, no Eio clock in context";
+      Eio.Mutex.lock mutex;
+      Ok (hold_lane_gate mutex f)
+    | Some clock ->
+      let started = Mtime_clock.now () in
+      let rec acquire () =
+        if Eio.Mutex.try_lock mutex
+        then Ok (hold_lane_gate mutex f)
+        else (
+          let waited_s = elapsed_seconds started in
+          if Float.compare waited_s floor_s >= 0
+          then Error { waited_s; floor_s }
+          else (
+            Eio.Time.sleep clock lane_acquire_poll_interval_seconds;
+            acquire ()))
+      in
+      acquire ())
 ;;
 
 let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
@@ -474,8 +537,9 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
           in
           `Persistence (outcome, elapsed_seconds started))
     with
-    | `Unobserved value -> value
-    | `Persistence (outcome, elapsed) ->
+    | Error _ as unavailable -> unavailable
+    | Ok (`Unobserved value) -> Ok value
+    | Ok (`Persistence (outcome, elapsed)) ->
       (* Keep blocking metrics-store work outside the per-Keeper persistence
          gate. The transaction outcome and elapsed time were captured while
          holding the gate, and [with_lane_gate] has released it before this
@@ -485,7 +549,7 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
         let (_ : int) = Atomic.fetch_and_add persistence_lane_in_flight (-1) in
         Otel_metric_store.observe_histogram persistence_lane_duration_metric elapsed);
       (match outcome with
-       | Lane_lock_returned value -> value
+       | Lane_lock_returned value -> Ok value
        | Lane_lock_raised (exn, backtrace) ->
          Printexc.raise_with_backtrace exn backtrace)
   in
@@ -697,6 +761,13 @@ let submit_error_to_json = function
     `Assoc
       [ "error", `String "request_persistence_failed"
       ; "message", `String reason
+      ]
+  | Submit_lane_unavailable ({ waited_s; floor_s } as lane) ->
+    `Assoc
+      [ "error", `String "keeper_lane_unavailable"
+      ; "message", `String (lane_unavailable_to_string lane)
+      ; "waited_s", `Float waited_s
+      ; "floor_s", `Float floor_s
       ]
   | Acceptance_persistence_failed { request_id; reason } ->
     `Assoc
@@ -1131,6 +1202,11 @@ type write_failure =
 type persist_error =
   | Write_failed of write_failure
   | Integrity_failed of persist_integrity_error
+  (* The persistence lane could not be acquired within the liveness floor: a
+     durable write for this keeper is still in flight. Nothing was written on
+     this path — no temp file, no rename — so this is unambiguously
+     unpublished and must never be reconciled or rolled back. *)
+  | Lane_unavailable of lane_unavailable
 
 let persist_integrity_error_to_string = function
   | Unsafe_request_id -> "request_id is unsafe for persistence"
@@ -1149,12 +1225,15 @@ let persist_error_to_string = function
   | Write_failed (Not_published error | Published_uncertain error) ->
     Keeper_fs.durable_write_error_to_string error
   | Integrity_failed error -> persist_integrity_error_to_string error
+  | Lane_unavailable lane -> lane_unavailable_to_string lane
 ;;
 
 let persist_error_published = function
   | Write_failed (Not_published _) -> false
   | Write_failed (Published_uncertain _) -> true
   | Integrity_failed _ -> false
+  (* Acquisition failed before any write was attempted. *)
+  | Lane_unavailable _ -> false
 ;;
 
 let save_entry_durable ~ops path (entry : entry) =
@@ -1234,10 +1313,11 @@ let with_entry_persistence_transaction (entry : entry) f =
   match Keeper_id.Keeper_name.of_string entry.keeper_name with
   | Error reason -> Error (Integrity_failed (Invalid_keeper_name reason))
   | Ok keeper_name ->
-    with_keeper_persistence_lock
-      ~base_path:entry.base_path
-      ~keeper_name
-      f
+    (match
+       with_keeper_persistence_lock ~base_path:entry.base_path ~keeper_name f
+     with
+     | Ok result -> result
+     | Error lane -> Error (Lane_unavailable lane))
 ;;
 
 let persist_entry ~ops ?source_path (entry : entry) =
@@ -2031,11 +2111,13 @@ let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) re
       ; durability = Volatile_persistence_failure
       ; origin = Transition_commit
       }
-  | Error (Write_failed (Not_published _)) ->
+  | Error (Write_failed (Not_published _)) | Error (Lane_unavailable _) ->
     (* The durable row still contains the previous non-terminal status. Keep
        an explicit volatile terminal overlay in this process so polling cannot
        hang indefinitely; restart recovery later converts the stale durable
-       row to typed [Lost]. *)
+       row to typed [Lost]. [Lane_unavailable] shares this arm because it
+       leaves the same on-disk state: acquisition failed before any temp file
+       or rename, so nothing was published. *)
     publish_if_owned key transition_lock failure_entry;
     Status_settlement
       { entry = failure_entry
@@ -2116,6 +2198,17 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                 transition_lock
                 updated
                 (Keeper_fs.durable_write_error_to_string error))
+         | Error (Lane_unavailable lane) ->
+           (* Same on-disk state as [Not_published] — acquisition failed before
+              any write — so it takes the same settlement path, carrying a
+              reason that names the wedged lane rather than a disk error. *)
+           Some
+             (persist_failure_locked
+                ~ops
+                key
+                transition_lock
+                updated
+                (lane_unavailable_to_string lane))
          | Error (Integrity_failed _) ->
            Some
              (project_canonical_integrity_failure_locked
@@ -2170,7 +2263,8 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
      | Error reason -> Error (Submit_invalid_keeper_name { reason })
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
-    with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
+    (match
+       with_keeper_submission_lock ~base_path ~keeper_name:keeper_name_id (fun () ->
     match reserve_new_request ~ops ~base_path ~submitted_by ~keeper_name with
     | Error rejection -> Error (Submit_rejected rejection)
     | Ok (request_id, entry, key, transition_lock) ->
@@ -2181,6 +2275,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
         }
     in
     let initial_persistence =
+      match
       with_keeper_persistence_lock
         ~base_path
         ~keeper_name:keeper_name_id
@@ -2225,9 +2320,19 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
                               reason
                               (Keeper_fs.durable_remove_error_to_string
                                  rollback_error)))))
-              | Write_failed (Not_published _) | Integrity_failed _ ->
+              | Write_failed (Not_published _)
+              | Integrity_failed _
+              | Lane_unavailable _ ->
                 remove_runtime_if_owned key transition_lock;
                 `Settled (Error (Initial_persistence_failed { reason }))))
+      with
+      | Ok outcome -> outcome
+      | Error { waited_s; floor_s } ->
+        (* Acquisition failed, so no temp file was created and no rename ran:
+           there is nothing to roll back and no uncertain publication. Drop the
+           reservation and reject, the same shape as [Not_published]. *)
+        remove_runtime_if_owned key transition_lock;
+        `Settled (Error (Submit_lane_unavailable { waited_s; floor_s }))
     in
     (match initial_persistence with
      | `Settled result -> result
@@ -2456,7 +2561,14 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
               Ok { request_id; acceptance = Durably_accepted }
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
-          background_start_failed (Printexc.to_string exn))))))
+          background_start_failed (Printexc.to_string exn)))))
+     with
+     | Ok result -> result
+     | Error { waited_s; floor_s } ->
+       (* The submission lane is still held by an in-flight durable write for
+          this keeper. No reservation was taken and nothing was written on this
+          path, so the caller is rejected outright with no reconciliation. *)
+       Error (Submit_lane_unavailable { waited_s; floor_s })))
 ;;
 
 let submit_with_request_id = submit_with_ops production_request_ops
@@ -2878,4 +2990,9 @@ module For_testing = struct
   ;;
   let persistence_lane_samples = persistence_lane_samples
 
+  let bounded_lane_gate ~floor_s mutex f =
+    with_lane_gate ~on_wait:(fun () -> ()) ~floor_s mutex f
+  ;;
+
+  let lane_acquire_floor_seconds = lane_acquire_floor_seconds
 end

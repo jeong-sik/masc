@@ -1847,6 +1847,8 @@
 
 (include stanzas/test_keeper_msg_async_durable_active_inventory.inc)
 
+(include stanzas/test_keeper_msg_async_lane_floor.inc)
+
 (include stanzas/test_turn_record.inc)
 
 (include stanzas/test_keeper_chat_coalescing.inc)

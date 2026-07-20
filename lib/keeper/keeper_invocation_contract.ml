@@ -298,6 +298,14 @@ let delegate_submission_error_to_json request = function
     `Assoc [ "error", `String "invalid_target"; "message", `String reason ]
   | Keeper_msg_async.Initial_persistence_failed { reason } ->
     `Assoc [ "error", `String "invocation_persistence_failed"; "message", `String reason ]
+  | Keeper_msg_async.Submit_lane_unavailable lane ->
+    (* Not [Publication_uncertain]: acquisition failed before any write, so the
+       invocation is definitively not published. *)
+    `Assoc
+      [ "error", `String "keeper_lane_unavailable"
+      ; "result_contract", `String (result_contract_to_string Failed)
+      ; "message", `String (Keeper_msg_async.lane_unavailable_to_string lane)
+      ]
   | Keeper_msg_async.Acceptance_persistence_failed { request_id; reason } ->
     `Assoc
       [ "error", `String "invocation_acceptance_uncertain"

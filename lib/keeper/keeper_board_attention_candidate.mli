@@ -174,7 +174,8 @@ val drain_pending_on_owner_lane :
       and terminal [Consumed] transitions then proceed idempotently from the
       committed judgments; they are not presented as a cross-file transaction.
     - Failure-evidence persistence errors propagate to the caller; they are
-      never reduced to logs. *)
+      never reduced to logs. Evidence for one attempted batch is committed in
+      one candidate-ledger rewrite or not committed at all. *)
 
 val batch_max_candidates : int
 (** Maximum candidates judged per model call. *)

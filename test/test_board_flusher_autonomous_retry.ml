@@ -196,6 +196,28 @@ let test_routing_recovery_resumes_on_replacement_owner () =
     Eio.Time.with_timeout_exn clock 1.0 (fun () -> Eio.Promise.await delivered))
 ;;
 
+let test_sse_hook_failure_boundary () =
+  let event =
+    Board_dispatch.Post_voted
+      { post_id = "sse-failure-boundary-post"
+      ; voter = "sse-failure-boundary-voter"
+      ; direction = Board.Up
+      }
+  in
+  Board_dispatch.set_board_sse_hook (fun _ ->
+    raise (Failure "forced observable SSE hook failure"));
+  Board_dispatch.emit_board_sse_event event;
+  Board_dispatch.set_board_sse_hook (fun _ -> raise Out_of_memory);
+  (match Board_dispatch.emit_board_sse_event event with
+   | exception Out_of_memory -> ()
+   | exception cause ->
+     Alcotest.failf
+       "expected Out_of_memory propagation, got %s"
+       (Printexc.to_string cause)
+   | () -> Alcotest.fail "Out_of_memory must not be suppressed as an SSE failure");
+  Board_dispatch.set_board_sse_hook (fun _ -> ())
+;;
+
 let () =
   Alcotest.run
     "board_flusher_autonomous_retry"
@@ -214,6 +236,12 @@ let () =
             "routing recovery resumes on replacement owner"
             `Quick
             test_routing_recovery_resumes_on_replacement_owner
+        ] )
+    ; ( "sse"
+      , [ Alcotest.test_case
+            "hook failure boundary"
+            `Quick
+            test_sse_hook_failure_boundary
         ] )
     ]
 ;;

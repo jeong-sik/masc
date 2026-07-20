@@ -92,16 +92,6 @@ val context_compacted
   -> phase:string
   -> Yojson.Safe.t
 
-val context_overflow_imminent
-  :  ts_unix:float
-  -> correlation_id:string
-  -> run_id:string
-  -> agent_name:string
-  -> estimated_tokens:int
-  -> limit_tokens:int
-  -> ratio:float
-  -> Yojson.Safe.t
-
 val context_compact_started
   :  ts_unix:float
   -> correlation_id:string

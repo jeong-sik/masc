@@ -257,8 +257,6 @@ let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "
    [Keeper_metrics.(to_string ProactiveOutcome)] classifies every scheduled
    autonomous cycle into tool_called | noop | error, giving a fleet-wide
    health ratio in Grafana. *)
-(* PR-B: keeper turn skipped due to ollama saturation pre-check.
-   Labelled by [keeper] and [runtime]. *)
 let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"

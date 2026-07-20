@@ -91,8 +91,6 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
       [ probe ("Inspect stop-requested keeper shutdown: " ^ reason)
       ; message ("Confirm keeper shutdown or supervisor reap: " ^ reason)
       ]
-    else if composite_execution_saturated execution && not stale_long_enough
-    then [ probe ("Inspect local runtime saturation: " ^ reason) ]
     else if idle_attention
     then
       [ probe ("Inspect idle composite: " ^ reason)

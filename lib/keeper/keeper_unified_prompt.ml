@@ -515,7 +515,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     ?(current_task : Masc_domain.task option)
     ?(active_goal_summaries : (string * string) list option)
     ~(observation : Keeper_world_observation.world_observation)
-    () : string * string
+    () : turn_prompt_parts
     =
   ignore base_path;
   (* Total deterministic resolution between two known instruction sources

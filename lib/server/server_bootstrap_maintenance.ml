@@ -306,9 +306,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       loop ());
   (* RFC-0247 §2.3: memory-os expiry sweep. Off the keeper hot path — every
      [interval]s it runs the deterministic per-keeper GC: facts whose explicit
-     [valid_until] has passed are removed and every other row is preserved.
-     Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Per-keeper
-     fibers run in parallel. *)
+     [valid_until] has passed are removed and every other row is preserved, and
+     episode files past their explicit [valid_until] are deleted under the
+     episode-bundle lock. Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the
+     kill switch. Per-keeper fibers run in parallel. *)
   if Env_config.KeeperMemoryOs.gc_enabled () then
     fork_logged_fiber
       ~sw
@@ -337,15 +338,46 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             keeper_id
             (Printexc.to_string exn)
       in
+      (* Episode-store sweep, same discipline as [gc_one]: only episodes past
+         their explicit [valid_until] are deleted; a corrupt episode store
+         fails loud here and is left untouched. *)
+      let gc_episodes_one keeper_id () =
+        try
+          let report =
+            Keeper_memory_os_gc.run_episode_gc ~keeper_id ~now:(Time_compat.now ()) ()
+          in
+          if report.Keeper_memory_os_gc.episodes_expired > 0
+          then
+            Log.Server.info
+              "memory_os_gc: keeper=%s episodes_expired=%d episodes_deleted=%d"
+              keeper_id
+              report.episodes_expired
+              report.episodes_deleted
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Server.warn
+            "memory_os_gc: keeper=%s episode sweep crashed: %s"
+            keeper_id
+            (Printexc.to_string exn)
+      in
       let rec loop () =
+        (* Union of fact-store ids and episode-store ids: a keeper whose
+           episodes all carried zero claims has no [*.facts.jsonl] but still
+           accumulates episode files. *)
         let keeper_ids =
           List.filter
             (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-            (Keeper_memory_os_io.list_fact_store_keeper_ids ())
+            (List.sort_uniq
+               String.compare
+               (Keeper_memory_os_io.list_fact_store_keeper_ids ()
+                @ Keeper_memory_os_io.list_episode_store_keeper_ids ()))
         in
         Eio.Fiber.all
           (List.map
-             (fun keeper_id () -> gc_one keeper_id ())
+             (fun keeper_id () ->
+                gc_one keeper_id ();
+                gc_episodes_one keeper_id ())
              keeper_ids);
         Eio.Time.sleep clock interval;
         loop ()

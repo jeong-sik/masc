@@ -1049,6 +1049,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
@@ -1212,6 +1215,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))

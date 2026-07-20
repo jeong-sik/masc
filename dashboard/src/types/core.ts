@@ -133,6 +133,33 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
+/**
+ * RFC-0000 §3.1 board attachment carrier — the wire shape of one entry in
+ * `meta.attachments` (OCaml `Board_attachment_meta`). `kind` is a closed set.
+ */
+export type BoardAttachmentKind = 'image' | 'video' | 'youtube' | 'external_link'
+
+export interface BoardAttachment {
+  id: string
+  kind: BoardAttachmentKind
+  origin_url: string
+  origin_name: string
+  origin_size_bytes: number
+  mime_type: string
+  width: number | null
+  height: number | null
+  created_at: number
+}
+
+/**
+ * Decode result for one raw `meta.attachments` entry. Entries that fail the
+ * typed wire contract are kept as `{ ok: false }` so surfaces render an
+ * explicit failure card instead of silently skipping them.
+ */
+export type BoardAttachmentDecode =
+  | { ok: true; attachment: BoardAttachment }
+  | { ok: false; raw: unknown }
+
 export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
@@ -180,6 +207,7 @@ export interface BoardPost {
   body: string
   content: string
   meta?: BoardPostMeta | null
+  attachments?: BoardAttachmentDecode[]
   tags: string[]
   votes: number | null
   vote_balance?: number | null

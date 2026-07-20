@@ -1145,3 +1145,113 @@ describe('board context inference', () => {
     )
   })
 })
+
+// ================================================================
+// board attachments decode (RFC-0000 §3.1)
+// ================================================================
+
+describe('board attachments decode', () => {
+  function stubBoardResponse(meta: unknown) {
+    const rawResponse = {
+      posts: [
+        {
+          id: 'post-att',
+          author: 'analyst',
+          title: 'With attachments',
+          body: 'body',
+          created_at: 1_713_000_000,
+          updated_at: 1_713_000_000,
+          meta,
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function attachmentEntry(kind: string, overrides: Record<string, unknown> = {}) {
+    return {
+      id: `a-${kind}`,
+      kind,
+      origin_url: 'https://cdn.example.com/a.png',
+      origin_name: 'a.png',
+      origin_size_bytes: 128,
+      mime_type: 'image/png',
+      width: 640,
+      height: null,
+      created_at: 1_714_989_600,
+      ...overrides,
+    }
+  }
+
+  it('decodes all four attachment kinds into typed entries', async () => {
+    stubBoardResponse({
+      attachments: [
+        attachmentEntry('image'),
+        attachmentEntry('video', { origin_url: 'https://cdn.example.com/b.mp4', mime_type: 'video/mp4' }),
+        attachmentEntry('youtube', { origin_url: 'https://youtu.be/abc123def45', width: null }),
+        attachmentEntry('external_link', { origin_url: 'https://example.com/spec' }),
+      ],
+    })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(4)
+    expect(attachments?.map(entry => entry.ok)).toEqual([true, true, true, true])
+    const first = attachments?.[0]
+    expect(first).toMatchObject({
+      ok: true,
+      attachment: {
+        id: 'a-image',
+        kind: 'image',
+        origin_url: 'https://cdn.example.com/a.png',
+        origin_size_bytes: 128,
+        width: 640,
+        height: null,
+      },
+    })
+    expect(attachments?.[3]).toMatchObject({
+      ok: true,
+      attachment: { kind: 'external_link', origin_url: 'https://example.com/spec' },
+    })
+  })
+
+  it('keeps entries that fail the wire contract as explicit decode failures', async () => {
+    stubBoardResponse({
+      attachments: [
+        attachmentEntry('image'),
+        { id: 'a-broken', kind: 'image' },
+        attachmentEntry('hologram'),
+      ],
+    })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(3)
+    expect(attachments?.[0]?.ok).toBe(true)
+    expect(attachments?.[1]).toMatchObject({ ok: false, raw: { id: 'a-broken', kind: 'image' } })
+    expect(attachments?.[2]?.ok).toBe(false)
+  })
+
+  it('treats a non-array attachments carrier as one explicit decode failure', async () => {
+    stubBoardResponse({ attachments: 'not-a-list' })
+
+    const result = await fetchBoard()
+    const attachments = result.posts[0]?.attachments
+    expect(attachments).toHaveLength(1)
+    expect(attachments?.[0]).toMatchObject({ ok: false, raw: 'not-a-list' })
+  })
+
+  it('leaves attachments undefined when meta has no carrier', async () => {
+    stubBoardResponse({ source: 'keeper' })
+
+    const result = await fetchBoard()
+    expect(result.posts[0]?.attachments).toBeUndefined()
+  })
+})

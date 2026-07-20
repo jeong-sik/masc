@@ -60,7 +60,7 @@ let is_error_json raw =
 (* ── find_registry_meta tests ─────────────────────────────────────────── *)
 
 let test_find_registry_meta_missing () =
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let before = counter_value ~source_layer:"test_layer" ~field:"registry_missing" in
   let result =
     KES.find_registry_meta ~keeper_name:"nonexistent-keeper" ~source_layer:"test_layer"
@@ -72,7 +72,7 @@ let test_find_registry_meta_missing () =
 ;;
 
 let test_find_registry_meta_mismatch () =
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let base = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
@@ -84,7 +84,7 @@ let test_find_registry_meta_mismatch () =
        in
        (* Register under a different name than meta.name. The registry repairs
           this at insert time, so the lookup layer should not see live drift. *)
-       ignore (Keeper_registry.register ~base_path:base "alias-name" meta);
+       ignore (Keeper_registry.For_testing.register ~base_path:base "alias-name" meta);
        let before = counter_value ~source_layer:"test_layer" ~field:"name_mismatch" in
        let result =
          KES.find_registry_meta ~keeper_name:"alias-name" ~source_layer:"test_layer"
@@ -103,13 +103,13 @@ let test_find_registry_meta_mismatch () =
 ;;
 
 let test_find_registry_meta_match () =
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let base = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let meta = make_meta "matched-name" in
-       ignore (Keeper_registry.register ~base_path:base "matched-name" meta);
+       ignore (Keeper_registry.For_testing.register ~base_path:base "matched-name" meta);
        let before_missing =
          counter_value ~source_layer:"test_layer" ~field:"registry_missing"
        in
@@ -131,7 +131,7 @@ let test_find_registry_meta_match () =
 (* ── with_registry_meta tests ─────────────────────────────────────────── *)
 
 let test_with_registry_meta_missing () =
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let result =
     KES.with_registry_meta ~keeper_name:"missing-keeper" ~source_layer:"test_layer"
       (fun _meta -> {|{"ok":true}|})
@@ -140,13 +140,13 @@ let test_with_registry_meta_missing () =
 ;;
 
 let test_with_registry_meta_match () =
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let base = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let meta = make_meta "found-keeper" in
-       ignore (Keeper_registry.register ~base_path:base "found-keeper" meta);
+       ignore (Keeper_registry.For_testing.register ~base_path:base "found-keeper" meta);
        let result =
          KES.with_registry_meta ~keeper_name:"found-keeper" ~source_layer:"test_layer"
            (fun meta -> Printf.sprintf {|{"ok":true,"name":"%s"}|} meta.name)

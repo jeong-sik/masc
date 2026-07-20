@@ -111,7 +111,7 @@ let with_temp_masc_dir ?(keeper_names = [ "operator" ]) f =
   Fun.protect
     ~finally:(fun () ->
       ignore (Workspace.reset config);
-      Reg.clear ();
+      Reg.For_testing.clear ();
       KR.reset_test_state base;
       restore_env "MASC_CONFIG_DIR" original_config_dir;
       Config_dir_resolver.reset ();

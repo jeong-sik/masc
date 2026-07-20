@@ -223,7 +223,7 @@ let setup ~sandbox f =
   ensure_dir config_dir;
   let config = Workspace.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
@@ -249,7 +249,7 @@ let setup_with_sandbox ~sandbox f =
   ensure_dir config_dir;
   let config = Workspace.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
@@ -279,11 +279,11 @@ let test_turn_sandbox_factory_uses_refreshed_registry_meta () =
     }
   in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
-  ignore (Keeper_registry.register ~base_path:config.Workspace.base_path meta.name docker_meta);
+  ignore (Keeper_registry.For_testing.register ~base_path:config.Workspace.base_path meta.name docker_meta);
   Fun.protect
     ~finally:(fun () ->
       Keeper_sandbox_factory.cleanup factory;
-      Keeper_registry.unregister ~base_path:config.Workspace.base_path meta.name)
+      Keeper_registry.For_testing.unregister ~base_path:config.Workspace.base_path meta.name)
   @@ fun () ->
   let docker_playground = Keeper_sandbox.host_root_abs_of_meta ~config docker_meta in
   match Keeper_sandbox_factory.resolve factory ~cwd:docker_playground with

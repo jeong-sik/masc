@@ -57,7 +57,7 @@ let setup f =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
   let config = Workspace.default_config base in
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"via-keeper" in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;

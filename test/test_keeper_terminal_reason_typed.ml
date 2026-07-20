@@ -797,12 +797,12 @@ let () =
       keeper_name
       (Some stale_provider_failure)
   in
-  Masc.Keeper_registry.clear ();
+  Masc.Keeper_registry.For_testing.clear ();
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
        ignore
-         (Masc.Keeper_registry.register
+         (Masc.Keeper_registry.For_testing.register
             ~base_path:config.base_path
             keeper_name
             meta);

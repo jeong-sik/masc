@@ -357,10 +357,6 @@ let set_started_at_for_test ~base_path name started_at =
       (registry_entry_validation_error_to_string err)
 ;;
 
-module For_testing = struct
-  let unsafe_put_entry = unsafe_put_entry
-end
-
 type wakeup_intent =
   | Reactive_signal
   | Scheduled_signal
@@ -1232,3 +1228,15 @@ let get_phase ~base_path name =
 
 (* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
    drain_board_events) moved to Keeper_registry_event_queue. *)
+
+module For_testing = struct
+  let unsafe_put_entry = unsafe_put_entry
+  let register = register
+  let unregister = unregister
+  let clear = clear
+  let reload_meta_from_disk = reload_meta_from_disk
+  let record_restart = record_restart
+  let set_started_at_for_test = set_started_at_for_test
+  let crash_log_of = crash_log_of
+  let board_wakeup_allowed = board_wakeup_allowed
+end

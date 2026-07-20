@@ -1182,6 +1182,18 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/audit-integrity" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let cache_key = Printf.sprintf "audit_integrity:%s" base_path in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Server_dashboard_http_audit_integrity.audit_integrity_http_json
+                 ~base_path))
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/gate" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in

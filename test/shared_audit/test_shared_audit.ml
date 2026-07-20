@@ -201,6 +201,50 @@ let test_store_verify_chain_detects_tampering () =
          because its prev_hash no longer matches. *)
       check bool "broken link reported" true (idx >= 2))
 
+let test_store_verify_empty_log () =
+  let dir = unique_temp_dir "audit_verify_empty" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let report = Store.verify store in
+    check int "no entries checked" 0 report.entries_checked;
+    check bool "no failure on empty log" true (report.failure = None))
+
+let test_store_verify_reports_intact_chain () =
+  let dir = unique_temp_dir "audit_verify_report_ok" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    for i = 1 to 4 do
+      let _ = Store.append store ~category:"V" ~payload:(`Int i) in ()
+    done;
+    let report = Store.verify store in
+    check int "all entries checked" 4 report.entries_checked;
+    check bool "no failure" true (report.failure = None))
+
+let test_store_verify_reports_on_disk_tampering () =
+  let dir = unique_temp_dir "audit_verify_report_broken" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let _ = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let e2 = Store.append store ~category:"X" ~payload:(`Int 2) in
+    (* Forge a third line whose prev_hash does not chain to e2. The line
+       lands in the same day-file as e2 so it is read after it. *)
+    let forged =
+      Env.make ~category:"X" ~payload:(`Int 3)
+        ~prev_hash:(Some (String.make 64 '0'))
+    in
+    let path = audit_path ~base_dir:dir ~ts:e2.ts in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
+    output_string oc (Yojson.Safe.to_string (Env.to_json forged));
+    output_char oc '\n';
+    close_out oc;
+    let report = Store.verify store in
+    check int "two links checked before break" 2 report.entries_checked;
+    match report.failure with
+    | Some (idx, reason) ->
+      check int "break at forged index" 2 idx;
+      check bool "reason non-empty" true (String.trim reason <> "")
+    | None -> fail "expected broken chain report")
+
 let test_store_resume_continues_chain () =
   let dir = unique_temp_dir "audit_resume" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -276,6 +320,9 @@ let () =
       test_case "since filters by timestamp" `Quick test_store_since_filters;
       test_case "verify_chain intact" `Quick test_store_verify_chain_intact;
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
+      test_case "verify empty log" `Quick test_store_verify_empty_log;
+      test_case "verify reports intact chain" `Quick test_store_verify_reports_intact_chain;
+      test_case "verify reports on-disk tampering" `Quick test_store_verify_reports_on_disk_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
       test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
       test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;

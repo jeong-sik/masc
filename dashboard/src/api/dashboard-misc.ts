@@ -192,6 +192,36 @@ export function fetchKeeperMemoryHealth(): Promise<KeeperMemoryHealthResponse> {
   return get<KeeperMemoryHealthResponse>('/api/v1/dashboard/keeper-memory-health')
 }
 
+// --- Audit Integrity ---
+// Backend: lib/server/server_dashboard_http_audit_integrity.ml
+// Route:   GET /api/v1/dashboard/audit-integrity
+// Read-only snapshot of the Shared_audit hash-chain verification over the
+// per-keeper resilience audit logs.
+
+export interface AuditIntegrityKeeperEntry {
+  keeper_id: string
+  entries: number
+  ok: boolean
+  broken_at: number | null
+  detail: string | null
+}
+
+export interface AuditIntegrityResponse {
+  generated_at: number
+  resilience_enabled: boolean
+  keepers: AuditIntegrityKeeperEntry[]
+  totals: {
+    keepers: number
+    entries: number
+    ok: number
+    failed: number
+  }
+}
+
+export function fetchAuditIntegrity(): Promise<AuditIntegrityResponse> {
+  return get<AuditIntegrityResponse>('/api/v1/dashboard/audit-integrity')
+}
+
 // --- Verification requests (Mission detail table) ---
 // Backend: lib/dashboard/dashboard_verification.ml
 // Route:   GET /api/v1/verification/requests?task_id=&limit=

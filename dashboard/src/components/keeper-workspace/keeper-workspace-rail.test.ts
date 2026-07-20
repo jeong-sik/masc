@@ -6,6 +6,7 @@ import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
 import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
+import { showToast } from '../common/toast'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
@@ -135,6 +136,11 @@ vi.mock('../../api/mcp', () => ({
 
 vi.mock('../common/confirm-dialog', () => ({
   requestConfirm: vi.fn().mockResolvedValue(true),
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
+  showActionToast: vi.fn(),
 }))
 
 function mkKeeper(partial: Partial<Keeper>): Keeper {
@@ -827,6 +833,55 @@ describe('KeeperWorkspaceRail', () => {
 
     await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
     expect(callMcpTool).not.toHaveBeenCalled()
+  })
+
+  it('shows a pending (not complete) toast when compaction is only enqueued', async () => {
+    // The real masc_keeper_compact ENQUEUES the request and returns
+    // {queued, queue_outcome}; it does NOT return before/after tokens. Enqueue is
+    // not completion — a queue stuck behind an unrecovered inflight turn stays
+    // pending, so the toast must say pending, never "완료".
+    vi.mocked(callMcpTool).mockResolvedValueOnce(
+      '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
+    )
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
+
+    // The compaction toast names the keeper; a later refresh toast does not, so
+    // filter by name to avoid asserting on the unrelated refresh notification.
+    await waitFor(() =>
+      expect(
+        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
+      ).toBe(true),
+    )
+    const compactCall = vi.mocked(showToast).mock.calls.find(
+      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
+    )
+    expect(compactCall?.[0]).toContain('예약됨')
+    expect(compactCall?.[0]).not.toContain('완료')
+    expect(compactCall?.[1]).toBe('warning')
+    // A request that only queued must not leave a phantom (null-token) snapshot.
+    expect(compactionSnapshots.value['masc-improver']).toBeUndefined()
+  })
+
+  it('reports completion only when the tool returns measured before/after tokens', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
+      ).toBe(true),
+    )
+    const compactCall = vi.mocked(showToast).mock.calls.find(
+      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
+    )
+    expect(compactCall?.[0]).toContain('완료')
+    expect(compactCall?.[1]).toBe('success')
+    // A measured compaction is recorded as a durable snapshot.
+    expect(compactionSnapshots.value['masc-improver']).toBeDefined()
   })
 
   it('opens the compaction inspector overlay from the context rail and hydrates durable snapshots', async () => {

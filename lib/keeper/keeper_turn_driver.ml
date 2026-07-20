@@ -114,6 +114,16 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry
+  else if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
+  then
+    (* A typed ContextOverflow is a per-candidate capacity bound, not a request
+       defect: a later lane candidate with a larger context window can still
+       serve the same turn. [sdk_error_to_http_error] folds it into a generic
+       HTTP 400 which [Runtime_attempt_fsm.should_try_next] treats as terminal,
+       so the typed error must be read before that mapping. Overflow on the
+       last candidate still returns the typed error, keeping the reactive
+       compaction trigger ([context_overflow_event_of_error]) intact. *)
+    true
   else
     match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err

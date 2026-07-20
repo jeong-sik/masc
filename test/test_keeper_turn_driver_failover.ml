@@ -393,6 +393,62 @@ let test_resolve_assignment_missing () =
     | `Single_runtime _ | `Lane _ ->
       Alcotest.fail "expected missing assignment")
 
+let runtime_toml_assignment_to_lane =
+  {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.lanes.resilient]
+strategy = "ordered"
+candidates = [ "primary.test_model", "fallback.test_model" ]
+
+[runtime.assignments]
+canary = "resilient"
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+|}
+
+(* Pins the current assignment contract: [runtime.assignments] targets must be
+   runtime ids, so a keeper can only reach a lane when the lane id shadows a
+   runtime id ([resolve_assignment] prefers lanes on collision). Direct lane
+   assignment also has no pre-dispatch context budget resolution
+   ([resolve_max_context_resolution_for_runtime_id] resolves runtime ids only),
+   so accepting it at load would just move this failure to every turn. *)
+let test_assignment_to_lane_id_rejected_at_load () =
+  let path = Filename.temp_file "runtime_failover_lane_assign_" ".toml" in
+  write_file path runtime_toml_assignment_to_lane;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
+       | Error msg ->
+         Alcotest.(check bool)
+           "error names the assignment"
+           true
+           (contains ~needle:"[runtime.assignments].canary" msg))
+
 let test_unknown_lane_candidate_rejected_at_load () =
   let path = Filename.temp_file "runtime_failover_bad_" ".toml" in
   write_file path runtime_toml_unknown_lane_candidate;
@@ -878,6 +934,73 @@ let test_attempt_loop_preserves_last_sdk_error () =
        | _ -> false)
      |> List.map decision_runtime_id)
 
+let context_overflow_error message =
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.ContextOverflow { message; limit = Some 32768 })
+
+(* A typed ContextOverflow is a per-candidate capacity bound: a later lane
+   candidate with a larger context window can still serve the same turn, so
+   the walk must continue instead of treating the 400 mapping as terminal. *)
+let test_attempt_loop_overflow_tries_next_candidate () =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "small.test_model" ->
+          Error (context_overflow_error "prompt exceeds context window"), None
+        | "large.test_model" -> Ok runtime_id, None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "small.test_model"; "large.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string)
+       "larger-context candidate serves the turn"
+       "large.test_model"
+       runtime_id
+   | Error e ->
+     Alcotest.failf
+       "expected larger-context fallback success, got %s"
+       (Agent_sdk.Error.to_string e));
+  Alcotest.(check (list string))
+    "overflow continues the lane walk"
+    [ "small.test_model"; "large.test_model" ]
+    !attempts
+
+(* When every candidate overflows, the last typed ContextOverflow must be
+   preserved so the reactive compaction path
+   ([Keeper_turn_runtime_budget.context_overflow_event_of_error]) still fires. *)
+let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        Error (context_overflow_error (runtime_id ^ " overflow")), None)
+      [ "small.test_model"; "smaller.test_model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected terminal overflow"
+   | Error err ->
+     Alcotest.(check bool)
+       "typed overflow preserved for reactive compaction"
+       true
+       (Masc.Keeper_error_classify.is_context_overflow err));
+  Alcotest.(check (list string))
+    "every candidate attempted before terminal overflow"
+    [ "small.test_model"; "smaller.test_model" ]
+    !attempts
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -908,6 +1031,10 @@ let () =
             "unknown lane candidate rejected at load"
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
+          Alcotest.test_case
+            "assignment to lane id rejected at load"
+            `Quick
+            test_assignment_to_lane_id_rejected_at_load;
           Alcotest.test_case
             "lane media degrade uses first candidate runtime id"
             `Quick
@@ -952,5 +1079,13 @@ let () =
             "attempt loop preserves last SDK error"
             `Quick
             test_attempt_loop_preserves_last_sdk_error;
+          Alcotest.test_case
+            "context overflow tries next lane candidate"
+            `Quick
+            test_attempt_loop_overflow_tries_next_candidate;
+          Alcotest.test_case
+            "context overflow on last candidate stays terminal"
+            `Quick
+            test_attempt_loop_overflow_on_last_candidate_is_terminal;
         ] );
     ]

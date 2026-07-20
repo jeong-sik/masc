@@ -823,7 +823,7 @@ let test_keeper_compact_is_public_mcp () =
   Alcotest.(check bool)
     "masc_keeper_compact is on the public MCP surface"
     true
-    (Masc.Tool_catalog.is_public_mcp "masc_keeper_compact")
+    (Tool_catalog.is_public_mcp "masc_keeper_compact")
 ;;
 
 (* Pin the deliberate scope boundary: [masc_keeper_clear] wipes transcript
@@ -833,7 +833,7 @@ let test_keeper_clear_stays_internal () =
   Alcotest.(check bool)
     "masc_keeper_clear stays off the public MCP surface"
     false
-    (Masc.Tool_catalog.is_public_mcp "masc_keeper_clear")
+    (Tool_catalog.is_public_mcp "masc_keeper_clear")
 ;;
 
 (* ============================================================ *)

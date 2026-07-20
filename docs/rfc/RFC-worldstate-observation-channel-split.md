@@ -1,9 +1,9 @@
 ---
 rfc: "worldstate-observation-channel-split"
-title: "Split keeper world-state into an observation channel (system) and an utterance channel (user)"
+title: "Split keeper world-state by durability: recomputable-ephemeral (system context) vs conversation-history (user message)"
 status: Draft
 created: 2026-07-19
-updated: 2026-07-19
+updated: 2026-07-20
 author: vincent
 supersedes: []
 superseded_by: []
@@ -33,39 +33,46 @@ measured the composition:
 | `### Pending Messages` | 15 (mostly (1)–(2)) | ~5,900 | 2% |
 
 The three always-present sections — Claimable Work, Namespace State, Autonomous
-Trigger — are **86%** of the world-state bytes and are pure *current-state
-observations*: a snapshot of the workspace at turn time, not anything anyone
-said. Persisting them as conversation history is duplication: turn N's
-namespace snapshot has no value once turn N+1 recomputes it.
+Trigger — are **86%** of the world-state bytes and are **recomputable-ephemeral**:
+each is regenerated from current workspace state every turn. (They are not
+author-free "pure observations" — Claimable Work carries claim/report directives
+and Connected surfaces carry guidance; §2.1. The property that matters is that
+they are *recomputed*, so a persisted copy is stale duplication: turn N's
+namespace snapshot has no value once turn N+1 recomputes it.)
 
 The genuinely conversational sections — Pending Messages (owner/keeper
-utterances) and Board Activity (posts) — are correctly user-side, and their
-accumulation is already bounded: `message_scope_ack_id` advances to the latest
-consumed message on every turn success
-(`keeper_unified_turn_success.ml:49-54`), so the pending window is (1)–(2)
-messages in steady state, not a re-copied backlog.
+utterances) and Board Activity (posts) — are correctly history-side, and their
+accumulation is already ack-bounded: `message_scope_ack_id` advances to the
+latest consumed message on every turn success
+(`keeper_unified_turn_success.ml:49-54`).
 
-This RFC splits the world-state assembly into two channels by layer:
-observation layers go to turn-scoped system context (re-sent each turn, never
-persisted); utterance layers stay in the user message (persisted, ack-bounded).
+This RFC splits the world-state assembly into two channels by durability:
+recomputable-ephemeral layers go to turn-scoped system context (re-sent each turn,
+never persisted); conversation-history layers stay in the user message (persisted,
+ack-bounded). **Scope of the claim (review #25246 P2 BOUND):** this does not make
+`checkpoint.messages` *bounded* — a per-turn goal/turn-marker and the delivered
+history utterances still accumulate (§2.5). It removes the 86% recomputable-
+ephemeral **growth slope**; the acceptance criterion is therefore a measured
+reduction in checkpoint *growth rate* (bytes/turn) and in compaction frequency,
+not a bounded total (§4).
 
 ## 1. Problem (evidence)
 
-### 1.1 The accumulation is observation-as-history, not utterance backlog
+### 1.1 The accumulation is recomputed state persisted as history, not a pending-message backlog
 
 An earlier hypothesis (#25193 original) blamed a re-copied "Pending Messages
 (50)" window. Re-measurement refuted it: `(50)`/`(51)` occur exactly once each;
-the ack watermark works. The real driver is the always-present observation
-sections being written to `checkpoint.messages` every turn
-(`keeper_run_prompt.ml:115` appends the user message to `ctx_work`; the OAS run
-persists the resulting conversation).
+the ack watermark works. The real driver is the always-present
+recomputable-ephemeral sections (§2.1) being written to `checkpoint.messages`
+every turn (`keeper_run_prompt.ml:115` appends the user message to `ctx_work`;
+the OAS run persists the resulting conversation).
 
 ### 1.2 Turn execution does not depend on world-state being a user message
 
 Turn admission branches exclusively on the typed `world_observation` record and
 event-queue triggers (`keeper_world_observation.ml:1164`,
 `keeper_heartbeat_loop_scheduling.ml:30`); it never reads the
-`## Current World State` string. Delivering the observation content by a
+`## Current World State` string. Delivering the world-state content by a
 different channel does not change whether or when a turn fires. The dashboard
 preview re-derives world-state from the observation, not from history
 (`dashboard_http_keeper_snapshot.ml:137`).
@@ -91,80 +98,121 @@ change **which channel** the content is delivered on, not tag the message.
 
 ## 2. Design
 
-### 2.1 Classify each layer as observation or utterance
+### 2.1 Classify each layer by durability, not by authorship
 
-`keeper_context_layers.ml` already enumerates the layers as an exhaustive
-`layer_id` variant. Add a total classifier:
+**Correction (review #25246 P2 TAXONOMY).** An earlier draft split the layers
+into "observation (no author)" vs "utterance". That axis is wrong: `Claimable_work`
+carries action directives (inspect / claim / report) and `Connected_surfaces`
+carries discretion guidance, so those layers are *not* author-free pure
+observations. The property that actually decides the channel is **durability**,
+not authorship:
+
+- **Recomputable-ephemeral** — the layer is regenerated from current workspace
+  state every turn. Turn N's copy has no value once turn N+1 recomputes it, so
+  persisting it in `checkpoint.messages` is pure duplication. Whether it happens
+  to contain guidance text is irrelevant: that guidance is regenerated too, so
+  re-sending it each turn is correct and persisting a stale copy is the waste.
+- **Conversation-history** — a durable record of what a participant said to the
+  keeper (owner/board utterances). It is authored once and must survive as
+  history.
 
 ```ocaml
-type channel = Observation | Utterance
+type channel = Recomputable_ephemeral | Conversation_history
 
 (* Exhaustive: a new layer must declare its channel at compile time. *)
 let channel_of = function
   | Active_goals | Current_task | Connected_surfaces
   | Namespace_state | Autonomous_trigger | Scheduled_automation
-  | Claimable_work -> Observation
-  | Pending_mentions | Scope_messages | Board_activity -> Utterance
+  | Claimable_work -> Recomputable_ephemeral
+  | Pending_mentions | Scope_messages | Board_activity -> Conversation_history
 ```
 
-Rationale per layer:
-- **Observation** (current-state snapshot, no author): active goals, claimed
-  task, connected surfaces, namespace counts, the autonomous trigger reason,
-  scheduled-automation readiness, claimable work. None of these is something a
-  participant said; each is fully recomputed next turn.
-- **Utterance** (a participant addressed the keeper): pending mentions, scope
-  messages, board posts. These are conversational and their accumulation is
-  already ack-bounded.
+Per-layer rationale (durability, with authorship called out where the earlier
+axis mis-classified it):
+- **Recomputable-ephemeral**: active goals, claimed task, connected surfaces
+  (guidance included), namespace counts, the autonomous trigger reason,
+  scheduled-automation readiness, claimable work (directives included). Each is
+  fully recomputed next turn from typed state — the keeper reads the *typed*
+  `world_observation`, not the string (`keeper_world_observation.ml:1164`), so
+  moving the *rendered* copy off history changes nothing the keeper depends on.
+- **Conversation-history**: pending mentions, scope messages, board posts —
+  authored input whose accumulation is already ack-bounded
+  (`message_scope_ack_id`).
+
+A future refinement may split a single layer whose *summary* (counts) is
+recomputable-ephemeral while its *posts* are history (e.g. Board Activity); that
+is out of scope here (§5).
 
 ### 2.2 Assemble two strings instead of one
 
 `build_prompt` already returns `(system_prompt, user_message)`. Extend the
 world-state assembly so:
-- Observation layers render into an **observation block** appended to the
-  turn-scoped `extra_system_context` (the `dynamic_context` channel that flows
-  to OAS `AdjustParams.extra_system_context`,
+- Recomputable-ephemeral layers render into an **ephemeral block** appended to
+  the turn-scoped `extra_system_context` (the `dynamic_context` channel that
+  flows to OAS `AdjustParams.extra_system_context`,
   `keeper_run_tools_hooks.ml:369`). This is re-sent every turn and never
   persisted to `checkpoint.messages`.
-- Utterance layers render into the **user message** exactly as today, so the
-  keeper still receives owner/board input as a user turn and the ack watermark
-  keeps bounding it.
+- Conversation-history layers render into the **user message** exactly as today,
+  so the keeper still receives owner/board input as a user turn and the ack
+  watermark keeps bounding it.
 
-When there are no utterance layers this turn, the user message degrades to a
-minimal turn marker (see §2.4) rather than an empty goal.
+When there are no conversation-history layers this turn, the user message
+degrades to a minimal turn marker (see §2.5) rather than an empty goal.
 
-### 2.3 What `extra_system_context` actually is (verified in OAS)
+### 2.3 What `extra_system_context` is — and its stability caveat (review #25246 P1 CONTRACT)
 
-`extra_system_context` is NOT a system-role message. OAS renders it as a
-`User`-role message prefixed with `[system context] ` and **appends** it to the
-turn's provider-bound message list — never to the persisted conversation
-(`oas agent_turn.ml:30-49 prepare_messages`). The persisted `agent.state.messages`
-and the provider-bound `prep.effective_messages` are distinct:
-`effective_messages = state.messages @ [extra_system_context msg]`, and only
-`effective_messages` reaches the provider (`pipeline_stage_route.ml:62`), while
-`state.messages` is what checkpoints persist. So the observation block is
-re-sent every turn but never accumulates.
+Observed behaviour (current OAS `HEAD`): `extra_system_context` is NOT a
+system-role message. OAS renders it as a `User`-role message prefixed with
+`[system context] ` and **appends** it to the turn's provider-bound message list,
+never to the persisted conversation (`oas agent_turn.ml:30-49 prepare_messages`).
+`agent.state.messages` (what checkpoints persist) and `prep.effective_messages`
+(what reaches the provider, `pipeline_stage_route.ml:62`) are distinct, so the
+ephemeral block is re-sent every turn but never accumulates.
 
-The masc side already round-trips this channel through the OAS `world_state_prompt`
-Drop_line contract for `history.jsonl`; this RFC extends the same
-"ephemeral, not history" treatment to the live `checkpoint.messages` growth by
-choosing the non-persisting channel.
+**Caveat — this is an inferred implementation detail, not a public contract.**
+The OAS stable surface exposes only `extra_system_context : string option`; it
+does not promise that the value is non-persisting, appended at the tail, or
+ordered relative to the goal. The non-persistence above is read off the
+`@stability Internal` `Agent_turn` implementation and could change without a
+semver signal. This RFC must therefore not treat the internal behaviour as a
+design authority. **Prerequisite (blocking):** before masc routes the ephemeral
+block here, the non-persistence + append-ordering guarantee must be *promoted to
+an OAS stable contract* (a typed `extra_system_context` semantics documented as
+Evolving/Stable, with a masc-visible test), OR the design must be re-based on a
+public-API boundary that already guarantees it. Until then this RFC is a design
+target, not an implementation warrant — see §4 phase 0.
 
-### 2.4 Prefix-cache interaction
+The masc side already round-trips a related channel through the OAS
+`world_state_prompt` `Drop_line` contract for `history.jsonl`; that contract is a
+precedent for the "ephemeral, not history" treatment, but it governs
+`history.jsonl`, not the live `checkpoint.messages` growth this RFC targets.
 
-OAS deliberately *appends* `extra_system_context` at the tail specifically to
-keep the conversation prefix byte-identical across turns for local-LLM KV-cache
-reuse (`agent_turn.ml:34-40` comment). Today's design already relies on this for
-`dynamic_context`. Moving the large observation block here keeps that stable
-prefix intact while shrinking persisted history. Per-turn wire cost is unchanged
-(the observation block was already sent every turn as the user message); what
-changes is that it stops being written to `checkpoint.messages`.
+### 2.4 Prefix-cache interaction (corrected — review #25246 P1 FALSE CACHE CLAIM)
+
+An earlier draft claimed this move keeps "the conversation prefix byte-identical
+across turns" for local-LLM KV-cache reuse. **That claim is false and is
+withdrawn.** The prefixes already diverge with or without this change: on turn N
+the provider-bound tail is `… user_goal + [system context] observation`, while the
+persisted history that seeds turn N+1 is `… user_goal + assistant_reply` (the
+ephemeral block is never persisted). So turn N+1's request prefix diverges from
+turn N's exactly at the point the observation was inserted — appending
+`extra_system_context` preserves only the prefix *before* the dynamic block, not
+the previous full request. This is true of today's `dynamic_context` too.
+
+The real, non-cache benefit stands on its own: the ephemeral block **stops being
+written to `checkpoint.messages`**, which is the accumulation this RFC targets.
+Per-turn wire cost is unchanged (the block was already sent every turn). The
+KV-cache effect is therefore **not a claimed win** — it is neutral-to-uncertain
+and must be *measured* on a local-LLM keeper in PR-2, not asserted. If the move
+measurably worsens cache reuse, that is a cost to weigh against the persisted-
+history reduction, not a property this RFC guarantees.
 
 ### 2.5 Turn marker (open question — see §5)
 
 OAS `run`/`run_blocks` require a non-empty goal and always append it to the
-conversation (`agent.ml:165`). On a turn whose world-state has no utterance
-layer, the goal today is the full observation block; after this change it must
-be a short, stable sentinel (e.g. a one-line "proceed with current world
+conversation (`agent.ml:165`). On a turn whose world-state has no
+conversation-history layer, the goal today is the full ephemeral block; after
+this change it must be a short, stable sentinel (e.g. a one-line "proceed with current world
 state" marker) so the persisted user message is bounded and near-constant
 across such turns. The sentinel must be stable enough that prefix caching is
 not defeated and small enough that its accumulation is negligible, OR the
@@ -183,24 +231,40 @@ only affects `history.jsonl`, not `checkpoint.messages`).
 
 ## 4. Phases
 
+0. **Phase 0 (blocking prerequisite, review #25246 P1 CONTRACT)**: the OAS
+   `extra_system_context` non-persistence + append-ordering must exist as a
+   *stable, masc-visible contract* (documented semantics + a test masc can rely
+   on), not an inference off `@stability Internal` `Agent_turn`. Either land that
+   OAS contract (Evolving/Stable) or re-base PR-2 on a public boundary that
+   already guarantees it. PR-2 does not merge until this holds — otherwise masc
+   pins its accumulation fix to an internal detail that can change without a
+   semver signal.
 1. **PR-1**: `channel_of` classifier + `assemble_by_channel` in
    `keeper_context_layers`, with unit tests pinning each layer's channel and
    the exhaustiveness guard. No behavior change yet (both channels still
-   concatenated into the user message).
-2. **PR-2**: route the observation block to `extra_system_context` in
-   `build_prompt` / `keeper_run_tools_hooks`; user message carries utterance
-   layers + turn marker. Live checkpoint re-measurement as the acceptance test.
-3. **PR-3 (if needed)**: turn-marker persistence bound (§2.4) once PR-2's live
+   concatenated into the user message). Independent of Phase 0.
+2. **PR-2 (gated on Phase 0)**: route the ephemeral block to
+   `extra_system_context` in `build_prompt` / `keeper_run_tools_hooks`; user
+   message carries conversation-history layers + turn marker.
+   **Acceptance (review P2 BOUND):** a live checkpoint re-measurement showing a
+   reduced *growth rate* (world-state bytes/turn) and reduced compaction
+   frequency — not a bounded total. Also record the KV-cache reuse delta on a
+   local-LLM keeper (§2.4): the move is accepted only if the growth-rate win is
+   not outweighed by a cache regression.
+3. **PR-3 (if needed)**: turn-marker persistence bound (§2.5) once PR-2's live
    data shows whether the marker accumulates.
 
 ## 5. Open questions
 
-- Turn marker shape and whether it needs its own persistence bound (§2.4).
+- Turn marker shape and whether it needs its own persistence bound (§2.5).
 - Does moving the autonomous-trigger reason to system context change model
   behavior (it currently reads as a user instruction "you were triggered
   because…")? The block already declares itself "context, not instructions",
   so system placement is arguably more honest, but this needs an A/B on a live
   keeper before PR-2 lands.
-- Board Activity is classified Utterance here, but a board *summary* (counts)
-  is observation while the *posts* are utterance — a future split of that one
-  layer may be warranted.
+- Board Activity is classified conversation-history here, but a board *summary*
+  (counts) is recomputable-ephemeral while the *posts* are history — a future
+  split of that one layer may be warranted (§2.1).
+- Phase 0's shape: does the OAS `extra_system_context` stable contract land as a
+  documented semantics note + test, or does it need a typed wrapper? Owned with
+  OAS, since masc cannot promote another repo's stability tier unilaterally.

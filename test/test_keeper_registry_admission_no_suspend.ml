@@ -58,7 +58,7 @@ let make_meta name =
    because B is parked with state_mu held. *)
 let run_interleaving () =
   Eio_main.run (fun _env ->
-    KR.clear ();
+    KR.For_testing.clear ();
     Admission.For_testing.reset ();
     let key_lock_taken, set_key_lock_taken = Eio.Promise.create () in
     let release_key_lock, do_release_key_lock = Eio.Promise.create () in

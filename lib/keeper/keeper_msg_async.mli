@@ -305,6 +305,23 @@ val submit
   -> unit
   -> (submit_outcome, submit_error) result
 
+(** Same lifecycle and durability contract as {!submit}, but the worker also
+    receives the canonical request id generated and accepted by this module.
+    Use this when a producer's durable artifacts must share that identity;
+    callers needing only fire-and-forget execution should keep using
+    {!submit}. *)
+val submit_with_request_id
+  :  ?on_accepted:(string -> (unit, string) result)
+  -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+  -> ?on_worker_settled:(worker_settlement -> unit)
+  -> background_sw:Eio.Switch.t
+  -> base_path:string
+  -> caller:string
+  -> f:(request_id:string -> Eio.Switch.t -> Keeper_types_profile.tool_result)
+  -> keeper_name:string
+  -> unit
+  -> (submit_outcome, submit_error) result
+
 (** [poll ~base_path ~caller request_id] returns [Found entry] for a known request,
     [Absent] when no record exists, and [Unreadable reason] when a persisted
     record exists but cannot be decoded. [Rejected reason] means the request
@@ -412,6 +429,19 @@ module For_testing : sig
     -> base_path:string
     -> caller:string
     -> f:(Eio.Switch.t -> Keeper_types_profile.tool_result)
+    -> keeper_name:string
+    -> unit
+    -> (submit_outcome, submit_error) result
+
+  val submit_with_request_id
+    :  request_ops
+    -> ?on_accepted:(string -> (unit, string) result)
+    -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+    -> ?on_worker_settled:(worker_settlement -> unit)
+    -> background_sw:Eio.Switch.t
+    -> base_path:string
+    -> caller:string
+    -> f:(request_id:string -> Eio.Switch.t -> Keeper_types_profile.tool_result)
     -> keeper_name:string
     -> unit
     -> (submit_outcome, submit_error) result

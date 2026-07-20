@@ -46,6 +46,7 @@ let create_store () =
   ; last_sweep = Time_compat.now ()
   ; mutex = Eio.Mutex.create ()
   ; persist_mutex = Eio.Mutex.create ()
+  ; origin_create_mutex = Eio.Mutex.create ()
   ; karma_cache = None
   ; sorted_posts_cache = None
   ; comments_by_post = Hashtbl.create 1024
@@ -648,6 +649,122 @@ let create_post
            rollback_fresh_post store post;
            Error e)
       | Error _ as e -> e)
+;;
+
+type create_post_once_result =
+  | Post_created of post
+  | Post_already_present of post
+
+let create_post_once_by_fusion_run_id
+      store
+      ~fusion_run_id
+      ~author
+      ~content
+      ~post_kind
+      ?meta_json
+      ~visibility
+      ~ttl_hours
+      ~origin
+      ()
+  =
+  let option_equal equal left right =
+    match left, right with
+    | None, None -> true
+    | Some left, Some right -> equal left right
+    | None, Some _ | Some _, None -> false
+  in
+  let origin_equal left right =
+    option_equal Ids.Turn_ref.equal left.turn_ref right.turn_ref
+    && option_equal String.equal left.source right.source
+    && option_equal String.equal left.fusion_run_id right.fusion_run_id
+  in
+  let post_kind_equal left right =
+    match left, right with
+    | Human_post, Human_post
+    | Automation_post, Automation_post
+    | System_post, System_post -> true
+    | Human_post, (Automation_post | System_post)
+    | Automation_post, (Human_post | System_post)
+    | System_post, (Human_post | Automation_post) -> false
+  in
+  let visibility_equal left right =
+    match left, right with
+    | Public, Public
+    | Unlisted, Unlisted
+    | Internal, Internal
+    | Direct, Direct -> true
+    | Public, (Unlisted | Internal | Direct)
+    | Unlisted, (Public | Internal | Direct)
+    | Internal, (Public | Unlisted | Direct)
+    | Direct, (Public | Unlisted | Internal) -> false
+  in
+  if String.equal fusion_run_id ""
+  then Error (Validation_error "fusion_run_id must not be empty")
+  else if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else
+    match origin.fusion_run_id with
+    | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
+      (match
+         Agent_id.of_string author,
+         normalize_post_payload ~content ~post_kind ?meta_json ()
+       with
+       | Error error, _ -> Error error
+       | _, Error (Meta_not_assoc payload) ->
+         Error
+           (Validation_error
+              (Printf.sprintf
+                 "Malformed meta_json: expected JSON object, got %s"
+                 (Yojson.Safe.to_string payload)))
+       | Ok author_id, Ok (title, body, post_kind, meta_json) ->
+         if String.equal body ""
+         then Error (Validation_error "Content cannot be empty")
+         else
+           Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
+             maybe_sweep store;
+             let existing_post =
+               with_lock store (fun () ->
+                 match Hashtbl.find_opt store.posts_by_run_id fusion_run_id with
+                 | None -> None
+                 | Some post_id -> Hashtbl.find_opt store.posts post_id)
+             in
+             match existing_post with
+             | Some post ->
+               let exact_replay =
+                 String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
+                 && String.equal post.title title
+                 && String.equal post.body body
+                 && String.equal post.content body
+                 && post_kind_equal post.post_kind post_kind
+                 && option_equal Yojson.Safe.equal post.meta_json meta_json
+                 && visibility_equal post.visibility visibility
+                 && Option.is_none post.hearth
+                 && Option.is_none post.thread_id
+                 && option_equal origin_equal post.origin (Some origin)
+               in
+               if exact_replay
+               then Ok (Post_already_present post)
+               else
+                 Error
+                   (Already_exists
+                      (Printf.sprintf
+                         "conflicting Fusion Board projection for run_id=%S"
+                         fusion_run_id))
+             | None ->
+               create_post store ~author ~content ~post_kind ?meta_json
+                 ~visibility ~ttl_hours ~origin ()
+               |> Result.map (fun post -> Post_created post)))
+    | Some origin_run_id ->
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "fusion_run_id mismatch: argument=%S origin=%S"
+              fusion_run_id
+              origin_run_id))
+    | None ->
+      Error
+        (Validation_error
+           "create_post_once_by_fusion_run_id requires typed fusion origin")
 ;;
 
 (* Owner-gated in-place edit of an existing post's title/body. The edited content is

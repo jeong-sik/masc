@@ -75,6 +75,29 @@ let wait_until ~clock ~max_iterations ~interval_sec predicate =
   loop max_iterations
 ;;
 
+let test_identified_worker_receives_accepted_request_id () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        let observed, resolve_observed = Eio.Promise.create () in
+        let accepted =
+          Keeper_msg_async.submit_with_request_id
+            ~background_sw:sw
+            ~base_path
+            ~caller
+            ~keeper_name:"terminal-event-identified"
+            ~f:(fun ~request_id _request_sw ->
+              Eio.Promise.resolve resolve_observed request_id;
+              Keeper_types_profile.tool_result_ok "completed")
+            ()
+          |> accepted_request_id
+        in
+        check string
+          "worker identity is the accepted request id"
+          accepted
+          (Eio.Promise.await observed))))
+;;
+
 let test_operator_cancel_running_worker_invokes_on_worker_aborted () =
   with_temp_base (fun base_path ->
     Eio_main.run (fun env ->
@@ -343,7 +366,11 @@ let test_closed_background_switch_rejects_worker_acceptance () =
 let () =
   run
     "keeper_msg_async_terminal_event"
-    [ ( "on_worker_aborted"
+    [ ( "worker identity"
+      , [ test_case "identified worker receives accepted request id" `Quick
+            test_identified_worker_receives_accepted_request_id
+        ] )
+    ; ( "on_worker_aborted"
       , [ test_case "operator cancel running worker invokes on_worker_aborted" `Quick
             test_operator_cancel_running_worker_invokes_on_worker_aborted
         ; test_case "abort callback failure stays inside the request lane" `Quick

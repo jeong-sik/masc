@@ -91,8 +91,8 @@ let restore_env name = function
   | None -> Unix.putenv name ""
 ;;
 
-(* Board_dispatch.create_post (via Fusion_sink.emit) needs a live Eio
-   scheduler for its lock/cancellation-context effects (Effect.Unhandled
+(* Fusion_sink's Board projection needs a live Eio scheduler for its
+   lock/cancellation-context effects (Effect.Unhandled
    (Eio.Cancel.Get_context) otherwise) — same [Eio_main.run] +
    [Fs_compat.set_fs] wrapper test_board_dispatch.ml's [with_eio] uses. *)
 let with_isolated_eio_base_path prefix f =
@@ -277,7 +277,7 @@ let test_fusion_completion_is_actionable () =
       ~arrived_at:1000.0
       fc
   in
-  check string "post_id correlates to the board post" "post-77" ev.post_id;
+  check string "post_id is canonical Fusion identity" "fusion-run:fus-1" ev.post_id;
   check bool "preview carries the resolved answer" true (contains ~needle:"ANSWER-TOKEN-xyz" ev.preview);
   check string "author remains context" meta.name ev.author;
   check bool "post kind remains context" true
@@ -486,8 +486,7 @@ let test_scheduled_wake_is_actionable () =
        ^ Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
-(* (3) an empty board_post_id (sink failed to create the post) still delivers
-   the answer under a synthetic, non-empty post id. *)
+(* (3) Board availability never changes the durable completion identity. *)
 let test_missing_board_post_id_fallback () =
   let meta = make_meta () in
   let fc = fusion_payload ~run_id:"fus-9" ~board_post_id:"" () in
@@ -614,6 +613,58 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block post id" post_id block_post_id;
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
+    let replay =
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
+        ~judge:(Ok synthesis) ~judges ~judge_usage
+    in
+    check bool "same completion replay succeeds" true (Result.is_ok replay);
+    let posts_for_run =
+      Board.list_posts (Board.global ()) ()
+      |> List.filter (fun (candidate : Board.post) ->
+        match candidate.origin with
+        | Some { fusion_run_id = Some candidate_run_id; _ } ->
+          String.equal candidate_run_id run_id
+        | Some { fusion_run_id = None; _ } | None -> false)
+    in
+    check int "same completion creates one Board post" 1
+      (List.length posts_for_run);
+    let replay_messages =
+      Keeper_chat_store.load ~base_dir ~keeper_name:keeper
+      |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
+        contains ~needle:resolved_answer message.content)
+    in
+    check int "same completion appends one chat row" 1
+      (List.length replay_messages);
+    check int "same completion queues one durable wake" 1
+      (Keeper_event_queue.length
+         (Keeper_event_queue_persistence.load
+            ~base_path:base_dir
+            ~keeper_name:keeper));
+    let conflicting_replay =
+      Fusion_sink.emit ~base_dir ~keeper ~run_id
+        ~question:(question ^ " changed") ~panel ~judge:(Ok synthesis) ~judges
+        ~judge_usage
+    in
+    check bool "changed completion replay is rejected" true
+      (Result.is_error conflicting_replay);
+    check int "conflicting replay keeps one Board post" 1
+      (Board.list_posts (Board.global ()) ()
+       |> List.filter (fun (candidate : Board.post) ->
+         match candidate.origin with
+         | Some { fusion_run_id = Some candidate_run_id; _ } ->
+           String.equal candidate_run_id run_id
+         | Some { fusion_run_id = None; _ } | None -> false)
+       |> List.length);
+    check int "conflicting replay keeps one chat row" 1
+      (Keeper_chat_store.load ~base_dir ~keeper_name:keeper
+       |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
+         contains ~needle:resolved_answer message.content)
+       |> List.length);
+    check int "conflicting replay keeps one durable wake" 1
+      (Keeper_event_queue.length
+         (Keeper_event_queue_persistence.load
+            ~base_path:base_dir
+            ~keeper_name:keeper));
     match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
     | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
     | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
@@ -736,20 +787,45 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
     check bool "wake commits durably" true (Result.is_ok result);
     check bool "route consumed only after the durable commit" true
       (Fusion_wake_route.peek ~keeper ~run_id = None);
+    (match
+       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+       |> Keeper_event_queue.dequeue
+     with
+     | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+       check string "durable completion run id" run_id fc.run_id;
+       (match fc.channel with
+        | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
+        | other ->
+          fail
+            (Printf.sprintf "durable channel must be the originating route, got %s"
+               (Keeper_continuation_channel.describe other)))
+     | Some _ -> fail "unexpected durable stimulus kind"
+     | None -> fail "completion stimulus must be durably persisted with its channel");
+    let replay =
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~ok:true ~resolved_answer:"WAKE-DURABLE-ANSWER"
+        ~board_post_id:"post-wake-1"
+    in
+    check bool "route-less replay accepts the committed recipient" true
+      (Result.is_ok replay);
     match
       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
       |> Keeper_event_queue.dequeue
     with
-    | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
-      check string "durable completion run id" run_id fc.run_id;
+    | Some
+        ( { payload = Keeper_event_queue.Fusion_completed fc; _ }
+        , remaining ) ->
+      check int "route-less replay keeps one durable completion" 0
+        (Keeper_event_queue.length remaining);
       (match fc.channel with
        | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
        | other ->
          fail
-           (Printf.sprintf "durable channel must be the originating route, got %s"
+           (Printf.sprintf
+              "replay must preserve the first committed recipient, got %s"
               (Keeper_continuation_channel.describe other)))
-    | Some _ -> fail "unexpected durable stimulus kind"
-    | None -> fail "completion stimulus must be durably persisted with its channel")
+    | Some _ -> fail "unexpected durable stimulus kind after replay"
+    | None -> fail "durable completion disappeared after replay")
 ;;
 
 (* P1-A fail-closed: when the durable commit fails (here a conflicting durable
@@ -761,13 +837,15 @@ let test_wake_fail_closed_preserves_route () =
     let keeper = Printf.sprintf "fusion-wake-fc-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-fc-%d" (Random.bits ()) in
     let board_post_id = "post-wake-fc-1" in
+    let conflicting_payload =
+      fusion_payload ~run_id ~board_post_id
+        ~resolved_answer:"CONFLICTING-PRIOR-ANSWER" ()
+    in
     let conflicting : Keeper_event_queue.stimulus =
-      { post_id = board_post_id
+      { post_id = Keeper_event_queue.fusion_completion_post_id conflicting_payload
       ; urgency = Keeper_event_queue.Normal
       ; arrived_at = 1.0
-      ; payload =
-          Keeper_event_queue.Fusion_completed
-            (fusion_payload ~run_id ~board_post_id ~resolved_answer:"CONFLICTING-PRIOR-ANSWER" ())
+      ; payload = Keeper_event_queue.Fusion_completed conflicting_payload
       }
     in
     (match
@@ -815,6 +893,39 @@ let test_completion_wake_does_not_signal_replacement_lane () =
            (Atomic.get captured.fiber_wakeup);
          check bool "replacement lane is not signaled" false
            (Atomic.get replacement.fiber_wakeup)))
+;;
+
+let test_wake_board_recovery_keeps_canonical_identity () =
+  with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir ->
+    let keeper = Printf.sprintf "fusion-board-recovery-%d" (Random.bits ()) in
+    let run_id = Printf.sprintf "fus-board-recovery-%d" (Random.bits ()) in
+    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
+    let first =
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~ok:true ~resolved_answer:"RECOVERED-ANSWER" ~board_post_id:""
+    in
+    check bool "completion without Board evidence commits" true (Result.is_ok first);
+    let replay =
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~board_post_id:"post-created-on-retry"
+    in
+    check bool "Board recovery replay is idempotent" true (Result.is_ok replay);
+    match
+      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      |> Keeper_event_queue.to_list
+    with
+    | [ { post_id; payload = Keeper_event_queue.Fusion_completed completion; _ } ] ->
+      check string "canonical durable identity" ("fusion-run:" ^ run_id) post_id;
+      check string "first committed Board projection remains authoritative" ""
+        completion.board_post_id;
+      (match completion.channel with
+       | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
+       | other ->
+         fail
+           (Printf.sprintf "first committed route changed: %s"
+              (Keeper_continuation_channel.describe other)))
+    | _ -> fail "Board recovery replay created more than one durable completion")
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
@@ -1062,6 +1173,10 @@ let () =
             "completion wake never signals a replacement Keeper lane"
             `Quick
             test_completion_wake_does_not_signal_replacement_lane
+        ; test_case
+            "Board recovery replay keeps canonical wake identity"
+            `Quick
+            test_wake_board_recovery_keeps_canonical_identity
         ; test_case
             "completion stimulus persists without live registry"
             `Quick

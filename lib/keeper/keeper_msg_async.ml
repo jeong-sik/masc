@@ -2159,7 +2159,9 @@ let runtime_cancelled_status () =
 ;;
 
 let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
-    ~base_path ~caller ~(f : Eio.Switch.t -> tool_result) ~keeper_name () :
+    ~base_path ~caller
+    ~(f : request_id:string -> Eio.Switch.t -> tool_result)
+    ~keeper_name () :
     (submit_outcome, submit_error) result =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Submit_rejected rejection)
@@ -2369,7 +2371,7 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
            | `Operator_cancelled -> raise CancelledByOperator
            | `Already_settled entry -> raise (Worker_already_settled entry)
            | `Preempted reason -> raise (Worker_preempted reason));
-          let result = f req_sw in
+          let result = f ~request_id req_sw in
           let data =
             match Tool_result.data result with
             | `String _ -> None
@@ -2457,7 +2459,15 @@ let submit_with_ops ops ?on_accepted ?on_worker_aborted ?on_worker_settled ~back
           background_start_failed (Printexc.to_string exn))))))
 ;;
 
-let submit = submit_with_ops production_request_ops
+let submit_with_request_id = submit_with_ops production_request_ops
+
+let submit ?on_accepted ?on_worker_aborted ?on_worker_settled ~background_sw
+    ~base_path ~caller ~f ~keeper_name () =
+  submit_with_request_id ?on_accepted ?on_worker_aborted ?on_worker_settled
+    ~background_sw ~base_path ~caller
+    ~f:(fun ~request_id:_ request_sw -> f request_sw)
+    ~keeper_name ()
+;;
 
 (** Exact owner check for both the process-global table and persisted rows. *)
 let owner_rejection ~caller (entry : entry) =
@@ -2844,7 +2854,15 @@ module For_testing = struct
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
-  let submit = submit_with_ops
+  let submit_with_request_id = submit_with_ops
+
+  let submit ops ?on_accepted ?on_worker_aborted ?on_worker_settled
+      ~background_sw ~base_path ~caller ~f ~keeper_name () =
+    submit_with_request_id ops ?on_accepted ?on_worker_aborted
+      ?on_worker_settled ~background_sw ~base_path ~caller
+      ~f:(fun ~request_id:_ request_sw -> f request_sw)
+      ~keeper_name ()
+  ;;
   let cancel = cancel_with_ops
   let reserved_request_id_count () =
     Eio.Mutex.use_ro mu (fun () -> Store_transition_table.length reserved_request_ids)

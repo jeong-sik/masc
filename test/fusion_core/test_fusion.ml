@@ -1384,6 +1384,27 @@ let test_judge_error_node_timed_out () =
       None n2.elapsed_s
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
 
+let test_deliberation_evidence_roundtrip () =
+  let evidence : Fusion_types.deliberation_evidence =
+    { question = "Which implementation is sound?"
+    ; panel = []
+    ; judge = Error Fusion_types.Empty_result
+    ; judges = []
+    ; judge_usage = { input_tokens = 11; output_tokens = 7 }
+    }
+  in
+  match
+    Fusion_types.deliberation_evidence_to_yojson evidence
+    |> Fusion_types.deliberation_evidence_of_yojson
+  with
+  | Ok decoded ->
+    Alcotest.(check bool)
+      "typed evidence is lossless"
+      true
+      (Fusion_types.equal_deliberation_evidence evidence decoded)
+  | Error detail -> Alcotest.fail detail
+;;
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -1488,6 +1509,8 @@ let () =
       , [ Alcotest.test_case "roundtrip" `Quick test_judge_outcome_roundtrip
         ; Alcotest.test_case "timed_out_elapsed_s" `Quick
             test_judge_error_node_timed_out
+        ; Alcotest.test_case "deliberation evidence roundtrip" `Quick
+            test_deliberation_evidence_roundtrip
         ] )
     ; ( "panel_guard"
       , [ Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered

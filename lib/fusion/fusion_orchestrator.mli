@@ -16,6 +16,30 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
+type compute_outcome =
+  | Compute_denied of Fusion_types.deny_reason
+  | Computed of Fusion_types.deliberation_evidence
+
+(** Run panel and judge computation without Board, chat, wake, or run-registry
+    projection. The caller can durably claim the semantic terminal before
+    passing a [Computed] value to {!project}. *)
+val compute
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> policy:Fusion_policy.t
+  -> topology:Fusion_types.fusion_topology
+  -> request:Fusion_types.fusion_request
+  -> unit
+  -> compute_outcome
+
+(** Project one already-computed deliberation to the existing sink. *)
+val project
+  :  base_dir:string
+  -> topology:Fusion_types.fusion_topology
+  -> request:Fusion_types.fusion_request
+  -> Fusion_types.deliberation_evidence
+  -> outcome
+
 (** 요청을 심의한다.
 
     + [Fusion_policy.decide]로 정책 판정 → [Deny]면 [Denied] 반환(부작용 없음).

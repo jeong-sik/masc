@@ -305,7 +305,16 @@ let apply_schema_or_prompt_tier ~log_label schema provider_cfg =
    json_object-only provider is silently dropped from structured lanes,
    leaving the single json_schema-capable native endpoint (minimax) as a SPOF.
    Use ONLY where the prompt states the schema and the parse is validated
-   downstream; [apply_to_provider_config] stays the strict default. *)
+   downstream; [apply_to_provider_config] stays the strict default.
+
+   CONTRACT (#25324): the OpenAI-compatible [json_object] response format
+   requires the request messages to contain the literal token "json"
+   (case-insensitive) or the endpoint returns HTTP 400. DeepSeek and Kimi
+   enforce this; GLM is lenient. This function only sets [response_format] on
+   [provider_cfg] and cannot see the messages, so any caller that reaches the
+   JsonMode tier MUST include a "json" token in its prompt. The compaction
+   summarizer does so in [Keeper_compaction_llm_summarizer.messages_for_plan]
+   (locked by test_compaction_llm_summarizer). *)
 let apply_schema_json_mode_or_prompt_tier ~log_label schema provider_cfg =
   let native_cfg = apply_to_provider_config schema provider_cfg in
   match Llm_provider.Provider_config.validate_output_schema_request native_cfg with

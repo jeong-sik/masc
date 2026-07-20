@@ -778,7 +778,7 @@ extraction에서 나온 상세 inventory다. first-class 실행 권한이 없으
 | Circuit Breaker (Closed/Open/HalfOpen) | Phase 2.2 P1 sketch 미배선; 0.212 cap-removal과 긴장(breaker=bounded counter) | 중 | provider-local-timeout 대체와 조율 |
 | Auto Recovery exponential backoff (1s→60s) | Phase 2.1 sketch 미구현; keeper_supervisor sweep가 piecemeal 대체하나 통합 backoff ladder 없음 | 중 | 통합 backoff-escalation |
 | Graceful Shutdown phase machine (StopAccepting→Drain→Cleanup→SaveState→Exit) | Phase 1.3 sketch; MASC_SHUTDOWN_* knob(untyped)만; lane-drain vs server-drain 혼동 | 중 | typed phase FSM |
-| Legacy GOAL LOOP OODA cadence scheduler | Legacy Goal runtime과 함께 **KILL**. `scripts/goal_loop_scheduler.py` 및 관련 dashboard/test/config 삭제 | 중 | revival 금지; 명시적 Task+Keeper lane+typed Scheduler wake 사용 |
+| Legacy GOAL LOOP OODA cadence scheduler | **KILL 집행됨 (2026-07-21)**: scripts 10개+py 테스트 8개+fixtures 삭제. dashboard/서버 broadcast 표면은 RFC-0352 결정 스코프로 잔존 | 중 | revival 금지; 명시적 Task+Keeper lane+typed Scheduler wake 사용 |
 | Automatic verification evidence from gh pr create + git-delta visibility | task-execution visibility audit "missing teeth"; tool_access naming vs semantics mismatch | 중 | 2026-06-04 audit 참조 |
 | Capability matching algorithm (masc_bind → routing) | MASC-V2-DESIGN "Should Have" 미체크; 4 Must-Have primitive만 배송 | 중 | matching 알고리즘 구현 |
 | Capability Honesty (실적 기반 anti-exaggeration) | "(목표)"로 강등; aspirational | 중 | track record 검증 |
@@ -907,7 +907,7 @@ FSM 전이 매트릭스는 `_ -> false` catch-all 금지 — 모든 쌍 명시. 
 - NORTH-STAR-OCAML.md · OAS-MASC-BOUNDARY.md · MASC-V2-DESIGN.md · **PRODUCT-OPERATING-PLAN.md** *(⚠ STALE worldview: "repo-local … one repository"·"supervised" — RFC-0318/0319/0322/0329/0337/0341이 폐기; §1.1 정본)* · PRODUCT-REVIEW.md · **external-comparison-and-positioning.md** *(⚠ STALE worldview: "operator-governed supervisor"·"supervised cycles not self-driven loops"·"autonomy bounded by phase policy" — 폐기; §1.1/§7 정본)* · VERSIONED-ROADMAP.md *(stale v2.87-v2.93; renumber 필요)* · sdk-independence-principle.md
 
 ### Keeper / Runtime / Scheduler
-- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · spec/04-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · GOAL-LOOP-RUNTIME-SCHEDULER.md · runtime-tunables.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html
+- KEEPER-STATE-OWNERSHIP.md · KEEPER-FILE-MODEL.md · KEEPER-CAPABILITY-MATRIX.md · spec/04-turn-lifecycle.md · KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md · KEEPER-SANDBOX-BOUNDARY-POLICY.md · IMMORTAL-SERVER-ROADMAP.md · runtime-tunables.md · SUPERVISOR-MODE.md · Keeper Scheduler _ Waiting Goal Matrix - 2026-07-04.html
 
 ### Connector / Board / Fusion / Memory
 - CONNECTOR-CONFIG-SCHEMA.md · CONNECTOR-UI-DESIGN.md · DESIGN-RICH-CONNECTOR-RENDERING.md · Keeper Connector-Aware Continuation — Goal Matrix.html (RFC-0320) · RFC-0223-typed-connector-surfaces-presence-pull-speaker.md · RFC-0283-fusion-judge-of-judges.md · RFC-0277-fusion-heterogeneous-panels.md · RFC-0298-fusion-judge-pool.md · RFC-0266-fusion-async-completion-wake-and-visibility.md · RFC-0306-fusion-settings-typed-editor.md · RFC-0037-board-multimedia-vision-adapted.md · 2026-06-24-fusion-dashboard-wiring-rich-text-design.md · RFC-0247-memory-os-associative-graph-forgetting-brain.md · 2026-06-23-what-to-forget-keeper-memory-forgetting-policy.md · RFC-0332-memory-write-boundary-dedup.md (REJECTED)

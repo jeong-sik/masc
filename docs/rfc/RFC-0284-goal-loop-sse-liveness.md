@@ -52,7 +52,7 @@ fetch should be push/`useQuery`, not effect-on-mount).
 ## §2 Boundary — the worker is out-of-process (Python)
 
 The goal-loop worker is **not** an in-process OCaml fiber. It is a set of Python
-scripts implementing the OODA loop (`scripts/goal_loop_scheduler.py`,
+scripts implementing the OODA loop (`scripts/goal_loop_scheduler.py` — deleted 2026-07-21 per RFC-0000:781 KILL,
 `scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`,
 `scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`,
 `scripts/goal_loop_status.py`, `scripts/goal_loop_anti_stagnation.py`). They run

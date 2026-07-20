@@ -10,7 +10,7 @@
 
 module WOI = Masc.Keeper_world_observation_inputs
 
-let make_meta name : Keeper_meta_contract.keeper_meta =
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc

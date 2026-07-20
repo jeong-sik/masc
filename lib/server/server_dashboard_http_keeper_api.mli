@@ -24,38 +24,6 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 
-(** {1 Trajectory merge}
-
-    The dashboard merges the on-disk turn trajectory with internal-history
-    lines (per-turn snapshots from the keeper subprocess) so the operator
-    sees both LLM messages and structural events in one feed. *)
-
-val trajectory_line_ts : Trajectory.trajectory_line -> float
-(** Extract the timestamp used as the merge key. *)
-
-val dedupe_thinking_lines :
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
-(** Collapse consecutive identical "thinking" lines to one entry. *)
-
-val internal_history_json_to_trajectory_line :
-  Yojson.Safe.t -> Trajectory.trajectory_line option
-(** Parse a single internal-history JSON entry into a trajectory line;
-    [None] for malformed entries. *)
-
-val read_internal_history_lines :
-  config:Workspace.config ->
-  trace_id:string -> Trajectory.trajectory_line list
-(** Read the internal-history file for [trace_id] under [config]. *)
-
-val merge_keeper_trace_lines :
-  config:Workspace.config ->
-  trace_id:string ->
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
-(** Merge [trajectory_lines] with the internal-history file in
-    timestamp order, applying [dedupe_thinking_lines]. *)
-
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit

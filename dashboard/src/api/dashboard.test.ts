@@ -21,6 +21,7 @@ import {
   parseDashboardKeeperWaitingSource,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperTrajectory,
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
@@ -314,7 +315,26 @@ describe('keeper tool telemetry fetchers', () => {
         keeper: 'keeper-alpha',
         window_hours: 24,
         total_entries: 0,
+        decode: {
+          invalid_entry_count: 0,
+          invalid_reasons: {
+            missing_required_field: 0,
+            invalid_field: 0,
+            unexpected_field: 0,
+            duplicate_field: 0,
+            unsupported_row_type: 0,
+            malformed_json: 0,
+          },
+        },
+        io_errors: [],
         source: 'trajectory_tool_call',
+        producer: 'keeper_hooks_oas.post_tool_use',
+        durable_store: '.masc/keepers/keeper-alpha/trajectories/v1',
+        dashboard_surface: '/api/v1/keepers/:name/tool-stats',
+        freshness_slo_s: 300,
+        latest_ts_unix: null,
+        latest_ts_iso: null,
+        latest_age_s: null,
         health: 'coverage_gap',
         stale_reason: 'trajectory_append_failed',
         coverage_gaps: [
@@ -324,12 +344,13 @@ describe('keeper tool telemetry fetchers', () => {
             ts_iso: '2026-05-14T00:00:00Z',
             source: 'trajectory_tool_call',
             producer: 'keeper_hooks_oas.post_tool_use',
-            durable_store: '.masc/keepers/keeper-alpha/trajectories',
+            durable_store: '.masc/keepers/keeper-alpha/trajectories/v1',
             dashboard_surface: '/api/v1/keepers/:name/tool-stats',
             stale_reason: 'trajectory_append_failed',
             keeper_name: 'keeper-alpha',
             trace_id: 'trace-tool-stats-gap',
             error: 'append denied',
+            error_class: null,
           },
         ],
         tools: [],
@@ -344,15 +365,500 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolStats('keeper-alpha')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
+    expect(result.decode).toMatchObject({
+      invalid_entry_count: 0,
+    })
+    expect(result.io_errors).toEqual([])
     expect(result.coverage_gap_count).toBe(1)
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_hooks_oas.post_tool_use',
-      durable_store: '.masc/keepers/keeper-alpha/trajectories',
+      durable_store: '.masc/keepers/keeper-alpha/trajectories/v1',
       dashboard_surface: '/api/v1/keepers/:name/tool-stats',
       stale_reason: 'trajectory_append_failed',
       trace_id: 'trace-tool-stats-gap',
       error: 'append denied',
     })
+  })
+
+  it('rejects invalid tool-stat children instead of fabricating zero values', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      window_hours: 24,
+      total_entries: 1,
+      decode: {
+        invalid_entry_count: 0,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 0,
+          unexpected_field: 0,
+          duplicate_field: 0,
+          unsupported_row_type: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [],
+      tools: [{
+        name: 'tool_execute',
+        call_count: 'invalid',
+        success_count: 1,
+        failure_count: 0,
+        avg_duration_ms: 1,
+        p95_duration_ms: 1,
+        max_duration_ms: 1,
+        last_used_at: '2026-07-18T00:00:00Z',
+      }],
+      timeline: [{ hour: '2026-07-18T00:00:00Z', call_count: 1, error_count: 0 }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperToolStats('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper tool stats payload',
+    )
+  })
+
+  it('rejects malformed thinking rows instead of fabricating trajectory fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      trace_id: 'trace-1',
+      generation: 1,
+      total_entries: 1,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_entries: 500,
+      showing: 1,
+      decode: {
+        tool_call_count: 0,
+        thinking_count: 1,
+        skipped_summary_count: 0,
+        invalid_line_count: 0,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 0,
+          unexpected_field: 0,
+          duplicate_field: 0,
+          unsupported_row_type: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [],
+      scan: { physical_rows: 1, bytes_read: 128, stop: 'reached_entry_limit' },
+      next_cursor: null,
+      entries: [{
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'thinking',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        block_index: 0,
+        block: { type: 'thinking', thinking: 42 },
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+  })
+
+  it('preserves exact strings and rejects retired trajectory fields', async () => {
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    }
+    const response = (entry: Record<string, unknown>, decode: Record<string, unknown>) =>
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        total_entries_scope: 'tail',
+        total_entries_exact: false,
+        tail_scan_entries: 500,
+        showing: 1,
+        decode: {
+          skipped_summary_count: 0,
+          invalid_line_count: 0,
+          invalid_reasons: invalidReasons,
+          ...decode,
+        },
+        io_errors: [],
+        scan: { physical_rows: 1, bytes_read: 128, stop: 'reached_entry_limit' },
+        next_cursor: 'opaque-cursor',
+        entries: [entry],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'thinking',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        block_index: 0,
+        block: { type: 'thinking', thinking: '  thought  ' },
+      }, {
+        tool_call_count: 0,
+        thinking_count: 1,
+      }))
+      .mockResolvedValueOnce(response({
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'tool_call',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:00Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        schedule: {
+          planned_index: 0,
+          batch_index: 0,
+          batch_size: 1,
+          execution_mode: 'serial',
+        },
+        tool_use_id: '',
+        round: 1,
+        tool_name: 'tool_execute',
+        args: {},
+        execution_id: 'exec-retired-gate-1',
+        outcome: { status: 'succeeded', output: '' },
+        gate: { status: 'reject', reason: ' \t ' },
+        duration_ms: 0,
+      }, {
+        tool_call_count: 1,
+        thinking_count: 0,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const exact = await fetchKeeperTrajectory('keeper-alpha')
+    expect(exact.entries[0]).toMatchObject({
+      block: { type: 'thinking', thinking: '  thought  ' },
+    })
+    expect(exact.next_cursor).toBe('opaque-cursor')
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+  })
+
+  it('decodes the closed tool outcome union without truncating output', async () => {
+    const longOutput = `start-${'x'.repeat(120_000)}-end`
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    }
+    const response = (entry: Record<string, unknown>) => new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      trace_id: 'trace-closed-outcome',
+      generation: 1,
+      total_entries: 1,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_entries: 1,
+      showing: 1,
+      decode: {
+        tool_call_count: 1,
+        thinking_count: 0,
+        skipped_summary_count: 0,
+        invalid_line_count: 0,
+        invalid_reasons: invalidReasons,
+      },
+      io_errors: [],
+      scan: { physical_rows: 1, bytes_read: 128, stop: 'reached_entry_limit' },
+      next_cursor: null,
+      entries: [entry],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const baseEntry = {
+      schema: 'masc.keeper_trajectory.v1',
+      type: 'tool_call',
+      ts: 1,
+      ts_iso: '2026-07-18T00:00:00Z',
+      keeper_turn_id: 1,
+      oas_turn: 0,
+      schedule: {
+        planned_index: 9,
+        batch_index: 7,
+        batch_size: 2,
+        execution_mode: 'concurrent',
+      },
+      tool_use_id: '',
+      tool_name: 'tool_execute',
+      args: { cmd: 'true' },
+      duration_ms: 1,
+      execution_id: 'exec-closed-outcome-1',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        ...baseEntry,
+        outcome: { status: 'succeeded', output: longOutput },
+      }))
+      .mockResolvedValueOnce(response({
+        ...baseEntry,
+        execution_id: 'exec-closed-outcome-2',
+        schedule: {
+          planned_index: 0,
+          batch_index: 0,
+          batch_size: 1,
+          execution_mode: 'serial',
+        },
+        outcome: { status: 'failed', error: 'provider failed' },
+      }))
+      .mockResolvedValueOnce(response({
+        ...baseEntry,
+        execution_id: undefined,
+        outcome: { status: 'succeeded', output: 'ok' },
+      }))
+      .mockResolvedValueOnce(response({
+        ...baseEntry,
+        outcome: { status: 'succeeded', output: 'ok', error: 'ambiguous' },
+      }))
+      .mockResolvedValueOnce(response({
+        ...baseEntry,
+        schedule: { ...baseEntry.schedule, execution_mode: 'parallel' },
+        outcome: { status: 'succeeded', output: 'ok' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const succeeded = await fetchKeeperTrajectory('keeper-alpha', 1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/keepers/keeper-alpha/trajectory?limit=1',
+    )
+    expect(succeeded.entries[0]).toMatchObject({
+      execution_id: 'exec-closed-outcome-1',
+      tool_use_id: '',
+      schedule: {
+        planned_index: 9,
+        batch_index: 7,
+        batch_size: 2,
+        execution_mode: 'concurrent',
+      },
+      outcome: { status: 'succeeded', output: longOutput },
+    })
+    const failed = await fetchKeeperTrajectory('keeper-alpha')
+    expect(failed.entries[0]).toMatchObject({
+      execution_id: 'exec-closed-outcome-2',
+      outcome: { status: 'failed', error: 'provider failed' },
+    })
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+  })
+
+  it('preserves canonical thinking blocks and rejects flattened block residue', async () => {
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    }
+    const thinkingEntries = [
+      {
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'thinking',
+        ts: 1,
+        ts_iso: '2026-07-18T00:00:01Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        block_index: 0,
+        block: { type: 'thinking', thinking: 'signed thought', signature: 'sig-1' },
+      },
+      {
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'thinking',
+        ts: 2,
+        ts_iso: '2026-07-18T00:00:02Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        block_index: 1,
+        block: {
+          type: 'reasoning_details',
+          details: [{ type: 'reasoning.text', text: 'provider detail' }],
+        },
+      },
+      {
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'thinking',
+        ts: 3,
+        ts_iso: '2026-07-18T00:00:03Z',
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        block_index: 2,
+        block: { type: 'redacted_thinking', data: 'opaque-secret' },
+      },
+    ]
+    const body = (entries: Record<string, unknown>[]) => ({
+      keeper: 'keeper-alpha',
+      trace_id: 'trace-thinking-blocks',
+      generation: 1,
+      total_entries: entries.length,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_entries: entries.length,
+      showing: entries.length,
+      decode: {
+        tool_call_count: 0,
+        thinking_count: entries.length,
+        skipped_summary_count: 0,
+        invalid_line_count: 0,
+        invalid_reasons: invalidReasons,
+      },
+      io_errors: [],
+      scan: {
+        physical_rows: entries.length,
+        bytes_read: 512,
+        stop: 'reached_snapshot_start',
+      },
+      next_cursor: null,
+      entries,
+    })
+    const jsonResponse = (payload: Record<string, unknown>) => new Response(
+      JSON.stringify(payload),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+    const flattened = {
+      ...thinkingEntries[0],
+      block: { ...thinkingEntries[0]!.block, content: 'retired duplicate' },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(body(thinkingEntries)))
+      .mockResolvedValueOnce(jsonResponse(body([flattened])))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const decoded = await fetchKeeperTrajectory('keeper-alpha')
+    expect(decoded.entries).toEqual(thinkingEntries)
+    await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper trajectory payload',
+    )
+  })
+
+  it('rejects unexpected trajectory response and decode envelope keys', async () => {
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    }
+    const base = {
+      keeper: 'keeper-alpha',
+      trace_id: 'trace-closed-envelope',
+      generation: 1,
+      total_entries: 0,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_entries: 0,
+      showing: 0,
+      decode: {
+        tool_call_count: 0,
+        thinking_count: 0,
+        skipped_summary_count: 0,
+        invalid_line_count: 0,
+        invalid_reasons: invalidReasons,
+      },
+      io_errors: [],
+      scan: { physical_rows: 0, bytes_read: 0, stop: 'reached_snapshot_start' },
+      next_cursor: null,
+      entries: [],
+    }
+    const jsonResponse = (body: Record<string, unknown>) => new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        decode: { ...base.decode, gate_decode: { rejected: 0 } },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ ...base, retired_projection: {} }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        decode: {
+          ...base.decode,
+          invalid_reasons: { ...invalidReasons, gate_decode: 0 },
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        scan: { ...base.scan, retired_offset: 0 },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        scan: { ...base.scan, stop: 'unknown_stop' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    for (let index = 0; index < 5; index++) {
+      await expect(fetchKeeperTrajectory('keeper-alpha')).rejects.toThrow(
+        '유효하지 않은 keeper trajectory payload',
+      )
+    }
+  })
+
+  it('rejects unexpected tool-stats response and nested envelope keys', async () => {
+    const invalidReasons = {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    }
+    const base = {
+      keeper: 'keeper-alpha',
+      window_hours: 24,
+      total_entries: 0,
+      decode: { invalid_entry_count: 0, invalid_reasons: invalidReasons },
+      io_errors: [],
+      tools: [],
+      timeline: [],
+    }
+    const jsonResponse = (body: Record<string, unknown>) => new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        decode: { ...base.decode, gate_decode: { rejected: 0 } },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ ...base, retired_projection: {} }))
+      .mockResolvedValueOnce(jsonResponse({
+        ...base,
+        dashboard_surface_envelope: { schema: 'masc.dashboard.surface.v1', retired: true },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    for (let index = 0; index < 3; index++) {
+      await expect(fetchKeeperToolStats('keeper-alpha')).rejects.toThrow(
+        '유효하지 않은 keeper tool stats payload',
+      )
+    }
   })
 
   it('preserves tool-call coverage gap rows', async () => {
@@ -476,12 +982,12 @@ describe('keeper tool telemetry fetchers', () => {
               keeper: 'keeper-alpha',
               trace_id: 'trace-grounded',
               absolute_turn: 7,
+              turn_ref: 'trace-grounded#7',
               ts: 10,
               runtime_profile: 'local',
               model: 'deepseek-v4-flash',
               finish_reason: 'completed',
               blocks: [],
-              execution_ids: [],
             },
             diff_vs_prev: null,
           },
@@ -492,10 +998,10 @@ describe('keeper tool telemetry fetchers', () => {
               keeper: 'keeper-alpha',
               trace_id: 'trace-grounded',
               absolute_turn: 8,
+              turn_ref: 'trace-grounded#8',
               ts: 11,
               runtime_profile: 'local',
               blocks: [],
-              execution_ids: [],
             },
             diff_vs_prev: null,
           },
@@ -511,6 +1017,85 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
     expect(result.entries[1]?.record.model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
+  })
+
+  it('rejects the retired turn-record execution_ids field', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'turn_record',
+        entries: [
+          {
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-retired-wire',
+              absolute_turn: 7,
+              turn_ref: 'trace-retired-wire#7',
+              ts: 10,
+              runtime_profile: 'local',
+              blocks: [],
+              execution_ids: ['exec-retired'],
+            },
+            diff_vs_prev: null,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a turn record without its canonical turn_ref', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      count: 1,
+      source: 'turn_record',
+      entries: [{
+        record: {
+          keeper: 'keeper-alpha',
+          trace_id: 'trace-unlinked',
+          absolute_turn: 7,
+          ts: 10,
+          runtime_profile: 'local',
+          blocks: [],
+        },
+        diff_vs_prev: null,
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects malformed nested TurnRecord data instead of filtering it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper: 'keeper-alpha',
+      count: 1,
+      source: 'turn_record',
+      entries: [{
+        record: {
+          keeper: 'keeper-alpha',
+          trace_id: 'trace-malformed-block',
+          absolute_turn: 7,
+          turn_ref: 'trace-malformed-block#7',
+          ts: 10,
+          runtime_profile: 'local',
+          blocks: [{ block: 'system', bytes: '1200', digest: 'digest' }],
+        },
+        diff_vs_prev: null,
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperTurnRecords('keeper-alpha')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
   })
 
   it('decodes durable compaction snapshots with nullable token fields', async () => {

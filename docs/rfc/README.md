@@ -263,7 +263,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0265 | Withdraw MASC modality capability rerouting | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 03d5feaf25 2026-07-08 | - |
 | 0267 | Make task↔goal links visible and explicitly assignable | Draft | 03d5feaf25 2026-07-08 | - |
-| 0269 | Process Critic Loop for Keeper Work Traces | Draft | 03d5feaf25 2026-07-08 | - |
 | 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | 03d5feaf25 2026-07-08 | - |
 | 0271 | Withdraw progress-based turn rejection and pause | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0272 | Memory OS — Episode Log Retention (bounded append for events.jsonl / episodes) | Draft | 03d5feaf25 2026-07-08 | - |

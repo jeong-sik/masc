@@ -7,7 +7,7 @@ import { KeeperTurnInspector } from './keeper-turn-inspector'
  * chat workspace (anchored to a chat entry's turn) and the board post detail
  * (anchored to a post's origin turn_ref, RFC-0233 §7). KeeperTurnInspector
  * self-fetches the keeper's turn records by `keeperName`, so a caller only
- * supplies the anchor (`initialTurnRef`/`initialTurnTimestamp`) and chrome.
+ * supplies the exact `initialTurnRef` anchor and chrome.
  *
  * `testId` namespaces the drawer/close data-testids per surface so existing
  * surface tests keep their stable selectors (`${testId}-drawer`/`-close`).
@@ -16,7 +16,6 @@ export function TurnInspectorDrawer({
   keeperName,
   subtitle,
   initialTurnRef,
-  initialTurnTimestamp,
   open,
   onClose,
   testId,
@@ -25,7 +24,6 @@ export function TurnInspectorDrawer({
   // Header secondary line; falls back to keeperName when null/undefined.
   subtitle?: string | null
   initialTurnRef?: string | null
-  initialTurnTimestamp?: string | null
   open: boolean
   onClose: () => void
   testId: string
@@ -60,7 +58,6 @@ export function TurnInspectorDrawer({
         <${KeeperTurnInspector}
           keeperName=${keeperName}
           initialTurnRef=${initialTurnRef ?? null}
-          initialTurnTimestamp=${initialTurnTimestamp ?? null}
         />
       </div>
     </div>

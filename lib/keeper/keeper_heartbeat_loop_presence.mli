@@ -25,6 +25,5 @@ val sync_keeper_presence :
   ctx:'a Keeper_types_profile.context ->
   meta_current:Keeper_meta_contract.keeper_meta ->
   consecutive_failures:int ref ->
-  last_successful_heartbeat_ts:float ref ->
   Keeper_meta_contract.keeper_meta
 (** Publish keeper heartbeat presence and update failure counters. *)

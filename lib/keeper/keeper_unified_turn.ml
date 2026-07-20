@@ -554,7 +554,6 @@ let run_keeper_cycle
               ~outcome:`Error
               ~terminal_reason_code
               ~activity_kind:"keeper.turn_blocked"
-              ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
               ~error_kind:
                 (Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err))
               ~error_message
@@ -659,14 +658,6 @@ let run_keeper_cycle
                    (Filename.concat
                       base_dir
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-               in
-               let masc_root = Workspace.masc_root_dir config in
-               let trajectory_acc =
-                 Trajectory.create_accumulator
-                   ~masc_root
-                   ~keeper_name:meta.name
-                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.generation ()
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
@@ -773,6 +764,34 @@ let run_keeper_cycle
                     meta.name
                     Keeper_registry.Decision_active_guard_ok
                 | _ -> ());
+               (* Register only at the OAS dispatch boundary. Prompt, session,
+                  registry, and event-bus preparation above cannot strand an
+                  active trajectory lane. *)
+               let trajectory_acc =
+                 create_trajectory_accumulator
+                   ~config
+                   ~keeper_name:meta.name
+                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                   ~keeper_turn_id
+                   ~generation:meta.runtime.generation
+               in
+               let trajectory_finalized = ref false in
+               let finalize_trajectory outcome =
+                 if not !trajectory_finalized then begin
+                   (* Mark before the durable flush.  A cancellation raised by
+                      the flush must not cause the exception fence below to
+                      finalize the same accumulator a second time.  Failed
+                      rows remain registered and queued for the lane-local
+                      background retry in [Trajectory.finalize]. *)
+                   trajectory_finalized := true;
+                   finalize_trajectory_acc
+                     ~config
+                     ~keeper_name:meta.name
+                     trajectory_acc
+                     outcome
+                 end
+               in
+               let run_with_trajectory () =
                let (run_result, turn_state), latency_ms =
                  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
            exceptions in [Fun.Finally_raised], losing the outer
@@ -810,7 +829,7 @@ let run_keeper_cycle
                        ()
                  in
                  match
-                   Keeper_context_runtime.timed (fun () ->
+                   (match Keeper_context_runtime.timed (fun () ->
                      match Eio_context.get_clock () with
                      | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
                      | Ok clock ->
@@ -855,7 +874,17 @@ let run_keeper_cycle
                            ~start_background_turn_event_bus_drain
                        in
                        run_result, turn_state
-                    )
+                    ) with
+                    | result -> result
+                    | exception exn ->
+                      let backtrace = Printexc.get_raw_backtrace () in
+                      let outcome =
+                        match exn with
+                        | Eio.Cancel.Cancelled _ -> Trajectory.Cancelled
+                        | _ -> Trajectory.Failed (Printexc.to_string exn)
+                      in
+                      finalize_trajectory outcome;
+                      Printexc.raise_with_backtrace exn backtrace)
                  with
                  | result ->
                    cleanup ();
@@ -916,11 +945,7 @@ let run_keeper_cycle
                      mark_terminal_error already emitted FSM Cancelled
                      transition and info-level log. Surface as Ok so the
                      keeper cycle does not enter failure processing. *)
-                  finalize_trajectory_acc
-                    ~config
-                    ~keeper_name:meta.name
-                    trajectory_acc
-                    (Trajectory.Gated "input_required");
+                  finalize_trajectory Trajectory.Input_required;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "input_required" ]
@@ -931,6 +956,8 @@ let run_keeper_cycle
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok meta, turn_state
                 | Error err ->
+                  finalize_trajectory
+                    (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   (match
                      require_last_execution_for_finalize
                        ~keeper_name:meta.name
@@ -938,11 +965,6 @@ let run_keeper_cycle
                    with
                    | Error missing_err -> Error missing_err, turn_state
                    | Ok final_execution ->
-                     finalize_trajectory_acc
-                       ~config
-                       ~keeper_name:meta.name
-                       trajectory_acc
-                       (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
@@ -1163,13 +1185,13 @@ dominant source of the observed CAS race exhaustion after
                        ~keeper_name:meta.name
                        turn_state
                    with
-                   | Error missing_err -> Error missing_err, turn_state
+                   | Error missing_err ->
+                     finalize_trajectory
+                       (Trajectory.Failed
+                          (Agent_sdk.Error.to_string missing_err));
+                     Error missing_err, turn_state
                    | Ok final_execution ->
-                     finalize_trajectory_acc
-                       ~config
-                       ~keeper_name:meta.name
-                       trajectory_acc
-                       Trajectory.Completed;
+                     finalize_trajectory Trajectory.Completed;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
@@ -1194,7 +1216,19 @@ dominant source of the observed CAS race exhaustion after
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                     Ok updated_meta, turn_state)))))
+                     Ok updated_meta, turn_state)))
+               in
+               match run_with_trajectory () with
+               | result -> result
+               | exception exn ->
+                 let backtrace = Printexc.get_raw_backtrace () in
+                 let outcome =
+                   match exn with
+                   | Eio.Cancel.Cancelled _ -> Trajectory.Cancelled
+                   | _ -> Trajectory.Failed (Printexc.to_string exn)
+                 in
+                 finalize_trajectory outcome;
+                 Printexc.raise_with_backtrace exn backtrace))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision

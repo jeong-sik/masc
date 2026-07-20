@@ -1,4 +1,4 @@
-(* Keeper_turn_helpers — string matching, event reporting, trajectory/receipt
+(* Keeper_turn_helpers — event reporting, trajectory/receipt
    helpers, FSM guard post-actions, and local discovery readiness.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -14,12 +14,6 @@ val default_turn_event_bus_drain_interval_sec : float
 
 val turn_event_bus_drain_interval_sec : unit -> float
 
-val string_contains_substring : needle:string -> string -> bool
-(** Delegates to [String_util.string_contains_substring]. *)
-
-val string_contains_substring_ci : needle:string -> string -> bool
-(** Delegates to [String_util.string_contains_substring_ci]. *)
-
 val report_keeper_cycle_side_effect_issue :
   config:Workspace.config ->
   keeper_name:string ->
@@ -34,6 +28,17 @@ val dispatch_keeper_phase_event_checked :
   side_effect:string ->
   Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
+
+val create_trajectory_accumulator :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  generation:int ->
+  Trajectory.accumulator
+(** Create the per-trace accumulator with one lane-level durable coverage-gap
+    observer. Tool and Thinking producers share this persistence failure
+    boundary instead of installing competing callbacks per row. *)
 
 val finalize_trajectory_acc :
   config:Workspace.config ->
@@ -71,7 +76,6 @@ val record_pre_dispatch_terminal_observation :
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->
-  trajectory_outcome:Trajectory.trajectory_outcome ->
   ?error_kind:Keeper_execution_receipt.error_kind ->
   ?error_message:string ->
   ?degraded_retry_applied:bool ->

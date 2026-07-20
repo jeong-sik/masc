@@ -72,10 +72,62 @@ describe('SessionTraceEntry', () => {
     expect(resultText).toContain('"ok":true')
   })
 
+  it('keeps the complete plain-text and diff output in the expanded detail DOM', () => {
+    const plainTail = 'PLAIN_OUTPUT_TAIL'
+    const plainOutput = `${'x'.repeat(120_000)}${plainTail}`
+    const plain = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({ id: 'plain-full', toolResult: plainOutput }),
+    }))
+    fireEvent.click(plain.container.querySelector('summary') as HTMLElement)
+    expect(plain.container.querySelector('pre')?.textContent).toContain(plainTail)
+    plain.unmount()
+
+    const diffTail = '+DIFF_OUTPUT_TAIL'
+    const diffOutput = [
+      '--- a/file',
+      '+++ b/file',
+      '@@ -1,1 +1,601 @@',
+      ...Array.from({ length: 600 }, (_, index) => `+line ${index}`),
+      diffTail,
+    ].join('\n')
+    const diff = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({ id: 'diff-full', toolResult: diffOutput }),
+    }))
+    fireEvent.click(diff.container.querySelector('summary') as HTMLElement)
+    expect(diff.container.textContent).toContain(diffTail)
+    expect(diff.container.textContent).not.toContain('truncated for performance')
+  })
+
   it('applies v2 monitoring marker classes to trace row and detail', () => {
     const { container } = render(h(SessionTraceEntry, { event: sampleToolCallEvent() }))
     expect(container.querySelector('.v2-monitoring-trace-row')).not.toBeNull()
     expect(container.querySelector('.v2-monitoring-trace-detail')).not.toBeNull()
+  })
+
+  it('renders the Keeper/OAS/batch/planned hierarchy and preserves raw schedule detail', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        keeperTurnId: 412,
+        oasTurn: 0,
+        toolSchedule: {
+          planned_index: 0,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
+        },
+        toolUseId: '',
+      }),
+    }))
+
+    expect(container.textContent).toContain('K 412 · OAS 1 · batch 2/2 · plan 1')
+    expect(container.textContent).not.toContain('T412R')
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+    const schedule = screen.getAllByTestId('json-viewer-card')
+      .find(card => card.getAttribute('data-title') === '실행 스케줄')
+    expect(schedule?.textContent).toContain('"planned_index":0')
+    expect(schedule?.textContent).toContain('"execution_mode":"concurrent"')
+    expect(container.textContent).toContain('tool_use_id: (blank)')
   })
 
   it('links safe tool-call file args back to the Code IDE route', () => {
@@ -269,11 +321,31 @@ describe('SessionTraceEntry', () => {
     expect(thinkingMd).toBeDefined()
   })
 
+  it('renders ReasoningDetails as the canonical structured block', () => {
+    const details = [{ kind: 'summary', text: 'step one' }, { opaque: { value: 2 } }]
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleThinkingEvent({
+        thinkingContent: undefined,
+        thinkingBlock: { type: 'reasoning_details', details },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    const card = screen.getByTestId('json-viewer-card')
+    expect(card.getAttribute('data-title')).toBe('Reasoning details')
+    expect(JSON.parse(card.textContent ?? 'null')).toEqual(details)
+  })
+
   it('renders redacted ThinkingDetail with placeholder text', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleThinkingEvent({
         thinkingRedacted: true,
         thinkingContent: undefined,
+        detail: {
+          block_index: 2,
+          block: { type: 'redacted_thinking', data: 'opaque-secret-must-not-render' },
+        },
       }),
     }))
 
@@ -281,5 +353,6 @@ describe('SessionTraceEntry', () => {
 
     // The redacted placeholder should be visible (Korean text)
     expect(container.textContent).toContain('비공개 처리')
+    expect(container.textContent).not.toContain('opaque-secret-must-not-render')
   })
 })

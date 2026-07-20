@@ -22,11 +22,14 @@ import {
   getStatusCounts,
   getTraceLoading,
   getTraceError,
+  getTraceObservationErrors,
   buildTraceEvents,
+  loadSessionTrace,
   scheduleSessionTraceReload,
   traceSlots,
 } from './session-trace-state'
 import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
+import type { TrajectoryThinkingEntry, TrajectoryToolEntry } from '../../api/dashboard-keeper-trajectory'
 
 // Reset trace slots before each test
 beforeEach(() => {
@@ -51,6 +54,69 @@ function emptyTimeline(agent = 'keeper-a') {
       active_duration_minutes: 0,
       total_events: 0,
     },
+  }
+}
+
+const ONE_TOOL_TRAJECTORY_OBSERVATION = {
+  total_entries_scope: 'tail' as const,
+  total_entries_exact: false as const,
+  tail_scan_entries: 500,
+  decode: {
+    tool_call_count: 1,
+    thinking_count: 0,
+    skipped_summary_count: 0,
+    invalid_line_count: 0,
+    invalid_reasons: {
+      missing_required_field: 0,
+      invalid_field: 0,
+      unexpected_field: 0,
+      duplicate_field: 0,
+      unsupported_row_type: 0,
+      malformed_json: 0,
+    },
+  },
+  io_errors: [],
+  scan: { physical_rows: 1, bytes_read: 1, stop: 'reached_entry_limit' as const },
+  next_cursor: null,
+}
+
+function toolTrajectoryEntry(overrides: Partial<TrajectoryToolEntry> = {}): TrajectoryToolEntry {
+  return {
+    schema: 'masc.keeper_trajectory.v1' as const,
+    type: 'tool_call' as const,
+    ts: 1712397700,
+    ts_iso: '2024-04-06T10:01:40Z',
+    keeper_turn_id: 1,
+    oas_turn: 0,
+    schedule: {
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 1,
+      execution_mode: 'serial' as const,
+    },
+    tool_use_id: '',
+    tool_name: 'keeper_fs_read',
+    args: {},
+    outcome: { status: 'succeeded' as const, output: '' },
+    duration_ms: 0,
+    execution_id: 'exec-default',
+    ...overrides,
+  }
+}
+
+function thinkingTrajectoryEntry(
+  overrides: Partial<TrajectoryThinkingEntry> = {},
+): TrajectoryThinkingEntry {
+  return {
+    schema: 'masc.keeper_trajectory.v1' as const,
+    type: 'thinking' as const,
+    ts: 1,
+    ts_iso: '2026-07-18T00:00:01Z',
+    keeper_turn_id: 1,
+    oas_turn: 0,
+    block_index: 0,
+    block: { type: 'thinking' as const, thinking: '' },
+    ...overrides,
   }
 }
 
@@ -222,16 +288,34 @@ describe('scheduleSessionTraceReload', () => {
       trace_id: 'trace-1',
       generation: 1,
       total_entries: 1,
+      total_entries_scope: 'tail',
+      total_entries_exact: false,
+      tail_scan_entries: 500,
       showing: 1,
-      entries: [{
-        type: 'thinking',
+      decode: {
+        tool_call_count: 0,
+        thinking_count: 1,
+        skipped_summary_count: 0,
+        invalid_line_count: 1,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 1,
+          unexpected_field: 0,
+          duplicate_field: 0,
+          unsupported_row_type: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [{ path: '/trajectory/trace-1.jsonl', message: 'read fault' }],
+      scan: { physical_rows: 2, bytes_read: 128, stop: 'read_error' },
+      next_cursor: null,
+      entries: [thinkingTrajectoryEntry({
         ts: 1712400000,
         ts_iso: '2024-04-06T10:40:00Z',
-        turn: 12,
-        content: 'new keeper thought',
-        content_length: 18,
-        redacted: false,
-      }],
+        keeper_turn_id: 12,
+        block_index: 0,
+        block: { type: 'thinking', thinking: 'new keeper thought' },
+      })],
     })
     dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
       keeper: 'keeper-a',
@@ -248,6 +332,10 @@ describe('scheduleSessionTraceReload', () => {
     expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
     expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
     expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+    expect(getTraceObservationErrors('keeper-a')).toEqual([
+      expect.stringContaining('trajectory decode invalid 1 rows'),
+      'trajectory read failed /trajectory/trace-1.jsonl: read fault',
+    ])
   })
 
   it('ignores reload requests for closed trace slots', async () => {
@@ -257,6 +345,44 @@ describe('scheduleSessionTraceReload', () => {
     await vi.advanceTimersByTimeAsync(10)
 
     expect(dashboardApiMocks.fetchAgentTimeline).not.toHaveBeenCalled()
+  })
+})
+
+describe('loadSessionTrace source isolation', () => {
+  it('preserves successful timeline and tool-call sources when trajectory fails', async () => {
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValue({
+      ...emptyTimeline(),
+      events: [{
+        type: 'broadcast',
+        ts: '2026-07-18T00:00:00Z',
+        detail: { content: 'timeline source remains visible after trajectory failure' },
+      }],
+    })
+    dashboardApiMocks.fetchKeeperTrajectory.mockRejectedValue(new Error('strict decode failed'))
+    dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
+      keeper: 'keeper-a',
+      count: 1,
+      entries: [{
+        ts: 1_768_608_001,
+        keeper: 'keeper-a',
+        tool: 'fs_read',
+        input: { path: '/tmp/a' },
+        output: 'ok',
+        success: true,
+      }],
+    })
+
+    await loadSessionTrace('keeper-a', true)
+
+    expect(getTraceEvents('keeper-a').map(event => event.kind)).toEqual(
+      expect.arrayContaining(['broadcast', 'lifecycle']),
+    )
+    expect(getTraceEvents('keeper-a').find(event => event.kind === 'lifecycle')?.detail.observation_kind)
+      .toBe('provenance_gap')
+    expect(getTraceError('keeper-a')).toBeNull()
+    expect(getTraceObservationErrors('keeper-a')).toContain(
+      'trajectory read failed: strict decode failed',
+    )
   })
 })
 
@@ -273,20 +399,17 @@ describe('buildTraceEvents', () => {
     const events = buildTraceEvents(
       { agent: 'test', period: { from: '', to: '' }, events: [{ type: 'broadcast', ts: '2024-04-06T10:00:00Z', detail: { content: 'Starting work on feature X' } }], summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 } },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test', trace_id: 't1', generation: 1, total_entries: 1, showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/test.txt' },
-          result: 'file contents',
+          outcome: { status: 'succeeded', output: 'file contents' },
           duration_ms: 50,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
-        }],
+          execution_id: 'exec-merge-1',
+        })],
       },
     )
     expect(events.length).toBe(2)
@@ -294,7 +417,143 @@ describe('buildTraceEvents', () => {
     expect(kinds).toEqual(['broadcast', 'tool_call'])
   })
 
-  it('maps timeline tool_call activity into tool_call traces', () => {
+  it('does not classify short broadcasts as heartbeats', () => {
+    const events = buildTraceEvents(
+      {
+        ...emptyTimeline('test'),
+        events: [{ type: 'broadcast', ts: '2026-07-18T00:00:00Z', detail: { content: 'ok' } }],
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('broadcast')
+  })
+
+  it('uses only the exact heartbeat event type for heartbeat rows', () => {
+    const events = buildTraceEvents(
+      {
+        ...emptyTimeline('test'),
+        events: [{ type: 'heartbeat', ts: '2026-07-18T00:00:00Z', detail: { content: 'alive' } }],
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('heartbeat')
+  })
+
+  it('preserves duplicate canonical identities as explicit conflicts', () => {
+    const duplicate = toolTrajectoryEntry({
+      ts: 1712397700,
+      ts_iso: '2024-04-06T10:01:40Z',
+      tool_name: 'keeper_fs_read',
+      args: { file_path: '/tmp/a' },
+      outcome: { status: 'succeeded' as const, output: 'a' },
+      duration_ms: 1,
+      execution_id: 'exec-duplicate',
+    })
+    const events = buildTraceEvents(
+      emptyTimeline('test'),
+      {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
+        keeper: 'test',
+        trace_id: 'trace-duplicate',
+        generation: 1,
+        total_entries: 2,
+        showing: 2,
+        entries: [duplicate, {
+          ...duplicate,
+          schedule: { ...duplicate.schedule, planned_index: 1 },
+        }],
+      },
+    )
+    expect(events).toHaveLength(2)
+    expect(events.map(event => event.id)).toEqual([
+      'tj-exec-duplicate',
+      'tj-exec-duplicate#duplicate-1',
+    ])
+    expect(events[1]!.detail.observation_conflict).toEqual({
+      kind: 'duplicate_event_id',
+      event_id: 'tj-exec-duplicate',
+      occurrence: 1,
+    })
+    expect(events[1]!.error).toBe('duplicate trace event id: tj-exec-duplicate')
+  })
+
+  it('projects canonical thinking text while preserving structured blocks', () => {
+    const events = buildTraceEvents(
+      emptyTimeline('test'),
+      {
+        keeper: 'test',
+        trace_id: 'trace-thinking-blocks',
+        generation: 1,
+        total_entries: 3,
+        total_entries_scope: 'tail',
+        total_entries_exact: false,
+        tail_scan_entries: 3,
+        showing: 3,
+        decode: {
+          tool_call_count: 0,
+          thinking_count: 3,
+          skipped_summary_count: 0,
+          invalid_line_count: 0,
+          invalid_reasons: {
+            missing_required_field: 0,
+            invalid_field: 0,
+            unexpected_field: 0,
+            duplicate_field: 0,
+            unsupported_row_type: 0,
+            malformed_json: 0,
+          },
+        },
+        io_errors: [],
+        scan: { physical_rows: 3, bytes_read: 256, stop: 'reached_snapshot_start' },
+        next_cursor: null,
+        entries: [
+          thinkingTrajectoryEntry({
+            ts: 1,
+            ts_iso: '2026-07-18T00:00:01Z',
+            block_index: 0,
+            block: { type: 'thinking', thinking: 'signed thought', signature: 'sig-1' },
+          }),
+          thinkingTrajectoryEntry({
+            ts: 2,
+            ts_iso: '2026-07-18T00:00:02Z',
+            block_index: 1,
+            block: {
+              type: 'reasoning_details',
+              details: [{ text: 'detail-a' }, { raw: { kind: 'opaque' } }, { text: 'detail-b' }],
+            },
+          }),
+          thinkingTrajectoryEntry({
+            ts: 3,
+            ts_iso: '2026-07-18T00:00:03Z',
+            block_index: 2,
+            block: { type: 'redacted_thinking', data: 'opaque-secret' },
+          }),
+        ],
+      },
+    ).filter(event => event.kind === 'thinking')
+
+    expect(events).toHaveLength(3)
+    expect(events[0]!.thinkingRedacted).toBe(true)
+    expect(events[0]!.thinkingContent).toBeUndefined()
+    expect(events[0]!.summary).toBe('[비공개 사고]')
+    expect(events[0]!.detail.block).toEqual({ type: 'redacted_thinking', data: 'opaque-secret' })
+    expect(events[1]!.thinkingContent).toBeUndefined()
+    expect(events[1]!.thinkingBlock).toEqual({
+      type: 'reasoning_details',
+      details: [{ text: 'detail-a' }, { raw: { kind: 'opaque' } }, { text: 'detail-b' }],
+    })
+    expect(events[1]!.detail.block_index).toBe(1)
+    expect(events[2]!.thinkingContent).toBe('signed thought')
+    expect(events[2]!.detail.block).toEqual({
+      type: 'thinking',
+      thinking: 'signed thought',
+      signature: 'sig-1',
+    })
+  })
+
+  it('keeps unmatched timeline tool_call activity as a provenance gap', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -314,13 +573,17 @@ describe('buildTraceEvents', () => {
       null,
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.kind).toBe('tool_call')
-    expect(events[0]!.summary).toBe('keeper_fs_read')
-    expect(events[0]!.toolArgs).toBe('{"path":"/tmp/test.txt"}')
-    expect(events[0]!.toolResult).toBe('file preview')
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.summary).toBe('Tool provenance without canonical Trajectory: keeper_fs_read')
+    expect(events[0]!.detail.observation_kind).toBe('provenance_gap')
+    expect(events[0]!.detail.agent_timeline).toMatchObject({
+      tool_args_preview: '{"path":"/tmp/test.txt"}',
+      tool_output_preview: 'file preview',
+    })
+    expect(events[0]!.error).toBe('agent-timeline provenance has no canonical Trajectory execution row')
   })
 
-  it('enriches trajectory rows from tool-call log and suppresses shallow timeline duplicates', () => {
+  it('joins only exact execution IDs while preserving the full Trajectory payload', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -333,29 +596,27 @@ describe('buildTraceEvents', () => {
             success: true,
             duration_ms: 50,
             tool_args_preview: '{"path":"/tmp/preview.txt"}',
+            execution_id: 'exec-preserve-1',
           },
         }],
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: 'trajectory.txt' },
-          result: 'trajectory result',
+          outcome: { status: 'succeeded', output: 'trajectory result' },
           duration_ms: 50,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
-        }],
+          execution_id: 'exec-preserve-1',
+        })],
       },
       {
         keeper: 'test',
@@ -374,18 +635,28 @@ describe('buildTraceEvents', () => {
           keeper_turn_id: 1,
           task_id: 'task-1',
           lane: 'runtime_mcp',
+          execution_id: 'exec-preserve-1',
         }],
       },
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
-    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'full.txt' })
-    expect(toolEvents[0]!.toolResult).toBe('full file contents')
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
-    expect(toolEvents[0]!.detail.lane).toBe('runtime_mcp')
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'trajectory.txt' })
+    expect(toolEvents[0]!.toolResult).toBe('trajectory result')
+    expect(toolEvents[0]!.duration_ms).toBe(50)
+    expect(toolEvents[0]!.keeperTurnId).toBe(1)
+    expect(toolEvents[0]!.oasTurn).toBe(0)
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
+    expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
+      lane: 'runtime_mcp',
+      turn: 1,
+    })
+    expect(toolEvents[0]!.detail.agent_timeline).toMatchObject({
+      execution_id: 'exec-preserve-1',
+    })
   })
 
-  it('preserves trajectory duration when the richer tool-call row has no duration', () => {
+  it('enriches provenance without overwriting Trajectory fields', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -394,25 +665,21 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: 'trajectory.txt' },
-          result: 'trajectory result',
+          outcome: { status: 'failed', error: 'trajectory failed' },
           duration_ms: 812,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
           execution_id: 'exec-1712397700000-duration',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -438,12 +705,18 @@ describe('buildTraceEvents', () => {
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]!.duration_ms).toBe(812)
-    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'full.txt' })
-    expect(toolEvents[0]!.toolResult).toBe('full file contents')
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'trajectory.txt' })
+    expect(toolEvents[0]!.toolResult).toBeNull()
+    expect(toolEvents[0]!.error).toBe('trajectory failed')
+    expect(toolEvents[0]!.keeperTurnId).toBe(1)
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
+    expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
+      lane: 'runtime_mcp',
+      task_id: 'task-1',
+    })
   })
 
-  it('creates synthetic tool_call rows from tool-call log when trajectory is missing', () => {
+  it('surfaces a provenance gap when tool-call log has no canonical trajectory row', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -473,17 +746,13 @@ describe('buildTraceEvents', () => {
       },
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.kind).toBe('tool_call')
-    expect(events[0]!.toolName).toBe('Execute')
-    expect(events[0]!.error).toBe('command exited 1')
-    expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
-    expect(events[0]!.detail.lane).toBe('runtime_mcp')
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.error).toBe('tool-call provenance has no canonical Trajectory execution row')
+    expect(events[0]!.detail.observation_kind).toBe('provenance_gap')
+    expect(events[0]!.detail.tool_call_log).toMatchObject({ lane: 'runtime_mcp' })
   })
 
-  it('joins trajectory and tool-call log rows on execution_id despite divergent turn vocabularies (#20910)', () => {
-    // Reproduces the double-row symptom: trajectory turn is trace-relative
-    // (0) while the log turn is session-absolute (4064). The heuristic join
-    // fails on that mismatch; the canonical execution_id must win.
+  it('joins trajectory and tool-call log rows on execution_id despite divergent provenance', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -492,25 +761,30 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 0,
-          round: 5,
+          keeper_turn_id: 9,
+          oas_turn: 0,
+          schedule: {
+            planned_index: 5,
+            batch_index: 1,
+            batch_size: 2,
+            execution_mode: 'concurrent',
+          },
+          tool_use_id: 'toolu-002a',
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/trajectory.txt' },
-          result: 'trajectory result',
+          outcome: { status: 'succeeded', output: 'trajectory result' },
           duration_ms: 50,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
           execution_id: 'exec-1712397700000-002a',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -536,15 +810,25 @@ describe('buildTraceEvents', () => {
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]!.executionId).toBe('exec-1712397700000-002a')
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
-    // Trace-relative T/R pair stays on the badge; absolute turn remains a detail attribute.
-    expect(toolEvents[0]!.turn).toBe(0)
-    expect(toolEvents[0]!.round).toBe(5)
-    expect(toolEvents[0]!.detail.turn).toBe(4064)
-    expect(toolEvents[0]!.toolResult).toBe('full file contents')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory')
+    expect(toolEvents[0]!.keeperTurnId).toBe(9)
+    expect(toolEvents[0]!.oasTurn).toBe(0)
+    expect(toolEvents[0]!.toolSchedule).toEqual({
+      planned_index: 5,
+      batch_index: 1,
+      batch_size: 2,
+      execution_mode: 'concurrent',
+    })
+    expect(toolEvents[0]!.toolUseId).toBe('toolu-002a')
+    expect(toolEvents[0]!.detail.tool_call_log).toMatchObject({
+      turn: 4064,
+      keeper_turn_id: 9,
+    })
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: '/tmp/trajectory.txt' })
+    expect(toolEvents[0]!.toolResult).toBe('trajectory result')
   })
 
-  it('does not join rows with different execution_ids even when heuristics agree', () => {
+  it('does not join different execution IDs despite matching incidental metadata', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -553,25 +837,22 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
           args: { file_path: '/tmp/a.txt' },
-          result: 'a',
+          outcome: { status: 'succeeded', output: 'a' },
           duration_ms: 50,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
+          tool_use_id: 'shared-tool-use-id',
           execution_id: 'exec-1712397700000-0001',
-        }],
+        })],
       },
       {
         keeper: 'test',
@@ -589,15 +870,17 @@ describe('buildTraceEvents', () => {
           turn: 1,
           keeper_turn_id: 1,
           lane: 'runtime_mcp',
+          tool_use_id: 'shared-tool-use-id',
           execution_id: 'exec-1712397700001-0002',
         }],
       },
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
-    expect(toolEvents).toHaveLength(2)
+    expect(toolEvents).toHaveLength(1)
+    expect(events.filter(event => event.detail.observation_kind === 'provenance_gap')).toHaveLength(1)
   })
 
-  it('falls back to the heuristic join for pre-PR-1 rows without execution_id', () => {
+  it('does not infer a join for a tool-call log without execution_id', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -606,24 +889,21 @@ describe('buildTraceEvents', () => {
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
       },
       {
+        ...ONE_TOOL_TRAJECTORY_OBSERVATION,
         keeper: 'test',
         trace_id: 'trace-1',
         generation: 1,
         total_entries: 1,
         showing: 1,
-        entries: [{
+        entries: [toolTrajectoryEntry({
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
-          turn: 1,
-          round: 1,
           tool_name: 'keeper_fs_read',
-          args: { file_path: '/tmp/legacy.txt' },
-          result: 'legacy',
+          args: { file_path: '/tmp/trajectory.txt' },
+          outcome: { status: 'succeeded', output: 'trajectory' },
           duration_ms: 50,
-          gate: { status: 'pass' },
-          cost_usd: 0.001,
-          error: null,
-        }],
+          execution_id: 'exec-trajectory-only-1',
+        })],
       },
       {
         keeper: 'test',
@@ -632,8 +912,8 @@ describe('buildTraceEvents', () => {
           ts: 1712397700,
           keeper: 'test',
           tool: 'keeper_fs_read',
-          input: { file_path: '/tmp/legacy.txt' },
-          output: 'legacy full',
+          input: { file_path: '/tmp/log-only.txt' },
+          output: 'log output',
           success: true,
           duration_ms: 50,
           trace_id: 'trace-1',
@@ -646,10 +926,12 @@ describe('buildTraceEvents', () => {
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
-    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    const gap = events.find(event => event.detail.observation_kind === 'provenance_gap')
+    expect(gap?.id).toBe('provenance-gap-tool-call-log-row-0')
+    expect(gap?.detail.tool_call_log).toMatchObject({ trace_id: 'trace-1' })
   })
 
-  it('uses execution_id as the stable synthetic row id when present', () => {
+  it('uses execution_id as the stable provenance-gap row id when present', () => {
     const events = buildTraceEvents(
       {
         agent: 'test',
@@ -679,19 +961,19 @@ describe('buildTraceEvents', () => {
       },
     )
     expect(events).toHaveLength(1)
-    expect(events[0]!.id).toBe('tc-exec-1712397700000-00ff')
+    expect(events[0]!.id).toBe('provenance-gap-tool-call-log-exec-1712397700000-00ff')
     expect(events[0]!.executionId).toBe('exec-1712397700000-00ff')
   })
 
 })
 
 describe('getTraceSummary', () => {
-  it('counts tool_call events and accumulates cost', () => {
+  it('counts tool_call events without inventing tool costs', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {}, cost_usd: 0.01 },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {}, cost_usd: 0.02 },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -706,7 +988,7 @@ describe('getTraceSummary', () => {
     const summary = getTraceSummary('keeper-a')
     expect(summary.tool_call_count).toBe(2)
     expect(summary.broadcast_count).toBe(1)
-    expect(summary.total_cost_usd).toBeCloseTo(0.03)
+    expect(summary.total_cost_usd).toBe(0)
   })
 
   it('accumulates OAS tokens and cost from lifecycle events', () => {
@@ -936,7 +1218,6 @@ describe('status filter', () => {
         events: [
           { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
           { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'timeout' },
-          { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'rejected', detail: {}, gate: { status: 'reject', reason: 'unsafe' } },
           { id: '4', ts: 4000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -951,8 +1232,7 @@ describe('status filter', () => {
     const counts = getStatusCounts('keeper-a')
     expect(counts.success).toBe(1)
     expect(counts.failure).toBe(1)
-    expect(counts.gate_rejected).toBe(1)
-    expect(counts.all).toBe(3) // broadcast has no status
+    expect(counts.all).toBe(2) // broadcast has no status
   })
 
   it('filters events by status', () => {

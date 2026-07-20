@@ -14,7 +14,6 @@ function mkStat(name: string, overrides: Partial<ToolStat> = {}): ToolStat {
     avg_duration_ms: 10,
     p95_duration_ms: 20,
     max_duration_ms: 30,
-    total_cost_usd: 0,
     last_used_at: '2026-04-17T00:00:00Z',
     ...overrides,
   }
@@ -136,6 +135,18 @@ describe('KeeperToolTelemetry render', () => {
       keeper: 'analyst',
       window_hours: 24,
       total_entries: 0,
+      decode: {
+        invalid_entry_count: 2,
+        invalid_reasons: {
+          missing_required_field: 0,
+          invalid_field: 0,
+          unexpected_field: 2,
+          duplicate_field: 0,
+          unsupported_row_type: 0,
+          malformed_json: 0,
+        },
+      },
+      io_errors: [{ path: '/trajectory/t.jsonl', message: 'permission denied' }],
       source: 'trajectory_tool_call',
       health: 'coverage_gap',
       stale_reason: 'trajectory_append_failed',
@@ -144,7 +155,7 @@ describe('KeeperToolTelemetry render', () => {
         {
           source: 'trajectory_tool_call',
           producer: 'keeper_hooks_oas.post_tool_use',
-          durable_store: '.masc/keepers/analyst/trajectories',
+          durable_store: '.masc/keepers/analyst/trajectories/v1',
           dashboard_surface: '/api/v1/keepers/:name/tool-stats',
           stale_reason: 'trajectory_append_failed',
           trace_id: 'trace-tool-stats-gap',
@@ -163,9 +174,11 @@ describe('KeeperToolTelemetry render', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Tool trajectory write failed · 1 recorded gap')
+    expect(container.textContent).toContain('decode invalid 2 rows · unexpected field 2')
+    expect(container.textContent).toContain('trajectory read failed · /trajectory/t.jsonl · permission denied')
     expect(container.textContent).toContain('reason trajectory_append_failed')
     expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')
-    expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories')
+    expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories/v1')
     expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-stats')
     expect(container.textContent).toContain('trace trace-tool-stats-gap')
     expect(container.textContent).toContain('error append denied')

@@ -1040,16 +1040,8 @@ export interface MetricsWindow {
   // -- Fallback rates --
   fallback_count?: number
   fallback_rate?: number
-  model_fallback_count?: number
-  model_fallback_rate?: number
-  model_fallback_numerator?: number
-  model_fallback_denominator?: number
   proactive_fallback_count?: number
   proactive_fallback_rate?: number
-  proactive_template_fallback_count?: number
-  proactive_template_fallback_rate?: number
-  proactive_template_fallback_numerator?: number
-  proactive_template_fallback_denominator?: number
 
   // -- Intervention --
   intervention_share?: number
@@ -1258,6 +1250,7 @@ export interface Keeper {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   conversation_tail_count?: number
+  conversation_decode_error_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
   handoff_count_total?: number

@@ -75,8 +75,6 @@ module Attr_key = struct
   let masc_turn_blocks = register Masc_extension "masc.turn.blocks"
   let masc_turn_profile = register Masc_extension "masc.turn.profile"
 
-  let masc_turn_execution_ids =
-    register Masc_extension "masc.turn.execution_ids"
   ;;
 
   let keeper_name = register Legacy "keeper.name"

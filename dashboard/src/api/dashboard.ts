@@ -265,7 +265,15 @@ export {
   patchKeeperConfig,
 } from './dashboard-keeper-config'
 
-export type { TrajectoryEntry, TrajectoryResponse } from './dashboard-keeper-trajectory'
+export type {
+  TrajectoryEntry,
+  TrajectoryExecutionMode,
+  TrajectoryResponse,
+  TrajectoryThinkingBlock,
+  TrajectoryThinkingEntry,
+  TrajectoryToolEntry,
+  TrajectoryToolSchedule,
+} from './dashboard-keeper-trajectory'
 export { fetchKeeperTrajectory } from './dashboard-keeper-trajectory'
 
 // ── Keeper tool stats (server-side aggregation) ──────────

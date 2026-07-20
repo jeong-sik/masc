@@ -296,124 +296,6 @@ let runtime_mcp_keeper_tool_call_sse_payload
   in
   `Assoc (base_fields @ error_fields @ io_fields)
 
-let runtime_mcp_masc_root ~base_path =
-  match Keeper_tool_call_log.configured_masc_root () with
-  | Some masc_root -> masc_root
-  | None ->
-      let config = Workspace.default_config base_path in
-      Workspace.masc_root_dir config
-
-let record_runtime_mcp_trajectory_coverage_gap
-    ~(masc_root : string)
-    ~(keeper_name : string)
-    ~(trace_id : string)
-    ~(stale_reason : string)
-    (exn : exn) : unit =
-  try
-    Telemetry_coverage_gap.record
-      ~masc_root
-      ~source:"trajectory_tool_call"
-      ~producer:"mcp_server_eio_call_tool.runtime_mcp"
-      ~durable_store:(Trajectory.trajectory_path masc_root keeper_name trace_id)
-      ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-      ~stale_reason
-      ~keeper_name
-      ~trace_id
-      ~exn
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | gap_exn ->
-      log_mcp_exn
-        ~label:"runtime MCP trajectory coverage gap append failed"
-        gap_exn
-
-let record_runtime_mcp_keeper_trajectory
-    (ctx : keeper_runtime_mcp_log_context)
-    ~(base_path : string)
-    ~(tool_name : string)
-    ~(arguments : Yojson.Safe.t)
-    ~(message : string)
-    ~(success : bool)
-    ~(duration_ms : int)
-    ~(execution_id : Ids.Execution_id.t) : unit =
-  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
-  let masc_root = runtime_mcp_masc_root ~base_path in
-  let safe_input = Observability_redact.redact_json_value arguments in
-  let safe_output =
-    Observability_redact.redact_preview ~max_len:4000 message
-  in
-  let turn = Option.value ~default:0 ctx.turn in
-  let round =
-    Trajectory.next_round
-      ~masc_root
-      ~keeper_name:ctx.keeper_name
-      ~trace_id
-      ~turn
-  in
-  let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
-      ~keeper_name:ctx.keeper_name
-      ?agent_name:ctx.agent_name
-      ?trace_id:ctx.trace_id
-      ?session_id:ctx.session_id
-      ?generation:ctx.generation
-      ?keeper_turn_id:ctx.keeper_turn_id
-      ?task_id:ctx.task_id
-      ?goal_ids:ctx.goal_ids
-      ?sandbox_profile:ctx.sandbox_profile
-      ?sandbox_root:ctx.sandbox_root
-      ?allowed_paths:ctx.allowed_paths
-      ?network_mode:ctx.network_mode
-      ?runtime_profile:ctx.runtime_profile
-      ()
-  in
-  let error = if success then None else Some safe_output in
-  let action_radius =
-    Keeper_runtime_contract.action_radius_json
-      ~tool_name
-      ~input:safe_input
-      ~success
-      ~duration_ms:(float_of_int duration_ms)
-      ?error
-      ?sandbox_target:ctx.sandbox_profile
-      ()
-  in
-  let now = Time_compat.now () in
-  let entry : Trajectory.tool_call_entry =
-    {
-      ts = now;
-      ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-      turn;
-      round;
-      tool_name;
-      args_json = Yojson.Safe.to_string safe_input;
-      gate_decision = Trajectory.Pass;
-      result = Some safe_output;
-      duration_ms;
-      error;
-      cost_usd = Trajectory.tool_cost_estimate tool_name;
-      execution_id = Some (Ids.Execution_id.to_string execution_id);
-    }
-  in
-  try
-    Trajectory.append_entry
-      ~runtime_contract
-      ~action_radius
-      ~masc_root
-      ~keeper_name:ctx.keeper_name
-      ~trace_id
-      entry
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      record_runtime_mcp_trajectory_coverage_gap
-        ~masc_root
-        ~keeper_name:ctx.keeper_name
-        ~trace_id
-        ~stale_reason:"runtime_mcp_trajectory_append_failed"
-        exn
-
 let record_runtime_mcp_keeper_tool_trace
     ?mcp_session_id
     (entry : Keeper_registry.registry_entry)
@@ -428,8 +310,9 @@ let record_runtime_mcp_keeper_tool_trace
       entry
       ~arguments
   in
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
-     the tool_calls row and the trajectory row below share the value. *)
+  (* RFC-0233: mint the runtime-MCP execution identity at its dispatch
+     boundary. This lane has no OAS Invocation and therefore writes only the
+     tool-call log; it must not fabricate a canonical Keeper trajectory row. *)
   let execution_id = Ids.Execution_id.generate () in
   let success =
     match disposition with
@@ -456,20 +339,11 @@ let record_runtime_mcp_keeper_tool_trace
     ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
-      ?allowed_paths:ctx.allowed_paths
-      ?network_mode:ctx.network_mode
-      ?runtime_profile:ctx.runtime_profile
+    ?allowed_paths:ctx.allowed_paths
+    ?network_mode:ctx.network_mode
+    ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();
-  record_runtime_mcp_keeper_trajectory
-    ctx
-    ~base_path:entry.base_path
-    ~tool_name
-    ~arguments
-    ~message
-    ~success
-    ~duration_ms
-    ~execution_id;
   Sse.broadcast
     (runtime_mcp_keeper_tool_call_sse_payload
        ~keeper_name:ctx.keeper_name

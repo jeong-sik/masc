@@ -184,7 +184,11 @@ Look at `config/keepers/issue_king.toml` and its runtime binding to see which pr
 
 ### 6.4 Check trajectory / telemetry
 
-Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king` turn. The raw tool-call JSON should be present in the trajectory.
+Search `.masc/keepers/issue_king/trajectories/v1/`, `tool_calls/`, `logs/`,
+telemetry, and explicit coverage gaps for the affected turn. The retired
+top-level trajectory archive is not a live read source. If validation rejected
+the call before an OAS Invocation reached the canonical writer, absence from
+the trajectory is expected evidence and must not be repaired into a row.
 
 ---
 

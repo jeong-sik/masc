@@ -18,6 +18,16 @@ include Keeper_status_bridge
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
+let trajectory_read_failure_data ~keeper_name ~trace_id
+    (read : Trajectory.entries_read_result) =
+  `Assoc
+    [ ("error", `String "trajectory_read_failed")
+    ; ("keeper", `String keeper_name)
+    ; ("trace_id", `String trace_id)
+    ; ("decode", Trajectory.entry_decode_summary_to_json read.decode)
+    ; ("io_errors", Trajectory.trajectory_read_errors_to_json read.io_errors)
+    ]
+
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -243,9 +253,11 @@ let handle_keeper_trajectory ctx args : tool_result =
     | Ok (Some (_resolved_name, m)) ->
       let limit = get_int args "limit" 20 in
       let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
-      let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
+      let trace_id = Keeper_id.Trace_id.to_string m.runtime.trace_id in
+      let read =
+        Trajectory.read_entries_result ~masc_root ~keeper_name:m.name ~trace_id
       in
+      let entries = read.entries in
       let total = List.length entries in
       (* Take the last N entries (most recent) *)
       let recent =
@@ -254,20 +266,19 @@ let handle_keeper_trajectory ctx args : tool_result =
           let drop = total - limit in
           List.filteri (fun i _e -> i >= drop) entries
       in
-      if recent = [] then
-        tool_result_ok
-          (Printf.sprintf
-             "Keeper %s (trace: %s) has no trajectory entries."
-             m.name
-             (Keeper_id.Trace_id.to_string m.runtime.trace_id))
+      if read.io_errors <> [] then
+        tool_result_error_data
+          (trajectory_read_failure_data ~keeper_name:m.name ~trace_id read)
       else
         let json_list = List.map Trajectory.entry_to_json recent in
         let json = `Assoc [
           ("keeper", `String m.name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
+          ("trace_id", `String trace_id);
           ("generation", `Int m.runtime.generation);
           ("total_entries", `Int total);
           ("showing", `Int (List.length recent));
+          ("decode", Trajectory.entry_decode_summary_to_json read.decode);
+          ("io_errors", Trajectory.trajectory_read_errors_to_json read.io_errors);
           ("entries", `List json_list);
         ] in
         tool_result_ok_data json
@@ -283,10 +294,24 @@ let handle_keeper_eval ctx args : tool_result =
     | Ok (Some (_resolved_name, m)) ->
       let scenario_file = get_string_opt args "scenario_file" in
       let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
-      let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
+      let trace_id = Keeper_id.Trace_id.to_string m.runtime.trace_id in
+      let read =
+        Trajectory.read_entries_result ~masc_root ~keeper_name:m.name ~trace_id
       in
-      if entries = [] then
+      let entries = read.entries in
+      if read.io_errors <> [] then
+        tool_result_error_data
+          (trajectory_read_failure_data ~keeper_name:m.name ~trace_id read)
+      else if entries = [] && read.decode.invalid_entry_count > 0 then
+        tool_result_error_data
+          (`Assoc
+             [ ("error", `String "trajectory_has_no_valid_entries")
+             ; ("keeper", `String m.name)
+             ; ("trace_id", `String trace_id)
+             ; ( "decode",
+                 Trajectory.entry_decode_summary_to_json read.decode )
+             ])
+      else if entries = [] then
         tool_result_ok
           (Printf.sprintf "Keeper %s has no trajectory data to evaluate." m.name)
       else
@@ -323,7 +348,7 @@ let handle_keeper_eval ctx args : tool_result =
         in
         let json = `Assoc [
           ("keeper", `String m.name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
+          ("trace_id", `String trace_id);
           ("generation", `Int m.runtime.generation);
           ("total_turns", `Int m.runtime.usage.total_turns);
           ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
@@ -331,6 +356,7 @@ let handle_keeper_eval ctx args : tool_result =
           ("total_tool_calls", `Int total);
           ("unique_tools", `Int (List.length unique_tools));
           ("tool_distribution", `List tool_stats);
+          ("decode", Trajectory.entry_decode_summary_to_json read.decode);
           ("scenario_file", scenario_info);
           ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in

@@ -103,6 +103,37 @@ let test_source_of_string_unknown () =
 
 let masc_root dir = Filename.concat dir Common.masc_dirname
 
+let canonical_trajectory_tool_json ?(keeper_turn_id = 1) ?(oas_turn = 0)
+    ?(planned_index = 0) ?(batch_index = 0) ?(batch_size = 1)
+    ?(execution_mode = Agent_sdk.Tool.Serial) ?(tool_use_id = "") ~ts
+    ~tool_name ~duration_ms ~execution_id () =
+  `Assoc
+    [ ("schema", `String "masc.keeper_trajectory.v1")
+    ; ("type", `String "tool_call")
+    ; ("ts", `Float ts)
+    ; ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts))
+    ; ("keeper_turn_id", `Int keeper_turn_id)
+    ; ("oas_turn", `Int oas_turn)
+    ; ( "schedule"
+      , `Assoc
+          [ ("planned_index", `Int planned_index)
+          ; ("batch_index", `Int batch_index)
+          ; ("batch_size", `Int batch_size)
+          ; ( "execution_mode"
+            , Agent_sdk.Tool.execution_mode_to_yojson execution_mode )
+          ] )
+    ; ("tool_use_id", `String tool_use_id)
+    ; ("tool_name", `String tool_name)
+    ; ("args", `Assoc [])
+    ; ( "outcome"
+      , `Assoc
+          [ ("status", `String "succeeded")
+          ; ("output", `String "ok")
+          ] )
+    ; ("duration_ms", `Int duration_ms)
+    ; ("execution_id", `String execution_id)
+    ]
+
 let test_empty_returns_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -496,51 +527,31 @@ let test_time_window_reads_matching_day_files () =
   Alcotest.(check (list string)) "range spans multiple day files"
     ["today"; "yesterday"] events
 
-let test_time_window_n_zero_disables_truncation () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_window_unbounded" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
-  Fs_compat.mkdir_p telemetry_dir;
-  let now = Unix.gettimeofday () in
-  write_jsonl telemetry_dir [
-    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
-    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
-    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
-  ];
-  let result =
-    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Agent_event]
-      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:0 ()
-  in
-  Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
-  Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
-  Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+let test_unbounded_read_is_rejected () =
+  Alcotest.check_raises
+    "n=0 is not an unlimited server read"
+    (Invalid_argument
+       "Telemetry_unified.read_unified_result: n must be positive")
+    (fun () ->
+       Telemetry_unified.read_unified_result
+         ~base_path:"unused"
+         ~masc_root:"unused"
+         ~n:0
+         ()
+       |> ignore)
 
-(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
-   ([read_recent]), not the full-store [read_range] scan (1970->today) that
-   Yojson-parsed the whole store and starved keeper fibers, and not the empty
-   list the #20649 regression produced for fixed sources. With fewer entries
-   than [unbounded_window_scan_cap], all are returned. *)
-let test_n_zero_no_window_returns_bounded () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_n0_no_window" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
-  Fs_compat.mkdir_p telemetry_dir;
-  let now = Unix.gettimeofday () in
-  write_jsonl telemetry_dir [
-    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
-    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
-    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
-  ];
-  let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
-      ~masc_root:(masc_root dir)
-      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
-  in
-  Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
-    (List.length result.entries)
+let test_negative_offset_is_rejected () =
+  Alcotest.check_raises
+    "negative offset is not normalized"
+    (Invalid_argument
+       "Telemetry_unified.read_unified_result: offset must be non-negative")
+    (fun () ->
+       Telemetry_unified.read_unified_result
+         ~base_path:"unused"
+         ~masc_root:"unused"
+         ~offset:(-1)
+         ()
+       |> ignore)
 
 (* ── Summary with data ───────────────────────────── *)
 
@@ -655,29 +666,13 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
   let dir = tmpdir "telem_summary_tool_lanes" in
   let root = masc_root dir in
   let now = Unix.gettimeofday () in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  let trajectory_path = Trajectory.trajectory_path root "alice" "trace-1" in
+  let trajectory_dir = Filename.dirname trajectory_path in
   Fs_compat.mkdir_p trajectory_dir;
-  Fs_compat.append_file
-    (Filename.concat trajectory_dir "trace-1.jsonl")
+  Fs_compat.append_file trajectory_path
     (Yojson.Safe.to_string
-       (`Assoc
-          [
-            ("ts", `Float now);
-            ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds now));
-            ("turn", `Int 1);
-            ("round", `Int 1);
-            ("tool_name", `String "tool_execute");
-            ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
-            ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc [ ("keeper_name", `String "alice") ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
-          ])
+       (canonical_trajectory_tool_json ~ts:now ~tool_name:"tool_execute"
+          ~duration_ms:7 ~execution_id:"exec-telemetry-summary-1" ())
      ^ "\n");
   let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
   Fs_compat.mkdir_p receipt_dir;
@@ -717,30 +712,41 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_read_tool_lanes" in
   let root = masc_root dir in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
-  Fs_compat.mkdir_p trajectory_dir;
-  Fs_compat.append_file
-    (Filename.concat trajectory_dir "trace-1.jsonl")
-    (Yojson.Safe.to_string
-       (`Assoc
-          [
-            ("ts", `Float 2000.0);
-            ("ts_iso", `String "1970-01-01T00:33:20Z");
-            ("turn", `Int 1);
-            ("round", `Int 1);
-            ("tool_name", `String "tool_execute");
-            ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
-            ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc [ ("keeper_name", `String "alice") ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
-          ])
-     ^ "\n");
+  let invocation =
+    Agent_sdk.Tool.Invocation.create ~tool_use_id:"tool-use-telemetry-read-1"
+      ~turn:4
+      ~schedule:
+        { planned_index = 5
+        ; batch_index = 1
+        ; batch_size = 2
+        ; execution_mode = Agent_sdk.Tool.Concurrent
+        }
+  in
+  let trajectory_entry =
+    match
+      Trajectory.make_tool_call_entry
+        ~ts:2000.0
+        ~ts_iso:"1970-01-01T00:33:20Z"
+        ~keeper_turn_id:1
+        ~invocation
+        ~tool_name:"tool_execute"
+        ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "ok")
+        ~duration_ms:7
+        ~execution_id:
+          (Ids.Execution_id.of_string "exec-telemetry-read-1")
+    with
+    | Ok entry -> entry
+    | Error error ->
+      Alcotest.failf "canonical trajectory fixture rejected: %s"
+        (Trajectory.entry_decode_error_to_string error)
+  in
+  let trajectory_accumulator =
+    Trajectory.create_accumulator ~masc_root:root ~keeper_name:"alice"
+      ~trace_id:"trace-1" ~keeper_turn_id:1 ~generation:0 ()
+  in
+  Trajectory.record_entry trajectory_accumulator trajectory_entry;
+  Trajectory.finalize trajectory_accumulator Trajectory.Completed |> ignore;
   let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
   Fs_compat.mkdir_p receipt_dir;
   write_jsonl receipt_dir
@@ -773,63 +779,34 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
   Alcotest.(check string) "newest source" "trajectory_tool_call"
     (List.hd entries |> json_string_field "source");
   Alcotest.(check string) "oldest source" "execution_receipt"
-    (List.nth entries 1 |> json_string_field "source")
-
-let test_scope_filter_matches_runtime_contract_fields () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_runtime_contract_scope" in
-  let root = masc_root dir in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
-  Fs_compat.mkdir_p trajectory_dir;
-  Fs_compat.append_file
-    (Filename.concat trajectory_dir "trace-1.jsonl")
-    (Yojson.Safe.to_string
-       (`Assoc
-          [
-            ("ts", `Float 3000.0);
-            ("ts_iso", `String "1970-01-01T00:50:00Z");
-            ("turn", `Int 1);
-            ("round", `Int 1);
-            ("tool_name", `String "tool_execute");
-            ("args", `Assoc []);
-            ("gate", `Assoc [ ("status", `String "pass") ]);
-            ("result", `String "ok");
-            ("duration_ms", `Int 7);
-            ("error", `Null);
-            ("cost_usd", `Float 0.0);
-            ( "runtime_contract",
-              `Assoc
-                [
-                  ("keeper_name", `String "alice");
-                  ("session_id", `String "sess-nested");
-                  ("operation_id", `String "op-nested");
-                  ("trace_id", `String "run-nested");
-                ] );
-            ( "action_radius",
-              `Assoc [ ("tool_name", `String "tool_execute") ] );
-          ])
-     ^ "\n");
-  let result =
-    Telemetry_unified.read_unified_result
-      ~base_path:dir
-      ~masc_root:root
-      ~sources:[ Telemetry_unified.Trajectory_tool_call ]
-      ~session_id:"sess-nested"
-      ~operation_id:"op-nested"
-      ~worker_run_id:"run-nested"
-      ~n:10
-      ()
+    (List.nth entries 1 |> json_string_field "source");
+  let trajectory_json = List.hd entries in
+  Alcotest.(check int) "keeper turn preserved" 1
+    (json_int_field "keeper_turn_id" trajectory_json);
+  Alcotest.(check int) "OAS turn preserved" 4
+    (json_int_field "oas_turn" trajectory_json);
+  Alcotest.(check string) "OAS tool use id preserved"
+    "tool-use-telemetry-read-1"
+    (json_string_field "tool_use_id" trajectory_json);
+  Alcotest.(check string) "MASC execution id preserved"
+    "exec-telemetry-read-1"
+    (json_string_field "execution_id" trajectory_json);
+  let schedule =
+    match trajectory_json with
+    | `Assoc fields ->
+      (match List.assoc_opt "schedule" fields with
+       | Some (`Assoc _ as schedule) -> schedule
+       | Some _ | None -> Alcotest.fail "expected exact OAS schedule")
+    | _ -> Alcotest.fail "expected trajectory object"
   in
-  Alcotest.(check int) "runtime contract scoped row visible" 1
-    result.total_matching_entries;
-  match result.entries with
-  | [ entry ] ->
-    Alcotest.(check string) "source" "trajectory_tool_call"
-      (json_string_field "source" entry);
-    Alcotest.(check string) "tool" "tool_execute"
-      (json_string_field "tool_name" entry)
-  | _ -> Alcotest.fail "expected one scoped trajectory row"
+  Alcotest.(check int) "planned index preserved" 5
+    (json_int_field "planned_index" schedule);
+  Alcotest.(check int) "batch index preserved" 1
+    (json_int_field "batch_index" schedule);
+  Alcotest.(check int) "batch size preserved" 2
+    (json_int_field "batch_size" schedule);
+  Alcotest.(check string) "execution mode preserved" "concurrent"
+    (json_string_field "execution_mode" schedule)
 
 let test_goal_event_source_and_summary () =
   Eio_main.run @@ fun env ->
@@ -978,19 +955,17 @@ let test_trajectory_parse_errors_are_aggregated_per_file () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_bad_trajectory_rows" in
   let root = masc_root dir in
-  let trajectory_dir = Filename.concat root "trajectories/alice" in
+  let path = Trajectory.trajectory_path root "alice" "trace-bad" in
+  let trajectory_dir = Filename.dirname path in
   Fs_compat.mkdir_p trajectory_dir;
-  let path = Filename.concat trajectory_dir "trace-bad.jsonl" in
   Fs_compat.append_file path
     (String.concat "\n"
        [
          "{not-json";
          Yojson.Safe.to_string
-           (`Assoc
-              [
-                ("ts", `Float 2000.0);
-                ("tool_name", `String "tool_execute");
-              ]);
+           (canonical_trajectory_tool_json ~ts:2000.0
+              ~tool_name:"tool_execute" ~duration_ms:7
+              ~execution_id:"exec-telemetry-valid-1" ());
          "{still-not-json";
          "";
        ]);
@@ -1015,7 +990,7 @@ let test_summary_bad_trajectory_root_observed_once () =
   let dir = tmpdir "telem_bad_trajectory_root" in
   let root = masc_root dir in
   Fs_compat.mkdir_p root;
-  Fs_compat.append_file (Filename.concat root "trajectories")
+  Fs_compat.append_file (Filename.concat root "keepers")
     "not a directory\n";
   let before_summary =
     source_read_failure_metric "trajectory_tool_call"
@@ -1245,24 +1220,49 @@ let test_cluster_keeper_metrics () =
 (* ── Trajectory summary incremental cache ─────────── *)
 
 let trajectory_row ~ts ~tool_name =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ ("ts", `Float ts)
-       ; ("turn", `Int 1)
-       ; ("tool_name", `String tool_name)
-       ; ("args", `Assoc [])
-       ; ("result", `String "ok")
-       ])
+  (canonical_trajectory_tool_json ~ts ~tool_name ~duration_ms:1
+     ~execution_id:(Printf.sprintf "exec-%s-%.0f" tool_name ts) ()
+   |> Yojson.Safe.to_string)
   ^ "\n"
 
 let thinking_row ~ts =
   Yojson.Safe.to_string
     (`Assoc
-       [ ("type", `String "thinking")
+       [ ("schema", `String "masc.keeper_trajectory.v1")
+       ; ("type", `String "thinking")
        ; ("ts", `Float ts)
-       ; ("content", `String "reasoning text")
+       ; ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts))
+       ; ("keeper_turn_id", `Int 1)
+       ; ("oas_turn", `Int 0)
+       ; ("block_index", `Int 0)
+       ; ( "block",
+           `Assoc
+             [ ("type", `String "thinking")
+             ; ("thinking", `String "reasoning text")
+             ] )
        ])
   ^ "\n"
+
+let test_trajectory_read_scan_budget_counts_thinking_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_traj_scan_budget" in
+  let root = masc_root dir in
+  let trace = Trajectory.trajectory_path root "alice" "trace-scan-budget" in
+  Fs_compat.mkdir_p (Filename.dirname trace);
+  (* The Tool row is older than the canonical rows in the bounded tail.  A
+     Tool-only projection must not keep paging through Thinking rows until it
+     happens to find a matching Tool. *)
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"old_tool");
+  Fs_compat.append_file trace (thinking_row ~ts:200.0);
+  Fs_compat.append_file trace (thinking_row ~ts:300.0);
+  Fs_compat.append_file trace (thinking_row ~ts:400.0);
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+      ~sources:[ Telemetry_unified.Trajectory_tool_call ] ~n:1 ()
+  in
+  Alcotest.(check int) "bounded canonical tail contains no Tool row" 0
+    (List.length entries)
 
 (* The (count, latest_ts) summary must (a) count only tool-call rows,
    (b) pick appended rows up on the next call without any cache reset —
@@ -1272,9 +1272,9 @@ let test_trajectory_summary_incremental () =
   Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
   let dir = tmpdir "telem_traj_summary_incr" in
   let root = masc_root dir in
-  let keeper_dir = Filename.concat root "trajectories/alice" in
+  let trace = Trajectory.trajectory_path root "alice" "trace-1" in
+  let keeper_dir = Filename.dirname trace in
   Fs_compat.mkdir_p keeper_dir;
-  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
   Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
   Fs_compat.append_file trace (thinking_row ~ts:150.0);
   Fs_compat.append_file trace (trajectory_row ~ts:200.0 ~tool_name:"tool_b");
@@ -1334,14 +1334,12 @@ let () =
             test_time_window_reports_total_before_limit;
           Alcotest.test_case "time window reads matching day files" `Quick
             test_time_window_reads_matching_day_files;
-          Alcotest.test_case "time window n=0 disables truncation" `Quick
-            test_time_window_n_zero_disables_truncation;
-          Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
-            `Quick test_n_zero_no_window_returns_bounded;
+          Alcotest.test_case "unbounded reads are rejected" `Quick
+            test_unbounded_read_is_rejected;
+          Alcotest.test_case "negative offsets are rejected" `Quick
+            test_negative_offset_is_rejected;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
-          Alcotest.test_case "runtime contract scope filter" `Quick
-            test_scope_filter_matches_runtime_contract_fields;
           Alcotest.test_case "goal events" `Quick
             test_goal_event_source_and_summary;
           Alcotest.test_case "fixed source bad store type is observed" `Quick
@@ -1351,6 +1349,9 @@ let () =
           Alcotest.test_case "trajectory parse failures are aggregated"
             `Quick
             test_trajectory_parse_errors_are_aggregated_per_file;
+          Alcotest.test_case "trajectory scan budget counts thinking rows"
+            `Quick
+            test_trajectory_read_scan_budget_counts_thinking_rows;
         ] );
       ( "summary",
         [

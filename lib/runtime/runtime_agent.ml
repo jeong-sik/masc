@@ -1014,6 +1014,7 @@ let run_blocks
     ?(on_event : (Agent_sdk.Types.sse_event -> unit) option)
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
+    ?(execution_store : Agent_sdk.Agent.execution_store option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
     ?cooperative_yield_probe
     ?goal_detail
@@ -1110,6 +1111,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
+                   ?execution_store
                    ~on_event:cb
                    agent
                    goal_blocks
@@ -1119,6 +1121,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
+                   ?execution_store
                    agent
                    goal_blocks)
               |> Result.map (fun response -> `Completed response)
@@ -1156,6 +1159,7 @@ let run_blocks
                   ?clock
                   ?on_yield
                   ?on_resume
+                  ?execution_store
                   ~api_strategy
                   ~on_tool_boundary
                   agent
@@ -1364,12 +1368,14 @@ let run
     ?on_event
     ?on_yield
     ?on_resume
+    ?execution_store
     ?agent_ref
     ?cooperative_yield_probe
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   run_blocks ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ?cooperative_yield_probe ~goal_detail:goal [Agent_sdk.Types.Text goal]
+    ?execution_store ?agent_ref ?cooperative_yield_probe ~goal_detail:goal
+    [Agent_sdk.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
@@ -1384,11 +1390,12 @@ let run_with_masc_tools
     ?on_event
     ?on_yield
     ?on_resume
+    ?execution_store
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   match masc_tools with
   | [] ->
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?execution_store goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
       (match !oas_tool_of_masc_hook with
        | None -> Error (oas_tool_hook_unset_error ())
@@ -1404,6 +1411,6 @@ let run_with_masc_tools
              masc_tools
          in
          let config = { config with tools = oas_tools @ config.tools } in
-         run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
+         run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?execution_store goal)
   | _ ->
     Error (invalid_runtime_config "tools" "provider lacks inline tool support")

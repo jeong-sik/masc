@@ -862,7 +862,14 @@ let oas_interleaving_event_label = function
   | _ -> None
 
 let trajectory_interleaving_label = function
-  | Trajectory.Thinking entry -> "thinking:" ^ entry.Trajectory.content
+  | Trajectory.Thinking entry ->
+      (match entry.Trajectory.block with
+       | Agent_sdk.Types.Thinking { content; _ } -> "thinking:" ^ content
+       | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+           "thinking:"
+           ^ Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+       | Agent_sdk.Types.RedactedThinking _ -> "thinking:[redacted]"
+       | _ -> Alcotest.fail "trajectory Thinking carried a non-reasoning block")
   | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
 
 let receipt_detail_of_provider_call
@@ -885,22 +892,36 @@ let receipt_detail_of_provider_call
   ; output_fingerprint = None
   }
 
-let trajectory_entry_of_provider_call ~ts ~turn ~round
+let trajectory_entry_of_provider_call ~ts ~keeper_turn_id ~oas_turn
+    ~planned_index
     (call : Agent_sdk.Canonical_tool.provider_tool_call)
   : Trajectory.tool_call_entry =
-  { ts
-  ; ts_iso = Types_core.iso8601_of_unix_seconds ts
-  ; turn
-  ; round
-  ; tool_name = call.name
-  ; args_json = Yojson.Safe.to_string call.input
-  ; gate_decision = Trajectory.Pass
-  ; result = Some {|{"ok":true}|}
-  ; duration_ms = 1
-  ; error = None
-  ; cost_usd = Trajectory.tool_cost_estimate call.name
-  ; execution_id = Some ("exec-" ^ call.call_id)
-  }
+  let arguments =
+    match call.input with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "canonical provider Tool input must be an object"
+  in
+  let invocation =
+    Agent_sdk.Tool.Invocation.create ~tool_use_id:call.call_id ~turn:oas_turn
+      ~schedule:
+        { planned_index
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_sdk.Tool.Serial
+        }
+  in
+  match
+    Trajectory.make_tool_call_entry ~ts
+      ~ts_iso:(Types_core.iso8601_of_unix_seconds ts) ~keeper_turn_id
+      ~invocation
+      ~tool_name:call.name ~arguments
+      ~outcome:(Trajectory.Tool_succeeded {|{"ok":true}|}) ~duration_ms:1
+      ~execution_id:(Ids.Execution_id.of_string ("exec-" ^ call.call_id))
+  with
+  | Ok entry -> entry
+  | Error error ->
+      Alcotest.failf "invalid trajectory fixture: %s"
+        (Trajectory.entry_decode_error_to_string error)
 
 let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
   let open Agent_sdk.Types in
@@ -1095,22 +1116,25 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
         (fun () ->
            let keeper_name = "interleave-keeper" in
            let trace_id = "trace-oas-masc-interleaving" in
-           let turn = 7 in
+           let keeper_turn_id = 7 in
+           let oas_turn = 0 in
            let acc =
              Trajectory.create_accumulator ~masc_root:base_dir ~keeper_name
-               ~trace_id ~generation:0 ()
+               ~trace_id ~keeper_turn_id ~generation:0 ()
            in
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name ~trajectory_acc:(Some acc) ~oas_turn
              [ thinking_before_read ];
            Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.1 ~turn ~round:1 first);
+             (trajectory_entry_of_provider_call ~ts:1.1 ~keeper_turn_id
+                ~oas_turn ~planned_index:0 first);
            Trajectory.flush_pending acc;
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name ~trajectory_acc:(Some acc) ~oas_turn
              [ thinking_before_done ];
            Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second);
+             (trajectory_entry_of_provider_call ~ts:1.3 ~keeper_turn_id
+                ~oas_turn ~planned_index:1 second);
            Trajectory.flush_pending acc;
            check (list string) "MASC trajectory JSONL keeps interleaved facts"
              [ "thinking:inspect board first"
@@ -1118,9 +1142,11 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
              ; "thinking:complete after evidence"
              ; "tool:keeper_task_done"
              ]
-             (Trajectory.read_all_lines ~masc_root:base_dir ~keeper_name
+             (Trajectory.read_all_lines_result ~masc_root:base_dir ~keeper_name
                 ~trace_id
-              |> List.map trajectory_interleaving_label))
+              |> fun read -> read.Trajectory.lines
+              |> List.map trajectory_interleaving_label);
+           Trajectory.finalize acc Trajectory.Completed |> ignore)
   | _ -> failf "expected two projected tool calls, got %d" (List.length calls)
 
 let test_keeper_stream_bridge_ignores_replayed_tool_start () =

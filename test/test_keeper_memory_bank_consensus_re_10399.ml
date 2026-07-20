@@ -51,6 +51,13 @@ let test_clean_prose_rejected () =
   check bool "unrelated digits not flagged" false
     (M.has_inflated_consensus_marker "version 1234567 alpha")
 
+let test_budget_prose_is_ordinary_memory_content () =
+  check bool
+    "retired turn-budget prose has no local memory-selection authority"
+    true
+    (M.is_meaningful_memory_text
+       "[turn budget exhausted] remains useful historical incident evidence")
+
 (* --- 2. idempotence: 100 calls all consistent ----------- *)
 
 let test_repeated_calls_consistent () =
@@ -102,6 +109,8 @@ let () =
             test_inflated_marker_detected;
           test_case "clean prose rejected" `Quick
             test_clean_prose_rejected;
+          test_case "budget prose remains ordinary memory content" `Quick
+            test_budget_prose_is_ordinary_memory_content;
         ] );
       ( "memoisation",
         [

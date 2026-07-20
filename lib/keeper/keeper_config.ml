@@ -111,19 +111,6 @@ let keeper_bootstrap_retry_interval_sec_rp =
 let keeper_bootstrap_retry_interval_sec () : int =
   Runtime_params.get keeper_bootstrap_retry_interval_sec_rp
 
-let keeper_batch_limit_rp =
-  _rp_int ~key:"keeper.turn.batch_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BATCH_LIMIT"
-                          ~default:200 ~min_v:10 ~max_v:2000)
-    ~min_v:10 ~max_v:2000
-    ~description:"Max batch size per keeper cycle" ()
-let keeper_batch_limit () : int =
-  Runtime_params.get keeper_batch_limit_rp
-
-
-
-
-
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)
 (* ================================================================ *)
@@ -140,15 +127,6 @@ let keeper_unified_temperature_rp =
     ~description:"Keeper turn temperature" ()
 let keeper_unified_temperature () : float =
   Runtime_params.get keeper_unified_temperature_rp
-
-let keeper_unified_max_tokens_rp =
-  _rp_int ~key:"keeper.turn.max_output_tokens"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-                          ~default:65536 ~min_v:256 ~max_v:262144)
-    ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (runtime.toml may override in production)" ()
-let keeper_unified_max_tokens () : int =
-  Runtime_params.get keeper_unified_max_tokens_rp
 
 (* ── HITL context-summary worker policy ─────────────────────── *)
 (** Temperature for the HITL summary LLM call. Deterministic by default. *)

@@ -55,7 +55,6 @@ val same_run_retry_allowed : bool Atomic.t -> bool
 
 val run_try_provider :
   try_provider_ctx ->
-  ?enable_thinking_override:bool ->
   Runtime_candidate.t ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option

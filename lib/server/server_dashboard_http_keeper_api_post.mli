@@ -5,17 +5,6 @@ module Http = Http_server_eio
 include module type of Server_dashboard_http_keeper_api_types
 
 val json_list_length : Yojson.Safe.t -> int
-val trajectory_line_ts : Trajectory.trajectory_line -> float
-val dedupe_thinking_lines :
-  Trajectory.trajectory_line list -> Trajectory.trajectory_line list
-val read_internal_history_lines :
-  config:Workspace.config -> trace_id:string -> Trajectory.trajectory_line list
-val merge_keeper_trace_lines :
-  config:Workspace.config ->
-  trace_id:string ->
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
-
 val error_json : ?ok:bool -> string -> Yojson.Safe.t
 val respond_error :
   ?status:Httpun.Status.t ->

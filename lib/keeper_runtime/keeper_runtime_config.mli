@@ -44,18 +44,30 @@ val load_and_apply : base_path:string -> (int, string) result
     operator's TOML configuration (issue #17192). *)
 val toml_value_opt : string -> string option
 
+(** Removed Keeper-owned [runtime.toml] paths. This immutable schema fragment
+    is shared with [Runtime_toml] so both parsers reject the same keys without
+    reparsing the full Runtime catalog through the minimal Keeper parser. *)
+val removed_key_paths : string list list
+
+(** Keeper-owned top-level [runtime.toml] table names, derived from the live
+    key-to-env schema and {!removed_key_paths}. Provider catalog parsing uses
+    this exact list to exclude Keeper tables from provider bindings. *)
+val owned_table_names : string list
+
 (** Pure resolution: parse TOML and determine which env vars would be
     overridden, without mutating the process-local boot override store.
 
     [~env_lookup] defaults to [Env_config_core.raw_value_opt]; tests inject a fake env
     to avoid global process env dependency.
 
-    Returns [(count, overrides)] where [overrides] is
-    [(env_name, value) list]. *)
+    Returns [Ok (count, overrides)] where [overrides] is
+    [(env_name, value) list]. Removed or unknown Keeper-owned keys and values
+    unsupported by the scalar boot-override contract return [Error], including
+    when an environment override would otherwise preempt that TOML value. *)
 val resolve_overrides :
   ?env_lookup:(string -> string option) ->
   Keeper_toml_loader.toml_doc ->
-  int * (string * string) list
+  (int * (string * string) list, string) result
 
 (** TOML schema (for documentation):
 
@@ -77,4 +89,5 @@ val resolve_overrides :
       provider                    = "auto"
     ]}
 
-    Unknown keys are ignored (forward compatibility). *)
+    Keys owned by other [runtime.toml] parsers are ignored by this layer.
+    Removed and unknown Keeper-owned keys are rejected. *)

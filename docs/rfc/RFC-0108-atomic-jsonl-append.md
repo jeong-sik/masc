@@ -3,7 +3,7 @@ rfc: "0108"
 title: "Atomic JSONL Append (in-process)"
 status: Active
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-07-19
 author: vincent
 supersedes: []
 superseded_by: null
@@ -141,7 +141,7 @@ val close : t -> unit
 | 파일 | 변경 |
 |---|---|
 | `lib/masc_log/log.ml:286-294` | `output_string + output_char + flush` 3-syscall → `Jsonl_atomic.append` 1 호출. mutex 추가가 사이드 이펙트. |
-| `lib/trajectory/trajectory.ml:229-269` | 3 함수 (`append_entry`, `append_thinking`, `append_summary`) 가 `Fs_compat.append_file` → `Jsonl_atomic.append` 로 swap. Stdlib.Mutex 간접 의존 제거. |
+| `lib/trajectory/trajectory.ml` | Tool, Thinking, terminal summary 모두 단일 `append_jsonl_rows` 경계를 거쳐 `Fs_compat.append_private_jsonl_durable_locked_result` 로 저장. trajectory-local writer와 행별 저장 함수는 제거. |
 | `lib/dated_jsonl/dated_jsonl.ml:256-272` | `Fs_compat.append_jsonl` → `Jsonl_atomic.append`. 외부 시그니처 변경 없음. |
 | `lib/runtime/runtime_event_bridge.ml:992` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
 | `lib/keeper/keeper_reaction_ledger.ml:135-137` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
@@ -168,7 +168,10 @@ val close : t -> unit
 
 **진행 중 발견들** (RFC 본문 갱신 가치):
 1. system_log writer (`Ring.init_file_sink`) 가 `Eio_main.run` *전*에 실행된다 (`bin/main_eio.ml:683`). Eio API 적용 불가 → in-line Stdlib.Mutex pattern. boot-path vs runtime writer 구분 필요.
-2. trajectory caller (`record_runtime_mcp_keeper_trajectory`) 가 `~sw ~fs` 안 받음. Eio API 적용 시 3+ caller signature 변경 필요 → in-line pattern 선택.
+2. 당시 trajectory append 경계가 `~sw ~fs` 를 받지 않아 Eio API 로 직접
+   전환하려면 caller signature 변경이 필요했다. 현재 trajectory persistence 는
+   `append_jsonl_rows` 단일 경계를 사용하므로 삭제된 producer 이름을 계약으로
+   남기지 않는다.
 3. `Append_fd_cache` 자체가 race 의 진원지 (cached `out_channel` 공유). cache 제거가 *correctness fix* 이자 *code reduction* (-91 LoC, #15949).
 4. L2 inline pattern 이 L3 root fix 와 *equivalent guarantee*. L4 cleanup 에서 inline → library delegate (-109 LoC).
 
@@ -193,7 +196,8 @@ val close : t -> unit
 각 마이그레이션 PR 머지 후 24시간 운영 → 해당 카테고리 경로 재스캔. malformed 0 확인.
 
 - PR-3 머지 후: `<base-path>/.masc/logs/system_log_*.jsonl`
-- PR-4 머지 후: `<base-path>/.masc/trajectories/`
+- trajectory writer 변경 후:
+  `<base-path>/.masc/keepers/*/trajectories/v1/`
 - PR-5 머지 후: `<base-path>/.masc/oas-events/` + `<base-path>/.masc/keepers/*/reaction-ledger/`
 
 한 번이라도 malformed ≥ 1 재발견 시 즉시 §3.2 보장 모델 회귀.

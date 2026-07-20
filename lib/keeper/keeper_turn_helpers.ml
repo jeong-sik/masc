@@ -1,4 +1,4 @@
-(* Keeper_turn_helpers — string matching, event reporting, trajectory/receipt
+(* Keeper_turn_helpers — event reporting, trajectory/receipt
    helpers, FSM guard post-actions, and local discovery readiness.
 
    Extracted from keeper_unified_turn.ml (L21-326) during the god-file split. *)
@@ -18,12 +18,6 @@ open Keeper_context_runtime
    measurement evidence, not as silent operator overrides. *)
 let default_turn_event_bus_drain_interval_sec = 0.05
 let turn_event_bus_drain_interval_sec () = default_turn_event_bus_drain_interval_sec
-
-let string_contains_substring = String_util.string_contains_substring
-;;
-
-let string_contains_substring_ci = String_util.string_contains_substring_ci
-;;
 
 let side_effect_metric_label side_effect =
   let trimmed = String.trim side_effect in
@@ -74,6 +68,45 @@ let dispatch_keeper_phase_event_checked
          "phase dispatch %s failed: %s"
          (Keeper_state_machine.event_to_string event)
          (Keeper_state_machine.transition_error_to_string err))
+;;
+
+let create_trajectory_accumulator
+      ~(config : Workspace.config)
+      ~(keeper_name : string)
+      ~(trace_id : string)
+      ~(keeper_turn_id : int)
+      ~(generation : int)
+  : Trajectory.accumulator
+  =
+  let masc_root = Workspace.masc_root_dir config in
+  let observe_flush_failure exn =
+    try
+      Telemetry_coverage_gap.record
+        ~masc_root
+        ~source:"trajectory"
+        ~producer:"keeper_turn_helpers.accumulator"
+        ~durable_store:(Trajectory.trajectory_path masc_root keeper_name trace_id)
+        ~dashboard_surface:"/api/v1/keepers/:name/trajectory"
+        ~stale_reason:"trajectory_flush_failed"
+        ~keeper_name
+        ~trace_id
+        ~exn
+        ()
+    with
+    | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+    | gap_exn ->
+      Log.Keeper.error ~keeper_name
+        "trajectory coverage-gap write failed after flush error: %s"
+        (Printexc.to_string gap_exn)
+  in
+  Trajectory.create_accumulator
+    ~on_flush_error:observe_flush_failure
+    ~masc_root
+    ~keeper_name
+    ~trace_id
+    ~keeper_turn_id
+    ~generation
+    ()
 ;;
 
 let finalize_trajectory_acc
@@ -196,7 +229,6 @@ let record_pre_dispatch_terminal_observation
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
-      ~(trajectory_outcome : Trajectory.trajectory_outcome)
       ?error_kind
       ?error_message
       ?(degraded_retry_applied = false)
@@ -212,11 +244,6 @@ let record_pre_dispatch_terminal_observation
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
-  let masc_root = Workspace.masc_root_dir config in
-  let trajectory_acc =
-    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
-  in
-  finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in
   let receipt : Keeper_execution_receipt.t =
     { keeper_name = meta.name

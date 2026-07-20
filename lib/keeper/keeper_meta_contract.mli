@@ -274,10 +274,9 @@ type keeper_meta = {
           unclassified legacy state requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
-      (** Currently claimed task ID for cost attribution.  Set
-          when keeper claims a task; cleared on
-          masc_transition action=done.  Propagated to
-          trajectory accumulator for per-task cost tracking. *)
+      (** Canonical claimed task identity. Set when a keeper claims a task and
+          cleared on [masc_transition action=done]. Observation producers
+          project this typed value directly. *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;

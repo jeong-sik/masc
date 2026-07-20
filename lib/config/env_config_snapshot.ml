@@ -131,8 +131,6 @@ let keeper_entries =
 let keeper_execution_entries =
   [
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
-    entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-      "Unified turn max output tokens";
     entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
       "Autonomous execution max tokens";
   ]
@@ -326,8 +324,6 @@ let keeper_keepalive_entries =
   [
     entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       "Heartbeat cycle interval (positive integer, no implicit upper bound)";
-    entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
-      "Max seconds since last heartbeat before presence sync required";
     entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"

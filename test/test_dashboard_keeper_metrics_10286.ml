@@ -68,16 +68,6 @@ let retired_pr_work_summary_fields =
     "observed_pr_" ^ "work";
   ]
 
-let test_contains_ci_preserves_literal_ascii_semantics () =
-  check bool "ascii case-insensitive hit" true
-    (Metrics.contains_ci "keeper Tool Surface" "tool");
-  check bool "literal metachar needle" true
-    (Metrics.contains_ci "keeper.a+b" ".a+");
-  check bool "empty needle stays false" false
-    (Metrics.contains_ci "keeper" "");
-  check bool "longer needle false" false
-    (Metrics.contains_ci "keeper" "keeper-agent")
-
 let test_metrics_window_does_not_classify_execute_as_pr_work () =
   let _, summary, _, _ =
     Detail.compute_metrics_window
@@ -230,21 +220,37 @@ let test_history_summary_decodes_content_blocks () =
       "\n"
       [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
       ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
+      ; {|{"role":"user","content_blocks":[{"type":"text","text":"taskmasterish is not a mention"}],"ts_unix":3.0}|}
+      ; {|{"role":"user","content_blocks":|}
       ]
     ^ "\n"
   in
   with_temp_history rows (fun path ->
-      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+      let conversation, k2k_recent, k2k_mentions, raw_count, decode_error_count =
         Metrics.keeper_history_summary_json
           ~all_keeper_names:[ "albini"; "taskmaster" ]
           ~keeper_name:"albini"
           ~history_path:path
-          ~filter_fragments:false
       in
-      check int "raw_count counts content_blocks rows" 2 raw_count;
+      check int "raw_count counts content_blocks rows" 3 raw_count;
+      check int "malformed row remains observable" 1 decode_error_count;
+      (match k2k_recent with
+       | `List [ row ] ->
+         check string "exact @mention target" "taskmaster"
+           Yojson.Safe.Util.(row |> member "mentioned" |> to_string)
+       | other ->
+         failf "expected one exact k2k mention, got %s"
+           (Yojson.Safe.to_string other));
+      (match k2k_mentions with
+       | `List [ row ] ->
+         check int "substring without @ is not counted" 1
+           Yojson.Safe.Util.(row |> member "count" |> to_int)
+       | other ->
+         failf "expected one mention aggregate, got %s"
+           (Yojson.Safe.to_string other));
       match conversation with
       | `List (first :: _ as items) ->
-          check int "conversation length" 2 (List.length items);
+          check int "conversation length" 3 (List.length items);
           let content =
             first
             |> Yojson.Safe.Util.member "content"
@@ -260,11 +266,6 @@ let test_history_summary_decodes_content_blocks () =
 let () =
   run "dashboard_keeper_metrics_10286"
     [
-      ( "contains_ci",
-        [
-          test_case "preserves literal ascii semantics" `Quick
-            test_contains_ci_preserves_literal_ascii_semantics;
-        ] );
       ( "metrics_window",
         [
           test_case "does not classify Execute as PR work" `Quick

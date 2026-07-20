@@ -716,49 +716,14 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       let trace_id = "trace-test-" ^ keeper_name in
       let trajectory_entries =
-        Trajectory.read_entries
+        Trajectory.read_entries_result
           ~masc_root
           ~keeper_name
           ~trace_id
+        |> fun read -> read.Trajectory.entries
       in
-      check int "trajectory row count" 1 (List.length trajectory_entries);
-      let trajectory_entry = List.hd trajectory_entries in
-      check string "trajectory tool" "tool_execute"
-        trajectory_entry.Trajectory.tool_name;
-      check int "trajectory turn" 1
-        trajectory_entry.Trajectory.turn;
-      check int "trajectory round" 1
-        trajectory_entry.Trajectory.round;
-      let trajectory_json =
-        let path =
-          Trajectory.trajectory_path masc_root keeper_name trace_id
-        in
-        let ic = open_in path in
-        let content =
-          Fun.protect
-            ~finally:(fun () -> close_in_noerr ic)
-            (fun () -> really_input_string ic (in_channel_length ic))
-        in
-        content
-        |> String.split_on_char '\n'
-        |> List.find (fun line -> String.trim line <> "")
-        |> Yojson.Safe.from_string
-      in
-      check string "trajectory runtime keeper" keeper_name
-        (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
-         |> U.to_string);
-      check string "trajectory runtime agent"
-        (Masc.Keeper_identity.keeper_agent_name keeper_name)
-        (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
-         |> U.to_string);
-      check bool "trajectory runtime has runtime_profile field" true
-        (match trajectory_json |> U.member "runtime_contract"
-               |> U.member "runtime_profile" with
-         | `String _ | `Null -> true
-         | _ -> false);
-      check string "trajectory action tool" "tool_execute"
-        (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
-         |> U.to_string);
+      check int "runtime MCP cannot fabricate OAS trajectory rows" 0
+        (List.length trajectory_entries);
       let sse_payload =
         match !received_sse with
         | Some payload -> extract_json_from_text payload
@@ -783,7 +748,35 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
         (sse_payload |> U.member "tool_args_preview" |> U.to_string);
       check string "sse output preview includes result" "command exited 1"
-        (sse_payload |> U.member "tool_output_preview" |> U.to_string))
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string);
+      let full_output = String.make 12000 'r' in
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~mcp_session_id:"mcp-session-9"
+        entry
+        ~tool_name:"tool_execute"
+        ~arguments:(`Assoc [ ("cmd", `String "printf large") ])
+        ~message:full_output
+        ~disposition:(Tool_result.Completed ())
+        ~duration_ms:88;
+      let trajectory_entries =
+        Trajectory.read_entries_result ~masc_root ~keeper_name ~trace_id
+        |> fun read -> read.Trajectory.entries
+      in
+      check int "runtime MCP remains outside canonical trajectory" 0
+        (List.length trajectory_entries);
+      let tool_log_rows =
+        Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:2 ()
+      in
+      let persisted_full_output =
+        List.find_map
+          (fun row ->
+             match row |> U.member "output" with
+             | `String output when String.equal output full_output -> Some output
+             | _ -> None)
+          tool_log_rows
+      in
+      check (option string) "runtime MCP tool log persists complete output"
+        (Some full_output) persisted_full_output)
 
 let () =
   run "mcp_server_eio_call_tool"

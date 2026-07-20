@@ -30,14 +30,14 @@ type usage =
   ; output_tokens : int option
   }
 
-type t =
-  { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
-  ; keeper : string
+type t = private
+  { keeper : string
   ; trace_id : string
   ; absolute_turn : int
-  ; turn_ref : Ids.Turn_ref.t option
+  ; turn_ref : Ids.Turn_ref.t
     (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
-       [option] so pre-§7 rows decode as [None]. *)
+       Required and validated against the two coordinate fields; older rows
+       without it are rejected rather than recovered by timestamp. *)
   ; blocks : prompt_block list (* assembly order *)
   ; runtime_profile : string
   ; model : string option
@@ -54,7 +54,7 @@ type t =
   ; context_window : int option
     (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
        this turn, the denominator the dashboard ctx-fill% uses. [None] on
-       legacy rows or the error path; the inspector renders absence rather
+       the error path or when no exact runtime observation exists; the inspector renders absence rather
        than the fabricated 200K. This is the keeper compaction ceiling
        ([max_context]), NOT the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
@@ -72,9 +72,9 @@ type t =
        [inference_telemetry.request_latency_ms] (the OAS transport layer
        synthesizes it for every provider — [complete_common.patch_telemetry]
        non-streaming, [complete_stream] streaming — so it is populated
-       whenever a response is produced). [None] on the error path or legacy
-       rows; the inspector renders absence rather than a fabricated duration
-       for the response-generation phase. Phase-level splits
+       whenever a response is produced). [None] on the error path or when no
+       exact response observation exists; the inspector renders absence rather
+       than a fabricated duration for the response-generation phase. Phase-level splits
        (prefill/decode) are deliberately deferred: only the provider's
        native timing objects carry prefill/predicted durations and most
        keepers' runtimes do not report them, so emitting them would show
@@ -99,15 +99,40 @@ type t =
   ; ts : float
   }
 
+val make :
+  keeper:string ->
+  trace_id:string ->
+  absolute_turn:int ->
+  blocks:prompt_block list ->
+  runtime_profile:string ->
+  model:string option ->
+  finish_reason:string option ->
+  context_window:int option ->
+  price_input_per_million:float option ->
+  price_output_per_million:float option ->
+  request_latency_ms:int option ->
+  ttfrc_ms:float option ->
+  sampling:sampling ->
+  usage:usage ->
+  ts:float ->
+  (t, string) result
+(** Construct a valid record and derive [turn_ref] from
+    [(trace_id, absolute_turn)]. Rejects duplicate prompt-block ids and
+    invalid direct measurements (non-finite or negative timestamps,
+    sampling values, token counts, latencies, prices, and block sizes).
+    [trace_id] must be non-empty and [absolute_turn] must be positive.
+    Prompt-block ids must use their canonical typed representation. *)
+
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 
 val to_json : t -> Yojson.Safe.t
 
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Fails loudly on malformed rows (missing fields, unparseable
-    execution ids) instead of repairing them — RFC-0233 §4. Unknown
-    block names decode as [Prompt_block_id.Other] (that field alone is
-    forward-open by design). *)
+    values, duplicate prompt-block ids, or violated numeric invariants)
+    instead of repairing them — RFC-0233 §4. Unknown block names decode
+    as [Prompt_block_id.Other] (that field alone is forward-open by
+    design). *)
 
 (** Result of diffing two consecutive records by [(block, digest)]. *)
 type block_diff =
@@ -117,8 +142,8 @@ type block_diff =
   }
 
 val diff_blocks : prev:t -> next:t -> block_diff
-(** Blocks are keyed by [block] id; assembly produces at most one block
-    per id, so first occurrence wins if a malformed row repeats one. *)
+(** Blocks are keyed by [block] id. Every [t] has already passed the
+    uniqueness invariant, so diffing never repairs duplicate ids. *)
 
 val entries_with_diffs : t list -> (t * block_diff option) list
 (** Pair each record (oldest-first) with its diff against the previous

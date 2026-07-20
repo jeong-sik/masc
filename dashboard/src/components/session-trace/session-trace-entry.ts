@@ -9,7 +9,7 @@ import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
-import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
+import { deriveTokPerSec, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
 import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
 import {
@@ -410,10 +410,7 @@ function isLongContent(text: string): boolean {
 // ── Diff renderer ─────────────────────────────────────
 
 function DiffBlock({ text }: { text: string }) {
-  const allLines = text.split('\n')
-  const MAX_LINES = 500
-  const lines = allLines.length > MAX_LINES ? allLines.slice(0, MAX_LINES) : allLines
-  const truncatedCount = allLines.length - lines.length
+  const lines = text.split('\n')
 
   return html`
     <div class="font-mono text-2xs leading-loose overflow-x-auto">
@@ -425,11 +422,6 @@ function DiffBlock({ text }: { text: string }) {
           : 'text-[var(--color-fg-primary)]'
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
       })}
-      ${truncatedCount > 0 ? html`
-        <div class="px-2 py-2 text-[var(--color-fg-muted)] italic text-center border-t border-[var(--color-border-default)]">
-          ... ${truncatedCount} lines truncated for performance ...
-        </div>
-      ` : null}
     </div>
   `
 }
@@ -446,10 +438,6 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--color-border-default)]'
   const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--color-bg-surface)]'
 
-  const MAX_TEXT_LEN = 100000
-  const isTruncatedPlain = hint === 'plain' && text.length > MAX_TEXT_LEN
-  const displayText = isTruncatedPlain ? text.slice(0, MAX_TEXT_LEN) + '\n\n... (Output truncated for performance) ...' : text
-
   return html`
     <div>
       <div class="flex items-center justify-between mb-1">
@@ -463,7 +451,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${displayText}</pre>`}
+            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-primary)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">${text}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[var(--bad-6)]' : 'from-[var(--color-bg-surface)]'} to-transparent pointer-events-none"></div>
           ` : null}
@@ -485,7 +473,6 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 // ── Components ─────────────────────────────────────────
 
 function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
-  const gateRejected = event.gate?.status === 'reject'
   const toolIoRedacted = event.detail.tool_io_redacted === true
   const resultText = event.error ?? event.toolResult ?? null
   const hint = resultText ? detectContentHint(resultText) : 'plain'
@@ -512,6 +499,17 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
       ` : null}
       <${TraceContextLinks} links=${contextLinks} />
+      ${event.toolSchedule ? html`
+        <div>
+          <${SectionHeader} size="xs" class="mb-1">실행 스케줄</${SectionHeader}>
+          <${JsonViewerCard} title="실행 스케줄" data=${event.toolSchedule} />
+        </div>
+      ` : null}
+      ${event.toolUseId !== undefined ? html`
+        <div class="text-3xs text-[var(--color-fg-disabled)]">
+          tool_use_id: <span class="font-mono">${event.toolUseId === '' ? '(blank)' : event.toolUseId}</span>
+        </div>
+      ` : null}
       ${event.toolArgs ? html`
         <div>
           <${SectionHeader} size="xs" class="mb-1">인자</${SectionHeader}>
@@ -521,26 +519,19 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
       ${resultText ? html`
         <${ResultViewer} text=${resultText} hint=${hint} isError=${Boolean(event.error)} />
       ` : null}
-      ${gateRejected ? html`
-        <div class="text-3xs px-2 py-1 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)] inline-block">
-          거부: ${event.gate?.reason ?? ''}
-        </div>
-      ` : null}
       ${toolIoRedacted ? html`
         <div class="inline-block rounded-[var(--r-1)] border border-[var(--warn-25)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
           Tool I/O preview redacted
         </div>
       ` : null}
-      ${!event.toolArgs && !resultText && !gateRejected && !toolIoRedacted ? html`
+      ${!event.toolArgs && !resultText && !toolIoRedacted ? html`
         <div class="text-3xs text-[var(--color-fg-disabled)] italic px-2 py-1">
           세부 정보가 기록되지 않았습니다.
         </div>
       ` : null}
-      ${'' /* Metadata row */}
-      ${event.cost_usd != null && event.cost_usd > 0 ? html`
-        <div class="flex gap-3 text-3xs text-[var(--color-fg-disabled)]">
-          <span>비용: <span class="font-mono text-[var(--color-accent-fg)]">${formatCost(event.cost_usd)}</span></span>
-          ${event.duration_ms != null ? html`<span>소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span></span>` : null}
+      ${event.duration_ms != null ? html`
+        <div class="text-3xs text-[var(--color-fg-disabled)]">
+          소요: <span class="font-mono ${durationColor(event.duration_ms)}">${formatMsCompact(event.duration_ms)}</span>
         </div>
       ` : null}
     </div>
@@ -572,14 +563,29 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
 }
 
 function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
-  if (event.thinkingRedacted) {
+  const block = event.thinkingBlock
+  if (block?.type === 'redacted_thinking' || event.thinkingRedacted) {
     return html`
       <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel} text-xs ${TRACE_TONE.brassText} italic">
         이 사고 과정은 비공개 처리되었습니다.
       </div>
     `
   }
-  const content = event.thinkingContent ?? ''
+  if (block?.type === 'reasoning_details') {
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel} space-y-2">
+        ${block.reasoning_content ? html`
+          <div class="text-sm leading-relaxed text-[var(--color-fg-primary)]">
+            <${Markdown} text=${block.reasoning_content} />
+          </div>
+        ` : null}
+        <${JsonViewerCard} title="Reasoning details" data=${block.details} />
+      </div>
+    `
+  }
+  const content = block?.type === 'thinking'
+    ? block.thinking
+    : (event.thinkingContent ?? '')
   if (!content) return null
   return html`
     <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.brassPanel}">
@@ -763,6 +769,20 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
+function structuralClockLabel(event: UnifiedTraceEvent): string | null {
+  if (event.keeperTurnId != null && event.oasTurn != null) {
+    const parts = [`K ${event.keeperTurnId}`, `OAS ${event.oasTurn + 1}`]
+    if (event.toolSchedule) {
+      parts.push(
+        `batch ${event.toolSchedule.batch_index + 1}/${event.toolSchedule.batch_size}`,
+        `plan ${event.toolSchedule.planned_index + 1}`,
+      )
+    }
+    return parts.join(' · ')
+  }
+  return event.turn == null ? null : `turn ${event.turn}`
+}
+
 export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceEvent; searchQuery?: string }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
@@ -775,8 +795,8 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     ? toolStyle(event.toolName)
     : durable ?? kindStyle
 
-  const gateRejected = event.kind === 'tool_call' && event.gate?.status === 'reject'
   const contextLinks = traceRouteLinks(event)
+  const structuralClock = structuralClockLabel(event)
 
   // Summary text
   let summaryText = event.summary
@@ -798,7 +818,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || contextLinks.length > 0
 
   const row = html`
-    <div class="v2-monitoring-trace-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
+    <div class="v2-monitoring-trace-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)]">
       ${'' /* Icon */}
       <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
@@ -813,9 +833,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           <${TraceBadge} tone="neutral" wide>
             ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
           </${TraceBadge}>
-          ${event.turn != null ? html`
+          ${structuralClock !== null ? html`
             <span class="text-3xs text-[var(--color-fg-disabled)]">
-              T${event.turn}${event.round != null ? `R${event.round}` : ''}
+              ${structuralClock}
             </span>
           ` : null}
           ${event.sessionId ? html`<span class="text-3xs text-[var(--color-fg-disabled)] font-mono">S ${event.sessionId}</span>` : null}
@@ -828,11 +848,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           ` : null}
           ${event.error
             ? html`<${TraceBadge} tone="bad">오류</${TraceBadge}>`
-            : gateRejected
-              ? html`<${TraceBadge} tone="bad">거부</${TraceBadge}>`
-              : event.kind === 'tool_call'
-                ? html`<${TraceBadge} tone="ok">완료</${TraceBadge}>`
-                : null}
+            : event.kind === 'tool_call'
+              ? html`<${TraceBadge} tone="ok">완료</${TraceBadge}>`
+              : null}
         </div>
         <div class="mt-0.5 text-2xs text-[var(--color-fg-muted)] font-mono truncate max-w-full" title=${event.summary}>
           <${HighlightedText} text=${summaryText} query=${searchQuery ?? ''} />

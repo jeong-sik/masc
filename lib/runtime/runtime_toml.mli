@@ -9,11 +9,11 @@
     - [<provider>.<model>] binding tables — Layer 3
     - [\[runtime\].default] — the default Runtime id ([provider.model])
 
-    The routing layers are intentionally NOT parsed: Layer 4 aliases
-    ([<p>.<m>.<a>]), Layer 5 [\[routes\]]/[\[system\]]/[\[profiles\]], and the
-    strategy/cycle-policy/scoring tables are dropped. A Runtime is a single
-    pre-selected (provider × model) binding, so there is no routing
-    indirection to model. *)
+    The routing layers are intentionally NOT parsed: removed top-level
+    [\[routes\]]/[\[system\]]/[\[profiles\]] namespaces are rejected, and Layer
+    4 aliases ([<p>.<m>.<a>]) plus strategy/cycle-policy/scoring tables have no
+    representation. A Runtime is a single pre-selected (provider × model)
+    binding, so there is no routing indirection to model. *)
 
 type parse_error =
   { path : string  (** TOML path where the error occurred *)

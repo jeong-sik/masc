@@ -2,16 +2,16 @@
 
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
-    {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search (plus the dropped routing namespaces system,
-    routes, profiles, which are still reserved so they are never mistaken for a
-    provider table). Any other top-level table is a provider table, with
-    sub-tables as model bindings.
+    {!Runtime_schema.config}. The provider-table scan excludes Runtime-owned
+    namespaces and Keeper-owned namespaces derived from
+    {!Keeper_runtime_config}. The legacy provider-table grammar treats each
+    remaining top-level table as a provider table, with sub-tables as model
+    bindings.
 
     Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
-    Layer 4 aliases, Layer 5 routes/system/profiles, and the
-    strategy/cycle-policy/scoring tables are dropped from
-    {!Runtime_schema}, so this parser neither reads nor populates them. *)
+    top-level routes/system/profiles are removed and rejected, while Layer 4
+    aliases and the strategy/cycle-policy/scoring tables are absent from
+    {!Runtime_schema}. *)
 
 type parse_error =
   { path : string
@@ -745,15 +745,21 @@ let parse_models (toml : Otoml.t)
 
 (* --- Reserved namespace detection --- *)
 
-(* The dropped routing namespaces (system, routes, profiles) remain
-   reserved: keeping them out of the provider-table scan ensures a stale
-   [[routes]]/[[profiles]] table in an existing runtime.toml is silently
-   ignored rather than misread as a provider with bogus model bindings. *)
-let reserved_namespaces =
-  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime"; "web_search" ]
+(* Removed routing namespaces stay excluded from the provider-table scan, but
+   [parse_toml] rejects their presence explicitly. This prevents a stale
+   routing table from becoming either a bogus provider or a silent no-op. *)
+let removed_routing_namespaces = [ "system"; "routes"; "profiles" ]
+let runtime_reserved_namespaces = [ "providers"; "models"; "runtime" ]
+
+let non_provider_namespaces =
+  List.sort_uniq
+    String.compare
+    (runtime_reserved_namespaces
+     @ removed_routing_namespaces
+     @ Keeper_runtime_config.owned_table_names)
 ;;
 
-let is_reserved (name : string) : bool = List.mem name reserved_namespaces
+let is_reserved (name : string) : bool = List.mem name non_provider_namespaces
 
 (* --- Layer 3: Bindings from provider tables --- *)
 
@@ -1103,6 +1109,26 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
 ;;
 
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+  let removed_routing_namespace_errors =
+    removed_routing_namespaces
+    |> List.filter_map (fun namespace ->
+      match Otoml.find_opt toml Fun.id [ namespace ] with
+      | None -> None
+      | Some _ ->
+        Some
+          { path = namespace
+          ; message = "removed runtime routing namespace"
+          })
+  in
+  let removed_keeper_runtime_errors =
+    Keeper_runtime_config.removed_key_paths
+    |> List.filter_map (fun path ->
+      match Otoml.find_opt toml Fun.id path with
+      | None -> None
+      | Some _ ->
+        let key = String.concat "." path in
+        Some { path = key; message = "removed Keeper runtime TOML key" })
+  in
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let runtime_section_result = parse_runtime_section toml in
@@ -1111,7 +1137,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let lanes_result = parse_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
-    errs providers_result
+    removed_routing_namespace_errors
+    @ removed_keeper_runtime_errors
+    @ errs providers_result
     @ errs models_result
     @ errs runtime_section_result
     @ errs assignments_result

@@ -157,13 +157,11 @@ let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(consecutive_failures : int ref)
-      ~(last_successful_heartbeat_ts : float ref)
   : keeper_meta
   =
   try
     let synced = meta_current in
     consecutive_failures := 0;
-    last_successful_heartbeat_ts := Time_compat.now ();
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path
       meta_current.name

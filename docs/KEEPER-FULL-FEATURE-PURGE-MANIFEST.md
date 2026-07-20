@@ -163,9 +163,9 @@ as alternate lifecycle writers or control authorities.
 
 ### 3.1 Rewrite execution joins and current work
 
-- `keeper_execution_join`: replace the process-local
-  `tool_use_id -> execution_id` Hashtbl with a durable typed link carried by
-  the MASC operation and OAS invocation reference;
+- the retired `keeper_execution_join` process-local
+  `tool_use_id -> execution_id` table is deleted; the durable typed link is
+  carried by the MASC operation and exact OAS invocation reference;
 - `keeper_current_operations`: project one MASC Operation Journal instead of
   joining two independently authored stores;
 - `keeper_execution_receipt`, runtime manifests, Turn records, and Trajectory:

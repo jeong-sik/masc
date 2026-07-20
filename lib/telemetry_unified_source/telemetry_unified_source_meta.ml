@@ -61,8 +61,9 @@ let source_freshness_slo_s = function
 let source_producer = function
   | Keeper_metric -> "keeper_unified_metrics"
   | Agent_event -> "telemetry_eio"
-  | Tool_call_io -> "keeper_hooks_oas|mcp_server_eio_call_tool"
-  | Trajectory_tool_call -> "keeper_hooks_oas|mcp_server_eio_call_tool"
+  | Tool_call_io ->
+    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp"
+  | Trajectory_tool_call -> "keeper_hooks_oas.post_tool_use"
   | Tool_usage -> "tool_usage_log"
   | Oas_event -> "oas_event_bus"
   | Execution_receipt -> "keeper_agent_run.execution_receipt"
@@ -80,10 +81,24 @@ let source_dashboard_surface = function
   | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"
 
+let keeper_store_dir ~masc_root ~keeper_name store =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat masc_root Common.keepers_runtime_dirname)
+       keeper_name)
+    (Common.keeper_runtime_store_dirname store)
+;;
+
+let keeper_store_glob masc_root store =
+  keeper_store_dir ~masc_root ~keeper_name:"*" store
+;;
+
 let source_durable_store ~masc_root ~base_path = function
-  | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
-  | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
-  | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
+  | Keeper_metric -> keeper_store_glob masc_root Common.Keeper_metrics
+  | Trajectory_tool_call ->
+      Trajectory.trajectory_path masc_root "*" "*"
+  | Execution_receipt ->
+      keeper_store_glob masc_root Common.Keeper_execution_receipts
   | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | source -> (
       match fixed_store_dir ~masc_root ~base_path source with
@@ -120,7 +135,7 @@ let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
              sources) );
       ( "cache_policy",
         `String
-          "uncached; reads persisted JSONL rows; sorts newest first; n<=0 returns the full filtered window"
+          "uncached; reads persisted JSONL rows; sorts newest first; positive page size required"
       );
     ]
 
@@ -146,7 +161,7 @@ let classify_store_dir source ~site dir =
 
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Keeper_metric ~site:"discover_keeper_metric_root"
           keepers_dir with
   | Store_missing | Store_invalid -> []
@@ -155,11 +170,18 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
       protect_source_read Keeper_metric ~site:"discover_keeper_metric_dirs"
         ~default:[] (fun () -> Array.to_list (Sys.readdir keepers_dir))
     in
-    List.filter_map (fun name ->
-      let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
-      if Sys.file_exists metrics_dir then Some (name, metrics_dir)
-      else None
-    ) entries
+    List.filter_map
+      (fun name ->
+        let metrics_dir =
+          keeper_store_dir ~masc_root ~keeper_name:name Common.Keeper_metrics
+        in
+        match
+          classify_store_dir Keeper_metric
+            ~site:"discover_keeper_metric_dir_stat" metrics_dir
+        with
+        | Store_directory -> Some (name, metrics_dir)
+        | Store_missing | Store_invalid -> None)
+      entries
 
 let is_directory source ~site path =
   protect_source_read source ~site ~default:false (fun () ->
@@ -170,28 +192,30 @@ let is_jsonl_file source ~site path =
     Sys.file_exists path && (not (Sys.is_directory path))
     && Filename.check_suffix path ".jsonl")
 
-let discover_trajectory_keeper_dirs_in_root trajectories_root =
+let discover_trajectory_keeper_dirs_in_keepers_root ~masc_root keepers_root =
   protect_source_read Trajectory_tool_call
     ~site:"discover_trajectory_keeper_dirs" ~default:[] (fun () ->
-    Sys.readdir trajectories_root
+    Sys.readdir keepers_root
     |> Array.to_list
     |> List.filter_map (fun name ->
-         let dir = Filename.concat trajectories_root name in
-         if
-           is_directory Trajectory_tool_call
+         let dir = Trajectory.trajectories_dir masc_root name in
+         match
+           classify_store_dir Trajectory_tool_call
              ~site:"discover_trajectory_keeper_dir_stat" dir
-         then Some (name, dir)
-         else None))
+         with
+         | Store_directory -> Some (name, dir)
+         | Store_missing | Store_invalid -> None))
 
 let discover_trajectory_keeper_dirs masc_root : (string * string) list =
-  let trajectories_root = Filename.concat masc_root "trajectories" in
+  let keepers_root = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Trajectory_tool_call
-          ~site:"discover_trajectory_root" trajectories_root with
+          ~site:"discover_trajectory_root" keepers_root with
   | Store_missing | Store_invalid -> []
-  | Store_directory -> discover_trajectory_keeper_dirs_in_root trajectories_root
+  | Store_directory ->
+      discover_trajectory_keeper_dirs_in_keepers_root ~masc_root keepers_root
 
 let discover_execution_receipt_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Execution_receipt
           ~site:"discover_execution_receipt_root" keepers_dir with
   | Store_missing | Store_invalid -> []
@@ -202,11 +226,12 @@ let discover_execution_receipt_dirs masc_root : (string * string) list =
       |> Array.to_list
       |> List.filter_map (fun name ->
            let dir =
-             Filename.concat (Filename.concat keepers_dir name)
-               "execution-receipts"
+             keeper_store_dir ~masc_root ~keeper_name:name
+               Common.Keeper_execution_receipts
            in
-           if
-             is_directory Execution_receipt
+           match
+             classify_store_dir Execution_receipt
                ~site:"discover_execution_receipt_dir_stat" dir
-           then Some (name, dir)
-           else None))
+           with
+           | Store_directory -> Some (name, dir)
+           | Store_missing | Store_invalid -> None))

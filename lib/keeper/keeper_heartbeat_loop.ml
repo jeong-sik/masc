@@ -112,8 +112,8 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
    unified-turn failure path in [Keeper_unified_turn_failure] uses),
    so the caller reads a non-zero [turn_fail_count] and dispatches
    [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
-   NOT refresh the work-as-heartbeat lease; the count is observation and never
-   terminates the Keeper lane. *)
+   NOT run the post-turn workspace heartbeat or reset its failure counter; the
+   count is observation and never terminates the Keeper lane. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_crashed : bool;
@@ -1000,13 +1000,7 @@ let run_heartbeat_loop
   in
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
-  (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Workspace.heartbeat success after turn. *)
-  let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled in
-  let _max_silence () =
-    Runtime_params.get Runtime_settings.keeper_work_as_hb_max_silence_sec
-  in
   (* Persistent OAS Context.t — created once per keeper lifecycle.
      OAS Context.t is a mutable cross-turn state container for values
      written directly into the shared context. This preserves shared
@@ -1078,7 +1072,6 @@ let run_heartbeat_loop
             ~ctx
             ~meta_current
             ~consecutive_failures
-            ~last_successful_heartbeat_ts
         in
         if !consecutive_failures > 0
         then
@@ -1236,12 +1229,11 @@ let run_heartbeat_loop
               ~base_path:ctx.config.base_path
               m.name
               (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
-          (* Phase 1: work-as-heartbeat — renew point (b).
-             After turn, call Workspace.heartbeat to prove workspace I/O health.
-             On success: refresh freshness lease + reset consecutive_failures.
-             On failure: leave timestamp unchanged → presence sync resumes next cycle.
-             T6 audit: a crashed cycle proves nothing about health — do not
-             refresh the lease or reset consecutive_failures for it. *)
+          (* Post-turn work-as-heartbeat refresh. After a non-crashed turn,
+             call Workspace.heartbeat to prove the configured workspace is
+             reachable. Success resets [consecutive_failures]; failure leaves
+             it unchanged. A crashed cycle proves nothing, so it neither runs
+             this refresh nor resets the counter. *)
           if turn_outcome.cycle_crashed
           then
             Log.Keeper.info
@@ -1253,7 +1245,6 @@ let run_heartbeat_loop
               ~meta_after_proactive
               ~proactive_warmup_elapsed
               ~work_as_hb
-              ~last_successful_heartbeat_ts
               ~consecutive_failures);
         let t_turn_end = Time_compat.now () in
         let interval =

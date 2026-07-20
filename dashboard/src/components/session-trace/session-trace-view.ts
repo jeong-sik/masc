@@ -8,11 +8,10 @@ import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SessionTraceEntry } from './session-trace-entry'
 import { SessionTraceFilter } from './session-trace-filter'
-import { evaluateProcessTrace, type ProcessCriticFinding, type ProcessCriticSeverity } from './process-critic'
 import {
   getTraceLoading,
   getTraceError,
-  getTraceEvents,
+  getTraceObservationErrors,
   getFilteredEvents,
   getTraceSummary,
   getTraceSearchQuery,
@@ -80,58 +79,6 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   `
 }
 
-function processCriticToneClass(severity: ProcessCriticSeverity): string {
-  if (severity === 'action') return 'border-[var(--warn-20)] bg-[var(--warn-soft)]'
-  if (severity === 'warning') return 'border-[var(--warn-border)] bg-[var(--color-bg-elevated)]'
-  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
-}
-
-function ProcessCriticPanel({ findings }: { findings: readonly ProcessCriticFinding[] }) {
-  if (findings.length === 0) return null
-
-  return html`
-    <section
-      class="v2-monitoring-process-critic rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-3 py-2.5"
-      aria-label="Process Critic"
-    >
-      <div class="mb-2 flex items-center gap-2">
-        <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-[10px] text-[var(--color-fg-muted)]">
-          PC
-        </span>
-        <span class="text-2xs font-semibold text-[var(--color-fg-primary)]">Process Critic</span>
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs uppercase text-[var(--color-fg-muted)]">
-          advisory
-        </span>
-      </div>
-      <div class="grid gap-1.5">
-        ${findings.map(finding => html`
-          <article
-            key=${finding.id}
-            class="rounded-[var(--r-1)] border px-2.5 py-2 ${processCriticToneClass(finding.severity)}"
-          >
-            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span class="text-2xs font-semibold text-[var(--color-fg-primary)]">${finding.title}</span>
-              <span class="text-3xs uppercase text-[var(--color-fg-muted)]">${finding.severity}</span>
-              <span class="ml-auto text-3xs font-medium text-[var(--color-accent-fg)]">${finding.action}</span>
-            </div>
-            <p class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${finding.detail}</p>
-            <div class="mt-1.5 flex flex-wrap gap-1">
-              ${finding.evidence.map((item, index) => html`
-                <span
-                  key=${`${finding.id}-${index}`}
-                  class="max-w-full truncate rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-fg-muted)]"
-                >
-                  ${item}
-                </span>
-              `)}
-            </div>
-          </article>
-        `)}
-      </div>
-    </section>
-  `
-}
-
 // ── Live indicator ─────────────────────────────────────
 
 function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
@@ -179,11 +126,10 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   const loading = getTraceLoading(agentName)
   const error = getTraceError(agentName)
-  const processEvents = getTraceEvents(agentName)
+  const observationErrors = getTraceObservationErrors(agentName)
   const events = getFilteredEvents(agentName)
   const summary = getTraceSummary(agentName)
   const searchQuery = getTraceSearchQuery(agentName)
-  const processFindings = evaluateProcessTrace({ events: processEvents, summary })
 
   // Auto-scroll to top when new events arrive (newest-first order)
   const prevCountRef = useRef(0)
@@ -201,6 +147,12 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   const handleRefresh = useCallback(() => {
     void loadSessionTrace(agentName, isKeeper)
   }, [agentName, isKeeper])
+
+  const observationWarning = observationErrors.length > 0 ? html`
+    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-3xs font-mono text-[var(--color-status-warn)]" role="alert">
+      ${observationErrors.map(observation => html`<div class="break-all">${observation}</div>`)}
+    </div>
+  ` : null
 
   // Loading state
   if (loading && events.length === 0) {
@@ -226,7 +178,8 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
         ? '아직 시작되지 않은 키퍼입니다. 활동 기록이 없습니다.'
         : '현재 세대에서 기록된 활동이 없습니다.'
     return html`
-      <div class="py-4">
+      <div class="flex flex-col gap-3 py-4">
+        ${observationWarning}
         <${EmptyState} message=${msg} compact />
       </div>
     `
@@ -234,6 +187,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   return html`
     <div class="v2-monitoring-trace-surface flex flex-col gap-3">
+      ${observationWarning}
       ${'' /* Filter + Refresh */}
       <div class="flex items-center justify-between gap-3">
         <${SessionTraceFilter} agentName=${agentName} />
@@ -249,7 +203,6 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
       ${'' /* Summary */}
       <${TraceSummaryBar} summary=${summary} />
-      <${ProcessCriticPanel} findings=${processFindings} />
 
       ${'' /* Event list */}
       <div

@@ -30,9 +30,12 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
 let trajectory_duration_ms duration_ms =
-  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
-  then 0
-  else max 1 (int_of_float (Float.round duration_ms))
+  let rounded = Float.round duration_ms in
+  if (not (Float.is_finite rounded))
+     || Float.compare rounded 0.0 < 0
+     || Float.compare rounded (Float.of_int max_int) > 0
+  then Error (Trajectory.Invalid_field Trajectory.Duration_ms)
+  else Ok (int_of_float rounded)
 
 (* Inference telemetry redaction moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
@@ -113,7 +116,7 @@ include Keeper_hooks_oas_cost_events
     @param meta_ref Mutable ref to keeper metadata
     @param generation Current generation counter
     @param on_tool_executed Optional callback after each tool execution
-    @param trajectory_acc Optional trajectory accumulator for cost attribution
+    @param trajectory_acc Optional trajectory accumulator for tool and thinking observations
 
     Issue #8597 #3-5: dropped [~config], [~session], [~ctx_snapshot]. The
     closure body never read them; the docstring even admitted [ctx_snapshot]
@@ -236,26 +239,15 @@ let make_hooks
           | Some { ttfrc_ms = Some _; _ } -> Some true
           | _ -> None
         in
-        (* Cache-token tracking uses OAS-reported counters only. *)
-        let cc = cache_creation_input_tokens in
-        let cr = cache_read_input_tokens in
-        if cc > 0 then
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_provider_prefix_cache_creation_tokens
-               ~delta:(Float.of_int cc) ();
-        if cr > 0 then begin
-          Otel_metric_store.inc_counter
-            Otel_metric_store.metric_provider_prefix_cache_read_tokens
-            ~delta:(Float.of_int cr) ();
-          (* Per-provider/model cache-read counter for Otel_metric_store
-             dashboards.  The legacy unlabelled counter above
-             remains for backward compatibility. *)
+        (* Cache-token tracking uses OAS-reported counters only. Cache
+           creation is represented by the GenAI usage-detail event below;
+           cache reads additionally have one labeled provider metric. *)
+        if cache_read_input_tokens > 0 then
           Otel_metric_store.inc_counter
             Otel_metric_store.metric_llm_provider_cache_read_tokens
             ~labels:[ ("provider", provider_label); ("model", model) ]
-            ~delta:(Float.of_int cr)
-            ()
-        end;
+            ~delta:(Float.of_int cache_read_input_tokens)
+            ();
         (* Per-provider/model reasoning-token counter.  Available via
            [inference_telemetry.reasoning_tokens] on select providers
            (Anthropic extended thinking, DeepSeek, etc.). *)
@@ -323,8 +315,12 @@ let make_hooks
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with
          | Some acc ->
-           emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:meta.name ~task_id:acc.task_id
+           let task_id =
+             Option.map Keeper_id.Task_id.to_string meta.current_task_id
+           in
+           emit_cost_event
+             ~masc_root:(Trajectory.accumulator_masc_root acc)
+             ~agent_name:meta.name ~task_id
              ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~cache_creation_input_tokens:raw_cache_creation_input_tokens
@@ -337,7 +333,7 @@ let make_hooks
               only the final turn's thinking; turns 1..N-1 were merely counted
               by the log line above. *)
            Keeper_agent_run_thinking_trajectory.persist_response_content
-             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~turn
+             ~keeper_name:meta.name ~trajectory_acc:(Some acc) ~oas_turn:turn
              response.content
          | None -> ());
         (try
@@ -463,12 +459,6 @@ let make_hooks
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Ids.Execution_id.generate () in
-        (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
-           strictly before OAS publishes ToolCompleted for this call, so the
-           event bridge can stamp the same id onto the oas:tool_completed
-           row (insert happens-before publish happens-before drain). *)
-        Keeper_execution_join.record ~tool_use_id
-          ~execution_id:(Ids.Execution_id.to_string execution_id);
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -512,68 +502,74 @@ let make_hooks
          | None -> ()
          | Some acc ->
            let keeper_name = (!meta_ref).name in
-           let trace_id = acc.Trajectory.trace_id in
+           let trace_id = Trajectory.accumulator_trace_id acc in
+           let masc_root = Trajectory.accumulator_masc_root acc in
+           let trajectory_keeper = Trajectory.accumulator_keeper_name acc in
+           let keeper_turn_id = Trajectory.accumulator_keeper_turn_id acc in
            let safe_input =
              Observability_redact.redact_json_value input
            in
            let safe_output =
-             Observability_redact.redact_preview
-               ~max_len:4000
-               output_text
+             Observability_redact.redact_text output_text
            in
-           let runtime_contract =
-             Keeper_tool_call_log.runtime_observability_contract_json_for_call
-               ~keeper_name
-               ~cell:turn_ctx_cell
-               ()
-           in
-           let action_radius =
-             Keeper_tool_call_log.action_radius_json_for_call
-               ~cell:turn_ctx_cell
-               ~tool_name
-               ~input:safe_input
-               ~success:(outcome = Tool_result.Ok)
-               ~duration_ms
-               ?error:(if outcome = Tool_result.Ok then None else Some safe_output)
-               ()
-           in
-           let now = Time_compat.now () in
-           let entry : Trajectory.tool_call_entry =
-             {
-               ts = now;
-               ts_iso = Masc_domain.iso8601_of_unix_seconds now;
-               turn = acc.Trajectory.turn;
-               round = Trajectory.calls_in_current_turn acc + 1;
-               tool_name;
-               args_json = Yojson.Safe.to_string safe_input;
-               gate_decision = Trajectory.Pass;
-               result = Some safe_output;
-               duration_ms = trajectory_duration_ms duration_ms;
-               error = (if outcome = Tool_result.Ok then None else Some safe_output);
-               cost_usd = Trajectory.tool_cost_estimate tool_name;
-               execution_id =
-                 Some (Ids.Execution_id.to_string execution_id);
-             }
-           in
-           Trajectory.record_entry
-             ~runtime_contract
-             ~action_radius
-             ~on_persist_error:(fun exn ->
+           let report_trajectory_gap ~stale_reason exn =
+             try
                Telemetry_coverage_gap.record
-                 ~masc_root:acc.Trajectory.masc_root
+                 ~masc_root
                  ~source:"trajectory_tool_call"
                  ~producer:"keeper_hooks_oas.post_tool_use"
                  ~durable_store:
-                   (Trajectory.trajectory_path acc.Trajectory.masc_root
-                      acc.Trajectory.keeper_name trace_id)
+                   (Trajectory.trajectory_path masc_root trajectory_keeper trace_id)
                  ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-                 ~stale_reason:"trajectory_append_failed"
+                 ~stale_reason
                  ~keeper_name
                  ~trace_id
                  ~exn
-                 ())
-             acc
-             entry);
+                 ()
+             with
+             | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+             | gap_exn ->
+                 Log.Keeper.error ~keeper_name
+                   "trajectory coverage-gap write failed: %s"
+                   (Printexc.to_string gap_exn)
+           in
+           (match safe_input with
+            | `Assoc arguments ->
+                let now = Time_compat.now () in
+                let trajectory_outcome =
+                  if outcome = Tool_result.Ok
+                  then Trajectory.Tool_succeeded safe_output
+                  else Trajectory.Tool_failed safe_output
+                in
+                (match
+                   let open Result.Syntax in
+                   let* duration_ms = trajectory_duration_ms duration_ms in
+                   Trajectory.make_tool_call_entry ~ts:now
+                     ~ts_iso:(Masc_domain.iso8601_of_unix_seconds now)
+                     ~keeper_turn_id ~invocation ~tool_name ~arguments
+                     ~outcome:trajectory_outcome ~duration_ms ~execution_id
+                 with
+                 | Error error ->
+                     report_trajectory_gap
+                       ~stale_reason:"trajectory_entry_invalid"
+                       (Invalid_argument
+                          (Trajectory.entry_decode_error_to_string error))
+                 | Ok entry ->
+                     (try Trajectory.record_entry acc entry with
+                      | Eio.Cancel.Cancelled _ as cancel -> raise cancel
+                      | exn ->
+                        report_trajectory_gap
+                          ~stale_reason:"trajectory_entry_queue_failed"
+                          exn))
+            | _ ->
+                let exn =
+                  Invalid_argument
+                    "trajectory Tool arguments must be a JSON object"
+                in
+                Log.Keeper.error ~keeper_name "%s" (Printexc.to_string exn);
+                report_trajectory_gap
+                  ~stale_reason:"trajectory_arguments_invalid"
+                  exn));
         (try
            on_tool_executed
              ~tool_name

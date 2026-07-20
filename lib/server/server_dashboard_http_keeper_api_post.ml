@@ -11,12 +11,6 @@ let json_list_length = function
   | _ -> 0
 ;;
 
-let trajectory_line_ts = Trace.line_ts
-let dedupe_thinking_lines = Trace.dedupe_thinking_lines
-
-let read_internal_history_lines = Trace.read_internal_history_lines
-let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
-
 let error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =

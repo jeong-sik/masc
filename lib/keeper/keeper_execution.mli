@@ -58,6 +58,3 @@ val build_keeper_system_prompt :
 
 (** Append trait clause to existing trait string. *)
 val append_trait_clause : base:string -> clause:string -> string
-
-(** Check if text appears fragmentary (incomplete sentence fragments). *)
-val looks_fragmentary_history_text : string -> bool

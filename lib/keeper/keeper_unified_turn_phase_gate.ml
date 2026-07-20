@@ -61,7 +61,6 @@ let decide_and_record
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
-      ~trajectory_outcome:(Trajectory.Gated "supervisor_stop")
       ~keeper_turn_id
       ();
     (* FSM: HonorStopSignal — cooperative cancel at phase_gating *)
@@ -101,7 +100,6 @@ let decide_and_record
         ~outcome:`Skipped
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
         ~keeper_turn_id
         ();
       Keeper_turn_fsm.emit_transition
@@ -137,7 +135,6 @@ let decide_and_record
         ~outcome:`Error
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_blocked"
-        ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
         ~error_kind:
           (Keeper_execution_receipt.error_kind_of_string terminal_reason_code)
         ~error_message

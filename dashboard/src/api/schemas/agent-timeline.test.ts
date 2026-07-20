@@ -124,6 +124,13 @@ describe('parseAgentTimelineResponse', () => {
     expect(() => parseAgentTimelineResponse(bad)).toThrow(AgentTimelineSchemaDriftError)
   })
 
+  it('rejects an invalid event timestamp instead of rewriting it to dashboard time', () => {
+    const bad = validResponse({
+      events: [{ type: 'task_claimed', ts: 'not-a-timestamp', detail: {} }],
+    })
+    expect(() => parseAgentTimelineResponse(bad)).toThrow(AgentTimelineSchemaDriftError)
+  })
+
   it('throws on non-object payload', () => {
     expect(() => parseAgentTimelineResponse(null)).toThrow(AgentTimelineSchemaDriftError)
   })

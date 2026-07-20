@@ -18,11 +18,10 @@ type usage =
   }
 
 type t =
-  { execution_ids : Ids.Execution_id.t list
-  ; keeper : string
+  { keeper : string
   ; trace_id : string
   ; absolute_turn : int
-  ; turn_ref : Ids.Turn_ref.t option
+  ; turn_ref : Ids.Turn_ref.t
   ; blocks : prompt_block list
   ; runtime_profile : string
   ; model : string option
@@ -52,15 +51,13 @@ let prompt_block_to_json (b : prompt_block) : Yojson.Safe.t =
 
 let to_json (r : t) : Yojson.Safe.t =
   `Assoc
-    ([ ( "execution_ids"
-       , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
-     ; ("keeper", `String r.keeper)
+    ([ ("keeper", `String r.keeper)
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ("runtime_profile", `String r.runtime_profile)
      ]
-    @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
+    @ [ ("turn_ref", Ids.Turn_ref.to_yojson r.turn_ref) ]
     @ opt_field "model" (fun v -> `String v) r.model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
@@ -79,12 +76,172 @@ let to_json (r : t) : Yojson.Safe.t =
 
 let ( let* ) = Result.bind
 
+module String_set = Set.Make (String)
+
+let invalid_numeric name reason =
+  Error (Printf.sprintf "turn_record: field %S %s" name reason)
+
+let validate_nonnegative_int name value =
+  if value >= 0 then Ok () else invalid_numeric name "must be nonnegative"
+
+let validate_optional_nonnegative_int name = function
+  | None -> Ok ()
+  | Some value -> validate_nonnegative_int name value
+
+let validate_nonnegative_float name value =
+  if not (Float.is_finite value)
+  then invalid_numeric name "must be finite"
+  else if value < 0.0
+  then invalid_numeric name "must be nonnegative"
+  else Ok ()
+
+let validate_optional_nonnegative_float name = function
+  | None -> Ok ()
+  | Some value -> validate_nonnegative_float name value
+
+let validate_blocks blocks =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (block : prompt_block) :: rest ->
+      let block_id = Prompt_block_id.to_string block.block in
+      let* () = validate_nonnegative_int "blocks[].bytes" block.bytes in
+      if String_set.mem block_id seen
+      then
+        Error
+          (Printf.sprintf
+             "turn_record: duplicate prompt block id %S"
+             block_id)
+      else if not (Prompt_block_id.equal block.block (Prompt_block_id.of_string block_id))
+      then
+        Error
+          (Printf.sprintf
+             "turn_record: non-canonical prompt block id %S"
+             block_id)
+      else loop (String_set.add block_id seen) rest
+  in
+  loop String_set.empty blocks
+
+let make
+      ~keeper
+      ~trace_id
+      ~absolute_turn
+      ~blocks
+      ~runtime_profile
+      ~model
+      ~finish_reason
+      ~context_window
+      ~price_input_per_million
+      ~price_output_per_million
+      ~request_latency_ms
+      ~ttfrc_ms
+      ~sampling
+      ~usage
+      ~ts
+  =
+  let* () =
+    if absolute_turn > 0
+    then Ok ()
+    else Error "turn_record: absolute_turn must be positive"
+  in
+  let* () =
+    if String.equal trace_id ""
+    then Error "turn_record: trace_id must not be empty"
+    else Ok ()
+  in
+  let* () = validate_blocks blocks in
+  let* () = validate_optional_nonnegative_int "context_window" context_window in
+  let* () =
+    validate_optional_nonnegative_float
+      "price_input_per_million"
+      price_input_per_million
+  in
+  let* () =
+    validate_optional_nonnegative_float
+      "price_output_per_million"
+      price_output_per_million
+  in
+  let* () =
+    validate_optional_nonnegative_int "request_latency_ms" request_latency_ms
+  in
+  let* () = validate_optional_nonnegative_float "ttfrc_ms" ttfrc_ms in
+  let* () =
+    validate_optional_nonnegative_float "temperature" sampling.temperature
+  in
+  let* () = validate_optional_nonnegative_float "top_p" sampling.top_p in
+  let* () = validate_optional_nonnegative_int "max_tokens" sampling.max_tokens in
+  let* () =
+    validate_optional_nonnegative_int
+      "thinking_budget"
+      sampling.thinking_budget
+  in
+  let* () = validate_optional_nonnegative_int "input_tokens" usage.input_tokens in
+  let* () = validate_optional_nonnegative_int "output_tokens" usage.output_tokens in
+  let* () = validate_nonnegative_float "ts" ts in
+  Ok
+    { keeper
+    ; trace_id
+    ; absolute_turn
+    ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn
+    ; blocks
+    ; runtime_profile
+    ; model
+    ; finish_reason
+    ; context_window
+    ; price_input_per_million
+    ; price_output_per_million
+    ; request_latency_ms
+    ; ttfrc_ms
+    ; sampling
+    ; usage
+    ; ts
+    }
+
 let member name fields = List.assoc_opt name fields
 
 let require name fields =
   match member name fields with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "turn_record: missing field %S" name)
+
+let allowed_fields =
+  [ "keeper"
+  ; "trace_id"
+  ; "absolute_turn"
+  ; "turn_ref"
+  ; "blocks"
+  ; "runtime_profile"
+  ; "model"
+  ; "finish_reason"
+  ; "context_window"
+  ; "price_input_per_million"
+  ; "price_output_per_million"
+  ; "request_latency_ms"
+  ; "ttfrc_ms"
+  ; "temperature"
+  ; "top_p"
+  ; "max_tokens"
+  ; "thinking_budget"
+  ; "enable_thinking"
+  ; "input_tokens"
+  ; "output_tokens"
+  ; "ts"
+  ]
+
+let validate_object_fields ~context ~allowed fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest when List.mem name seen ->
+        Error (Printf.sprintf "turn_record: %s duplicate field %S" context name)
+    | (name, _) :: _ when not (List.mem name allowed) ->
+        Error (Printf.sprintf "turn_record: %s unexpected field %S" context name)
+    | (name, _) :: rest -> loop (name :: seen) rest
+  in
+  loop [] fields
+
+let validate_fields fields =
+  validate_object_fields ~context:"row" ~allowed:allowed_fields fields
+
+let prompt_block_fields = [ "block"; "bytes"; "digest" ]
 
 let as_string name = function
   | `String s -> Ok s
@@ -118,6 +275,10 @@ let as_turn_ref name json =
 let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result =
   match json with
   | `Assoc fields ->
+      let* () =
+        validate_object_fields ~context:"block" ~allowed:prompt_block_fields
+          fields
+      in
       let* block_json = require "block" fields in
       let* block_name = as_string "block" block_json in
       let* bytes_json = require "bytes" fields in
@@ -137,13 +298,7 @@ let rec collect_results acc = function
 let of_json (json : Yojson.Safe.t) : (t, string) result =
   match json with
   | `Assoc fields ->
-      let* ids_json = require "execution_ids" fields in
-      let* execution_ids =
-        match ids_json with
-        | `List items ->
-            collect_results [] (List.map Ids.Execution_id.of_yojson items)
-        | _ -> Error "turn_record: execution_ids is not a list"
-      in
+      let* () = validate_fields fields in
       let* keeper_json = require "keeper" fields in
       let* keeper = as_string "keeper" keeper_json in
       let* trace_json = require "trace_id" fields in
@@ -158,7 +313,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
-      let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
+      let* turn_ref_json = require "turn_ref" fields in
+      let* turn_ref = as_turn_ref "turn_ref" turn_ref_json in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* context_window = opt_member "context_window" fields as_int in
@@ -175,25 +331,28 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* output_tokens = opt_member "output_tokens" fields as_int in
       let* ts_json = require "ts" fields in
       let* ts = as_float "ts" ts_json in
-      Ok
-        { execution_ids
-        ; keeper
-        ; trace_id
-        ; absolute_turn
-        ; turn_ref
-        ; blocks
-        ; runtime_profile
-        ; model
-        ; finish_reason
-        ; context_window
-        ; price_input_per_million
-        ; price_output_per_million
-        ; request_latency_ms
-        ; ttfrc_ms
-        ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
-        ; usage = { input_tokens; output_tokens }
-        ; ts
-        }
+      let* record =
+        make
+          ~keeper
+          ~trace_id
+          ~absolute_turn
+          ~blocks
+          ~runtime_profile
+          ~model
+          ~finish_reason
+          ~context_window
+          ~price_input_per_million
+          ~price_output_per_million
+          ~request_latency_ms
+          ~ttfrc_ms
+          ~sampling:
+            { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
+          ~usage:{ input_tokens; output_tokens }
+          ~ts
+      in
+      if Ids.Turn_ref.equal turn_ref record.turn_ref
+      then Ok record
+      else Error "turn_record: turn_ref does not match trace_id/absolute_turn"
   | _ -> Error "turn_record: row is not an object"
 
 (* ── Block diff ────────────────────────────────────────── *)
@@ -207,20 +366,9 @@ type block_diff =
 let find_block blocks id =
   List.find_opt (fun (b : prompt_block) -> Prompt_block_id.equal b.block id) blocks
 
-let dedupe_by_id blocks =
-  List.fold_left
-    (fun acc (b : prompt_block) ->
-      if List.exists (fun (seen : prompt_block) ->
-             Prompt_block_id.equal seen.block b.block)
-           acc
-      then acc
-      else b :: acc)
-    [] blocks
-  |> List.rev
-
 let diff_blocks ~(prev : t) ~(next : t) : block_diff =
-  let prev_blocks = dedupe_by_id prev.blocks in
-  let next_blocks = dedupe_by_id next.blocks in
+  let prev_blocks = prev.blocks in
+  let next_blocks = next.blocks in
   let added =
     List.filter
       (fun (b : prompt_block) -> find_block prev_blocks b.block = None)

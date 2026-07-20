@@ -156,19 +156,6 @@ let make_test_ctx_with_agent agent_name =
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
-let seed_trace_evidence ctx trace_id =
-  let base_path = ctx.Task.Tool.config.Workspace.base_path in
-  let path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat base_path ".masc")
-         "trajectories/test-agent")
-      (trace_id ^ ".jsonl")
-  in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path
-    {|{"type":"tool_task_coverage_evidence","turn":0,"trace_id":"test"}|}
-
 let make_temp_dir prefix =
   incr test_counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -758,7 +745,6 @@ let () = test "handle_done_uses_llm_review_without_keeper_verifier_redirect" (fu
                 ])
         in
         start_task_001 ctx;
-        seed_trace_evidence ctx "run_deliverable";
         let result_done =
           Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
             (`Assoc
@@ -1532,7 +1518,6 @@ let () = test "handle_transition_done_default_contract_follows_llm_approval" (fu
   start_task_001 ctx;
   (* Evidence remains reviewer input. The default test hook's LLM approval,
      rather than a local reference classifier, authorizes completion. *)
-  seed_trace_evidence ctx "default-contract-done";
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -2499,7 +2484,6 @@ let () = test "transition_done_completes_after_llm_review_and_clears_planning_cu
       (`Assoc [ "task_id", `String "task-001"; "action", `String "start" ])
   in
   assert (Tool_result.is_success start_result);
-  seed_trace_evidence ctx "task-1815";
   let done_result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -2887,7 +2871,6 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
   let ctx = make_test_ctx () in
   (* Create a task, mark it as done *)
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done task")]) in
-  seed_trace_evidence ctx "done-task";
   let _ = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [
     ("task_id", `String "task-001");
     ("action", `String "done");

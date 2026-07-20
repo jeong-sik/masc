@@ -18,19 +18,47 @@ function trajectory(): TrajectoryResponse {
     trace_id: 'trace-1',
     generation: 1,
     total_entries: 1,
+    total_entries_scope: 'tail',
+    total_entries_exact: false,
+    tail_scan_entries: 500,
     showing: 1,
+    decode: {
+      tool_call_count: 1,
+      thinking_count: 0,
+      skipped_summary_count: 0,
+      invalid_line_count: 0,
+      invalid_reasons: {
+        missing_required_field: 0,
+        invalid_field: 0,
+        unexpected_field: 0,
+        duplicate_field: 0,
+        unsupported_row_type: 0,
+        malformed_json: 0,
+      },
+    },
+    io_errors: [],
+    scan: { physical_rows: 1, bytes_read: 1, stop: 'reached_entry_limit' },
+    next_cursor: null,
     entries: [
       {
+        schema: 'masc.keeper_trajectory.v1',
+        type: 'tool_call',
         ts: 2,
         ts_iso: '2026-05-14T00:00:02.000Z',
-        turn: 1,
-        round: 1,
+        keeper_turn_id: 1,
+        oas_turn: 0,
+        schedule: {
+          planned_index: 0,
+          batch_index: 0,
+          batch_size: 1,
+          execution_mode: 'serial',
+        },
+        tool_use_id: '',
         tool_name: 'fs_read',
         args: { path: '/tmp/old' },
-        gate: { status: 'pass' },
-        result: 'old result',
+        outcome: { status: 'succeeded', output: 'old result' },
         duration_ms: 120,
-        cost_usd: 0.002,
+        execution_id: 'exec-journey-1',
       },
     ],
   }
@@ -51,6 +79,7 @@ function toolCalls(): ToolCallsResponse {
         duration_ms: 120,
         trace_id: 'trace-1',
         turn: 1,
+        execution_id: 'exec-journey-1',
       },
     ],
   }
@@ -197,13 +226,14 @@ describe('JourneyPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Keeper Turn Waterfall')).toBeInTheDocument()
-      expect(screen.getByText('Turn 1')).toBeInTheDocument()
+      expect(screen.getByText('Keeper Turn 1')).toBeInTheDocument()
       expect(screen.getByText('fs_read')).toBeInTheDocument()
+      expect(screen.getByText('K 1 · OAS 1 · batch 1/1 · plan 1')).toBeInTheDocument()
       expect(screen.getByText('agent turns 2')).toBeInTheDocument()
-      expect(screen.getByText('trajectory + I/O')).toBeInTheDocument()
+      expect(screen.getByText('trajectory + provenance')).toBeInTheDocument()
     })
 
-    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true, true)
+    expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200)
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('keeper-a', 200, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))

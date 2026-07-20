@@ -7,37 +7,6 @@ let () =
   ignore (Unix.gettimeofday ())
 
 (* ================================================================ *)
-(* Test: tool_cost_estimate returns expected values                   *)
-(* ================================================================ *)
-
-let test_tool_cost_known () =
-  let cost = Trajectory.tool_cost_estimate "keeper_board_post" in
-  Alcotest.(check (float 0.001)) "board_post cost" 0.002 cost
-
-let test_tool_cost_unknown () =
-  let cost = Trajectory.tool_cost_estimate "nonexistent_tool" in
-  Alcotest.(check (float 0.0001)) "unknown tool default cost" 0.0 cost
-
-let test_tool_cost_bash () =
-  let cost = Trajectory.tool_cost_estimate "tool_execute" in
-  Alcotest.(check (float 0.0001)) "bash cost" 0.0001 cost
-
-(* ================================================================ *)
-(* Test: gate_decision types                                         *)
-(* ================================================================ *)
-
-let test_gate_decision_pass () =
-  match Trajectory.Pass with
-  | Trajectory.Pass -> ()
-  | Trajectory.Reject _ -> Alcotest.fail "Expected Pass"
-
-let test_gate_decision_reject () =
-  match Trajectory.Reject "test reason" with
-  | Trajectory.Reject reason ->
-      Alcotest.(check string) "reject reason" "test reason" reason
-  | Trajectory.Pass -> Alcotest.fail "Expected Reject"
-
-(* ================================================================ *)
 (* Test: create_accumulator and basic state                          *)
 (* ================================================================ *)
 
@@ -50,14 +19,77 @@ let with_tmpdir f =
     Fs_compat.remove_tree dir
   ) (fun () -> f dir)
 
+let tool_invocation ?(tool_use_id = "") ?(oas_turn = 0)
+    ?(planned_index = 0) ?(batch_index = 0) ?(batch_size = 1)
+    ?(execution_mode = Agent_sdk.Tool.Serial) () =
+  Agent_sdk.Tool.Invocation.create ~tool_use_id ~turn:oas_turn
+    ~schedule:{ planned_index; batch_index; batch_size; execution_mode }
+
+let make_tool_entry ?(keeper_turn_id = 1) ?(oas_turn = 0)
+    ?(planned_index = 0) ?(batch_index = 0) ?(batch_size = 1)
+    ?(execution_mode = Agent_sdk.Tool.Serial) ?(tool_use_id = "") ~ts ~ts_iso
+    ~tool_name ~arguments ~outcome ~duration_ms ~execution_id () =
+  let invocation =
+    tool_invocation ~tool_use_id ~oas_turn ~planned_index ~batch_index
+      ~batch_size ~execution_mode ()
+  in
+  match
+    Trajectory.make_tool_call_entry ~ts ~ts_iso ~keeper_turn_id ~invocation
+      ~tool_name ~arguments ~outcome ~duration_ms
+      ~execution_id:(Ids.Execution_id.of_string execution_id)
+  with
+  | Ok entry -> entry
+  | Error error ->
+      Alcotest.failf "invalid Tool fixture: %s"
+        (Trajectory.entry_decode_error_to_string error)
+
+let canonical_tool_row ?keeper_turn_id ?oas_turn ?planned_index ?batch_index
+    ?batch_size ?execution_mode ?tool_use_id ~ts ~execution_id () =
+  make_tool_entry ?keeper_turn_id ?oas_turn ?planned_index ?batch_index
+    ?batch_size ?execution_mode ?tool_use_id ~ts
+    ~ts_iso:"2026-07-01T00:00:00Z" ~tool_name:"tool_execute"
+    ~arguments:[] ~outcome:(Trajectory.Tool_succeeded "ok") ~duration_ms:1
+    ~execution_id ()
+  |> Trajectory.entry_to_json
+  |> Yojson.Safe.to_string
+
 let test_create_accumulator () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-001" ~generation:0 () in
-    Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
-    Alcotest.(check (float 0.0001)) "initial cost" 0.0 acc.Trajectory.total_cost;
-    Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
+      ~trace_id:"trace-001" ~keeper_turn_id:1 ~generation:0 () in
+    Alcotest.(check int) "exact keeper turn" 1
+      (Trajectory.accumulator_keeper_turn_id acc);
+    Trajectory.finalize acc Trajectory.Completed |> ignore)
+
+let test_duplicate_active_accumulator_is_rejected () =
+  with_tmpdir (fun dir ->
+    let first =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"test-keeper"
+        ~trace_id:"trace-duplicate" ~keeper_turn_id:1 ~generation:0 ()
+    in
+    (match
+       Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"test-keeper"
+         ~trace_id:"trace-duplicate" ~keeper_turn_id:1 ~generation:0 ()
+     with
+     | _ -> Alcotest.fail "duplicate active accumulator must not replace SSOT"
+     | exception
+         Trajectory.Accumulator_registration_error
+           (Trajectory.Active_accumulator_exists _) -> ());
+    Trajectory.finalize first Trajectory.Completed |> ignore)
+
+let test_active_observation_does_not_block_next_keeper_turn () =
+  with_tmpdir (fun dir ->
+    let first =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"test-keeper"
+        ~trace_id:"trace-shared" ~keeper_turn_id:1 ~generation:0 ()
+    in
+    let next =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"test-keeper"
+        ~trace_id:"trace-shared" ~keeper_turn_id:2 ~generation:0 ()
+    in
+    Trajectory.finalize first Trajectory.Completed |> ignore;
+    Trajectory.finalize next Trajectory.Completed |> ignore)
 
 (* ================================================================ *)
 (* Test: record_entry updates accumulator                            *)
@@ -67,83 +99,17 @@ let test_record_entry () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-002" ~generation:0 () in
-    let entry : Trajectory.tool_call_entry = {
-      ts = 1000.0;
-      ts_iso = "2026-01-01T00:00:00Z";
-      turn = 1;
-      round = 0;
-      tool_name = "tool_execute";
-      args_json = "{\"command\": \"pwd\"}";
-      gate_decision = Trajectory.Pass;
-      result = Some "/home/test";
-      duration_ms = 50;
-      error = None;
-      cost_usd = 0.0001;
-      execution_id = Some "exec-1000-0001";
-    } in
+      ~trace_id:"trace-002" ~keeper_turn_id:1 ~generation:0 () in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-01-01T00:00:00Z"
+        ~oas_turn:1 ~tool_name:"tool_execute"
+        ~arguments:[ "command", `String "pwd" ]
+        ~outcome:(Trajectory.Tool_succeeded "/home/test") ~duration_ms:50
+        ~execution_id:"exec-1000-0001" ()
+    in
     Trajectory.record_entry acc entry;
-    Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
-    Alcotest.(check (float 0.0001)) "total cost" 0.0001 acc.Trajectory.total_cost)
-
-(* ================================================================ *)
-(* Test: detect_entropy                                              *)
-(* ================================================================ *)
-
-let test_entropy_not_triggered () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-003" ~generation:0 () in
-    (* Add 1 consecutive call — with +1 for upcoming, count=2 < threshold 3 *)
-    let mk_entry tool = { Trajectory.
-      ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
-      tool_name = tool; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.0001;
-      execution_id = None;
-    } in
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
-    Alcotest.(check bool) "entropy not triggered" true (entropy = None))
-
-let test_entropy_triggered () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-004" ~generation:0 () in
-    let mk_entry tool = { Trajectory.
-      ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
-      tool_name = tool; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.0001;
-      execution_id = None;
-    } in
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    Trajectory.record_entry acc (mk_entry "tool_execute");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
-    match entropy with
-    | Some (_name, count) ->
-        Alcotest.(check int) "entropy count" 4 count
-    | None -> Alcotest.fail "Expected entropy to be triggered")
-
-(* ================================================================ *)
-(* Test: increment_turn                                              *)
-(* ================================================================ *)
-
-let test_increment_turn () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005" ~generation:0 () in
-    Alcotest.(check int) "turn 0" 0 acc.Trajectory.turn;
-    Trajectory.increment_turn acc;
-    Alcotest.(check int) "turn 1" 1 acc.Trajectory.turn;
-    Trajectory.increment_turn acc;
-    Alcotest.(check int) "turn 2" 2 acc.Trajectory.turn)
+    let trajectory = Trajectory.finalize acc Trajectory.Completed in
+    Alcotest.(check int) "Tool count" 1 trajectory.total_tool_calls)
 
 (* ================================================================ *)
 (* Test: finalize creates trajectory record                          *)
@@ -153,22 +119,33 @@ let test_finalize () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-006" ~generation:0 () in
-    Trajectory.increment_turn acc;
-    let entry : Trajectory.tool_call_entry = {
-      ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
-      turn = 1; round = 0;
-      tool_name = "tool_execute"; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 100;
-      error = None; cost_usd = 0.0001;
-      execution_id = None;
-    } in
+      ~trace_id:"trace-006" ~keeper_turn_id:1 ~generation:0 () in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-01-01T00:00:00Z"
+        ~oas_turn:1 ~tool_name:"tool_execute" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "ok") ~duration_ms:100
+        ~execution_id:"exec-finalize-1" ()
+    in
     Trajectory.record_entry acc entry;
+    let thinking =
+      match
+        Trajectory.make_thinking_entry ~ts:1001.0
+          ~ts_iso:"2026-01-01T00:00:01Z" ~keeper_turn_id:1 ~oas_turn:2
+          ~block_index:0
+          ~block:
+            (Agent_sdk.Types.Thinking
+               { content = "second observed turn"; signature = None })
+      with
+      | Ok entry -> entry
+      | Error error ->
+          Alcotest.failf "invalid Thinking fixture: %s"
+            (Trajectory.entry_decode_error_to_string error)
+    in
+    Trajectory.record_thinking acc thinking;
     let traj = Trajectory.finalize acc Trajectory.Completed in
-    Alcotest.(check int) "total turns" 1 traj.Trajectory.total_turns;
+    Alcotest.(check int) "distinct observed turns" 2
+      traj.Trajectory.observed_oas_turn_count;
     Alcotest.(check int) "total calls" 1 traj.Trajectory.total_tool_calls;
-    Alcotest.(check (float 0.0001)) "total cost" 0.0001 traj.Trajectory.total_cost_usd;
     Alcotest.(check string) "trace_id" "trace-006" traj.Trajectory.trace_id)
 
 (* ================================================================ *)
@@ -178,127 +155,31 @@ let test_finalize () =
 let test_outcome_to_string () =
   Alcotest.(check string) "completed" "completed"
     (Trajectory.outcome_to_string Trajectory.Completed);
-  Alcotest.(check string) "cost_exceeded" "cost_exceeded"
-    (Trajectory.outcome_to_string Trajectory.CostExceeded);
   Alcotest.(check string) "failed" "failed: oops"
     (Trajectory.outcome_to_string (Trajectory.Failed "oops"));
-  Alcotest.(check string) "gated" "gated: blocked"
-    (Trajectory.outcome_to_string (Trajectory.Gated "blocked"))
-
-(* ================================================================ *)
-(* Test: calls_in_current_turn                                       *)
-(* ================================================================ *)
-
-let test_calls_in_current_turn () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-007" ~generation:0 () in
-    Trajectory.increment_turn acc;
-    let mk tool = { Trajectory.
-      ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
-      tool_name = tool; args_json = "{}";
-      gate_decision = Trajectory.Pass;
-      result = Some "ok"; duration_ms = 10;
-      error = None; cost_usd = 0.001;
-      execution_id = None;
-    } in
-    Trajectory.record_entry acc (mk "tool_execute");
-    Trajectory.record_entry acc (mk "tool_read_file");
-    let count = Trajectory.calls_in_current_turn acc in
-    Alcotest.(check int) "calls in turn 1" 2 count)
-
-(* ================================================================ *)
-(* Test: task_id binding and propagation                             *)
-(* ================================================================ *)
-
-let test_task_id_default_none () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-001" ~generation:0 () in
-    Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
-
-let test_set_task_id () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-002" ~generation:0 () in
-    Trajectory.set_task_id acc "task-042";
-    Alcotest.(check (option string)) "task_id set"
-      (Some "task-042") acc.Trajectory.task_id)
-
-let test_clear_task_id () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-003" ~generation:0 () in
-    Trajectory.set_task_id acc "task-042";
-    Trajectory.clear_task_id acc;
-    Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
-
-let test_finalize_propagates_task_id () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-004" ~generation:0 () in
-    Trajectory.set_task_id acc "task-099";
-    Trajectory.increment_turn acc;
-    let traj = Trajectory.finalize acc Trajectory.Completed in
-    Alcotest.(check (option string)) "task_id propagated"
-      (Some "task-099") traj.Trajectory.task_id)
-
-let test_task_id_in_trajectory_json () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-005" ~generation:0 () in
-    Trajectory.set_task_id acc "task-json-test";
-    let traj = Trajectory.finalize acc Trajectory.Completed in
-    let json = Trajectory.trajectory_to_json traj in
-    let open Yojson.Safe.Util in
-    let task_id_val = json |> member "task_id" in
-    match task_id_val with
-    | `String s ->
-      Alcotest.(check string) "task_id in json" "task-json-test" s
-    | _ -> Alcotest.fail "Expected task_id to be a string in trajectory JSON")
-
-let test_task_id_null_when_none () =
-  with_tmpdir (fun dir ->
-    let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-006" ~generation:0 () in
-    let traj = Trajectory.finalize acc Trajectory.Completed in
-    let json = Trajectory.trajectory_to_json traj in
-    let open Yojson.Safe.Util in
-    let task_id_val = json |> member "task_id" in
-    match task_id_val with
-    | `Null -> ()
-    | _ -> Alcotest.fail "Expected task_id to be null when not set")
-
-(* model_pricing tests removed — model_token_pricing / estimate_turn_cost
-   deleted from Trajectory (#3029). Pricing belongs to OAS runtime. *)
+  Alcotest.(check string) "input required" "input_required"
+    (Trajectory.outcome_to_string Trajectory.Input_required);
+  Alcotest.(check string) "cancelled" "cancelled"
+    (Trajectory.outcome_to_string Trajectory.Cancelled)
 
 (* ================================================================ *)
 (* Test: aggregate_tool_stats                                        *)
 (* ================================================================ *)
 
-let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur cost ts_iso =
-  { Trajectory.
-    ts; ts_iso; turn = 1; round = 0;
-    tool_name = name; args_json = "{}";
-    gate_decision = gate;
-    result = Some "ok"; duration_ms = dur;
-    error; cost_usd = cost;
-    execution_id = None;
-  }
+let mk_entry ?(ts = 1000.0) ?(error = None) name dur ts_iso =
+  make_tool_entry ~ts ~ts_iso ~oas_turn:1 ~tool_name:name ~arguments:[]
+    ~outcome:
+      (match error with
+       | None -> Trajectory.Tool_succeeded "ok"
+       | Some message -> Trajectory.Tool_failed message)
+    ~duration_ms:dur ~execution_id:(Printf.sprintf "exec-%s-%d" name dur) ()
 
 let test_aggregate_basic () =
   let entries = [
-    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry "tool_execute" 200 0.002 "2026-04-06T10:01:00Z";
-    mk_entry "tool_execute" 300 0.001 "2026-04-06T10:02:00Z";
-    mk_entry "tool_read_file" 50 0.0 "2026-04-06T10:03:00Z";
+    mk_entry "tool_execute" 100 "2026-04-06T10:00:00Z";
+    mk_entry "tool_execute" 200 "2026-04-06T10:01:00Z";
+    mk_entry "tool_execute" 300 "2026-04-06T10:02:00Z";
+    mk_entry "tool_read_file" 50 "2026-04-06T10:03:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 2 (List.length stats);
@@ -313,9 +194,10 @@ let test_aggregate_basic () =
 
 let test_aggregate_with_errors () =
   let entries = [
-    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry ~error:(Some "timeout") "tool_execute" 5000 0.001 "2026-04-06T10:01:00Z";
-    mk_entry ~gate:(Trajectory.Reject "denied") "tool_execute" 0 0.0 "2026-04-06T10:02:00Z";
+    mk_entry "tool_execute" 100 "2026-04-06T10:00:00Z";
+    mk_entry ~error:(Some "timeout") "tool_execute" 5000 "2026-04-06T10:01:00Z";
+    mk_entry ~error:(Some "denied") "tool_execute" 0
+      "2026-04-06T10:02:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 1 (List.length stats);
@@ -331,7 +213,7 @@ let test_aggregate_empty () =
 let test_aggregate_p95 () =
   (* 20 entries: durations 100, 200, ..., 2000. p95 index = round(20 * 0.95) = 19 -> 2000 *)
   let entries = List.init 20 (fun i ->
-    mk_entry "tool_execute" ((i + 1) * 100) 0.0
+    mk_entry "tool_execute" ((i + 1) * 100)
       (Printf.sprintf "2026-04-06T10:%02d:00Z" i)
   ) in
   let stats = Trajectory.aggregate_tool_stats entries in
@@ -345,8 +227,8 @@ let test_aggregate_p95 () =
 
 let test_hourly_single_bucket () =
   let entries = [
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    mk_entry ~ts:1743937500.0 "tool_execute" 100 "2026-04-06T10:05:00Z";
+    mk_entry ~ts:1743939000.0 "tool_execute" 100 "2026-04-06T10:30:00Z";
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   (* Both entries fall in the same hour bucket (25 min apart) *)
@@ -357,8 +239,9 @@ let test_hourly_single_bucket () =
 
 let test_hourly_with_errors () =
   let entries = [
-    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry ~error:(Some "fail") "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    mk_entry ~ts:1743937500.0 "tool_execute" 100 "2026-04-06T10:05:00Z";
+    mk_entry ~ts:1743939000.0 ~error:(Some "fail") "tool_execute" 100
+      "2026-04-06T10:30:00Z";
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   let b = List.hd timeline in
@@ -381,7 +264,6 @@ let test_tool_stat_json_roundtrip () =
     avg_duration_ms = 150;
     p95_duration_ms = 500;
     max_duration_ms = 800;
-    total_cost_usd = 0.01;
     last_used_at = "2026-04-06T12:00:00Z";
   } in
   let json = Trajectory.tool_stat_to_json stat in
@@ -403,115 +285,192 @@ let test_hourly_bucket_json () =
   Alcotest.(check int) "calls" 5 (json |> member "call_count" |> to_int);
   Alcotest.(check int) "errors" 1 (json |> member "error_count" |> to_int)
 
-let test_entry_to_json_includes_contract_and_radius () =
-  let entry : Trajectory.tool_call_entry = {
-    ts = 1000.0;
-    ts_iso = "2026-04-06T10:00:00Z";
-    turn = 1;
-    round = 1;
-    tool_name = "tool_execute";
-    args_json = {|{"command":"pwd"}|};
-    gate_decision = Trajectory.Pass;
-    result = Some "/tmp/work";
-    duration_ms = 25;
-    error = None;
-    cost_usd = 0.0001;
-    execution_id = Some "exec-1000-0001";
-  } in
-  let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
-      ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
-      ~trace_id:"trace-alpha"
-      ~generation:2
-      ~sandbox_profile:"docker"
-      ()
+let test_entry_to_json_preserves_typed_fields () =
+  let entry =
+    make_tool_entry ~ts:1000.0 ~ts_iso:"2026-04-06T10:00:00Z"
+      ~keeper_turn_id:42 ~oas_turn:3 ~planned_index:7 ~batch_index:1
+      ~batch_size:2 ~execution_mode:Agent_sdk.Tool.Concurrent
+      ~tool_use_id:"provider-tool-1" ~tool_name:"tool_execute"
+      ~arguments:[ "command", `String "pwd" ]
+      ~outcome:(Trajectory.Tool_succeeded "/tmp/work") ~duration_ms:25
+      ~execution_id:"exec-1000-0001" ()
   in
-  let action_radius =
-    Keeper_runtime_contract.action_radius_json
-      ~tool_name:"tool_execute"
-      ~input:(`Assoc [("cwd", `String "/tmp/work")])
-      ~success:true
-      ~duration_ms:25.0
-      ()
-  in
-  let json =
-    Trajectory.entry_to_json ~runtime_contract ~action_radius entry
-  in
+  let json = Trajectory.entry_to_json entry in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "runtime keeper" "alpha"
-    (json |> member "runtime_contract" |> member "keeper_name" |> to_string);
-  Alcotest.(check string) "action tool" "tool_execute"
-    (json |> member "action_radius" |> member "tool_name" |> to_string);
-  Alcotest.(check string) "observed path" "/tmp/work"
-    (json |> member "action_radius" |> member "observed_paths" |> to_list
-     |> List.hd |> to_string);
+  Alcotest.(check string) "structured argument" "pwd"
+    (json |> member "args" |> member "command" |> to_string);
   Alcotest.(check string) "execution_id persisted" "exec-1000-0001"
-    (json |> member "execution_id" |> to_string)
+    (json |> member "execution_id" |> to_string);
+  Alcotest.(check string) "closed schema" "masc.keeper_trajectory.v1"
+    (json |> member "schema" |> to_string);
+  Alcotest.(check int) "Keeper clock" 42
+    (json |> member "keeper_turn_id" |> to_int);
+  Alcotest.(check int) "OAS clock" 3 (json |> member "oas_turn" |> to_int);
+  Alcotest.(check int) "planned occurrence" 7
+    (json |> member "schedule" |> member "planned_index" |> to_int);
+  Alcotest.(check int) "batch placement" 1
+    (json |> member "schedule" |> member "batch_index" |> to_int);
+  Alcotest.(check int) "batch cardinality" 2
+    (json |> member "schedule" |> member "batch_size" |> to_int);
+  Alcotest.(check string) "execution mode" "concurrent"
+    (json |> member "schedule" |> member "execution_mode" |> to_string);
+  Alcotest.(check string) "opaque provider correlation" "provider-tool-1"
+    (json |> member "tool_use_id" |> to_string)
 
-(* RFC-0233 PR-1: the canonical join key survives the JSONL round-trip,
-   and rows written before the field existed decode as [None]. *)
+(* The canonical join key is required. Rows without it are invalid rather than
+   guessed from timestamps, names, or durations. *)
 let test_execution_id_roundtrip () =
-  let entry : Trajectory.tool_call_entry = {
-    ts = 1000.0; ts_iso = "2026-06-12T00:00:00Z"; turn = 3; round = 1;
-    tool_name = "tool_execute"; args_json = "{}";
-    gate_decision = Trajectory.Pass;
-    result = Some "ok"; duration_ms = 10; error = None; cost_usd = 0.0;
-    execution_id = Some "exec-1718150400000-0001";
-  } in
+  let entry =
+    make_tool_entry ~ts:1000.0 ~ts_iso:"2026-06-12T00:00:00Z"
+      ~keeper_turn_id:3 ~oas_turn:2 ~tool_name:"tool_execute" ~arguments:[]
+      ~outcome:(Trajectory.Tool_succeeded "ok") ~duration_ms:10
+      ~execution_id:"exec-1718150400000-0001" ()
+  in
   (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
-   | Some (decoded, _) ->
-       Alcotest.(check (option string)) "round-trip"
-         (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
-   | None -> Alcotest.fail "entry did not decode");
-  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
-  match Trajectory.tool_call_entry_of_json legacy with
-  | Some (decoded, _) ->
-      Alcotest.(check (option string)) "legacy row decodes as None" None
-        decoded.Trajectory.execution_id
-  | None -> Alcotest.fail "legacy entry did not decode"
-
-let has_assoc_key key = function
-  | `Assoc fields -> List.mem_assoc key fields
-  | _ -> false
-
-let test_runtime_contract_projection_redacts_backend_details () =
-  let keeper_visible =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
-      ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
-      ~trace_id:"trace-alpha"
-      ~generation:2
-      ~sandbox_profile:"docker"
-      ~sandbox_root:"/workspace"
-      ~network_mode:"none"
-      ()
+   | Trajectory.Decoded_entry decoded ->
+       Alcotest.(check string) "round-trip"
+         "exec-1718150400000-0001"
+         (Ids.Execution_id.to_string decoded.Trajectory.execution_id)
+   | Trajectory.Non_entry_row | Trajectory.Invalid_entry _ ->
+       Alcotest.fail "entry did not decode");
+  let without_execution_id =
+    match Trajectory.entry_to_json entry with
+    | `Assoc fields -> `Assoc (List.remove_assoc "execution_id" fields)
+    | _ -> Alcotest.fail "entry serializer must return an object"
   in
-  let observability =
-    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
-      ~keeper_name:"alpha"
-      ~agent_name:"alpha-agent"
-      ~trace_id:"trace-alpha"
-      ~generation:2
-      ~sandbox_profile:"docker"
-      ~sandbox_root:"/workspace"
-      ~network_mode:"none"
-      ()
+  match Trajectory.tool_call_entry_of_json without_execution_id with
+  | Trajectory.Invalid_entry
+      (Trajectory.Missing_required_field Trajectory.Execution_id) -> ()
+  | Trajectory.Decoded_entry _ | Trajectory.Non_entry_row
+  | Trajectory.Invalid_entry _ ->
+      Alcotest.fail "entry without execution_id must be rejected"
+
+let test_schedule_and_tool_use_id_are_exact_observations () =
+  let decode entry =
+    match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
+    | Trajectory.Decoded_entry decoded -> decoded
+    | Trajectory.Non_entry_row | Trajectory.Invalid_entry _ ->
+        Alcotest.fail "canonical Tool entry did not decode"
   in
-  let open Yojson.Safe.Util in
-  Alcotest.(check bool) "keeper contract redacts sandbox_profile" false
-    (has_assoc_key "sandbox_profile" keeper_visible);
-  Alcotest.(check bool) "keeper contract redacts network_mode" false
-    (has_assoc_key "network_mode" keeper_visible);
-  Alcotest.(check string) "keeper contract keeps sandbox root" "/workspace"
-    (keeper_visible |> member "sandbox_root" |> to_string);
-  Alcotest.(check bool) "keeper contract says Read has no implicit cwd" false
-    (keeper_visible |> member "path_resolution" |> member "read_implicit_cwd"
-     |> to_bool);
-  Alcotest.(check string) "observability keeps sandbox_profile" "docker"
-    (observability |> member "sandbox_profile" |> to_string);
-  Alcotest.(check string) "observability keeps network_mode" "none"
-    (observability |> member "network_mode" |> to_string)
+  let blank =
+    make_tool_entry ~ts:1.0 ~ts_iso:"2026-07-18T00:00:00Z"
+      ~planned_index:12 ~batch_index:99 ~batch_size:1
+      ~execution_mode:Agent_sdk.Tool.Concurrent ~tool_use_id:""
+      ~tool_name:"tool_execute" ~arguments:[]
+      ~outcome:(Trajectory.Tool_succeeded "ok") ~duration_ms:0
+      ~execution_id:"exec-blank-tool-use" ()
+    |> decode
+  in
+  Alcotest.(check string) "blank provider correlation remains blank" ""
+    blank.Trajectory.tool_use_id;
+  Alcotest.(check int) "batch_index is observed, not normalized" 99
+    blank.Trajectory.schedule.batch_index;
+  let repeated tool_use_id execution_id =
+    make_tool_entry ~ts:2.0 ~ts_iso:"2026-07-18T00:00:01Z" ~tool_use_id
+      ~tool_name:"tool_execute" ~arguments:[]
+      ~outcome:(Trajectory.Tool_succeeded "ok") ~duration_ms:0 ~execution_id ()
+    |> decode
+  in
+  let first = repeated "provider-repeat" "exec-repeat-1" in
+  let second = repeated "provider-repeat" "exec-repeat-2" in
+  Alcotest.(check string) "repeated opaque id retained" first.tool_use_id
+    second.tool_use_id;
+  Alcotest.(check bool) "execution identity stays distinct" false
+    (Ids.Execution_id.equal first.execution_id second.execution_id)
+
+let test_retired_gate_field_is_rejected () =
+  let canonical =
+    Trajectory.entry_to_json
+      (mk_entry "tool_execute" 1 "2026-06-12T00:00:00Z")
+  in
+  let with_retired_gate =
+    match canonical with
+    | `Assoc fields ->
+        `Assoc (("gate", `Assoc [("status", `String "pass")]) :: fields)
+    | _ -> Alcotest.fail "entry serializer must return an object"
+  in
+  match Trajectory.tool_call_entry_of_json with_retired_gate with
+  | Trajectory.Invalid_entry (Trajectory.Unexpected_field "gate") -> ()
+  | _ -> Alcotest.fail "retired gate field must not remain a hidden legacy input"
+
+let test_closed_row_codec_rejects_invalid_fields_and_types () =
+  let valid_entry =
+    Trajectory.entry_to_json
+      (mk_entry "tool_execute" 1 "2026-06-12T00:00:00Z")
+  in
+  let replace key value = function
+    | `Assoc fields ->
+        `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> Alcotest.fail "entry serializer must return an object"
+  in
+  let check_invalid_field field json =
+    match Trajectory.tool_call_entry_of_json json with
+    | Trajectory.Invalid_entry (Trajectory.Invalid_field actual)
+      when actual = field -> ()
+    | _ -> Alcotest.fail "invalid required field must not be fabricated"
+  in
+  check_invalid_field Trajectory.Timestamp
+    (replace "ts" (`Float Float.nan) valid_entry);
+  check_invalid_field Trajectory.Keeper_turn_id
+    (replace "keeper_turn_id" (`Int 0) valid_entry);
+  check_invalid_field Trajectory.Oas_turn
+    (replace "oas_turn" (`Int (-1)) valid_entry);
+  let replace_schedule key value =
+    match valid_entry with
+    | `Assoc fields ->
+        let schedule =
+          match List.assoc "schedule" fields with
+          | `Assoc schedule_fields ->
+              `Assoc ((key, value) :: List.remove_assoc key schedule_fields)
+          | _ -> Alcotest.fail "schedule must be an object"
+        in
+        `Assoc (("schedule", schedule) :: List.remove_assoc "schedule" fields)
+    | _ -> Alcotest.fail "entry serializer must return an object"
+  in
+  check_invalid_field Trajectory.Planned_index
+    (replace_schedule "planned_index" (`Int (-1)));
+  check_invalid_field Trajectory.Batch_index
+    (replace_schedule "batch_index" (`Int (-1)));
+  check_invalid_field Trajectory.Batch_size
+    (replace_schedule "batch_size" (`Int 0));
+  check_invalid_field Trajectory.Execution_mode
+    (replace_schedule "execution_mode" (`String "invented"));
+  check_invalid_field Trajectory.Tool_name
+    (replace "tool_name" (`String "") valid_entry);
+  check_invalid_field Trajectory.Duration_ms
+    (replace "duration_ms" (`Int (-1)) valid_entry);
+  check_invalid_field Trajectory.Arguments
+    (replace "args" (`String "{}") valid_entry);
+  check_invalid_field Trajectory.Tool_outcome
+    (replace "outcome" (`Assoc [("status", `String "unknown")]) valid_entry);
+  (match
+     Trajectory.tool_call_entry_of_json
+       (replace "type" (`String "unsupported") valid_entry)
+   with
+   | Trajectory.Invalid_entry
+       (Trajectory.Unsupported_row_type "unsupported") -> ()
+   | _ -> Alcotest.fail "unknown row type must not decode as a tool row");
+  let invalid_thinking =
+    {|{"schema":"masc.keeper_trajectory.v1","type":"thinking","ts":1000.0,"ts_iso":"2026-06-12T00:00:00Z","keeper_turn_id":1,"oas_turn":0,"block_index":0,"block":{"type":"thinking","thinking":"thought"},"unexpected":false}|}
+  in
+  (match
+     Trajectory.tool_call_entry_of_json
+       (Yojson.Safe.from_string invalid_thinking)
+   with
+   | Trajectory.Invalid_entry
+       (Trajectory.Unexpected_field "unexpected") -> ()
+   | _ ->
+       Alcotest.fail
+         "tool-only reader must observe an invalid Thinking sibling row");
+  let decoded =
+    Trajectory.trajectory_lines_of_jsonl_lines [ invalid_thinking ]
+  in
+  Alcotest.(check int) "invalid thinking excluded" 0
+    (List.length decoded.Trajectory.lines);
+  Alcotest.(check int) "invalid thinking observed" 1
+    decoded.Trajectory.line_decode.invalid_line_count;
+  Alcotest.(check int) "unexpected thinking field reason" 1
+    decoded.Trajectory.line_decode.invalid_reasons.unexpected_field
 
 (* ================================================================ *)
 (* Test: read_entries_since (file-based)                             *)
@@ -522,12 +481,12 @@ let test_read_entries_since () =
     let masc_root = dir in
     let keeper = "test-keeper" in
     (* Create a trajectory file manually *)
-    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    let traj_dir = Trajectory.trajectories_dir masc_root keeper in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
-    let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
-      ts
+    let entry_json ts =
+      canonical_tool_row ~ts
+        ~execution_id:(Printf.sprintf "exec-read-%.0f" ts) ()
     in
     let oc = open_out path in
     Printf.fprintf oc "%s\n" (entry_json 1000.0);
@@ -535,24 +494,45 @@ let test_read_entries_since () =
     Printf.fprintf oc "%s\n" (entry_json 3000.0);
     close_out oc;
     (* Read since ts=1500 should get 2 entries *)
-    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:1500.0 in
-    Alcotest.(check int) "entries since 1500" 2 (List.length entries);
+    let entries =
+      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
+        ~since:1500.0
+    in
+    Alcotest.(check int) "entries since 1500" 2
+      (List.length entries.Trajectory.entries);
+    Alcotest.(check int) "no invalid filtered rows" 0
+      entries.Trajectory.decode.invalid_entry_count;
+    Alcotest.(check int) "no read errors" 0
+      (List.length entries.Trajectory.io_errors);
     (* Read since ts=0 should get all 3 *)
-    let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
-    Alcotest.(check int) "all entries" 3 (List.length all))
+    let all =
+      Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
+        ~since:0.0
+    in
+    Alcotest.(check int) "all entries" 3
+      (List.length all.Trajectory.entries))
 
-let test_read_entries_since_result_parses_gate_summary () =
+let test_read_entries_since_result_rejects_retired_fields () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
     let keeper = "test-keeper" in
-    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    let traj_dir = Trajectory.trajectories_dir masc_root keeper in
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
       [
-        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|};
-        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked","cost_usd":0.0}|};
-        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"result":"legacy","duration_ms":10,"error":null,"cost_usd":0.001}|};
+        canonical_tool_row ~ts:1000.0 ~execution_id:"exec-read-1" ();
+        canonical_tool_row ~ts:2000.0 ~planned_index:1
+          ~execution_id:"exec-read-2" ();
+        (let canonical =
+           canonical_tool_row ~ts:3000.0 ~planned_index:2
+             ~execution_id:"exec-read-3" ()
+           |> Yojson.Safe.from_string
+         in
+         match canonical with
+         | `Assoc fields ->
+             `Assoc (("round", `Int 3) :: fields) |> Yojson.Safe.to_string
+         | _ -> Alcotest.fail "canonical fixture must be an object");
       ]
     in
     let oc = open_out path in
@@ -562,28 +542,32 @@ let test_read_entries_since_result_parses_gate_summary () =
       Trajectory.read_entries_since_result ~masc_root ~keeper_name:keeper
         ~since:0.0
     in
-    Alcotest.(check int) "three entries" 3 (List.length result.Trajectory.entries);
-    Alcotest.(check int) "parsed gate count" 2
-      result.Trajectory.gate_decode.parsed_gate_count;
-    Alcotest.(check int) "legacy default count" 1
-      result.Trajectory.gate_decode.legacy_default_count;
-    match List.nth result.Trajectory.entries 1 with
-    | { Trajectory.gate_decision = Trajectory.Reject reason; _ } ->
-      Alcotest.(check string) "reject reason parsed" "blocked" reason
-    | _ -> Alcotest.fail "expected persisted reject gate")
+    Alcotest.(check int) "invalid row excluded" 2
+      (List.length result.Trajectory.entries);
+    Alcotest.(check int) "invalid row count" 1
+      result.Trajectory.decode.invalid_entry_count;
+    Alcotest.(check int) "retired field reason count" 1
+      result.Trajectory.decode.invalid_reasons.unexpected_field;
+    Alcotest.(check int) "no read errors" 0
+      (List.length result.Trajectory.io_errors))
 
 let test_read_entries_since_no_dir () =
   with_tmpdir (fun dir ->
-    let entries = Trajectory.read_entries_since ~masc_root:dir ~keeper_name:"nonexistent" ~since:0.0 in
-    Alcotest.(check int) "no dir" 0 (List.length entries))
+    let result =
+      Trajectory.read_entries_since_result ~masc_root:dir
+        ~keeper_name:"nonexistent" ~since:0.0
+    in
+    Alcotest.(check int) "no dir" 0
+      (List.length result.Trajectory.entries);
+    Alcotest.(check int) "missing dir is not an I/O failure" 0
+      (List.length result.Trajectory.io_errors))
 
 (* P2 silent-failure fix: a malformed/corrupted row in the trajectory JSONL
    used to vanish from [read_recent_lines]/[read_all_lines] with zero
    signal (bare [List.filter_map] swallowing the parse exception). This
    pins the still-correct filtering behavior (malformed rows drop, valid
-   rows survive) after switching to a fold that also tracks skipped/total
-   for a per-read WARN summary (mirrors
-   [Server_dashboard_http_keeper_api_trace.log_internal_history_skips]). *)
+   rows survive) after switching to a fold that also tracks exact invalid
+   reasons for the read result. *)
 let write_raw_line ~masc_root ~keeper_name ~trace_id raw_line =
   let dir = Trajectory.trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
@@ -593,34 +577,553 @@ let write_raw_line ~masc_root ~keeper_name ~trace_id raw_line =
     output_string oc raw_line;
     output_char oc '\n')
 
+let standard_scan_limits = Trajectory.standard_trajectory_scan_limits
+
 let test_read_recent_lines_skips_malformed_rows () =
   with_tmpdir (fun dir ->
     let acc =
       Trajectory.create_accumulator
         ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed"
-        ~generation:0 ()
+        ~keeper_turn_id:1 ~generation:0 ()
     in
     Trajectory.record_entry acc
-      (mk_entry "tool_execute" 10 0.0 "2026-07-01T00:00:00Z");
+      (mk_entry "tool_execute" 10 "2026-07-01T00:00:00Z");
     Trajectory.flush_pending acc;
     write_raw_line ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-malformed" "{not valid json";
-    let recent =
-      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name:"test-keeper"
-        ~trace_id:"trace-malformed" ~max_lines:100
+    let recent_page =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir
+        ~keeper_name:"test-keeper" ~trace_id:"trace-malformed"
+        ~scan_limits:standard_scan_limits ~max_entries:100 ()
     in
+    let recent = recent_page.Trajectory.read in
     Alcotest.(check int)
       "malformed row dropped, valid row kept (read_recent_lines)"
       1
-      (List.length recent);
+      (List.length recent.Trajectory.lines);
+    Alcotest.(check int) "recent malformed row observed" 1
+      recent.Trajectory.line_decode.invalid_reasons.malformed_json;
+    let tool_entries =
+      Trajectory.read_entries_result ~masc_root:dir
+        ~keeper_name:"test-keeper"
+        ~trace_id:"trace-malformed"
+    in
+    Alcotest.(check int)
+      "malformed row dropped, valid row kept (read_entries)"
+      1
+      (List.length tool_entries.Trajectory.entries);
+    Alcotest.(check int) "tool-entry malformed row observed" 1
+      tool_entries.Trajectory.decode.invalid_reasons.malformed_json;
     let all_lines =
-      Trajectory.read_all_lines ~masc_root:dir ~keeper_name:"test-keeper"
+      Trajectory.read_all_lines_result ~masc_root:dir
+        ~keeper_name:"test-keeper"
         ~trace_id:"trace-malformed"
     in
     Alcotest.(check int)
       "malformed row dropped, valid row kept (read_all_lines)"
       1
-      (List.length all_lines))
+      (List.length all_lines.Trajectory.lines);
+    Alcotest.(check int) "all-lines malformed row observed" 1
+      all_lines.Trajectory.line_decode.invalid_reasons.malformed_json;
+    Trajectory.finalize acc Trajectory.Completed |> ignore)
+
+let trajectory_tool_row ~ts ~planned_index ~execution_id =
+  canonical_tool_row ~ts ~planned_index ~execution_id ()
+
+let trajectory_thinking_row =
+  {|{"schema":"masc.keeper_trajectory.v1","type":"thinking","ts":1001.0,"ts_iso":"2026-07-01T00:00:01Z","keeper_turn_id":1,"oas_turn":0,"block_index":0,"block":{"type":"thinking","thinking":"exact reasoning"}}|}
+
+let trajectory_summary_row =
+  {|{"schema":"masc.keeper_trajectory.v1","type":"trajectory_summary","keeper_name":"test-keeper","trace_id":"trace-page","keeper_turn_id":1,"generation":0,"observed_oas_turn_count":1,"total_tool_calls":2,"outcome":"completed","started_at":1000.0,"ended_at":1002.0}|}
+
+let scan_limits ~physical_rows ~bytes =
+  match
+    Trajectory.make_trajectory_scan_limits
+      ~max_physical_rows:physical_rows ~max_bytes:bytes
+  with
+  | Ok limits -> limits
+  | Error error ->
+      Alcotest.fail
+        (Trajectory.trajectory_scan_limit_error_to_string error)
+
+let tool_execution_ids lines =
+  List.filter_map
+    (function
+      | Trajectory.Tool_call entry ->
+          Some (Ids.Execution_id.to_string entry.Trajectory.execution_id)
+      | Trajectory.Thinking _ -> None)
+    lines
+
+let check_execution_ids message expected lines =
+  Alcotest.(check (list string)) message expected (tool_execution_ids lines)
+
+let test_scan_limit_contract_is_typed () =
+  (match
+     Trajectory.make_trajectory_scan_limits ~max_physical_rows:0
+       ~max_bytes:1L
+   with
+   | Error (Trajectory.Non_positive_physical_row_limit 0) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "zero physical-row limit must be typed");
+  (match
+     Trajectory.make_trajectory_scan_limits ~max_physical_rows:1
+       ~max_bytes:0L
+   with
+   | Error (Trajectory.Non_positive_byte_limit 0L) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "zero byte limit must be typed");
+  Alcotest.(check bool) "snapshot start is complete" true
+    (Trajectory.trajectory_scan_coverage Trajectory.Reached_snapshot_start
+     = Trajectory.Scan_complete);
+  Alcotest.(check bool) "transport limit is partial" true
+    (Trajectory.trajectory_scan_coverage
+       Trajectory.Reached_physical_row_limit
+     = Trajectory.Scan_partial);
+  Alcotest.(check bool) "oversized row is blocked" true
+    (Trajectory.trajectory_scan_coverage
+       Trajectory.Blocked_by_oversized_physical_row
+     = Trajectory.Scan_blocked)
+
+let test_recent_limit_counts_only_canonical_entries () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-decoded-limit" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-oldest");
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id "{not valid json";
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id trajectory_summary_row;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id trajectory_thinking_row;
+    let result_page =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:standard_scan_limits ~max_entries:2 ()
+    in
+    let result = result_page.Trajectory.read in
+    (match result.Trajectory.lines with
+     | [ Trajectory.Tool_call tool; Trajectory.Thinking thinking ] ->
+         Alcotest.(check string) "oldest canonical Tool"
+           "exec-oldest"
+           (Ids.Execution_id.to_string tool.Trajectory.execution_id);
+         Alcotest.(check int) "newest canonical Thinking index"
+           0 thinking.Trajectory.block_index
+     | lines ->
+         Alcotest.failf "expected Tool + Thinking, got %d canonical rows"
+           (List.length lines));
+    Alcotest.(check int) "canonical Tool count" 1
+      result.Trajectory.line_decode.tool_call_count;
+    Alcotest.(check int) "canonical Thinking count" 1
+      result.Trajectory.line_decode.thinking_count;
+    Alcotest.(check int) "summary observed without consuming limit" 1
+      result.Trajectory.line_decode.skipped_summary_count;
+    Alcotest.(check int) "invalid row observed without consuming limit" 1
+      result.Trajectory.line_decode.invalid_line_count)
+
+let test_recent_page_cursor_is_exact_and_snapshot_bound () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-page" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-page-1");
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id trajectory_thinking_row;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id "{not valid json";
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id trajectory_summary_row;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1002.0 ~planned_index:1
+         ~execution_id:"exec-page-2");
+    let newest =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:standard_scan_limits ~max_entries:2 ()
+    in
+    (match newest.Trajectory.read.lines with
+     | [ Trajectory.Thinking _; Trajectory.Tool_call tool ] ->
+         Alcotest.(check string) "newest Tool identity"
+           "exec-page-2"
+           (Ids.Execution_id.to_string tool.Trajectory.execution_id)
+     | lines ->
+         Alcotest.failf "expected Thinking + newest Tool, got %d rows"
+           (List.length lines));
+    Alcotest.(check int) "page observes summary" 1
+      newest.Trajectory.read.line_decode.skipped_summary_count;
+    Alcotest.(check int) "page observes malformed row" 1
+      newest.Trajectory.read.line_decode.invalid_line_count;
+    Alcotest.(check bool) "entry bound is the exact stop reason" true
+      (newest.Trajectory.scan.stop = Trajectory.Reached_entry_limit);
+    let cursor =
+      match newest.Trajectory.next_cursor with
+      | Some cursor -> cursor
+      | None -> Alcotest.fail "older canonical row requires a cursor"
+    in
+    Alcotest.(check bool) "cursor is a positive byte boundary" true
+      (Trajectory.trajectory_byte_cursor_offset cursor > 0L);
+    (* Appends after the first page do not move its cursor into the new suffix. *)
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1003.0 ~planned_index:2
+         ~execution_id:"exec-later");
+    let older =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~before:cursor ~scan_limits:standard_scan_limits
+        ~max_entries:2 ()
+    in
+    (match older.Trajectory.read.lines with
+     | [ Trajectory.Tool_call tool ] ->
+         Alcotest.(check string) "older page Tool identity"
+           "exec-page-1"
+           (Ids.Execution_id.to_string tool.Trajectory.execution_id)
+     | lines ->
+         Alcotest.failf "expected one older Tool, got %d rows"
+           (List.length lines));
+    Alcotest.(check bool) "beginning of snapshot has no next cursor" true
+      (Option.is_none older.Trajectory.next_cursor);
+    Alcotest.(check bool) "older page covers the snapshot prefix" true
+      (older.Trajectory.scan.stop = Trajectory.Reached_snapshot_start);
+    Alcotest.(check int) "cursor page has no storage error" 0
+      (List.length older.Trajectory.read.io_errors))
+
+let test_recent_page_cursor_rejects_truncated_snapshot () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-truncated-cursor" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-truncate-1");
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1001.0 ~planned_index:1
+         ~execution_id:"exec-truncate-2");
+    let first =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:standard_scan_limits ~max_entries:1 ()
+    in
+    let cursor =
+      match first.Trajectory.next_cursor with
+      | Some cursor -> cursor
+      | None -> Alcotest.fail "first page must expose its older byte boundary"
+    in
+    Unix.truncate (Trajectory.trajectory_path dir keeper_name trace_id) 0;
+    let rejected =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~before:cursor ~scan_limits:standard_scan_limits
+        ~max_entries:1 ()
+    in
+    Alcotest.(check int) "truncated page has no fabricated rows" 0
+      (List.length rejected.Trajectory.read.lines);
+    Alcotest.(check int) "truncation is an explicit storage error" 1
+      (List.length rejected.Trajectory.read.io_errors);
+    Alcotest.(check bool) "truncated cursor is explicitly rejected" true
+      (rejected.Trajectory.scan.stop = Trajectory.Rejected_cursor);
+    Alcotest.(check bool) "failed page has no continuation cursor" true
+      (Option.is_none rejected.Trajectory.next_cursor))
+
+let test_physical_row_limit_pages_without_skip_or_duplicate () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-physical-row-page" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-physical-old");
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id trajectory_summary_row;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id "{not valid json";
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id "";
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1001.0 ~planned_index:1
+         ~execution_id:"exec-physical-new");
+    let limits = scan_limits ~physical_rows:3 ~bytes:1_000_000L in
+    let newest =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:limits ~max_entries:10 ()
+    in
+    check_execution_ids "newest bounded page" [ "exec-physical-new" ]
+      newest.Trajectory.read.lines;
+    Alcotest.(check int) "blank and invalid rows consume physical allowance" 3
+      newest.Trajectory.scan.physical_rows;
+    Alcotest.(check int) "invalid row remains observable" 1
+      newest.Trajectory.read.line_decode.invalid_line_count;
+    Alcotest.(check bool) "physical-row bound stops the scan" true
+      (newest.Trajectory.scan.stop = Trajectory.Reached_physical_row_limit);
+    let cursor =
+      match newest.Trajectory.next_cursor with
+      | Some cursor -> cursor
+      | None -> Alcotest.fail "physical-row stop requires a safe cursor"
+    in
+    let older =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~before:cursor ~scan_limits:limits ~max_entries:10 ()
+    in
+    check_execution_ids "older bounded page" [ "exec-physical-old" ]
+      older.Trajectory.read.lines;
+    Alcotest.(check int) "summary remains explicitly observed" 1
+      older.Trajectory.read.line_decode.skipped_summary_count;
+    Alcotest.(check bool) "older page reaches snapshot start" true
+      (older.Trajectory.scan.stop = Trajectory.Reached_snapshot_start);
+    check_execution_ids "concatenated pages neither skip nor duplicate"
+      [ "exec-physical-old"; "exec-physical-new" ]
+      (older.Trajectory.read.lines @ newest.Trajectory.read.lines))
+
+let test_standard_reader_stops_at_non_entry_transport_boundary () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-default-transport-boundary" in
+    let trajectory_dir = Trajectory.trajectories_dir dir keeper_name in
+    Fs_compat.mkdir_p trajectory_dir;
+    let path = Trajectory.trajectory_path dir keeper_name trace_id in
+    let output = open_out_bin path in
+    let physical_row_limit =
+      Trajectory.standard_trajectory_scan_limits.max_physical_rows
+    in
+    Fun.protect
+      ~finally:(fun () -> close_out output)
+      (fun () ->
+         output_string output
+           (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+              ~execution_id:"exec-before-default-boundary");
+         output_char output '\n';
+         for _ = 1 to physical_row_limit do
+           output_string output trajectory_summary_row;
+           output_char output '\n'
+         done);
+    let page =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:standard_scan_limits ~max_entries:1 ()
+    in
+    Alcotest.(check int) "older canonical row is outside this bounded page" 0
+      (List.length page.Trajectory.read.lines);
+    Alcotest.(check int) "default physical rows are observed exactly"
+      physical_row_limit page.Trajectory.scan.physical_rows;
+    Alcotest.(check int) "all inspected summaries remain observable"
+      physical_row_limit
+      page.Trajectory.read.line_decode.skipped_summary_count;
+    Alcotest.(check bool) "default request ends at its transport boundary" true
+      (page.Trajectory.scan.stop = Trajectory.Reached_physical_row_limit);
+    Alcotest.(check bool) "default boundary has an exact continuation" true
+      (Option.is_some page.Trajectory.next_cursor))
+
+let test_byte_limit_pages_at_safe_newline_boundary () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-byte-page" in
+    let oldest =
+      trajectory_tool_row ~ts:1000.0 ~planned_index:0
+        ~execution_id:"exec-byte-old"
+    in
+    let middle =
+      trajectory_tool_row ~ts:1001.0 ~planned_index:1
+        ~execution_id:"exec-byte-middle"
+    in
+    let newest =
+      trajectory_tool_row ~ts:1002.0 ~planned_index:2
+        ~execution_id:"exec-byte-new"
+    in
+    List.iter
+      (write_raw_line ~masc_root:dir ~keeper_name ~trace_id)
+      [ oldest; middle; newest ];
+    let byte_limit =
+      Int64.of_int (String.length middle + 1 + String.length newest + 1)
+    in
+    let first_limits = scan_limits ~physical_rows:100 ~bytes:byte_limit in
+    let first =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:first_limits ~max_entries:10 ()
+    in
+    check_execution_ids "only the fully observed newest row is decoded"
+      [ "exec-byte-new" ] first.Trajectory.read.lines;
+    Alcotest.(check int64) "actual read bytes equal the byte contract"
+      byte_limit first.Trajectory.scan.bytes_read;
+    Alcotest.(check bool) "byte contract is the exact stop reason" true
+      (first.Trajectory.scan.stop = Trajectory.Reached_byte_limit);
+    let cursor =
+      match first.Trajectory.next_cursor with
+      | Some cursor -> cursor
+      | None -> Alcotest.fail "safe newline boundary requires a cursor"
+    in
+    let older_limits = scan_limits ~physical_rows:100 ~bytes:1_000_000L in
+    let older =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~before:cursor ~scan_limits:older_limits ~max_entries:10 ()
+    in
+    check_execution_ids "partial middle row is re-read, not lost"
+      [ "exec-byte-old"; "exec-byte-middle" ] older.Trajectory.read.lines;
+    check_execution_ids "byte pages neither skip nor duplicate"
+      [ "exec-byte-old"; "exec-byte-middle"; "exec-byte-new" ]
+      (older.Trajectory.read.lines @ first.Trajectory.read.lines))
+
+let test_oversized_physical_row_is_explicitly_blocked () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-oversized-row" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-oversized");
+    let limits = scan_limits ~physical_rows:100 ~bytes:8L in
+    let page =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:limits ~max_entries:10 ()
+    in
+    Alcotest.(check int) "no partial row is decoded" 0
+      (List.length page.Trajectory.read.lines);
+    Alcotest.(check int) "no complete physical row was observed" 0
+      page.Trajectory.scan.physical_rows;
+    Alcotest.(check int64) "actual partial bytes remain observable" 8L
+      page.Trajectory.scan.bytes_read;
+    Alcotest.(check bool) "oversized row has a distinct stop reason" true
+      (page.Trajectory.scan.stop
+       = Trajectory.Blocked_by_oversized_physical_row);
+    Alcotest.(check bool) "blocked page has no fabricated cursor" true
+      (Option.is_none page.Trajectory.next_cursor);
+    Alcotest.(check int) "transport blockage is not a storage error" 0
+      (List.length page.Trajectory.read.io_errors))
+
+let cursor_token_of_json json =
+  json |> Yojson.Safe.to_string
+  |> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+
+let cursor_json_fields = function
+  | `Assoc fields -> fields
+  | _ -> Alcotest.fail "cursor fixture must be an object"
+
+let canonical_cursor_json ?(schema =
+    "masc.keeper_trajectory_cursor." ^ Trajectory.trajectory_contract_version)
+    ?(keeper_name = "test-keeper") ?(trace_id = "trace-cursor-codec")
+    ?(snapshot_device = "1") ?(snapshot_inode = "2")
+    ?(snapshot_size = "10") ?(before_byte = "5") () =
+  `Assoc
+    [ "schema", `String schema
+    ; "keeper_name", `String keeper_name
+    ; "trace_id", `String trace_id
+    ; "snapshot_device", `String snapshot_device
+    ; "snapshot_inode", `String snapshot_inode
+    ; "snapshot_size", `String snapshot_size
+    ; "before_byte", `String before_byte
+    ]
+
+let test_cursor_codec_is_url_safe_closed_and_logically_bound () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "test-keeper" in
+    let trace_id = "trace-cursor-codec" in
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1000.0 ~planned_index:0
+         ~execution_id:"exec-cursor-old");
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id
+      (trajectory_tool_row ~ts:1001.0 ~planned_index:1
+         ~execution_id:"exec-cursor-new");
+    let first =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~scan_limits:standard_scan_limits ~max_entries:1 ()
+    in
+    let cursor =
+      match first.Trajectory.next_cursor with
+      | Some cursor -> cursor
+      | None -> Alcotest.fail "entry-limited page must expose a cursor"
+    in
+    let encoded = Trajectory.trajectory_byte_cursor_to_string cursor in
+    let is_uri_safe = function
+      | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' -> true
+      | _ -> false
+    in
+    Alcotest.(check bool) "cursor is unpadded URI-safe Base64" true
+      (encoded <> "" && String.for_all is_uri_safe encoded);
+    let decoded =
+      match Trajectory.trajectory_byte_cursor_of_string encoded with
+      | Ok cursor -> cursor
+      | Error error ->
+          Alcotest.fail
+            (Trajectory.trajectory_cursor_decode_error_to_string error)
+    in
+    Alcotest.(check string) "cursor codec is stable" encoded
+      (Trajectory.trajectory_byte_cursor_to_string decoded);
+    Alcotest.(check int64) "cursor offset round-trips"
+      (Trajectory.trajectory_byte_cursor_offset cursor)
+      (Trajectory.trajectory_byte_cursor_offset decoded);
+    let cursor_json =
+      match
+        Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet encoded
+      with
+      | Error (`Msg message) -> Alcotest.fail message
+      | Ok payload -> Yojson.Safe.from_string payload
+    in
+    let forged_before_byte =
+      Int64.pred (Trajectory.trajectory_byte_cursor_offset decoded)
+    in
+    let forged_token =
+      cursor_json
+      |> cursor_json_fields
+      |> List.remove_assoc "before_byte"
+      |> (fun fields ->
+        `Assoc
+          (("before_byte", `String (Int64.to_string forged_before_byte))
+           :: fields))
+      |> cursor_token_of_json
+    in
+    let forged_cursor =
+      match Trajectory.trajectory_byte_cursor_of_string forged_token with
+      | Ok cursor -> cursor
+      | Error error ->
+          Alcotest.fail
+            (Trajectory.trajectory_cursor_decode_error_to_string error)
+    in
+    let rejected_boundary =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id ~before:forged_cursor ~scan_limits:standard_scan_limits
+        ~max_entries:1 ()
+    in
+    Alcotest.(check bool) "cursor must point to a verified newline boundary"
+      true
+      (rejected_boundary.Trajectory.scan.stop = Trajectory.Rejected_cursor);
+    Alcotest.(check int64) "cursor boundary validation I/O is observed" 1L
+      rejected_boundary.Trajectory.scan.bytes_read;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id:"other-trace"
+      (trajectory_tool_row ~ts:1002.0 ~planned_index:0
+         ~execution_id:"exec-other-trace");
+    let rejected =
+      Trajectory.read_recent_lines_page_result ~masc_root:dir ~keeper_name
+        ~trace_id:"other-trace" ~before:decoded
+        ~scan_limits:standard_scan_limits ~max_entries:1 ()
+    in
+    Alcotest.(check bool) "cursor cannot cross a logical trace boundary" true
+      (rejected.Trajectory.scan.stop = Trajectory.Rejected_cursor);
+    Alcotest.(check int) "logical mismatch is explicit" 1
+      (List.length rejected.Trajectory.read.io_errors));
+  (match Trajectory.trajectory_byte_cursor_of_string "not-a-cursor!" with
+   | Error Trajectory.Cursor_base64_decode_failed -> ()
+   | Ok _ | Error _ -> Alcotest.fail "invalid Base64 must be typed");
+  (match
+     canonical_cursor_json ~schema:"retired.cursor.schema" ()
+     |> cursor_token_of_json
+     |> Trajectory.trajectory_byte_cursor_of_string
+   with
+   | Error (Trajectory.Cursor_invalid_field Trajectory.Cursor_schema) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "unknown cursor schema must be rejected");
+  (match
+     canonical_cursor_json ()
+     |> cursor_json_fields
+     |> (fun fields -> `Assoc (("extra", `String "x") :: fields))
+     |> cursor_token_of_json
+     |> Trajectory.trajectory_byte_cursor_of_string
+   with
+   | Error (Trajectory.Cursor_unexpected_field "extra") -> ()
+   | Ok _ | Error _ -> Alcotest.fail "unexpected cursor field must be rejected");
+  (match
+     canonical_cursor_json ()
+     |> cursor_json_fields
+     |> (fun fields -> `Assoc (List.remove_assoc "before_byte" fields))
+     |> cursor_token_of_json
+     |> Trajectory.trajectory_byte_cursor_of_string
+   with
+   | Error (Trajectory.Cursor_missing_field Trajectory.Cursor_before_byte) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "missing cursor field must be typed");
+  (match
+     canonical_cursor_json ()
+     |> cursor_json_fields
+     |> (fun fields -> `Assoc (("before_byte", `String "5") :: fields))
+     |> cursor_token_of_json
+     |> Trajectory.trajectory_byte_cursor_of_string
+   with
+   | Error (Trajectory.Cursor_duplicate_field "before_byte") -> ()
+   | Ok _ | Error _ -> Alcotest.fail "duplicate cursor field must be typed");
+  match
+    canonical_cursor_json ~snapshot_size:"10" ~before_byte:"11" ()
+    |> cursor_token_of_json
+    |> Trajectory.trajectory_byte_cursor_of_string
+  with
+  | Error (Trajectory.Cursor_invalid_field Trajectory.Cursor_before_byte) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "cursor offset beyond snapshot must fail"
 
 (* trajectory_summary rows are intentionally written to the same JSONL file at
    session end; they must not inflate the "malformed JSON or unrecognized
@@ -628,270 +1131,27 @@ let test_read_recent_lines_skips_malformed_rows () =
 let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
-      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null,"cost_usd":0.0}|}
-    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_cost_usd":0.0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
+      canonical_tool_row ~ts:1000.0 ~execution_id:"exec-summary-1" ()
+    ; {|{"schema":"masc.keeper_trajectory.v1","type":"trajectory_summary","keeper_name":"k","trace_id":"t","keeper_turn_id":1,"generation":0,"observed_oas_turn_count":0,"total_tool_calls":0,"outcome":"completed","started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
   in
-  let parsed, skipped, total =
-    Trajectory.trajectory_lines_of_jsonl_lines ~trace_id:"t" lines
+  let decoded =
+    Trajectory.trajectory_lines_of_jsonl_lines lines
   in
-  Alcotest.(check int) "parsed lines (tool call only)" 1 (List.length parsed);
-  Alcotest.(check int) "skipped count counts only malformed" 1 skipped;
-  Alcotest.(check int) "total rows processed" 3 total
-
-(* ================================================================ *)
-(* Test: next_round tail-read hydration                              *)
-(* ================================================================ *)
-
-(* A trajectory JSONL row carrying the fields next_round reads. next_round only
-   inspects the "turn" field, but the row mirrors a real tool-call entry. *)
-let next_round_row ~turn ~round : Yojson.Safe.t =
-  `Assoc
-    [
-      ("ts", `Float 1000.0);
-      ("ts_iso", `String "2026-07-01T00:00:00Z");
-      ("turn", `Int turn);
-      ("round", `Int round);
-      ("tool_name", `String "tool_execute");
-      ("args", `Assoc []);
-      ("result", `String "ok");
-      ("duration_ms", `Int 1);
-      ("error", `Null);
-      ("cost_usd", `Float 0.0);
-    ]
-
-let next_round_summary_row : Yojson.Safe.t =
-  `Assoc
-    [
-      ("type", `String "trajectory_summary");
-      ("keeper_name", `String "k");
-      ("trace_id", `String "t");
-      ("generation", `Int 0);
-    ]
-
-(* Append rows to the trajectory JSONL for a keeper/trace. Uses a single append
-   fd so the large-turn fixture stays fast, and appends (not truncates) so the
-   cache-hit test can add rows after hydration. *)
-let append_trajectory_rows ~masc_root ~keeper_name ~trace_id (rows : Yojson.Safe.t list) =
-  let dir = Trajectory.trajectories_dir masc_root keeper_name in
-  Fs_compat.mkdir_p dir;
-  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
-  let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
-  Fun.protect
-    ~finally:(fun () -> close_out oc)
-    (fun () ->
-      List.iter
-        (fun row ->
-          output_string oc (Yojson.Safe.to_string row);
-          output_char oc '\n')
-        rows)
-
-let test_next_round_empty_or_missing_file () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    (* Missing file: first round is 1. *)
-    let r_missing =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k"
-        ~trace_id:"t-missing" ~turn:1
-    in
-    Alcotest.(check int) "missing file -> round 1" 1 r_missing;
-    (* Present but empty (0-byte) file: still round 1. *)
-    let dir2 = Trajectory.trajectories_dir dir "k" in
-    Fs_compat.mkdir_p dir2;
-    let empty_path = Trajectory.trajectory_path dir "k" "t-empty" in
-    close_out (open_out empty_path);
-    let r_empty =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-empty"
-        ~turn:1
-    in
-    Alcotest.(check int) "empty file -> round 1" 1 r_empty)
-
-let test_next_round_past_turns_only () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-past"
-      (List.init 5 (fun i -> next_round_row ~turn:3 ~round:i));
-    (* No entries for turn 4 yet: first round is 1. *)
-    let r =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-past"
-        ~turn:4
-    in
-    Alcotest.(check int) "past turns only -> round 1" 1 r)
-
-let test_next_round_counts_current_turn () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    let rows =
-      List.init 2 (fun i -> next_round_row ~turn:6 ~round:i)
-      @ List.init 3 (fun i -> next_round_row ~turn:7 ~round:i)
-    in
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cur" rows;
-    let r =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cur"
-        ~turn:7
-    in
-    Alcotest.(check int) "3 current-turn entries -> round 4" 4 r)
-
-let test_next_round_ignores_summary_rows_without_turn () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-summary"
-      [
-        next_round_row ~turn:7 ~round:0;
-        next_round_row ~turn:7 ~round:1;
-        next_round_summary_row;
-      ];
-    let r =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k"
-        ~trace_id:"t-summary" ~turn:7
-    in
-    Alcotest.(check int) "summary row skipped -> round 3" 3 r)
-
-let test_next_round_widens_past_initial_window () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    (* 600 current-turn rows (> the 512-line initial tail window, < 1024) sit
-       above a 3-row previous-turn boundary. The first tail read misses the
-       boundary; the window must widen once to count exactly. *)
-    let current_count = 600 in
-    let rows =
-      List.init 3 (fun i -> next_round_row ~turn:9 ~round:i)
-      @ List.init current_count (fun i -> next_round_row ~turn:10 ~round:i)
-    in
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-wide" rows;
-    let r =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-wide"
-        ~turn:10
-    in
-    Alcotest.(check int) "600 current-turn entries -> round 601"
-      (current_count + 1) r)
-
-let test_next_round_full_scan_fallback () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    (* Single-turn file larger than the tail cap (currently 8192 lines) with no
-       older-turn boundary anywhere. Forces the doubling loop to the cap and
-       then the full-scan fallback; the count must still be exact. 9000 is
-       chosen to exceed the internal max_hydrate_tail_lines constant. *)
-    let current_count = 9000 in
-    let rows = List.init current_count (fun i -> next_round_row ~turn:1 ~round:i) in
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-huge" rows;
-    let r =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-huge"
-        ~turn:1
-    in
-    Alcotest.(check int) "9000 current-turn entries via full-scan -> round 9001"
-      (current_count + 1) r)
-
-let test_next_round_cache_hit_skips_disk () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
-      [ next_round_row ~turn:2 ~round:0; next_round_row ~turn:2 ~round:1 ];
-    let r1 =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
-        ~turn:2
-    in
-    Alcotest.(check int) "hydrate 2 rows -> round 3" 3 r1;
-    (* Append two more turn-2 rows AFTER hydration; a cache hit must ignore the
-       disk and increment purely in memory. *)
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
-      [ next_round_row ~turn:2 ~round:9; next_round_row ~turn:2 ~round:9 ];
-    let r2 =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
-        ~turn:2
-    in
-    Alcotest.(check int) "cache hit ignores new disk rows -> round 4" 4 r2)
-
-let test_next_round_evicts_past_turn_keys () =
-  with_tmpdir (fun dir ->
-    Trajectory.reset_round_counters_for_testing ();
-    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
-      [ next_round_row ~turn:5 ~round:0; next_round_row ~turn:5 ~round:1 ];
-    let r5a =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
-        ~turn:5
-    in
-    Alcotest.(check int) "turn 5 hydrate -> round 3" 3 r5a;
-    let r5b =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
-        ~turn:5
-    in
-    Alcotest.(check int) "turn 5 cache hit -> round 4" 4 r5b;
-    (* Advancing to turn 6 evicts the turn-5 cache key. *)
-    let r6 =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
-        ~turn:6
-    in
-    Alcotest.(check int) "turn 6 first round -> 1" 1 r6;
-    (* The active turn-5 key was evicted, but the issued high-water mark is
-       retained so an out-of-order caller cannot receive a duplicate round. *)
-    let r5c =
-      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
-        ~turn:5
-    in
-    Alcotest.(check int) "turn 5 after eviction stays monotonic" 5 r5c)
-
-let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
-  Trajectory.Thinking
-    {
-      ts;
-      ts_iso = "2026-06-29T00:00:00Z";
-      turn = 1;
-      content;
-      content_length = String.length content;
-      redacted;
-    }
-
-let check_thinking_content label expected = function
-  | Trajectory.Thinking entry ->
-      Alcotest.(check string) label expected entry.Trajectory.content
-  | Trajectory.Tool_call _ -> Alcotest.fail (label ^ ": expected thinking line")
-
-let check_tool_call label expected = function
-  | Trajectory.Tool_call entry ->
-      Alcotest.(check string) label expected entry.Trajectory.tool_name
-  | Trajectory.Thinking _ -> Alcotest.fail (label ^ ": expected tool call line")
-
-let test_dedupe_thinking_lines_uses_structural_key () =
-  let tool_call =
-    Trajectory.Tool_call
-      (mk_entry ~ts:1000.5 "tool_execute" 20 0.0 "2026-06-29T00:00:00Z")
-  in
-  let lines =
-    [
-      thinking_line ~ts:1000.0 "same";
-      tool_call;
-      thinking_line ~ts:1000.0 "same";
-      thinking_line ~ts:1001.0 "same";
-      thinking_line ~ts:1000.0 ~redacted:true "same";
-    ]
-  in
-  let deduped =
-    Server_dashboard_http_keeper_api_trace.dedupe_thinking_lines lines
-  in
-  Alcotest.(check int) "one exact duplicate removed" 4 (List.length deduped);
-  check_thinking_content "first thinking preserved" "same" (List.nth deduped 0);
-  check_tool_call "tool call preserved" "tool_execute" (List.nth deduped 1);
-  check_thinking_content "same content at a new timestamp preserved" "same"
-    (List.nth deduped 2);
-  (match List.nth deduped 3 with
-   | Trajectory.Thinking entry ->
-       Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
-   | Trajectory.Tool_call _ -> Alcotest.fail "expected redacted thinking line")
-
-(* ================================================================ *)
-(* Runner                                                            *)
-(* ================================================================ *)
+  Alcotest.(check int) "parsed lines (tool call only)" 1
+    (List.length decoded.Trajectory.lines);
+  Alcotest.(check int) "summary explicitly skipped" 1
+    decoded.Trajectory.line_decode.skipped_summary_count;
+  Alcotest.(check int) "malformed row observed separately" 1
+    decoded.Trajectory.line_decode.invalid_line_count
 
 (* ================================================================ *)
 (* Test: thinking trajectory — full untruncated text, per-turn        *)
 (* ================================================================ *)
 
 let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
-  let path = Filename.concat masc_root
-    (Printf.sprintf "trajectories/%s/%s.jsonl" keeper_name trace_id) in
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
   if not (Sys.file_exists path) then []
   else begin
     let ic = open_in path in
@@ -904,68 +1164,240 @@ let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
       loop [])
   end
 
-(* append_thinking must persist the FULL text, not the legacy 2000-byte cap. *)
-let test_append_thinking_persists_untruncated () =
+let test_tool_results_are_persisted_untruncated () =
+  with_tmpdir (fun dir ->
+    let result = String.make 12000 'r' in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-07-18T00:00:00Z"
+        ~keeper_turn_id:1 ~oas_turn:0 ~tool_name:"tool_execute" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded result) ~duration_ms:10
+        ~execution_id:"exec-lossless-1" ()
+    in
+    let acc =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"tool-lossless" ~keeper_turn_id:1 ~generation:0 ()
+    in
+    Trajectory.record_entry acc entry;
+    Trajectory.flush_pending acc;
+    let persisted =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"tool-lossless"
+    in
+    let open Yojson.Safe.Util in
+    let persisted_result =
+      match persisted with
+      | [ row ] -> row |> member "outcome" |> member "output" |> to_string
+      | _ -> Alcotest.fail "expected exactly one persisted tool row"
+    in
+    Alcotest.(check string) "Keeper-lane append is lossless" result
+      persisted_result;
+    Trajectory.finalize acc Trajectory.Completed |> ignore)
+
+let test_finalize_retries_complete_batch_after_write_failure () =
+  with_tmpdir (fun dir ->
+    let blocked_parent = Filename.concat dir "keepers" in
+    let oc = open_out blocked_parent in
+    close_out oc;
+    let acc =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"retry-finalize" ~keeper_turn_id:1 ~generation:0 ()
+    in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-07-18T00:00:00Z"
+        ~keeper_turn_id:1 ~oas_turn:0 ~tool_name:"tool_execute" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "durable") ~duration_ms:10
+        ~execution_id:"exec-retry-finalize" ()
+    in
+    Trajectory.record_entry acc entry;
+    (match Trajectory.finalize acc Trajectory.Completed with
+     | _ -> Alcotest.fail "blocked parent must make finalize observable"
+     | exception Trajectory.Persistence_error _ -> ());
+    Unix.unlink blocked_parent;
+    Trajectory.flush_pending acc;
+    let rows =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"retry-finalize"
+    in
+    Alcotest.(check int) "Tool row and terminal summary retried together" 2
+      (List.length rows);
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "Tool output survived retry" "durable"
+      (List.hd rows |> member "outcome" |> member "output" |> to_string);
+    Alcotest.(check string) "summary follows Tool row" "trajectory_summary"
+      (List.nth rows 1 |> member "type" |> to_string))
+
+let test_flush_error_observer_reserved_exception_propagates () =
+  with_tmpdir (fun dir ->
+    let blocked_parent = Filename.concat dir "keepers" in
+    let oc = open_out blocked_parent in
+    close_out oc;
+    let acc =
+      Trajectory.create_accumulator
+        ~on_flush_error:(fun _ -> raise Sys.Break)
+        ~masc_root:dir ~keeper_name:"k" ~trace_id:"reserved-flush"
+        ~keeper_turn_id:1 ~generation:0 ()
+    in
+    let entry =
+      make_tool_entry ~ts:1000.0 ~ts_iso:"2026-07-18T00:00:00Z"
+        ~keeper_turn_id:1 ~oas_turn:0 ~tool_name:"tool_execute" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "durable") ~duration_ms:10
+        ~execution_id:"exec-reserved-flush" ()
+    in
+    Trajectory.record_entry acc entry;
+    (match Trajectory.finalize acc Trajectory.Completed with
+     | _ -> Alcotest.fail "reserved observer exception must propagate"
+     | exception Sys.Break -> ());
+    Unix.unlink blocked_parent;
+    Trajectory.flush_pending acc;
+    let rows =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"reserved-flush"
+    in
+    Alcotest.(check int)
+      "reserved failure leaves the complete batch retryable"
+      2 (List.length rows))
+
+(* The accumulator persists the complete structured Thinking block. *)
+let test_record_thinking_persists_untruncated () =
   with_tmpdir (fun dir ->
     let big = String.make 9000 'x' in
-    let entry : Trajectory.thinking_entry = {
-      ts = 1000.0; ts_iso = "2026-06-09T00:00:00Z"; turn = 4;
-      content = big; content_length = String.length big; redacted = false;
-    } in
-    Trajectory.append_thinking ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" entry;
+    let entry =
+      match
+        Trajectory.make_thinking_entry ~ts:1000.0
+          ~ts_iso:"2026-06-09T00:00:00Z" ~keeper_turn_id:4 ~oas_turn:2
+          ~block_index:0
+          ~block:
+            (Agent_sdk.Types.Thinking
+               { content = big; signature = Some "signature-exact" })
+      with
+      | Ok entry -> entry
+      | Error error ->
+          Alcotest.failf "invalid Thinking fixture: %s"
+            (Trajectory.entry_decode_error_to_string error)
+    in
+    let acc =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"th1" ~keeper_turn_id:4 ~generation:0 ()
+    in
+    Trajectory.record_thinking acc entry;
+    Trajectory.flush_pending acc;
     let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" in
     Alcotest.(check int) "one thinking line" 1 (List.length lines);
     let open Yojson.Safe.Util in
     let row = List.hd lines in
     Alcotest.(check string) "type=thinking" "thinking" (row |> member "type" |> to_string);
     Alcotest.(check int) "content untruncated (9000B, not 2000 cap)" 9000
-      (row |> member "content" |> to_string |> String.length);
-    Alcotest.(check int) "content_length records true length" 9000
-      (row |> member "content_length" |> to_int))
+      (row |> member "block" |> member "thinking" |> to_string
+       |> String.length);
+    Alcotest.(check string) "signature persisted byte-exact" "signature-exact"
+      (row |> member "block" |> member "signature" |> to_string);
+    Trajectory.finalize acc Trajectory.Completed |> ignore)
 
-(* persist_response_content stamps every block with the hook's ~turn (not
-   acc.turn) and writes one line per thinking block, untruncated. *)
+let test_accumulator_preserves_reasoning_tool_order () =
+  with_tmpdir (fun dir ->
+    let acc =
+      Trajectory.create_accumulator ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"ordered" ~keeper_turn_id:1 ~generation:0 ()
+    in
+    let thinking =
+      match
+        Trajectory.make_thinking_entry ~ts:1.0
+          ~ts_iso:"2026-07-18T00:00:01Z" ~keeper_turn_id:1 ~oas_turn:0
+          ~block_index:0
+          ~block:
+            (Agent_sdk.Types.Thinking
+               { content = "inspect source"; signature = Some "sig" })
+      with
+      | Ok entry -> entry
+      | Error error ->
+          Alcotest.failf "invalid Thinking fixture: %s"
+            (Trajectory.entry_decode_error_to_string error)
+    in
+    let tool =
+      make_tool_entry ~ts:2.0 ~ts_iso:"2026-07-18T00:00:02Z"
+        ~keeper_turn_id:1 ~oas_turn:0 ~tool_name:"tool_read" ~arguments:[]
+        ~outcome:(Trajectory.Tool_succeeded "source") ~duration_ms:1
+        ~execution_id:"exec-ordered-1" ()
+    in
+    Trajectory.record_thinking acc thinking;
+    Trajectory.record_entry acc tool;
+    Trajectory.finalize acc Trajectory.Completed |> ignore;
+    let rows =
+      read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"ordered"
+    in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "reasoning, Tool, summary" 3 (List.length rows);
+    Alcotest.(check string) "reasoning stays before its Tool" "thinking"
+      (List.nth rows 0 |> member "type" |> to_string);
+    Alcotest.(check string) "Tool follows reasoning" "tool_read"
+      (List.nth rows 1 |> member "tool_name" |> to_string);
+    Alcotest.(check string) "summary remains terminal" "trajectory_summary"
+      (List.nth rows 2 |> member "type" |> to_string))
+
+(* persist_response_content stamps each block with the exact accumulator
+   Keeper clock and OAS callback clock. *)
 let test_persist_response_content_per_turn_full () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
-      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
-    (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
+      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~keeper_turn_id:7
+      ~generation:0 () in
     let big = String.make 5000 'a' in
-    let content = [
-      Agent_sdk.Types.Thinking { signature = None; content = big };
-      Agent_sdk.Types.Thinking { signature = None; content = "second block" };
-    ] in
+    let detail : Agent_sdk.Types.reasoning_detail =
+      { raw = `Assoc [ ("type", `String "reasoning.summary_text")
+                     ; ("text", `String "detail text") ]
+      ; text = Some "detail text"
+      }
+    in
+    let content =
+      [ Agent_sdk.Types.Thinking
+          { signature = Some "signed-block"; content = big }
+      ; Agent_sdk.Types.Thinking
+          { signature = None; content = "second block" }
+      ; Agent_sdk.Types.ReasoningDetails
+          { reasoning_content = Some "reasoning content"; details = [ detail ] }
+      ; Agent_sdk.Types.RedactedThinking "opaque-provider-payload"
+      ]
+    in
     Keeper_agent_run_thinking_trajectory.persist_response_content
-      ~keeper_name:"k" ~trajectory_acc:(Some acc) ~turn:11 content;
+      ~keeper_name:"k" ~trajectory_acc:(Some acc) ~oas_turn:11 content;
+    Trajectory.flush_pending acc;
     let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" in
     let open Yojson.Safe.Util in
-    Alcotest.(check int) "both thinking blocks persisted" 2 (List.length lines);
+    Alcotest.(check int) "all reasoning block variants persisted" 4
+      (List.length lines);
     List.iter (fun row ->
-      Alcotest.(check int) "turn stamped from hook (11), not acc.turn (0)" 11
-        (row |> member "turn" |> to_int)) lines;
+      Alcotest.(check int) "exact Keeper clock" 7
+        (row |> member "keeper_turn_id" |> to_int);
+      Alcotest.(check int) "exact OAS clock" 11
+        (row |> member "oas_turn" |> to_int)) lines;
+    Alcotest.(check (list int)) "provider block order is explicit"
+      [ 0; 1; 2; 3 ]
+      (List.map (fun row -> row |> member "block_index" |> to_int) lines);
     Alcotest.(check int) "first block untruncated (5000B)" 5000
-      (List.hd lines |> member "content" |> to_string |> String.length))
+      (List.hd lines |> member "block" |> member "thinking" |> to_string
+       |> String.length);
+    Alcotest.(check string) "signed block signature survives" "signed-block"
+      (List.hd lines |> member "block" |> member "signature" |> to_string);
+    Alcotest.(check string) "reasoning_content survives" "reasoning content"
+      (List.nth lines 2 |> member "block" |> member "reasoning_content"
+       |> to_string);
+    Alcotest.(check string) "reasoning detail raw JSON survives" "detail text"
+      (List.nth lines 2 |> member "block" |> member "details" |> index 0
+       |> member "text" |> to_string);
+    Alcotest.(check string) "redacted opaque payload survives"
+      "opaque-provider-payload"
+      (List.nth lines 3 |> member "block" |> member "data" |> to_string);
+    Trajectory.finalize acc Trajectory.Completed |> ignore)
 
 let () =
   Alcotest.run "Trajectory" [
-    ("tool_cost", [
-      Alcotest.test_case "known tool cost" `Quick test_tool_cost_known;
-      Alcotest.test_case "unknown tool cost" `Quick test_tool_cost_unknown;
-      Alcotest.test_case "bash tool cost" `Quick test_tool_cost_bash;
-    ]);
-    ("gate_decision", [
-      Alcotest.test_case "pass" `Quick test_gate_decision_pass;
-      Alcotest.test_case "reject" `Quick test_gate_decision_reject;
-    ]);
     ("accumulator", [
       Alcotest.test_case "create" `Quick test_create_accumulator;
+      Alcotest.test_case "duplicate active identity is rejected" `Quick
+        test_duplicate_active_accumulator_is_rejected;
+      Alcotest.test_case "active observation does not block next Keeper turn"
+        `Quick test_active_observation_does_not_block_next_keeper_turn;
       Alcotest.test_case "record_entry" `Quick test_record_entry;
-      Alcotest.test_case "increment_turn" `Quick test_increment_turn;
-      Alcotest.test_case "calls_in_current_turn" `Quick test_calls_in_current_turn;
-    ]);
-    ("entropy", [
-      Alcotest.test_case "not triggered" `Quick test_entropy_not_triggered;
-      Alcotest.test_case "triggered" `Quick test_entropy_triggered;
     ]);
     ("finalize", [
       Alcotest.test_case "finalize completed" `Quick test_finalize;
@@ -973,17 +1405,9 @@ let () =
     ("outcome", [
       Alcotest.test_case "outcome_to_string" `Quick test_outcome_to_string;
     ]);
-    ("task_id", [
-      Alcotest.test_case "default none" `Quick test_task_id_default_none;
-      Alcotest.test_case "set_task_id" `Quick test_set_task_id;
-      Alcotest.test_case "clear_task_id" `Quick test_clear_task_id;
-      Alcotest.test_case "finalize propagates" `Quick test_finalize_propagates_task_id;
-      Alcotest.test_case "json with task_id" `Quick test_task_id_in_trajectory_json;
-      Alcotest.test_case "json null when none" `Quick test_task_id_null_when_none;
-    ]);
     ("aggregate_tool_stats", [
       Alcotest.test_case "basic aggregation" `Quick test_aggregate_basic;
-      Alcotest.test_case "with errors and rejected gates" `Quick test_aggregate_with_errors;
+      Alcotest.test_case "with errors" `Quick test_aggregate_with_errors;
       Alcotest.test_case "empty input" `Quick test_aggregate_empty;
       Alcotest.test_case "p95 calculation" `Quick test_aggregate_p95;
     ]);
@@ -995,49 +1419,57 @@ let () =
     ("json_serialization", [
       Alcotest.test_case "tool_stat to json" `Quick test_tool_stat_json_roundtrip;
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
-      Alcotest.test_case "entry carries runtime/action telemetry" `Quick
-        test_entry_to_json_includes_contract_and_radius;
-      Alcotest.test_case "execution_id JSONL round-trip + legacy None" `Quick
+      Alcotest.test_case "entry preserves typed fields" `Quick
+        test_entry_to_json_preserves_typed_fields;
+      Alcotest.test_case "required execution_id JSONL round-trip" `Quick
         test_execution_id_roundtrip;
-      Alcotest.test_case "runtime contract redacts backend details" `Quick
-        test_runtime_contract_projection_redacts_backend_details;
-    ]);
-    ("next_round", [
-      Alcotest.test_case "empty or missing file -> 1" `Quick
-        test_next_round_empty_or_missing_file;
-      Alcotest.test_case "past turns only -> 1" `Quick
-        test_next_round_past_turns_only;
-      Alcotest.test_case "counts current-turn entries" `Quick
-        test_next_round_counts_current_turn;
-      Alcotest.test_case "ignores summary rows without turn" `Quick
-        test_next_round_ignores_summary_rows_without_turn;
-      Alcotest.test_case "widens window past initial 512" `Quick
-        test_next_round_widens_past_initial_window;
-      Alcotest.test_case "full-scan fallback past cap" `Quick
-        test_next_round_full_scan_fallback;
-      Alcotest.test_case "cache hit skips disk" `Quick
-        test_next_round_cache_hit_skips_disk;
-      Alcotest.test_case "evicts past-turn keys" `Quick
-        test_next_round_evicts_past_turn_keys;
+      Alcotest.test_case "schedule and tool_use_id remain exact observations"
+        `Quick test_schedule_and_tool_use_id_are_exact_observations;
+      Alcotest.test_case "retired gate field is rejected" `Quick
+        test_retired_gate_field_is_rejected;
+      Alcotest.test_case "closed row codec rejects invalid fields and types"
+        `Quick test_closed_row_codec_rejects_invalid_fields_and_types;
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
-      Alcotest.test_case "parses persisted gate summary" `Quick
-        test_read_entries_since_result_parses_gate_summary;
+      Alcotest.test_case "rejects retired fields" `Quick
+        test_read_entries_since_result_rejects_retired_fields;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;
+      Alcotest.test_case "scan-limit contract and coverage are typed" `Quick
+        test_scan_limit_contract_is_typed;
+      Alcotest.test_case "recent limit counts canonical entries" `Quick
+        test_recent_limit_counts_only_canonical_entries;
+      Alcotest.test_case "byte cursor is exact and snapshot-bound" `Quick
+        test_recent_page_cursor_is_exact_and_snapshot_bound;
+      Alcotest.test_case "byte cursor rejects truncated snapshot" `Quick
+        test_recent_page_cursor_rejects_truncated_snapshot;
+      Alcotest.test_case "physical-row pages preserve exact coverage" `Quick
+        test_physical_row_limit_pages_without_skip_or_duplicate;
+      Alcotest.test_case "default reader stops at non-entry transport boundary"
+        `Quick test_standard_reader_stops_at_non_entry_transport_boundary;
+      Alcotest.test_case "byte pages stop at safe newline boundaries" `Quick
+        test_byte_limit_pages_at_safe_newline_boundary;
+      Alcotest.test_case "oversized physical row is explicitly blocked" `Quick
+        test_oversized_physical_row_is_explicitly_blocked;
+      Alcotest.test_case "cursor codec is closed and logically bound" `Quick
+        test_cursor_codec_is_url_safe_closed_and_logically_bound;
       Alcotest.test_case "summary row not counted as malformed" `Quick
         test_summary_row_not_counted_as_malformed;
     ]);
-    ("keeper_trace", [
-      Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick
-        test_dedupe_thinking_lines_uses_structural_key;
-    ]);
     ("thinking_trajectory", [
-      Alcotest.test_case "append_thinking persists full untruncated text" `Quick
-        test_append_thinking_persists_untruncated;
-      Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
+      Alcotest.test_case "tool results persist without display truncation" `Quick
+        test_tool_results_are_persisted_untruncated;
+      Alcotest.test_case "failed finalize retries Tool rows and summary" `Quick
+        test_finalize_retries_complete_batch_after_write_failure;
+      Alcotest.test_case "reserved flush observer exception propagates" `Quick
+        test_flush_error_observer_reserved_exception_propagates;
+      Alcotest.test_case "record_thinking persists canonical block" `Quick
+        test_record_thinking_persists_untruncated;
+      Alcotest.test_case "reasoning/Tool order is preserved" `Quick
+        test_accumulator_preserves_reasoning_tool_order;
+      Alcotest.test_case "persist_response_content stamps exact clocks" `Quick
         test_persist_response_content_per_turn_full;
     ]);
   ]

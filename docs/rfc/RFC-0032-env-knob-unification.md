@@ -1,11 +1,20 @@
 # RFC-0032 — Environment Knob Unification
 
-- **Status**: Draft
+- **Status**: Superseded (2026-07-19)
 - **Author**: yousleepwhen (vincent)
 - **Created**: 2026-05-05
 - **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §4-3, Phase 3 #15
 - **Related**: RFC-0030 (`masc create` CLI), RFC-0031 (3-tier disclosure),
-  `lib/env_config_core.ml`, `.github/workflows/ci.yml` (env knob catalog drift gate)
+  `lib/config/env_config_core.ml`
+
+## 0. Supersession
+
+This proposal is historical and is not an active configuration contract. The
+standalone `config/env-knobs.toml` catalog proposed below did not become the
+runtime SSOT. Current non-secret runtime configuration lives in
+`runtime.toml`, with each owning parser exposing a typed closed boundary. Dead
+Keeper tuning knobs are removed and explicitly rejected rather than retained
+as catalog aliases.
 
 ## 1. Problem
 
@@ -16,12 +25,10 @@ cleanup tool, see §4.1). The audit estimated 443; the truth is bigger.
 
 Three concrete defects:
 
-1. **Naming drift.** Examples:
-   `MASC_KEEPER_AUTOBOOT_MAX` vs the removed typo
-   `MASC_KEEPER_AUTOBOT_MAX`. Multiply across hundreds of knobs and
-   any deprecated-alias list becomes a source of confusion.
-2. **No discoverability.** Operators read `keeper_turn_slot.ml` to
-   find that `MASC_KEEPER_AUTOBOOT_MAX` exists; there is no `masc
+1. **Naming drift.** Historical canonical/typo alias pairs showed that
+   deprecated-alias lists become a source of confusion.
+2. **No discoverability.** Operators read owning implementation modules to
+   find that `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` exists; there is no `masc
    env list` and no schema dump.
 3. **Layer coupling.** `MASC_CLIENT_CAPACITY` (env) and
    `cli_max_concurrent` (TOML field) are two layers for the same
@@ -58,8 +65,7 @@ gaining the missing introspection.
 
 - Replacing env vars with a JSON / TOML / YAML config as the runtime
   source. Env vars remain the source; the catalog describes them.
-- Reintroducing the removed `MASC_KEEPER_AUTOBOOT_MAX` ↔
-  `MASC_KEEPER_AUTOBOT_MAX` alias. New migrations should pick one
+- Reintroducing deleted environment aliases. New migrations should pick one
   canonical name and avoid soft fallbacks.
 - Rewriting the dashboard or operator UX to show the catalog. The
   catalog is for tooling + CI; operator UX is RFC-0031's lane.
@@ -73,14 +79,14 @@ gaining the missing introspection.
 `config/env-knobs.toml` (SSOT):
 
 ```toml
-[knob.MASC_KEEPER_AUTOBOOT_MAX]
+[knob.MASC_KEEPER_HEARTBEAT_INTERVAL_SEC]
 tier = "advanced"
 type = "int"
-default = 32
+default = 30
 min = 1
 max = "max_int"
-description = "Global turn slot cap across autonomous + reactive pools."
-owner_module = "lib/keeper/keeper_turn_slot.ml"
+description = "Keeper heartbeat interval in seconds."
+owner_module = "lib/config/env_config_keeper.ml"
 
 [knob.MASC_CLIENT_CAPACITY]
 tier = "advanced"
@@ -187,8 +193,8 @@ Each module migration is one PR. Total PR count: ~10–15.
   lookup.
 - `test_catalog_validate_int_range`: assert out-of-range values are
   rejected by `validate_value`.
-- `test_catalog_rejects_removed_alias`: `MASC_KEEPER_AUTOBOT_MAX`
-  does not resolve to the canonical `MASC_KEEPER_AUTOBOOT_MAX` entry.
+- `test_catalog_rejects_removed_alias`: a deleted alias does not resolve to a
+  canonical entry.
 - `test_drift_gate_detects_missing_entry`: synthetic code change adds
   a `MASC_NEW_KNOB` reference; assert the drift gate would fail.
 - `test_env_config_core_typed_int_default`: env unset → returns
@@ -210,8 +216,8 @@ gate which PR ships first.
 Existing `.env` files, operator scripts, and CI workflows that set
 `MASC_*` keep working unchanged.
 
-Removed aliases such as `MASC_KEEPER_AUTOBOT_MAX` stay absent from the
-runtime catalog. The catalog may document a successor in release notes, but
+Removed aliases stay absent from the runtime catalog. Release notes may
+document a successor, but
 the loader must not keep accepting the old name.
 
 ## 8. Open questions

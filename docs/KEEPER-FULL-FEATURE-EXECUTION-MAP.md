@@ -90,8 +90,9 @@ OAS #2589 is on `main`. It removed parallel timeout construction and preserved
 only the explicit request-level streaming idle timeout. Omission remains
 disabled; OAS does not invent 60/300/600-second defaults.
 
-Turn, idle-turn, tool-round, cost, and token counters were already removed by
-#2590. They remain observations, not termination authority.
+Termination counters for turn, idle-turn, Tool call ordering, cost, and tokens
+were already removed by #2590. Exact OAS Invocation and schedule coordinates
+remain observations, not termination authority or a new counter contract.
 
 ### 3.3 Context reducer contracts
 

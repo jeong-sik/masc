@@ -11,7 +11,7 @@ import {
   fetchKeeperRuntimeTrace,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { formatCost, formatMsCompact } from '../lib/format-number'
+import { formatMsCompact } from '../lib/format-number'
 import { errorToString } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
@@ -71,7 +71,7 @@ async function fetchWaterfallSources(
   const [trajectory, toolCalls, runtimeTrace] = await Promise.all([
     settleSource<TrajectoryResponse>(
       'trajectory',
-      fetchKeeperTrajectory(keeperName, 200, true, true),
+      fetchKeeperTrajectory(keeperName, 200),
     ),
     settleSource<ToolCallsResponse>(
       'tool-calls',
@@ -86,6 +86,16 @@ async function fetchWaterfallSources(
   const sourceErrors = [trajectory, toolCalls, runtimeTrace]
     .filter((result): result is Extract<SettledSource<unknown>, { ok: false }> => !result.ok)
     .map(result => `${result.label}: ${result.error}`)
+  if (trajectory.ok) {
+    if (trajectory.data.decode.invalid_line_count > 0) {
+      sourceErrors.push(
+        `trajectory: decode invalid ${trajectory.data.decode.invalid_line_count} rows ${JSON.stringify(trajectory.data.decode.invalid_reasons)}`,
+      )
+    }
+    for (const error of trajectory.data.io_errors) {
+      sourceErrors.push(`trajectory: read failed ${error.path}: ${error.message}`)
+    }
+  }
 
   const hasAnySource = trajectory.ok || toolCalls.ok || runtimeTrace.ok
   if (!hasAnySource) {
@@ -147,7 +157,7 @@ function statusTone(entry: JourneyWaterfallEntry): string {
       return 'ok'
     case 'failure':
       return 'bad'
-    case 'gate_rejected':
+    case 'gap':
       return 'warn'
     case 'unknown':
     default:
@@ -157,23 +167,37 @@ function statusTone(entry: JourneyWaterfallEntry): string {
 
 function turnTone(turn: JourneyWaterfallTurn): string {
   if (turn.failureCount > 0) return 'bad'
-  if (turn.gateRejectedCount > 0) return 'warn'
+  if (turn.provenanceGapCount > 0) return 'warn'
   if (turn.toolCallCount > 0) return 'ok'
   return 'neutral'
 }
 
 function sourceLabel(entry: JourneyWaterfallEntry): string {
   switch (entry.source) {
-    case 'trajectory+tool_call_log':
-      return 'trajectory + I/O'
     case 'tool_call_log':
-      return 'tool log'
+      return 'tool provenance gap'
+    case 'agent_timeline':
+      return 'timeline provenance gap'
     case 'trajectory':
-      return 'trajectory'
+      return entry.hasToolCallLogProvenance ? 'trajectory + provenance' : 'trajectory'
     case 'unknown':
     default:
       return 'unknown'
   }
+}
+
+function structuralClockLabel(entry: JourneyWaterfallEntry): string | null {
+  if (entry.keeperTurnId == null || entry.oasTurn == null) return null
+  const parts = [`K ${entry.keeperTurnId}`, `OAS ${entry.oasTurn + 1}`]
+  if (entry.blockIndex != null) {
+    parts.push(`response block ${entry.blockIndex + 1}`)
+  } else if (entry.toolSchedule) {
+    parts.push(
+      `batch ${entry.toolSchedule.batch_index + 1}/${entry.toolSchedule.batch_size}`,
+      `plan ${entry.toolSchedule.planned_index + 1}`,
+    )
+  }
+  return parts.join(' · ')
 }
 
 function MetricCell({
@@ -256,36 +280,47 @@ function WaterfallEntryRow({
   maxDurationMs: number
 }) {
   const isTool = entry.kind === 'tool_call'
+  const isGap = entry.kind === 'provenance_gap'
   const style = toolCategory(entry.toolName ?? entry.summary)
+  let entryIcon = 'TH'
+  let entryLabel = 'thinking'
+  if (isTool) {
+    entryIcon = style.icon
+    entryLabel = normalizeToolName(entry.toolName ?? entry.summary)
+  } else if (isGap) {
+    entryIcon = 'GAP'
+    entryLabel = entry.toolName ?? entry.summary
+  }
   const widthPct = entry.durationMs && maxDurationMs > 0
     ? Math.max(8, Math.min(100, Math.round((entry.durationMs / maxDurationMs) * 100)))
     : 8
-  const status = entry.status === 'gate_rejected'
-    ? 'gate rejected'
-    : entry.status
+  const status = entry.status
   const resultPreview = entry.error ?? entry.toolResult ?? entry.thinkingContent ?? ''
+  const structuralClock = structuralClockLabel(entry)
 
   return html`
     <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
       <div class="flex flex-wrap items-center gap-2">
         <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs ${isTool ? style.color : 'text-[var(--color-info-fg)]'}">
-          ${isTool ? style.icon : 'TH'}
+          ${entryIcon}
         </span>
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg-secondary)]">
-          ${isTool ? normalizeToolName(entry.toolName ?? entry.summary) : 'thinking'}
+          ${entryLabel}
         </span>
         <${StatusChip} tone=${statusTone(entry)} uppercase=${false}>${status}<//>
         <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">
           ${sourceLabel(entry)}
         </span>
-        ${entry.round != null
-          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">round ${entry.round}</span>`
-          : null}
+        ${structuralClock !== null ? html`
+          <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">
+            ${structuralClock}
+          </span>
+        ` : null}
       </div>
 
       ${isTool
         ? html`
-            <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+            <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
               <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
                 <div
                   class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]"
@@ -296,7 +331,6 @@ function WaterfallEntryRow({
               <span class="font-mono text-3xs ${entry.durationMs != null ? durationColor(entry.durationMs) : 'text-[var(--color-fg-disabled)]'}">
                 ${formatMaybeDuration(entry.durationMs)}
               </span>
-              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${formatCost(entry.costUsd, '$0')}</span>
             </div>
             ${entry.toolArgs
               ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatArgs(entry.toolArgs)}</div>`
@@ -307,10 +341,6 @@ function WaterfallEntryRow({
               ${entry.thinkingRedacted ? 'Thinking content redacted.' : entry.thinkingContent ?? 'No thinking text recorded.'}
             </div>
           `}
-
-      ${entry.gateReason
-        ? html`<div class="text-xs text-[var(--color-status-warn)]">gate: ${entry.gateReason}</div>`
-        : null}
 
       ${resultPreview && isTool
         ? html`
@@ -347,15 +377,12 @@ function WaterfallTurnRow({
             <span>tools ${turn.toolCallCount}</span>
             <span>thinking ${turn.thinkingCount}</span>
             <span>failures ${turn.failureCount}</span>
-            <span>gate ${turn.gateRejectedCount}</span>
+            <span>provenance gaps ${turn.provenanceGapCount}</span>
           </div>
         </div>
         <div class="flex flex-wrap gap-1.5 text-3xs">
           <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
             tool time ${formatMaybeDuration(turn.totalDurationMs)}
-          </span>
-          <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-            cost ${formatCost(turn.totalCostUsd, '$0')}
           </span>
         </div>
       </div>
@@ -406,8 +433,8 @@ function WaterfallBody({
         <${MetricCell} label="events" value=${summary.totalEntries} />
         <${MetricCell} label="tools" value=${summary.toolCallCount} tone="ok" />
         <${MetricCell} label="failures" value=${summary.failureCount} tone=${summary.failureCount > 0 ? 'bad' : 'ok'} />
+        <${MetricCell} label="provenance gaps" value=${summary.provenanceGapCount} tone=${summary.provenanceGapCount > 0 ? 'warn' : 'ok'} />
         <${MetricCell} label="tool time" value=${formatMaybeDuration(summary.totalDurationMs)} />
-        <${MetricCell} label="cost" value=${formatCost(summary.totalCostUsd, '$0')} />
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 text-3xs text-[var(--color-fg-muted)]">

@@ -765,6 +765,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
         diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         conversation_tail_count: asNumber(row.conversation_tail_count),
+        conversation_decode_error_count: asNumber(row.conversation_decode_error_count),
         k2k_count: asNumber(row.k2k_count),
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
         compaction_count: asNumber(row.compaction_count),

@@ -1,8 +1,10 @@
 # JSONL Contract Inventory
 
 Status: refactor WBS task `task-381` for GitHub issue #16082.
-Date: 2026-05-18.
-Scope: current code inventory only. This document does not change runtime behavior.
+Date: 2026-05-18; the Trajectory row was re-verified for the v1 hard cut on
+2026-07-19.
+Scope: inventory snapshot only. This document does not change runtime behavior;
+only the Trajectory row claims 2026-07-19 currency.
 
 ## Goal
 
@@ -37,7 +39,7 @@ fixtures before any writer implementation is changed.
 | Board votes | `.masc/board_votes.jsonl` | append on cast; snapshot rewrite on flush | board vote state and analytics | `Board_votes` | Timestamp preservation is part of the contract. |
 | Mention inbox | `.masc/mention_inbox.jsonl` | `Fs_compat.append_jsonl` | `Mention_inbox.load_all_mentions`, `Activity_feed` | `Mention_inbox.mention_record_to_json` | Terminal task mentions are skipped by invariant check before append. |
 | Goal verification events | goal verification event path from `Goal_verification.events_path` | `Fs_compat.append_jsonl` | goal verification state/readers | `Goal_verification.emit_event` | Event append is separate from file-locked state update. |
-| Trajectory | `.masc/trajectories/<keeper>/<trace_id>.jsonl` | `Fs_compat.append_jsonl` | trajectory affinity/status readers | `Trajectory.entry_to_json`, thinking and summary encoders | Previous local mutex helper was removed in favor of `Fs_compat.append_jsonl`. |
+| Trajectory | `.masc/keepers/<keeper>/trajectories/v1/<trace_id>.jsonl` | `Trajectory.append_jsonl_rows` → `Fs_compat.append_private_jsonl_durable_locked_result` | typed trajectory page/read APIs and dashboard projection | closed `masc.keeper_trajectory.v1` Tool/Thinking/summary codecs | OAS Invocation coordinates are exact; only `execution_id` joins the MASC tool-call store. The retired top-level archive is not decoded or migrated. |
 | Runtime/OAS events | date-split OAS/runtime event stores | `Dated_jsonl.append` | dashboard runtime/OAS projections | `Runtime_event_bridge`, `Runtime_trust_persist` | Some append failures recreate `Dated_jsonl` store handles and retry later. |
 | Shared audit | `<base_dir>/YYYY-MM/DD.jsonl` | direct `open_out_gen` | `Shared_audit.Store.read_all_entries`, `verify_chain` | `Shared_audit.Envelope` | Hash-chain state means writer migration must preserve append order and `latest_hash`. |
 

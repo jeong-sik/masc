@@ -1,7 +1,7 @@
 // Session trace state — unified event store for GitHub Agents-style trace view.
-// Merges agent-timeline (broadcast/task), keeper-trajectory (turn/thinking),
-// keeper tool-call log (full I/O), and live OAS runtime SSE events into a
-// single chronological event stream.
+// Merges agent-timeline (broadcast/task), canonical keeper trajectory,
+// tool-call provenance, and live OAS runtime SSE events into one chronological
+// event stream. Tool-call provenance never replaces Trajectory-owned I/O.
 // State is keyed per agent to avoid cross-overlay collisions.
 // Each SessionTraceView instance passes its own agentName to derived helpers.
 
@@ -24,7 +24,9 @@ import type {
   ToolCallEntry,
   ToolCallsResponse,
   TrajectoryEntry,
+  TrajectoryThinkingBlock,
   TrajectoryResponse,
+  TrajectoryToolSchedule,
 } from '../../api/dashboard'
 
 // ── Types ──────────────────────────────────────────────
@@ -40,7 +42,7 @@ export type TraceEventKind =
   | 'oas_turn'
   | 'oas_context'
 
-export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
+export type TraceStatus = 'success' | 'failure'
 
 type TraceSourceLane = 'masc' | 'oas'
 
@@ -61,18 +63,21 @@ export interface UnifiedTraceEvent {
   toolArgs?: Record<string, unknown> | string
   toolResult?: string | null
   duration_ms?: number
-  gate?: { status: string; reason?: string }
   turn?: number
-  round?: number
+  keeperTurnId?: number
+  oasTurn?: number
+  toolSchedule?: TrajectoryToolSchedule
+  toolUseId?: string
   cost_usd?: number
   error?: string | null
-  // RFC-0233: canonical execution identity — same id across trajectory,
-  // tool_call log, and oas-event rows for one physical execution.
-  // Absent on rows written before PR-1 and on timeline rows.
+  // RFC-0233: canonical MASC execution identity — same id across Trajectory
+  // and tool_call log rows for one physical execution.
+  // Source rows without this identity remain independent observations.
   executionId?: string
   // thinking fields
   thinkingContent?: string
   thinkingRedacted?: boolean
+  thinkingBlock?: TrajectoryThinkingBlock
 }
 
 export interface TraceSummary {
@@ -101,6 +106,7 @@ interface TraceSlot {
   events: UnifiedTraceEvent[]
   loading: boolean
   error: string | null
+  observationErrors?: string[]
   filter: TraceEventKind | 'all'
   statusFilter: TraceStatus | 'all'
   searchQuery: string
@@ -113,8 +119,6 @@ interface TraceSlot {
 export const traceSlots = signal<Record<string, TraceSlot>>({})
 
 const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', statusFilter: 'all', searchQuery: '', fetchToken: 0 }
-
-const TOOL_CALL_MATCH_WINDOW_MS = 2000
 
 registerLiveTraceHistoricalIdsProvider((agentName) =>
   traceSlots.value[agentName]?.events.map(item => item.id) ?? [],
@@ -142,6 +146,10 @@ export function getTraceError(agent: string): string | null {
   return getSlot(agent).error
 }
 
+export function getTraceObservationErrors(agent: string): string[] {
+  return getSlot(agent).observationErrors ?? []
+}
+
 export function getTraceEvents(agent: string): UnifiedTraceEvent[] {
   return mergeTraceEvents(getSlot(agent).events, liveTraceFeeds.value[agent] ?? [])
 }
@@ -161,7 +169,6 @@ export function getTraceSearchQuery(agent: string): string {
 // ── Status classification ────────────────────────────────
 
 function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
-  if (e.gate?.status === 'reject') return 'gate_rejected'
   if (e.error) return 'failure'
   if (e.kind === 'tool_call' || e.kind === 'oas_tool') return 'success'
   return null
@@ -201,14 +208,12 @@ export function getStatusCounts(agent: string): Record<TraceStatus | 'all', numb
   const events = getTraceEvents(agent)
   let success = 0
   let failure = 0
-  let gate_rejected = 0
   for (const e of events) {
     const s = getEventStatus(e)
     if (s === 'success') success++
     else if (s === 'failure') failure++
-    else if (s === 'gate_rejected') gate_rejected++
   }
-  return { all: success + failure + gate_rejected, success, failure, gate_rejected }
+  return { all: success + failure, success, failure }
 }
 
 function detailNumber(detail: Record<string, unknown>, ...keys: string[]): number | null {
@@ -245,7 +250,6 @@ export function getTraceSummary(agent: string): TraceSummary {
     switch (e.kind) {
       case 'tool_call':
         tool_call_count++
-        total_cost_usd += e.cost_usd ?? 0
         break
       case 'oas_tool':
         oas_tool_count++
@@ -372,10 +376,11 @@ export function setTraceSearchQuery(agent: string, searchQuery: string): void {
 
 // ── Converters ─────────────────────────────────────────
 
-function safeTimestamp(ts: string | undefined | null): number {
-  if (!ts) return Date.now()
-  const parsed = new Date(ts).getTime()
-  return Number.isNaN(parsed) ? Date.now() : parsed
+function timestampMs(ts: string): number {
+  // AgentTimelineResponse validates this as an ISO timestamp at the source
+  // boundary. Invalid source timestamps reject that source instead of being
+  // rewritten to the dashboard clock.
+  return new Date(ts).getTime()
 }
 
 function mergeTraceEvents(
@@ -384,11 +389,24 @@ function mergeTraceEvents(
 ): UnifiedTraceEvent[] {
   const merged = [...historical, ...live]
   merged.sort((a, b) => b.ts - a.ts)
-  const seen = new Set<string>()
-  return merged.filter(event => {
-    if (seen.has(event.id)) return false
-    seen.add(event.id)
-    return true
+  const seen = new Map<string, number>()
+  return merged.map(event => {
+    const occurrence = seen.get(event.id) ?? 0
+    seen.set(event.id, occurrence + 1)
+    if (occurrence === 0) return event
+    return {
+      ...event,
+      id: `${event.id}#duplicate-${occurrence}`,
+      detail: {
+        ...event.detail,
+        observation_conflict: {
+          kind: 'duplicate_event_id',
+          event_id: event.id,
+          occurrence,
+        },
+      },
+      error: event.error ?? `duplicate trace event id: ${event.id}`,
+    }
   })
 }
 
@@ -396,29 +414,19 @@ function stringField(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
-function numberField(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function normalizeToolCallInput(input: unknown): Record<string, unknown> | string | undefined {
-  if (typeof input === 'string') return input
-  if (input != null && typeof input === 'object') return input as Record<string, unknown>
-  if (input == null) return undefined
-  try {
-    return JSON.stringify(input)
-  } catch {
-    return String(input)
+function thinkingBlockText(block: TrajectoryThinkingBlock): string | undefined {
+  switch (block.type) {
+    case 'thinking':
+      return block.thinking
+    case 'reasoning_details':
+      return block.reasoning_content === '' ? undefined : block.reasoning_content
+    case 'redacted_thinking':
+      return undefined
   }
 }
 
-function formatToolCallOutput(entry: ToolCallEntry): string {
-  if (typeof entry.output === 'string') return entry.output
-  const { sha256, bytes, mime, preview } = entry.output._blob
-  return `[masc:blob sha256=${sha256.slice(0, 12)}... bytes=${bytes} mime=${mime}]\n${preview}`
-}
-
-function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Record<string, unknown> {
-  const detail: Record<string, unknown> = { trace_origin: traceOrigin }
+function toolCallProvenanceDetail(entry: ToolCallEntry): Record<string, unknown> {
+  const detail: Record<string, unknown> = {}
   if (entry.trace_id) detail.trace_id = entry.trace_id
   if (entry.session_id) detail.session_id = entry.session_id
   if (entry.turn != null) detail.turn = entry.turn
@@ -430,218 +438,128 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   return detail
 }
 
-function toolEventTraceId(event: UnifiedTraceEvent): string | undefined {
-  return stringField(event.detail.trace_id)
-}
-
-function toolEventSessionId(event: UnifiedTraceEvent): string | undefined {
-  return event.sessionId ?? stringField(event.detail.session_id)
-}
-
-function toolEventTurn(event: UnifiedTraceEvent): number | undefined {
-  return event.turn
-    ?? numberField(event.detail.turn)
-    ?? numberField(event.detail.keeper_turn_id)
-}
-
-function toolEventSuccess(event: UnifiedTraceEvent): boolean {
-  return event.gate?.status !== 'reject' && event.error == null
-}
-
-function toolCallEntryMatchesTraceEvent(
-  entry: ToolCallEntry,
-  event: UnifiedTraceEvent,
-): boolean {
-  if (event.kind !== 'tool_call' || !event.toolName) return false
-  if (event.gate?.status === 'reject') return false
-
-  // RFC-0233: when both sides carry the canonical execution_id, identity
-  // equality is the whole answer — the heuristic below only exists for
-  // rows written before the id was minted (no backfill by design).
-  if (entry.execution_id && event.executionId) {
-    return entry.execution_id === event.executionId
-  }
-
-  if (entry.tool !== event.toolName) return false
-
-  const eventTraceId = toolEventTraceId(event)
-  if (eventTraceId && entry.trace_id && eventTraceId !== entry.trace_id) return false
-
-  const eventSessionId = toolEventSessionId(event)
-  if (
-    eventSessionId
-    && entry.session_id
-    && eventSessionId !== entry.session_id
-    && !(eventTraceId && entry.trace_id && eventTraceId === entry.trace_id)
-  ) {
-    return false
-  }
-
-  const eventTurn = toolEventTurn(event)
-  const entryTurn = entry.turn ?? entry.keeper_turn_id
-  if (eventTurn != null && entryTurn != null && eventTurn !== entryTurn) return false
-
-  if (
-    event.duration_ms != null
-    && entry.duration_ms != null
-    && Math.abs(event.duration_ms - entry.duration_ms) > 1
-  ) return false
-  if (toolEventSuccess(event) !== entry.success) return false
-
-  return Math.abs(event.ts - (entry.ts * 1000)) <= TOOL_CALL_MATCH_WINDOW_MS
-}
-
-function toolCallEntryMatchScore(entry: ToolCallEntry, event: UnifiedTraceEvent): number {
-  let score = Math.abs(event.ts - (entry.ts * 1000))
-  if (entry.execution_id && event.executionId && entry.execution_id === event.executionId) score -= 1_000_000
-  if (toolEventTraceId(event) && entry.trace_id && toolEventTraceId(event) === entry.trace_id) score -= 500
-  if (toolEventSessionId(event) && entry.session_id && toolEventSessionId(event) === entry.session_id) score -= 200
-  if (toolEventTurn(event) != null && (entry.turn ?? entry.keeper_turn_id) === toolEventTurn(event)) score -= 100
-  return score
-}
-
-function findBestToolCallEntryMatch(
+function findExactToolCallEntryMatch(
   entries: ToolCallEntry[],
   event: UnifiedTraceEvent,
   usedIndexes: Set<number>,
 ): number | null {
-  let bestIndex: number | null = null
-  let bestScore = Number.POSITIVE_INFINITY
+  if (event.kind !== 'tool_call' || !event.executionId) return null
   for (let index = 0; index < entries.length; index++) {
     if (usedIndexes.has(index)) continue
     const entry = entries[index]!
-    if (!toolCallEntryMatchesTraceEvent(entry, event)) continue
-    const score = toolCallEntryMatchScore(entry, event)
-    if (score < bestScore) {
-      bestScore = score
-      bestIndex = index
-    }
+    if (entry.execution_id === event.executionId) return index
   }
-  return bestIndex
+  return null
 }
 
 function enrichToolCallTrace(
   event: UnifiedTraceEvent,
   entry: ToolCallEntry,
 ): UnifiedTraceEvent {
-  const outputText = formatToolCallOutput(entry)
-  const error = entry.success ? null : outputText || event.error || 'tool call failed'
   return {
     ...event,
     agentName: entry.keeper,
     sessionId: entry.session_id ?? event.sessionId ?? null,
-    summary: entry.tool,
-    detail: { ...event.detail, ...toolCallMetadataDetail(entry, 'trajectory+tool_call_log') },
-    toolName: entry.tool,
-    toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
-    toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms ?? event.duration_ms,
-    // Trajectory turn is trace-relative and pairs with `round`; the log's
-    // session-absolute turn stays readable as detail.turn. Mixing the two
-    // vocabularies in one T#R# badge would mislabel the row.
-    turn: event.turn ?? entry.turn ?? entry.keeper_turn_id,
-    executionId: entry.execution_id ?? event.executionId,
-    error,
+    detail: {
+      ...event.detail,
+      tool_call_log: toolCallProvenanceDetail(entry),
+    },
   }
 }
 
-function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
-  const ts = entry.ts * 1000
-  const outputText = formatToolCallOutput(entry)
+function findExactTimelineProvenanceMatch(
+  events: UnifiedTraceEvent[],
+  event: UnifiedTraceEvent,
+  usedIndexes: Set<number>,
+): number | null {
+  if (event.kind !== 'tool_call' || !event.executionId) return null
+  for (let index = 0; index < events.length; index++) {
+    if (usedIndexes.has(index)) continue
+    const candidate = events[index]!
+    if (
+      candidate.detail.observation_kind === 'tool_call_provenance'
+      && candidate.executionId === event.executionId
+    ) return index
+  }
+  return null
+}
+
+function enrichTimelineProvenance(
+  event: UnifiedTraceEvent,
+  provenance: UnifiedTraceEvent,
+): UnifiedTraceEvent {
   return {
-    // execution_id is unique per physical execution — a stable row id that
-    // survives refetch; the composite form remains for pre-PR-1 rows.
-    id: entry.execution_id
-      ? `tc-${entry.execution_id}`
-      : `tc-${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`,
+    ...event,
+    detail: {
+      ...event.detail,
+      agent_timeline: provenance.detail.agent_timeline,
+    },
+  }
+}
+
+function markTimelineProvenanceGap(event: UnifiedTraceEvent): UnifiedTraceEvent {
+  if (event.detail.observation_kind !== 'tool_call_provenance') return event
+  const toolName = stringField(event.detail.provenance_tool_name)
+  return {
+    ...event,
+    summary: toolName === undefined
+      ? 'Tool provenance without canonical Trajectory'
+      : `Tool provenance without canonical Trajectory: ${toolName}`,
+    error: 'agent-timeline provenance has no canonical Trajectory execution row',
+    detail: { ...event.detail, observation_kind: 'provenance_gap' },
+  }
+}
+
+function toolCallEntryToProvenanceGap(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
+  const ts = entry.ts * 1000
+  const identity = entry.execution_id ?? `row-${index}`
+  return {
+    id: `provenance-gap-tool-call-log-${identity}`,
     ts,
     ts_iso: new Date(ts).toISOString(),
-    kind: 'tool_call',
+    kind: 'lifecycle',
     sourceLane: 'masc',
-    summary: entry.tool,
-    detail: toolCallMetadataDetail(entry, 'tool_call_log'),
+    summary: `Tool provenance without canonical Trajectory: ${entry.tool}`,
+    detail: {
+      observation_kind: 'provenance_gap',
+      source: 'tool_call_log',
+      provenance_tool_name: entry.tool,
+      tool_call_log: toolCallProvenanceDetail(entry),
+    },
     agentName: entry.keeper,
     sessionId: entry.session_id ?? null,
-    toolName: entry.tool,
-    toolArgs: normalizeToolCallInput(entry.input),
-    toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms ?? undefined,
-    turn: entry.turn ?? entry.keeper_turn_id,
+    turn: entry.turn,
+    keeperTurnId: entry.keeper_turn_id,
     executionId: entry.execution_id,
-    error: entry.success ? null : outputText || 'tool call failed',
+    error: 'tool-call provenance has no canonical Trajectory execution row',
   }
-}
-
-function richerToolCallMatchesFallback(
-  richer: UnifiedTraceEvent,
-  fallback: UnifiedTraceEvent,
-): boolean {
-  if (richer.kind !== 'tool_call' || fallback.kind !== 'tool_call') return false
-
-  // RFC-0233: canonical identity decides when both rows carry it.
-  if (richer.executionId && fallback.executionId) {
-    return richer.executionId === fallback.executionId
-  }
-
-  if (!richer.toolName || !fallback.toolName) return false
-  if (richer.toolName !== fallback.toolName) return false
-
-  const richerTraceId = toolEventTraceId(richer)
-  const fallbackTraceId = toolEventTraceId(fallback)
-  if (richerTraceId && fallbackTraceId && richerTraceId !== fallbackTraceId) return false
-
-  const richerSessionId = toolEventSessionId(richer)
-  const fallbackSessionId = toolEventSessionId(fallback)
-  if (
-    richerSessionId
-    && fallbackSessionId
-    && richerSessionId !== fallbackSessionId
-    && !(richerTraceId && fallbackTraceId && richerTraceId === fallbackTraceId)
-  ) {
-    return false
-  }
-
-  const richerTurn = toolEventTurn(richer)
-  const fallbackTurn = toolEventTurn(fallback)
-  if (richerTurn != null && fallbackTurn != null && richerTurn !== fallbackTurn) return false
-
-  if (
-    richer.duration_ms != null
-    && fallback.duration_ms != null
-    && Math.abs(richer.duration_ms - fallback.duration_ms) > 1
-  ) {
-    return false
-  }
-
-  if (toolEventSuccess(richer) !== toolEventSuccess(fallback)) return false
-
-  return Math.abs(richer.ts - fallback.ts) <= TOOL_CALL_MATCH_WINDOW_MS
 }
 
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
-  const ts = safeTimestamp(evt.ts)
+  const ts = timestampMs(evt.ts)
   const detail = evt.detail ?? {}
 
   if (evt.type === 'broadcast') {
     const content = typeof detail.content === 'string' ? detail.content : ''
-    if (content.length <= 20) {
-      return {
-        id: `tl-${ts}-hb-${index}`,
-        ts,
-        ts_iso: evt.ts ?? new Date(ts).toISOString(),
-        kind: 'heartbeat',
-        sourceLane: 'masc',
-        summary: content || 'heartbeat',
-        detail,
-      }
-    }
     return {
       id: `tl-${ts}-bc-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      ts_iso: evt.ts,
       kind: 'broadcast',
       sourceLane: 'masc',
       summary: content.slice(0, 120),
+      detail,
+    }
+  }
+
+  if (evt.type === 'heartbeat') {
+    return {
+      id: `tl-${ts}-hb-${index}`,
+      ts,
+      ts_iso: evt.ts,
+      kind: 'heartbeat',
+      sourceLane: 'masc',
+      summary: stringField(detail.content) ?? 'heartbeat',
       detail,
     }
   }
@@ -650,7 +568,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      ts_iso: evt.ts,
       kind: 'lifecycle',
       sourceLane: 'masc',
       summary: evt.type,
@@ -659,28 +577,24 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   }
 
   if (evt.type === 'tool_call') {
-    const toolName = stringField(detail.tool_name) ?? 'TOOL_CALL'
-    const durationMs = numberField(detail.duration_ms)
-    const toolArgsPreview = stringField(detail.tool_args_preview)
-    const toolOutputPreview = stringField(detail.tool_output_preview)
-    const explicitSuccess = typeof detail.success === 'boolean' ? detail.success : undefined
-    const errorText = stringField(detail.error)
-    const success = explicitSuccess ?? (errorText == null)
+    const toolName = stringField(detail.tool_name)
+    const executionId = stringField(detail.execution_id)
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,
-      ts_iso: evt.ts ?? new Date(ts).toISOString(),
-      kind: 'tool_call',
+      ts_iso: evt.ts,
+      kind: 'lifecycle',
       sourceLane: 'masc',
-      summary: toolName,
-      detail: { ...detail, type: evt.type, trace_origin: 'agent_timeline' },
+      summary: toolName === undefined ? 'Tool provenance' : `Tool provenance: ${toolName}`,
+      detail: {
+        observation_kind: 'tool_call_provenance',
+        source: 'agent_timeline',
+        ...(toolName === undefined ? {} : { provenance_tool_name: toolName }),
+        agent_timeline: { ...detail, type: evt.type },
+      },
       sessionId: stringField(detail.session_id) ?? null,
       operationId: stringField(detail.operation_id) ?? null,
-      toolName,
-      toolArgs: toolArgsPreview,
-      toolResult: success ? (toolOutputPreview ?? null) : null,
-      duration_ms: durationMs,
-      error: success ? null : (errorText ?? toolOutputPreview ?? 'tool call failed'),
+      executionId,
     }
   }
 
@@ -689,7 +603,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   return {
     id: `tl-${ts}-${evt.type}-${index}`,
     ts,
-    ts_iso: evt.ts ?? new Date(ts).toISOString(),
+    ts_iso: evt.ts,
     kind: 'task',
     sourceLane: 'masc',
     summary: `${evt.type.replace('task_', '')} ${taskId} ${title}`.trim(),
@@ -703,44 +617,63 @@ function trajectoryEntryToTrace(
   traceId?: string,
 ): UnifiedTraceEvent {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
-  const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
-  const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
-  if (entry.execution_id) detail.execution_id = entry.execution_id
+  const ts = entry.ts * 1000
+  const detail: Record<string, unknown> = {
+    ...(traceId ? { trace_id: traceId } : {}),
+    trace_origin: 'trajectory',
+    keeper_turn_id: entry.keeper_turn_id,
+    oas_turn: entry.oas_turn,
+  }
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
+    const redacted = entry.block.type === 'redacted_thinking'
+    const content = thinkingBlockText(entry.block)
+    const summary = redacted
+      ? '[비공개 사고]'
+      : entry.block.type === 'reasoning_details' && content === undefined
+        ? `Reasoning details (${entry.block.details.length})`
+        : (content?.slice(0, 120) ?? '')
     return {
-      id: `tj-${ts}-thinking-T${entry.turn}-${index}`,
+      id: `tj-${ts}-thinking-K${entry.keeper_turn_id}-O${entry.oas_turn}-B${entry.block_index}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
-      summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
-      detail,
-      turn: entry.turn,
-      thinkingContent: entry.content,
-      thinkingRedacted: entry.redacted,
+      summary,
+      detail: { ...detail, block_index: entry.block_index, block: entry.block },
+      keeperTurnId: entry.keeper_turn_id,
+      oasTurn: entry.oas_turn,
+      thinkingContent: content,
+      thinkingRedacted: redacted,
+      thinkingBlock: entry.block,
     }
   }
 
+  detail.execution_id = entry.execution_id
+  detail.schedule = entry.schedule
+  detail.tool_use_id = entry.tool_use_id
+  const toolResult = entry.outcome.status === 'succeeded' ? entry.outcome.output : null
+  const error = entry.outcome.status === 'failed' ? entry.outcome.error : null
+
   return {
-    id: `tj-${ts}-${entry.tool_name ?? 'unknown'}-T${entry.turn}R${entry.round ?? 0}-${index}`,
+    id: `tj-${entry.execution_id}`,
     ts,
     ts_iso: entry.ts_iso,
     kind: 'tool_call',
     sourceLane: 'masc',
-    summary: entry.tool_name ?? 'unknown',
+    summary: entry.tool_name,
     detail,
     toolName: entry.tool_name,
     toolArgs: entry.args,
-    toolResult: entry.result,
+    toolResult,
     duration_ms: entry.duration_ms,
-    gate: entry.gate,
-    turn: entry.turn,
-    round: entry.round,
-    cost_usd: entry.cost_usd,
+    keeperTurnId: entry.keeper_turn_id,
+    oasTurn: entry.oas_turn,
+    toolSchedule: entry.schedule,
+    toolUseId: entry.tool_use_id,
     executionId: entry.execution_id,
-    error: entry.error,
+    error,
   }
 }
 
@@ -749,11 +682,11 @@ function trajectoryEntryToTrace(
 /** Build a deduplicated, time-sorted trace from timeline + trajectory data.
  *  Extracted from loadSessionTrace for reuse in task detail overlay. */
 export function buildTraceEvents(
-  timeline: AgentTimelineResponse,
+  timeline: AgentTimelineResponse | null,
   trajectory: TrajectoryResponse | null,
   toolCalls: ToolCallsResponse | null = null,
 ): UnifiedTraceEvent[] {
-  const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
+  const timelineTraces = (timeline?.events ?? []).map(timelineEventToTrace)
   const trajectoryTraces = trajectory
     ? (trajectory.entries ?? []).map((entry, index) =>
         trajectoryEntryToTrace(entry, index, trajectory.trace_id),
@@ -761,36 +694,40 @@ export function buildTraceEvents(
     : []
   const toolCallEntries = toolCalls?.entries ?? []
   const usedToolCallIndexes = new Set<number>()
+  const usedTimelineIndexes = new Set<number>()
 
   const mergedTrajectoryTraces = trajectoryTraces.map((event) => {
     if (event.kind !== 'tool_call') return event
-    const matchedIndex = findBestToolCallEntryMatch(
+    const matchedIndex = findExactToolCallEntryMatch(
       toolCallEntries,
       event,
       usedToolCallIndexes,
     )
-    if (matchedIndex == null) return event
-    usedToolCallIndexes.add(matchedIndex)
-    return enrichToolCallTrace(event, toolCallEntries[matchedIndex]!)
+    const withToolCallProvenance = matchedIndex == null
+      ? event
+      : (() => {
+          usedToolCallIndexes.add(matchedIndex)
+          return enrichToolCallTrace(event, toolCallEntries[matchedIndex]!)
+        })()
+    const timelineIndex = findExactTimelineProvenanceMatch(
+      timelineTraces,
+      withToolCallProvenance,
+      usedTimelineIndexes,
+    )
+    if (timelineIndex == null) return withToolCallProvenance
+    usedTimelineIndexes.add(timelineIndex)
+    return enrichTimelineProvenance(withToolCallProvenance, timelineTraces[timelineIndex]!)
   })
 
-  const syntheticToolCallTraces = toolCallEntries.flatMap((entry, index) =>
-    usedToolCallIndexes.has(index) ? [] : [toolCallEntryToSyntheticTrace(entry, index)],
+  const toolCallProvenanceGaps = toolCallEntries.flatMap((entry, index) =>
+    usedToolCallIndexes.has(index) ? [] : [toolCallEntryToProvenanceGap(entry, index)],
+  )
+  const timelineObservations = timelineTraces.flatMap((event, index) =>
+    usedTimelineIndexes.has(index) ? [] : [markTimelineProvenanceGap(event)],
   )
 
-  const richerToolCallTraces = [
-    ...mergedTrajectoryTraces.filter((event) => event.kind === 'tool_call'),
-    ...syntheticToolCallTraces,
-  ]
-  const filteredTimelineTraces = timelineTraces.filter((event) => {
-    if (event.kind !== 'tool_call') return true
-    return !richerToolCallTraces.some((richer) =>
-      richerToolCallMatchesFallback(richer, event),
-    )
-  })
-
   return mergeTraceEvents(
-    [...filteredTimelineTraces, ...mergedTrajectoryTraces, ...syntheticToolCallTraces],
+    [...timelineObservations, ...mergedTrajectoryTraces, ...toolCallProvenanceGaps],
     [],
   )
 }
@@ -809,19 +746,24 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
   const prevSlot = getSlot(agentName)
   const token = prevSlot.fetchToken + 1
-  patchSlot(agentName, { loading: true, error: null, fetchToken: token })
+  patchSlot(agentName, {
+    loading: true,
+    error: null,
+    observationErrors: [],
+    fetchToken: token,
+  })
   ensureLiveTraceSlot(agentName)
 
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
     const trajectoryPromise = isKeeper
-      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true, true)
+      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT)
       : Promise.resolve(null)
     const toolCallsPromise = isKeeper
       ? fetchKeeperToolCalls(agentName, TOOL_CALL_LIMIT)
       : Promise.resolve(null)
 
-    const [timeline, trajectory, toolCalls] = await Promise.all([
+    const [timelineResult, trajectoryResult, toolCallsResult] = await Promise.allSettled([
       timelinePromise,
       trajectoryPromise,
       toolCallsPromise,
@@ -830,12 +772,37 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
     // Discard result if slot was closed or a newer fetch was started during await.
     if (getSlot(agentName).fetchToken !== token) return
 
+    const timeline = timelineResult.status === 'fulfilled' ? timelineResult.value : null
+    const trajectory = trajectoryResult.status === 'fulfilled' ? trajectoryResult.value : null
+    const toolCalls = toolCallsResult.status === 'fulfilled' ? toolCallsResult.value : null
+    const sourceErrors = [
+      ...(timelineResult.status === 'rejected'
+        ? [`agent timeline read failed: ${timelineResult.reason instanceof Error ? timelineResult.reason.message : String(timelineResult.reason)}`]
+        : []),
+      ...(trajectoryResult.status === 'rejected'
+        ? [`trajectory read failed: ${trajectoryResult.reason instanceof Error ? trajectoryResult.reason.message : String(trajectoryResult.reason)}`]
+        : []),
+      ...(toolCallsResult.status === 'rejected'
+        ? [`tool-call log read failed: ${toolCallsResult.reason instanceof Error ? toolCallsResult.reason.message : String(toolCallsResult.reason)}`]
+        : []),
+    ]
     const deduped = buildTraceEvents(timeline, trajectory, toolCalls)
+    const observationErrors = [
+      ...sourceErrors,
+      ...(trajectory === null
+        ? []
+        : [
+          ...(trajectory.decode.invalid_line_count > 0
+            ? [`trajectory decode invalid ${trajectory.decode.invalid_line_count} rows ${JSON.stringify(trajectory.decode.invalid_reasons)}`]
+            : []),
+          ...trajectory.io_errors.map(error => `trajectory read failed ${error.path}: ${error.message}`),
+        ]),
+    ]
 
     // Final stale check before writing
     if (getSlot(agentName).fetchToken !== token) return
 
-    patchSlot(agentName, { events: deduped, loading: false })
+    patchSlot(agentName, { events: deduped, loading: false, observationErrors })
   } catch (err) {
     // Discard if stale
     if (getSlot(agentName).fetchToken !== token) return

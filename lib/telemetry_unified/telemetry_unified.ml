@@ -10,7 +10,8 @@
     - [<masc_root>/keepers/<name>/metrics/]  — Per-keeper turn metrics
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
-    - [<masc_root>/trajectories/<keeper>/]   — Keeper trajectory tool-call rows
+    - [<masc_root>/keepers/<keeper>/trajectories/v1/]
+                                             — Keeper trajectory tool-call rows
     - [<masc_root>/tool_usage/]              — Non-public registered tool calls
     - [<masc_root>/oas-events/]              — Durable OAS native/custom events
     - [<masc_root>/keepers/<name>/execution-receipts/]
@@ -37,14 +38,16 @@ let all_sources = Telemetry_unified_source.all_sources
    [Telemetry_unified_source_meta] (godfile decomp). *)
 include Telemetry_unified_source_meta
 
-let trajectory_tool_call_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "type" fields with
-      | Some (`String ("trajectory_summary" | "thinking")) -> false
-      | _ ->
-          List.mem_assoc "tool_name" fields
-          && List.mem_assoc "ts" fields)
-  | _ -> false
+type trajectory_row_class =
+  | Trajectory_tool_row
+  | Trajectory_non_tool_row
+  | Trajectory_invalid_row
+
+let classify_trajectory_json json =
+  match Trajectory.tool_call_entry_of_json json with
+  | Trajectory.Decoded_entry _ -> Trajectory_tool_row
+  | Trajectory.Non_entry_row -> Trajectory_non_tool_row
+  | Trajectory.Invalid_entry _ -> Trajectory_invalid_row
 
 (* ── Timestamp extraction ───────────────────────────── *)
 
@@ -366,6 +369,14 @@ let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   | other ->
     `Assoc [("source", `String (source_to_string source)); ("data", other)]
 
+let tag_trajectory_entry ~keeper_name json =
+  let scoped =
+    match json with
+    | `Assoc fields -> `Assoc (("keeper_name", `String keeper_name) :: fields)
+    | other -> other
+  in
+  tag_entry Trajectory_tool_call scoped
+
 (* ── Keeper/agent name extraction for filtering ─────── *)
 
 let matches_keeper name (json : Yojson.Safe.t) : bool =
@@ -431,31 +442,19 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 
 (* ── Read from a single fixed-path source ───────────── *)
 
-(* A non-positive [n] means "unlimited" at the call sites (dashboard /telemetry
-   sends no [n], so [read_unified_result] derives per_source = 0). Scanning the
-   entire store for that case Yojson-parsed every entry over 1970->today on the
-   keeper's Eio domain, and major-GC starved keeper fibers (measured: a single
-   no-[n] /api/v1/dashboard/telemetry request held one core at 100%+ for ~8s on
-   a 224MB execution-receipts store, blocking turns). Clamp "unlimited" to this
-   cap so every read goes through the tail-bounded readers instead of a
-   full-store [read_range]. The cap is large enough that real dashboard windows
-   never hit it; if a future caller needs more, raise it deliberately rather
-   than reintroducing an unbounded scan. *)
-let unbounded_window_scan_cap = 50_000
-
 (* Shared read path for directory-backed Dated_jsonl stores. Always routes
    through the tail-bounded readers ([read_recent] / [read_range_recent]) so a
-   wide window or an "unlimited" ([n] <= 0) request cannot parse the whole
-   store. Returns entries filtered to the requested timestamp window, untagged;
-   callers tag with their source. *)
+   wide window cannot parse the whole store. Returns entries filtered to the
+   requested timestamp window, untagged; callers tag with their source. *)
 let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
-  let effective_n = if n <= 0 then unbounded_window_scan_cap else n in
+  if n <= 0 then
+    invalid_arg "Telemetry_unified.bounded_entries_for_window: n must be positive";
   let entries =
     match effective_day_window ?since_ts ?until_ts () with
-    | None -> Dated_jsonl.read_recent store effective_n
+    | None -> Dated_jsonl.read_recent store n
     | Some (since_day, until_day) ->
       Dated_jsonl.read_range_recent store ~since:since_day ~until:until_day
-        effective_n
+        n
   in
   List.filter (within_requested_window ?since_ts ?until_ts) entries
 
@@ -549,7 +548,9 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
         [])
     dirs
 
-let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
+let read_trajectory_file ~masc_root ~keeper_name ~trace_id ~max_entries
+    ?since_ts ?until_ts () =
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
   if
     not
       (is_jsonl_file Trajectory_tool_call
@@ -558,37 +559,36 @@ let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   else
     protect_source_read Trajectory_tool_call ~site:"read_trajectory_file"
       ~default:[] (fun () ->
-      let parse_error_count = ref 0 in
-      let entries =
-        (* Tail-bounded read: trajectory trace files grow append-only (one
-           measured at 12MB); [load_file] parsed the whole file on the keeper
-           Eio domain. Measured post-#20659/#20662: the trajectory source was
-           ~6.9s of an 8.3s /telemetry request — the dominant keeper-fleet
-           freeze cost, since [read_trajectory_tool_calls] ignored its [n] and
-           full-parsed every trace. Read only the newest [max_lines] from the
-           tail; trajectories are append-ordered so the tail is the recent
-           window the dashboard polls. *)
-        Dated_jsonl.load_tail_lines path ~max_lines
-        |> List.filter_map (fun line ->
-             let line = String.trim line in
-             if line = "" then None
-             else
-               try
-                 let json = Yojson.Safe.from_string line in
-                 if trajectory_tool_call_json json
-                    && within_requested_window ?since_ts ?until_ts json
-                 then Some json
-                 else None
-               with Yojson.Json_error _ ->
-                 incr parse_error_count;
-                 None)
+      let page =
+        Trajectory.read_recent_lines_page_result ~masc_root ~keeper_name
+          ~trace_id
+          ~scan_limits:Trajectory.standard_trajectory_scan_limits
+          ~max_entries ()
       in
-      if !parse_error_count > 0 then
+      List.iter
+        (fun (error : Trajectory.trajectory_read_error) ->
+           observe_source_read_failure Trajectory_tool_call
+             ~site:"read_trajectory_file_io"
+             ~error:(Printf.sprintf "%s: %s" error.path error.message))
+        page.read.io_errors;
+      let entries =
+        List.filter_map
+          (function
+            | Trajectory.Tool_call entry ->
+                let json = Trajectory.entry_to_json entry in
+                if within_requested_window ?since_ts ?until_ts json
+                then Some json
+                else None
+            | Trajectory.Thinking _ -> None)
+          page.read.lines
+      in
+      let invalid_row_count = page.read.line_decode.invalid_line_count in
+      if invalid_row_count > 0 then
         observe_source_read_failure Trajectory_tool_call
           ~site:"read_trajectory_file_parse"
           ~error:
-            (Printf.sprintf "%s has %d malformed JSONL line(s)" path
-               !parse_error_count);
+            (Printf.sprintf "%s has %d invalid trajectory row(s)" path
+               invalid_row_count);
       entries)
 
 (* A trace file whose last write predates [since_ts] cannot hold entries in the
@@ -609,20 +609,18 @@ let trace_file_within_since ~since_ts path =
 
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
+  if n <= 0 then
+    invalid_arg "Telemetry_unified.read_trajectory_tool_calls: n must be positive";
   let dirs = discover_trajectory_keeper_dirs masc_root in
   let dirs =
     match keeper_name with
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  (* Bound the per-file tail read. A non-positive [n] ("unlimited") clamps to
-     [unbounded_window_scan_cap] so no trace file is full-parsed. The final
-     [take_first n] still trims the merged set; this only stops the read itself
-     from being unbounded (the freeze cause). *)
-  let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
+  let max_entries = n in
   let entries =
     List.concat_map
-      (fun (_name, dir) ->
+      (fun (name, dir) ->
         protect_source_read Trajectory_tool_call
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
@@ -630,20 +628,24 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
           |> List.filter (fun name ->
                Filename.check_suffix name ".jsonl"
                && trace_file_within_since ~since_ts (Filename.concat dir name))
-          |> List.concat_map (fun name ->
+          |> List.concat_map (fun trace_file ->
+               let trace_id = Filename.chop_suffix trace_file ".jsonl" in
                read_trajectory_file
-                 (Filename.concat dir name)
-                 ~max_lines ?since_ts ?until_ts ())))
+                 ~masc_root ~keeper_name:name ~trace_id ~max_entries
+                 ?since_ts ?until_ts ())
+          |> List.map (tag_trajectory_entry ~keeper_name:name)))
       dirs
   in
   let entries = sort_newest_first entries in
-  let entries = if n <= 0 then entries else take_first n entries in
-  List.map (tag_entry Trajectory_tool_call) entries
+  let entries = take_first n entries in
+  entries
 
 let goal_events_path ~masc_root =
   Filename.concat masc_root "goal_events.jsonl"
 
 let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
+  if n <= 0 then
+    invalid_arg "Telemetry_unified.read_goal_events: n must be positive";
   let path = goal_events_path ~masc_root in
   if not (Sys.file_exists path) then []
   else
@@ -665,7 +667,7 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
           |> List.rev)
     in
     let entries = sort_newest_first entries in
-    let entries = if n <= 0 then entries else take_first n entries in
+    let entries = take_first n entries in
     List.map (tag_entry Goal_event) entries
 
 (* ── Unified read ───────────────────────────────────── *)
@@ -673,22 +675,36 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
     ?(n = 100) ?(offset = 0) () : read_result =
-  let limited = n > 0 in
+  if n <= 0 then
+    invalid_arg "Telemetry_unified.read_unified_result: n must be positive";
+  if offset < 0 then
+    invalid_arg "Telemetry_unified.read_unified_result: offset must be non-negative";
+  if offset > max_int - n then
+    invalid_arg "Telemetry_unified.read_unified_result: page coordinate overflow";
   let has_filter =
     Option.is_some keeper_name || Option.is_some session_id
     || Option.is_some operation_id || Option.is_some worker_run_id
     || Option.is_some since_ts || Option.is_some until_ts
   in
+  let page_coordinate = n + offset in
   let per_source =
-    if not limited then 0
-    else if has_filter then max (n + offset) ((n + offset) * 2)
-    else n + offset + 1
+    if has_filter then begin
+      if page_coordinate > max_int / 2 then
+        invalid_arg
+          "Telemetry_unified.read_unified_result: filtered page coordinate overflow";
+      page_coordinate * 2
+    end else begin
+      if page_coordinate = max_int then
+        invalid_arg
+          "Telemetry_unified.read_unified_result: page marker overflow";
+      page_coordinate + 1
+    end
   in
   let all_entries =
     List.concat_map (fun source ->
       match source with
       | Keeper_metric ->
-        if limited && Option.is_none keeper_name && not has_filter then
+        if Option.is_none keeper_name && not has_filter then
           read_keeper_metrics_fast_top ~masc_root ~n ()
         else
           read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
@@ -737,10 +753,13 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
   let entries =
-    if not limited || total_matching_entries <= offset + n then sorted
+    if total_matching_entries <= page_coordinate then List.drop offset sorted
     else sorted |> List.drop offset |> take_first n
   in
-  { entries; total_matching_entries; truncated = limited && total_matching_entries > offset + n }
+  { entries
+  ; total_matching_entries
+  ; truncated = total_matching_entries > page_coordinate
+  }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset () :
@@ -809,6 +828,7 @@ type trajectory_file_summary =
   { tfs_boundary : int
   ; tfs_tool_calls : int
   ; tfs_latest_ts : float option
+  ; tfs_invalid_rows : int
   }
 
 let trajectory_summary_cache : (string, trajectory_file_summary) Hashtbl.t =
@@ -832,43 +852,54 @@ let trajectory_file_summary path : trajectory_file_summary option =
     (match cached with
      | Some e when e.tfs_boundary = size -> Some e
      | cached ->
-       let from, count0, latest0 =
+       let from, count0, latest0, invalid0 =
          match cached with
          | Some e when e.tfs_boundary < size ->
-           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts
+           e.tfs_boundary, e.tfs_tool_calls, e.tfs_latest_ts, e.tfs_invalid_rows
          | Some _ ->
            (* boundary past the file size: shrink/rotation — full re-parse *)
            Otel_metric_store_core.inc_counter
              Otel_builtin_metric_names.metric_telemetry_cache_rescans
              ~labels:[ ("store", "trajectories") ]
              ();
-           0, 0, None
-         | None -> 0, 0, None
+           0, 0, None, 0
+         | None -> 0, 0, None, 0
        in
-       let (count, latest), boundary =
-         Fs_compat.fold_appended_lines ~path ~from ~init:(count0, latest0)
-           ~f:(fun (count, latest) line ->
+       let (count, latest, invalid), boundary =
+         Fs_compat.fold_appended_lines ~path ~from
+           ~init:(count0, latest0, invalid0)
+           ~f:(fun (count, latest, invalid) line ->
              match Yojson.Safe.from_string line with
-             | exception Yojson.Json_error _ -> count, latest
+             | exception Yojson.Json_error _ -> count, latest, invalid + 1
              | json ->
-               if trajectory_tool_call_json json
-               then begin
-                 let latest =
-                   match extract_ts json with
-                   | ts when ts > 0.0 -> max_ts_opt latest ts
-                   | _ -> latest
-                 in
-                 count + 1, latest
-               end
-               else count, latest)
+               (match classify_trajectory_json json with
+                | Trajectory_tool_row ->
+                    let latest =
+                      match extract_ts json with
+                      | ts when ts > 0.0 -> max_ts_opt latest ts
+                      | _ -> latest
+                    in
+                    count + 1, latest, invalid
+                | Trajectory_non_tool_row -> count, latest, invalid
+                | Trajectory_invalid_row -> count, latest, invalid + 1))
        in
+       if invalid > invalid0 then
+         observe_source_read_failure Trajectory_tool_call
+           ~site:"trajectory_summary_invalid_rows"
+           ~error:
+             (Printf.sprintf "%s appended %d invalid trajectory row(s)" path
+                (invalid - invalid0));
        Otel_metric_store_core.inc_counter
          Otel_builtin_metric_names.metric_telemetry_scanned_bytes
          ~labels:[ ("store", "trajectories") ]
          ~delta:(Float.of_int (max 0 (boundary - from)))
          ();
        let entry =
-         { tfs_boundary = boundary; tfs_tool_calls = count; tfs_latest_ts = latest }
+         { tfs_boundary = boundary
+         ; tfs_tool_calls = count
+         ; tfs_latest_ts = latest
+         ; tfs_invalid_rows = invalid
+         }
        in
        Stdlib.Mutex.protect trajectory_summary_cache_mu (fun () ->
          Hashtbl.replace trajectory_summary_cache path entry);
@@ -980,19 +1011,23 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ?coverage_gap ()),
         keeper_total )
     | Trajectory_tool_call ->
-      let trajectories_root = Filename.concat masc_root "trajectories" in
+      let keepers_root =
+        Filename.concat masc_root Common.keepers_runtime_dirname
+      in
       let dir_state =
         classify_store_dir Trajectory_tool_call
-          ~site:"summary_trajectory_root" trajectories_root
+          ~site:"summary_trajectory_root" keepers_root
       in
       let dirs =
         match dir_state with
         | Store_directory ->
-            discover_trajectory_keeper_dirs_in_root trajectories_root
+            discover_trajectory_keeper_dirs_in_keepers_root ~masc_root
+              keepers_root
         | Store_missing | Store_invalid -> []
       in
       let exists = match dir_state with
-        | Store_directory | Store_invalid -> true
+        | Store_directory -> dirs <> []
+        | Store_invalid -> true
         | Store_missing -> false
       in
       let read_error = match dir_state with
@@ -1009,7 +1044,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
-             ("path", `String trajectories_root);
+             ("path", `String keepers_root);
              ("exists", `Bool exists);
              ("entry_count", `Int count);
           ]
@@ -1023,7 +1058,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ~read_error ?coverage_gap ()),
         count )
     | Execution_receipt ->
-      let keepers_root = Filename.concat masc_root "keepers" in
+      let keepers_root =
+        Filename.concat masc_root Common.keepers_runtime_dirname
+      in
       let dirs = discover_execution_receipt_dirs masc_root in
       let dir_state =
         classify_store_dir Execution_receipt

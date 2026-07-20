@@ -8,6 +8,11 @@ let parse_or_fail content =
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
 
+let resolve_or_fail ~env_lookup doc =
+  match Keeper_runtime_config.resolve_overrides ~env_lookup doc with
+  | Ok resolved -> resolved
+  | Error msg -> failf "Keeper runtime config resolution failed: %s" msg
+
 let rec repo_root_from dir =
   let dune_project = Filename.concat dir "dune-project" in
   if Sys.file_exists dune_project then dir
@@ -861,7 +866,7 @@ let test_toml_catalog_resolves_lifecycle_keys () =
        dead_ttl_sec = 86400\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check int "applied lifecycle overrides" 1 count;
   check (option string) "dead ttl" (Some "86400")
@@ -879,7 +884,7 @@ let test_toml_catalog_resolves_web_search_keys () =
        cache_ttl_sec = 45.5\n"
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+    resolve_or_fail ~env_lookup:empty_env doc
   in
   check int "applied web search overrides" 6 count;
   check (option string) "searxng url" (Some "http://localhost:8888")
@@ -900,7 +905,7 @@ let test_toml_catalog_resolves_web_search_keys () =
     else None
   in
   let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:preempt_searxng doc
+    resolve_or_fail ~env_lookup:preempt_searxng doc
   in
   check int "env preempts only searxng url" 5 count;
   check (option string) "preempted searxng absent" None
@@ -943,6 +948,24 @@ let test_runtime_toml_reserves_web_search_namespace () =
     check (option string) "default runtime" (Some "local.sample")
       cfg.Runtime_schema.default_runtime_id
 
+let test_runtime_toml_reserves_keeper_namespace () =
+  match
+    Runtime_toml.parse_string
+      "[turn]\n\
+       stream_idle_timeout_sec = 120\n"
+  with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse live [turn] config:\n%s" rendered
+  | Ok cfg ->
+    check int "Keeper [turn] table adds no provider binding" 0
+      (List.length cfg.Runtime_schema.bindings)
+
 let test_runtime_toml_rejects_unknown_runtime_key () =
   let content =
     "[providers.local]\n\
@@ -972,6 +995,37 @@ let test_runtime_toml_rejects_unknown_runtime_key () =
       (String_util.contains_substring rendered "runtime.defualt");
     check bool "error explains unknown runtime key" true
       (String_util.contains_substring rendered "unknown [runtime] key")
+
+let test_runtime_toml_rejects_removed_keeper_runtime_key () =
+  match Runtime_toml.parse_string "[turn]\nbatch_limit = 9\n" with
+  | Ok _ -> fail "removed Keeper runtime key must fail parse"
+  | Error [ error ] ->
+    check string "error path" "turn.batch_limit" error.Runtime_toml.path;
+    check string "removed key diagnostic"
+      "removed Keeper runtime TOML key"
+      error.message
+  | Error _ -> fail "expected one removed Keeper runtime key error"
+
+let test_runtime_toml_rejects_removed_routing_namespaces () =
+  let content =
+    "[system]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [[routes]]\n\
+     pattern = \"legacy\"\n\
+     \n\
+     [profiles.legacy]\n\
+     members = [\"local.sample\"]\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "removed runtime routing namespaces must fail parse"
+  | Error errors ->
+    check (list string) "all removed namespace paths are reported"
+      [ "system"; "routes"; "profiles" ]
+      (List.map (fun (error : Runtime_toml.parse_error) -> error.path) errors);
+    check (list string) "removed namespace diagnostic is explicit"
+      (List.init 3 (fun _ -> "removed runtime routing namespace"))
+      (List.map (fun (error : Runtime_toml.parse_error) -> error.message) errors)
 
 let test_runtime_toml_allows_runtime_profile_tables () =
   let content =
@@ -2378,8 +2432,14 @@ let () =
             `Quick test_toml_catalog_resolves_web_search_keys;
           test_case "web_search is a reserved runtime TOML namespace" `Quick
             test_runtime_toml_reserves_web_search_namespace;
+          test_case "Keeper tables are reserved runtime TOML namespaces" `Quick
+            test_runtime_toml_reserves_keeper_namespace;
           test_case "runtime table rejects unknown keys" `Quick
             test_runtime_toml_rejects_unknown_runtime_key;
+          test_case "runtime TOML rejects removed Keeper runtime keys" `Quick
+            test_runtime_toml_rejects_removed_keeper_runtime_key;
+          test_case "runtime TOML rejects removed routing namespaces" `Quick
+            test_runtime_toml_rejects_removed_routing_namespaces;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
           test_case "runtime table rejects wrong-type media_failover" `Quick

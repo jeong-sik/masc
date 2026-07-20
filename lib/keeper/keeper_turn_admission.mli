@@ -198,9 +198,10 @@ val run_serialized
     exceptions from [f] release the slot and re-raise.
 
     Caller contract: a synchronous self-targeted call from inside the same
-    keeper's admitted turn waits for its own turn to finish and is bounded
-    only by the caller's turn budget — do not call this from within an
-    admitted turn of the same keeper. *)
+    keeper's admitted turn waits for the slot held by that same turn and
+    therefore cannot make progress until external cancellation unwinds it.
+    This function has no internal timeout or turn-budget escape hatch — do not
+    call it from within an admitted turn of the same keeper. *)
 
 val run_chat_if_free
   :  base_path:string

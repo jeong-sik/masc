@@ -5,4 +5,11 @@
  (public_name masc.telemetry_unified_source)
  (wrapped false)
  (modules telemetry_unified_source telemetry_unified_source_meta)
- (libraries eio masc.config masc.otel_metric_store masc_log yojson))
+ (libraries
+  eio
+  masc.config
+  masc.otel_metric_store
+  masc.trajectory
+  masc_core
+  masc_log
+  yojson))

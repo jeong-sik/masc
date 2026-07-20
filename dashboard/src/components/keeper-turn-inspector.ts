@@ -11,16 +11,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
-  fetchKeeperToolCalls,
   fetchKeeperTurnRecords,
   fetchKeeperTurnTranscript,
 } from '../api/dashboard'
 import type {
   MemoryOsEpisodeSummary,
   MemoryOsTurnRecordSnapshot,
-  ToolCallEntry,
-  ToolCallOutputBlob,
-  ToolCallsResponse,
   TurnBlock,
   TurnBlockDiff,
   TurnRecordEntry,
@@ -36,52 +32,17 @@ import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
 
-const INITIAL_TURN_MATCH_WINDOW_SEC = 30 * 60
 const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
 
-export function initialTurnRowForTimestamp(
-  rows: TurnRecordRow[],
-  timestampIso?: string | null,
-): TurnRecordRow | null {
-  if (!timestampIso || rows.length === 0) return null
-  const targetMs = Date.parse(timestampIso)
-  if (!Number.isFinite(targetMs)) return null
-  const targetSec = targetMs / 1000
-  let best: { row: TurnRecordRow; delta: number } | null = null
-
-  for (const row of rows) {
-    const delta = Math.abs(row.record.ts - targetSec)
-    if (!best || delta < best.delta) {
-      best = { row, delta }
-    }
-  }
-
-  return best && best.delta <= INITIAL_TURN_MATCH_WINDOW_SEC ? best.row : null
-}
-
-// RFC-0233 §7: exact turn join-key match, superseding the 30-min timestamp
-// window (§7.6 guard #3). [turnRef] is "<trace_id>#<absolute_turn>" minted
-// MASC-side and carried on the originating chat row / board post; split on the
-// LAST '#' (a trace_id may itself contain '#') and match trace_id +
-// absolute_turn exactly against the server turn records. A malformed key or a
-// turn not present in the loaded records returns null — never a fuzzy
-// fallback, so an exact key cannot mis-attribute.
+// RFC-0233 §7: [turn_ref] is minted once by the Keeper turn writer and carried
+// unchanged by TurnRecord, chat, and board origins. The dashboard compares the
+// opaque typed-wire value directly; it never parses or reconstructs identity.
 export function initialTurnRowForTurnRef(
   rows: TurnRecordRow[],
   turnRef?: string | null,
 ): TurnRecordRow | null {
   if (!turnRef || rows.length === 0) return null
-  const hash = turnRef.lastIndexOf('#')
-  if (hash <= 0 || hash === turnRef.length - 1) return null
-  const suffix = turnRef.slice(hash + 1)
-  if (!/^\d+$/.test(suffix)) return null
-  const trace = turnRef.slice(0, hash)
-  const turn = Number(suffix)
-  return (
-    rows.find(
-      row => row.record.trace_id === trace && row.record.absolute_turn === turn,
-    ) ?? null
-  )
+  return rows.find(row => row.record.turn_ref === turnRef) ?? null
 }
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
@@ -297,79 +258,14 @@ function DiffSection({ diff }: { diff: TurnBlockDiff }) {
    Keeper Turn Inspector v2 detail drawer
    ═══════════════════════════════════════════════════════════════════════ */
 
-type TurnPhase = {
-  label: string
-  kind: 'ctx' | 'reason' | 'tool' | 'gen'
-  mono?: boolean
-  durationMs: number | null
-  durationSource: 'tool_call_log' | 'provider_telemetry' | 'estimated' | 'not_recorded'
-  // RFC-0233 §10 — time-to-first-token for the gen phase (null when not
-  // recorded). Kept separate from durationMs (end-to-end request_latency_ms)
-  // so the post-first-chunk decode split is never derived (§9.6 guard).
-  ttfrcMs?: number | null
-  visualDurationMs: number
-  visualOffsetMs: number
-  meta?: string
-}
-
 type TurnDetail = {
-  traceId: string
-  tokIn: number
-  tokOut: number
-  // RFC-0233 §8 — null when context_window/price are absent on the record
-  // (runtime unknown or operator left runtime.toml unset); render "미상".
+  tokIn: number | null
+  tokOut: number | null
+  // RFC-0233 §8 — null when the observations needed for the ratio are absent.
   ctxPct: number | null
   contextWindow: number | null
-  cost: number | null
-  measuredDurationMs: number | null
-  visualTotalMs: number
-  phases: TurnPhase[]
-  tools: TurnToolDetail[]
-  systemPrompt: string
-  injectedCtx: string
-}
-
-type TurnToolDetail = {
-  id: string
-  toolName: string | null
-  status: 'ok' | 'bad' | 'unknown'
-  durationMs: number | null
-  agentSubturn: number | null
-  keeperTurn: number | null
-  // RFC-0233 §1.1: the real tool call I/O, joined from the tool-call log on
-  // execution_id (already boundary-redacted at write in keeper_tool_call_log).
-  // [matched] is false when no tool-call entry carried this execution id —
-  // the inspector renders explicit absence, never a fabricated result.
-  matched: boolean
-  input: unknown
-  output: string | ToolCallOutputBlob | null
-}
-
-type TurnInspectorData = {
-  turns: TurnRecordsResponse
-  toolCalls: ToolCallsResponse | null
-  toolCallError: string | null
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function approxTokens(str: string): number {
-  return Math.max(1, Math.round(String(str).length / 3.6))
-}
-
-function buildSystemPrompt(keeperName: string, record: TurnRecordEntry): string {
-  return `당신은 MASC 코디네이션 서버의 keeper "${keeperName}" 입니다.
-runtime · profile : ${record.runtime_profile}
-absolute turn     : T${record.absolute_turn}
-trace id          : ${record.trace_id}
-
-원칙
-- 모든 작업은 trace 로 기록한다.
-- 컨텍스트 사용량이 85% 를 넘으면 compact() 를 호출한다.
-- 소유하지 않은 태스크는 핸드오프(HandingOff)로 넘긴다.
-- 답변은 근거(도구 결과·trace)를 함께 제시한다.`
+  requestLatencyMs: number | null
+  ttfrcMs: number | null
 }
 
 function thinkingStateLabel(record: TurnRecordEntry): string {
@@ -384,337 +280,83 @@ function thinkingChipLabel(record: TurnRecordEntry): string {
   return '—'
 }
 
-// RFC-0233 §8 — compact "NNNK" form of the runtime's context window, or
-// "미상" when the record has no context_window (render absence, not 200K).
-function formatCtxWindowK(cw: number | null | undefined): string {
-  return cw != null ? `${Math.round(cw / 1000)}K` : '미상'
+function formatObservedTokens(value: number | null): string {
+  return value != null ? value.toLocaleString() : '측정 없음'
 }
 
-function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn: number): string {
-  const ctxLine = ctxPct != null
-    ? `${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
-    : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
-  return `# world snapshot
-fsm.state      = n/a
-model          = ${record.model ?? 'n/a'}
-finish_reason  = ${record.finish_reason ?? 'n/a'}
-ctx.window     = ${ctxLine}
-keeper.turn    = T${record.absolute_turn}
-thinking       = ${thinkingStateLabel(record)}
-thinking.budget= ${record.thinking_budget ?? '—'}
-
-# context blocks (조립 순서)
-${record.blocks.length
-    ? record.blocks.map(b => `  - ${b.block}  ${b.bytes}B  ${b.digest.slice(0, 12)}`).join('\n')
-    : '  (none)'}
-
-# tool executions
-${record.execution_ids.length
-    ? record.execution_ids.map(id => `  - ${id}`).join('\n')
-    : '  (none)'}`
+function formatContextWindow(value: number | null): string {
+  return value != null ? `${value.toLocaleString()} tok` : '미상'
 }
 
-function toolCallStatus(entry: ToolCallEntry | null): 'ok' | 'bad' | 'unknown' {
-  if (!entry) return 'unknown'
-  return entry.success ? 'ok' : 'bad'
+function formatObservedDuration(value: number | null): string {
+  return value != null ? formatMsCompact(value) : '측정 없음'
 }
 
-function toolStatusClass(status: TurnToolDetail['status']): string {
-  if (status === 'ok') return 'ok'
-  if (status === 'bad') return 'bad'
-  return ''
-}
-
-function toolStatusLabel(status: TurnToolDetail['status']): string {
-  if (status === 'ok') return 'success'
-  if (status === 'bad') return 'error'
-  return 'unmatched'
-}
-
-// Tool input args as copyable text. Strings pass through; structured input is
-// pretty-printed JSON.
-function toolInputText(input: unknown): string {
-  if (input == null) return ''
-  if (typeof input === 'string') return input
-  try {
-    return JSON.stringify(input, null, 2)
-  } catch {
-    return String(input)
-  }
-}
-
-// Tool output as copyable text. A string is the result verbatim; a blob ref
-// (output spilled out-of-line by the server) yields its stored preview.
-function toolOutputText(output: string | ToolCallOutputBlob | null): string {
-  if (output == null) return ''
-  if (typeof output === 'string') return output
-  return output._blob.preview
-}
-
-// Provenance line for a blob-backed output so the operator knows the preview is
-// truncated, with the sha to fetch the full payload elsewhere.
-function toolOutputMeta(output: string | ToolCallOutputBlob | null): string | null {
-  if (output == null || typeof output === 'string') return null
-  const { bytes, mime, sha256 } = output._blob
-  return `blob · ${bytes}B · ${mime} · ${sha256.slice(0, 12)}`
-}
-
-function toolCallIndexByExecutionId(entries: readonly ToolCallEntry[]): Map<string, ToolCallEntry> {
-  const index = new Map<string, ToolCallEntry>()
-  for (const entry of entries) {
-    if (entry.execution_id) index.set(entry.execution_id, entry)
-  }
-  return index
-}
-
-function uniqueNumbers(values: Array<number | null>): number[] {
-  return [...new Set(values.filter((value): value is number => typeof value === 'number'))]
-    .sort((a, b) => a - b)
-}
-
-function formatTurnList(values: number[]): string {
-  if (values.length === 0) return '—'
-  if (values.length <= 4) return values.map(value => `T${value}`).join(', ')
-  return `${values.slice(0, 3).map(value => `T${value}`).join(', ')} +${values.length - 3}`
-}
-
-function phaseDurationLabel(phase: TurnPhase): string {
-  if (phase.durationMs != null) {
-    const base = formatMsCompact(phase.durationMs)
-    // RFC-0233 §10 — show time-to-first-token alongside the gen phase's
-    // end-to-end duration when ttfrc_ms is recorded. No decode split: the
-    // post-first-chunk duration is NOT derived (§9.6 fabrication guard).
-    if (phase.kind === 'gen' && phase.ttfrcMs != null) {
-      return `${base} · 첫 ${formatMsCompact(phase.ttfrcMs)}`
-    }
-    return base
-  }
-  if (phase.durationSource === 'estimated') return '추정'
-  return '측정 없음'
-}
-
-function phaseDurationTitle(phase: TurnPhase): string {
-  switch (phase.durationSource) {
-    case 'tool_call_log':
-      return 'duration_ms from /api/v1/keepers/:name/tool-calls'
-    case 'provider_telemetry':
-      return 'request_latency_ms — provider call wall-clock (OAS inference_telemetry)'
-    case 'estimated':
-      return 'estimated only; no durable duration for this phase'
-    case 'not_recorded':
-      return 'duration not recorded for this phase'
-  }
-}
-
-function finalizePhaseOffsets(phases: TurnPhase[]): { visualTotalMs: number; measuredDurationMs: number | null } {
-  let visualOffsetMs = 0
-  let measuredDurationMs = 0
-  let measuredCount = 0
-  for (const phase of phases) {
-    phase.visualOffsetMs = visualOffsetMs
-    phase.visualDurationMs = phase.durationMs ?? 100
-    visualOffsetMs += phase.visualDurationMs
-    if (phase.durationMs != null) {
-      measuredDurationMs += phase.durationMs
-      measuredCount += 1
-    }
-  }
-  return {
-    visualTotalMs: Math.max(visualOffsetMs, 1),
-    measuredDurationMs: measuredCount > 0 ? measuredDurationMs : null,
-  }
-}
-
-function buildTurnDetail(
-  keeperName: string,
-  record: TurnRecordEntry,
-  toolEntries: readonly ToolCallEntry[],
-): TurnDetail {
-  const traceId = `${record.trace_id}_${String(record.absolute_turn).padStart(4, '0')}`
-  const tokIn = record.input_tokens ?? Math.max(1, Math.round(record.blocks.reduce((sum, b) => sum + b.bytes, 0) / 4))
-  const tokOut = record.output_tokens ?? 120
-  // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
-  // context_window is the keeper-resolved effective budget (replaces the
-  // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
-  // Either is null when the record lacks the fact — the view renders "미상".
+function buildTurnDetail(record: TurnRecordEntry): TurnDetail {
+  const tokIn = record.input_tokens ?? null
+  const tokOut = record.output_tokens ?? null
+  // RFC-0233 §8 — context fill is a transparent projection of two recorded
+  // observations. Missing input usage or context window stays unknown.
   const ctxPct =
-    record.context_window != null && record.context_window > 0
-      ? Math.min(100, (tokIn / record.context_window) * 100)
+    tokIn != null && record.context_window != null && record.context_window > 0
+      ? (tokIn / record.context_window) * 100
       : null
-  const cost =
-    record.price_input_per_million != null && record.price_output_per_million != null
-      ? (tokIn * record.price_input_per_million + tokOut * record.price_output_per_million) / 1e6
-      : null
-  const toolIndex = toolCallIndexByExecutionId(toolEntries)
-
-  const phases: TurnPhase[] = [{
-    label: '컨텍스트 조립',
-    kind: 'ctx',
-    durationMs: null,
-    durationSource: 'not_recorded',
-    visualDurationMs: 0,
-    visualOffsetMs: 0,
-    meta: 'keeper turn pre-dispatch',
-  }]
-  if (record.enable_thinking === true || record.thinking_budget != null) {
-    phases.push({
-      label: 'Thinking',
-      kind: 'reason',
-      durationMs: null,
-      durationSource: 'not_recorded',
-      visualDurationMs: 0,
-      visualOffsetMs: 0,
-      meta: record.thinking_budget != null ? `budget ${record.thinking_budget}` : 'enabled',
-    })
-  }
-
-  const tools = record.execution_ids.map((id): TurnToolDetail => {
-    const entry = toolIndex.get(id) ?? null
-    return {
-      id,
-      toolName: entry?.tool ?? null,
-      status: toolCallStatus(entry),
-      durationMs: entry?.duration_ms ?? null,
-      agentSubturn: entry?.turn ?? null,
-      keeperTurn: entry?.keeper_turn_id ?? null,
-      matched: entry !== null,
-      input: entry?.input ?? null,
-      output: entry?.output ?? null,
-    }
-  })
-  tools.forEach(tool => {
-    phases.push({
-      label: tool.toolName ?? tool.id.slice(0, 24),
-      kind: 'tool',
-      mono: true,
-      durationMs: tool.durationMs,
-      durationSource: tool.durationMs != null ? 'tool_call_log' : 'not_recorded',
-      visualDurationMs: 0,
-      visualOffsetMs: 0,
-      meta: [
-        tool.agentSubturn != null ? `agent subturn T${tool.agentSubturn}` : null,
-        `execution ${tool.id.slice(0, 24)}`,
-      ].filter(Boolean).join(' · '),
-    })
-  })
-  phases.push({
-    label: '응답 생성',
-    kind: 'gen',
-    // RFC-0233 §9 — ground the generation phase in OAS request_latency_ms
-    // (provider call wall-clock). Absent on the error path or before a
-    // response existed → render "측정 없음" rather than fabricating a bar.
-    durationMs: record.request_latency_ms ?? null,
-    durationSource:
-      record.request_latency_ms != null ? 'provider_telemetry' : 'not_recorded',
-    // RFC-0233 §10 — time-to-first-token. Populated on the streaming path for
-    // every provider; null for non-streaming turns and on the error path.
-    ttfrcMs: record.ttfrc_ms ?? null,
-    visualDurationMs: 0,
-    visualOffsetMs: 0,
-    meta: (() => {
-      if (record.request_latency_ms == null) {
-        return 'provider/OAS duration is not recorded for this turn'
-      }
-      if (record.ttfrc_ms != null) {
-        return `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
-      }
-      return 'provider call wall-clock (request_latency_ms)'
-    })(),
-  })
-  const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
-
-  const systemPrompt = buildSystemPrompt(keeperName, record)
-  const injectedCtx = buildInjectedCtx(record, ctxPct, tokIn)
 
   return {
-    traceId,
     tokIn,
     tokOut,
     ctxPct,
     contextWindow: record.context_window ?? null,
-    cost,
-    measuredDurationMs,
-    visualTotalMs,
-    phases,
-    tools,
-    systemPrompt,
-    injectedCtx,
+    requestLatencyMs: record.request_latency_ms ?? null,
+    ttfrcMs: record.ttfrc_ms ?? null,
   }
 }
 
 function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false)
-  const onClick = (e: Event) => {
+  const [status, setStatus] = useState<'idle' | 'done' | 'failed'>('idle')
+  const onClick = async (e: Event) => {
     e.stopPropagation()
     try {
-      void navigator.clipboard?.writeText(text)
+      if (!navigator.clipboard) throw new Error('clipboard API unavailable')
+      await navigator.clipboard.writeText(text)
+      setStatus('done')
     } catch {
-      /* ignore */
+      setStatus('failed')
     }
-    setDone(true)
-    setTimeout(() => setDone(false), 1200)
+    setTimeout(() => setStatus('idle'), 1200)
   }
   return html`
-    <button class="kti-copy ${done ? 'done' : ''}" onClick=${onClick}>
-      ${done ? '\u2713 복사됨' : '\u2398 ' + label}
+    <button class="kti-copy ${status}" onClick=${onClick}>
+      ${status === 'done' ? '\u2713 복사됨' : status === 'failed' ? '복사 실패' : '\u2398 ' + label}
     </button>
   `
 }
 
-function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: string; htmlContent?: string; tokens?: number }) {
-  return html`
-    <div class="kti-code">
-      <div class="kti-code-h">
-        <span class="cap">${cap}</span>
-        ${tokens != null ? html`<span class="sz">~${tokens} tok</span>` : null}
-        <${CopyBtn} text=${text} />
-      </div>
-      ${htmlContent
-        ? html`<pre dangerouslySetInnerHTML=${{ __html: htmlContent }} />`
-        : html`<pre>${text}</pre>`}
-    </div>
-  `
-}
-
 function TimelineTab({ t }: { t: TurnDetail }) {
-  const measuredCount = t.phases.filter(p => p.durationMs != null).length
-  const unknownCount = t.phases.length - measuredCount
+  const latencyObserved = t.requestLatencyMs != null
   return html`
     <div class="kti-sec">
       <div class="kti-sec-h">
-        <h4>턴 워터폴</h4>
-        <span class="n">
-          ${t.phases.length} 단계 · 실측 ${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'} · 미측정 ${unknownCount}
-        </span>
+        <h4>Provider 요청 관측</h4>
+        <span class="n">request_latency_ms · ${latencyObserved ? '실측' : '측정 없음'}</span>
       </div>
       <div class="kti-wf">
-        ${t.phases.map((p, i) => html`
-          <div key=${i} class="kti-wf-row">
-            <div class="kti-wf-lbl">
-              <span class="kti-wf-ico kti-k-${p.kind}"></span>
-              <span class="nm ${p.mono ? 'mono' : ''}" title=${p.meta ?? p.label}>${p.label}</span>
-            </div>
-            <div class="kti-wf-track">
-              <div
-                class=${`kti-wf-bar kti-k-${p.kind}${p.durationSource === 'not_recorded' ? ' is-unmeasured' : ''}`}
-                title=${phaseDurationTitle(p)}
-                style=${{
-                  left: `${(p.visualOffsetMs / t.visualTotalMs) * 100}%`,
-                  width: `${Math.max(0.6, (p.visualDurationMs / t.visualTotalMs) * 100)}%`,
-                }}
-              />
-            </div>
-            <span class="kti-wf-dur" title=${phaseDurationTitle(p)}>${phaseDurationLabel(p)}</span>
+        <div class="kti-wf-row">
+          <div class="kti-wf-lbl">
+            <span class="kti-wf-ico kti-k-provider"></span>
+            <span class="nm" title="OAS inference_telemetry.request_latency_ms">Provider request wall-clock</span>
           </div>
-        `)}
+          <div class="kti-wf-track">
+            ${latencyObserved
+              ? html`<span class="kti-wf-observed" data-testid="turn-provider-latency-observed">OAS inference telemetry</span>`
+              : html`<span class="kti-wf-unmeasured" data-testid="turn-provider-latency-unmeasured">측정 없음</span>`}
+          </div>
+          <span class="kti-wf-dur" title="request_latency_ms — provider call wall-clock (OAS inference_telemetry)">${formatObservedDuration(t.requestLatencyMs)}</span>
+        </div>
       </div>
       <div class="kti-wf-foot">
-        <div class="kti-wf-legend">
-          <span><i class="kti-k-reason"></i>추론</span>
-          <span><i class="kti-k-tool"></i>도구</span>
-          <span><i class="kti-k-gen"></i>생성</span>
-        </div>
-        <span>실측 합계 <b>${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'}</b></span>
+        <span>source · OAS inference_telemetry</span>
+        <span>request wall-clock <b>${formatObservedDuration(t.requestLatencyMs)}</b> · TTFRC <b>${formatObservedDuration(t.ttfrcMs)}</b></span>
       </div>
     </div>
   `
@@ -792,26 +434,24 @@ function KeeperLine({
 
 function MessagesTab({
   keeperName,
-  t,
   transcript,
 }: {
   keeperName: string
-  t: TurnDetail
   transcript: TranscriptView
 }) {
   let seq = 0
   const userLines = transcript.kind === 'loaded' ? transcript.data.user : []
   const assistantLines = transcript.kind === 'loaded' ? transcript.data.assistant : []
-  // 2 synthetic (system + context) + real user lines + tools + real assistant
-  // lines. Falls back to one placeholder slot each while loading/absent.
-  const userSlots = userLines.length || 1
-  const assistantSlots = assistantLines.length || 1
-  const messageCount = 2 + userSlots + t.tools.length + assistantSlots
+  const messageCount = userLines.length + assistantLines.length
   return html`
     <div class="kti-sec">
       <div class="kti-sec-h">
-        <h4>모델에 전달된 시퀀스</h4>
-        <span class="n">${messageCount} 메시지</span>
+        <h4>턴 전사 관측</h4>
+        <span class="n">
+          ${transcript.kind === 'loaded'
+            ? `${messageCount} 메시지 · ${transcript.data.source}`
+            : '전사 미확정'}
+        </span>
       </div>
       ${transcript.kind === 'loading'
         ? html`<div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-transcript-loading">전사 불러오는 중…</div>`
@@ -819,92 +459,18 @@ function MessagesTab({
       ${transcript.kind === 'error'
         ? html`<div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-transcript-error">전사 불러오기 실패 · ${transcript.message}</div>`
         : null}
-      <div class="kti-seq-rail">
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role system">system</span>
-            <span class="who">시스템 프롬프트</span>
-            <span class="seq">#${++seq}</span>
+      ${transcript.kind === 'loaded'
+        ? html`
+          <div class="kti-seq-rail">
+            ${userLines.length
+              ? userLines.map(line => html`<${OperatorLine} line=${line} seq=${++seq} />`)
+              : html`<${OperatorLine} line=${null} seq=${++seq} />`}
+            ${assistantLines.length
+              ? assistantLines.map(line => html`<${KeeperLine} keeperName=${keeperName} line=${line} seq=${++seq} />`)
+              : html`<${KeeperLine} keeperName=${keeperName} line=${null} seq=${++seq} />`}
           </div>
-          <div class="kti-msg-b mono">${t.systemPrompt}</div>
-        </div>
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role context">context</span>
-            <span class="who">주입 컨텍스트</span>
-            <span class="seq">#${++seq}</span>
-          </div>
-          <div class="kti-msg-b mono">${t.injectedCtx}</div>
-        </div>
-        ${userLines.length
-          ? userLines.map(line => html`<${OperatorLine} line=${line} seq=${++seq} />`)
-          : html`<${OperatorLine} line=${null} seq=${++seq} />`}
-        ${t.tools.map((tool, i) => html`
-          <div key=${i} class="kti-tool">
-            <div class="kti-tool-h">
-              <span class="seq">#${++seq}</span>
-              <span class="tnm mono">${tool.toolName ?? tool.id}</span>
-              <span class="pill ${toolStatusClass(tool.status)}">
-                ${toolStatusLabel(tool.status)}
-              </span>
-              ${tool.agentSubturn != null
-                ? html`<span class="seq">agent subturn T${tool.agentSubturn}</span>`
-                : null}
-              ${tool.durationMs != null
-                ? html`<span class="seq">${formatMsCompact(tool.durationMs)}</span>`
-                : html`<span class="seq">duration 없음</span>`}
-            </div>
-            <div class="kti-tool-b">
-              ${tool.matched
-                ? html`
-                  <${CodeCard}
-                    cap="요청 · input"
-                    text=${toolInputText(tool.input)}
-                    tokens=${approxTokens(toolInputText(tool.input))}
-                  />
-                  <${CodeCard}
-                    cap=${toolOutputMeta(tool.output) ? `응답 · result (${toolOutputMeta(tool.output)})` : '응답 · result'}
-                    text=${toolOutputText(tool.output)}
-                    tokens=${approxTokens(toolOutputText(tool.output))}
-                  />
-                `
-                : html`
-                  <div class="kti-msg-b kti-msg-absent" data-testid="turn-tool-io-absent">
-                    이 execution(${tool.id.slice(0, 24)})의 tool-call I/O를 tool-call 로그에서 찾지 못했습니다 (보존 윈도 밖이거나 미기록)
-                  </div>
-                `}
-            </div>
-          </div>
-        `)}
-        ${assistantLines.length
-          ? assistantLines.map(line => html`<${KeeperLine} keeperName=${keeperName} line=${line} seq=${++seq} />`)
-          : html`<${KeeperLine} keeperName=${keeperName} line=${null} seq=${++seq} />`}
-      </div>
-    </div>
-  `
-}
-
-function ContextTab({ t }: { t: TurnDetail }) {
-  return html`
-    <div class="kti-sec">
-      <div class="kti-ctx-card">
-        <div class="kti-ctx-h">
-          <span class="t">시스템 프롬프트</span>
-          <span class="tok">~${approxTokens(t.systemPrompt)} tok</span>
-          <${CopyBtn} text=${t.systemPrompt} />
-        </div>
-        <pre>${t.systemPrompt}</pre>
-      </div>
-    </div>
-    <div class="kti-sec">
-      <div class="kti-ctx-card">
-        <div class="kti-ctx-h">
-          <span class="t">주입 컨텍스트 · blocks · executions</span>
-          <span class="tok">~${approxTokens(t.injectedCtx)} tok</span>
-          <${CopyBtn} text=${t.injectedCtx} />
-        </div>
-        <pre>${t.injectedCtx}</pre>
-      </div>
+        `
+        : null}
     </div>
   `
 }
@@ -924,16 +490,13 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       <div class="kti-kv">
         <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
-        <span class="k">fsm.state</span><span class="v">n/a</span>
-        <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
-        <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
-        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
+        <span class="k">input tokens</span><span class="v">${formatObservedTokens(t.tokIn)}</span>
+        <span class="k">output tokens</span><span class="v">${formatObservedTokens(t.tokOut)}</span>
+        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${formatContextWindow(t.contextWindow)}` : `비율 측정 없음 / ${formatContextWindow(t.contextWindow)}`}</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
-        <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
-        <span class="k">tool calls</span><span class="v">${t.tools.length}</span>
-        <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
-        <span class="k">est. cost${record.price_input_per_million != null ? '' : ' · 가격 미구성'}</span><span class="v">${t.cost != null ? `$${t.cost.toFixed(3)}` : '미상'}</span>
+        <span class="k">provider request wall-clock</span><span class="v">${formatObservedDuration(t.requestLatencyMs)}</span>
+        <span class="k">time to first response chunk</span><span class="v">${formatObservedDuration(t.ttfrcMs)}</span>
         <span class="k">finish_reason</span><span class="v">${record.finish_reason ?? 'n/a'}</span>
         <span class="k">source</span><span class="v">${source}</span>
       </div>
@@ -944,7 +507,6 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
 const TABS: [string, string][] = [
   ['timeline', '타임라인'],
   ['messages', '메시지'],
-  ['context', '컨텍스트'],
   ['meta', '메타'],
 ]
 
@@ -952,24 +514,26 @@ function TurnDetailDrawer({
   keeperName,
   row,
   source,
-  toolEntries,
-  toolCallError,
   onClose,
 }: {
   keeperName: string
   row: TurnRecordRow
   source: string
-  toolEntries: readonly ToolCallEntry[]
-  toolCallError: string | null
   onClose: () => void
 }) {
   const [tab, setTab] = useState('timeline')
-  const t = buildTurnDetail(keeperName, row.record, toolEntries)
+  const t = buildTurnDetail(row.record)
+  const tokenSplit =
+    t.tokIn != null && t.tokOut != null && t.tokIn + t.tokOut > 0
+      ? {
+          inputPct: (t.tokIn / (t.tokIn + t.tokOut)) * 100,
+          outputPct: (t.tokOut / (t.tokIn + t.tokOut)) * 100,
+        }
+      : null
 
-  // RFC-0233 §7: lazily fetch this turn's transcript by its join key
-  // "<trace_id>#<absolute_turn>". Loaded per-open so the (potentially large)
-  // transcript never bloats the turn-records list.
-  const turnRef = `${row.record.trace_id}#${row.record.absolute_turn}`
+  // RFC-0233 §7: use the exact opaque join key recorded by the server. Loaded
+  // per-open so the (potentially large) transcript never bloats the list.
+  const turnRef = row.record.turn_ref
   const transcriptResource = useManagedAsyncResource<TurnTranscript | null>(null)
   useEffect(() => {
     void transcriptResource.load((signal) =>
@@ -1005,9 +569,9 @@ function TurnDetailDrawer({
       <div class="kti-drawer" onClick=${(e: Event) => e.stopPropagation()}>
         <div class="kti-head">
           <h3>턴 상세</h3>
-          <span class="tid mono">${t.traceId}</span>
+          <span class="tid mono">${row.record.turn_ref}</span>
           <div class="kti-head-actions">
-            <${CopyBtn} text=${t.traceId} label="ID" />
+            <${CopyBtn} text=${row.record.turn_ref} label="turn_ref" />
             <button class="kti-close" onClick=${onClose} title="닫기 (Esc)">\u2715</button>
           </div>
         </div>
@@ -1019,12 +583,6 @@ function TurnDetailDrawer({
           <span class="kti-chip">
             <span class="sub-k">keeper turn</span>T${row.record.absolute_turn}
           </span>
-          <span class="kti-chip">
-            <span class="sub-k">agent subturns</span>${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}
-          </span>
-          <span class="kti-chip">
-            <span class="sub-k">thinking</span>${thinkingChipLabel(row.record)}
-          </span>
           <span class="kti-chip${row.record.finish_reason ? ' ok' : ''}">
             <span class="sub-k">finish</span>${row.record.finish_reason ?? 'n/a'}
           </span>
@@ -1033,58 +591,41 @@ function TurnDetailDrawer({
           </span>
         </div>
 
-        ${toolCallError
-          ? html`
-            <div
-              class="mt-2 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-status-warn)]"
-              data-testid="turn-timing-source-warning"
-            >
-              tool-call timing source unavailable · ${toolCallError}
-            </div>
-          `
-          : null}
-
         <div class="kti-summary" data-testid="turn-summary-stats">
           <div class="kti-stat">
-            <div class="k">실측</div>
-            <div class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '—'}</div>
+            <div class="k">Provider</div>
+            <div class="v">${formatObservedDuration(t.requestLatencyMs)}</div>
           </div>
           <div class="kti-stat">
             <div class="k">입력</div>
-            <div class="v">${(t.tokIn / 1000).toFixed(1)}<small>k</small></div>
+            <div class="v">${formatObservedTokens(t.tokIn)}</div>
           </div>
           <div class="kti-stat">
             <div class="k">출력</div>
-            <div class="v volt">${t.tokOut.toLocaleString()}</div>
-          </div>
-          <div class="kti-stat">
-            <div class="k">도구</div>
-            <div class="v">${t.tools.length}</div>
-          </div>
-          <div class="kti-stat">
-            <div class="k">추정비용</div>
-            <div class="v ok">${t.cost != null ? `$${t.cost.toFixed(2)}` : '미상'}</div>
+            <div class="v volt">${formatObservedTokens(t.tokOut)}</div>
           </div>
         </div>
 
         <div class="kti-tok" data-testid="turn-token-bar">
           <div class="kti-tok-top">
-            <span class="lbl">토큰 경제</span>
-            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
+            <span class="lbl">토큰 관측</span>
+            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatContextWindow(t.contextWindow)}` : `컨텍스트 비율 측정 없음 / ${formatContextWindow(t.contextWindow)}`}</span>
           </div>
           <div class="kti-tok-bar">
-            <span
-              class="seg-in"
-              style=${{ width: `${(t.tokIn / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
-            <span
-              class="seg-out"
-              style=${{ width: `${(t.tokOut / (t.tokIn + t.tokOut)) * 100}%` }}
-            />
+            ${tokenSplit
+              ? html`
+                <span class="seg-in" style=${{ width: `${tokenSplit.inputPct}%` }} />
+                <span class="seg-out" style=${{ width: `${tokenSplit.outputPct}%` }} />
+              `
+              : html`
+                <span class="kti-tok-unmeasured" data-testid="turn-token-split-unmeasured">
+                  ${t.tokIn === 0 && t.tokOut === 0 ? '관측 합계 0' : '토큰 분할 측정 없음'}
+                </span>
+              `}
           </div>
           <div class="kti-tok-legend">
-            <span class="in"><i></i>입력 <b>${t.tokIn.toLocaleString()}</b></span>
-            <span class="out"><i></i>출력 <b>${t.tokOut.toLocaleString()}</b></span>
+            <span class="in"><i></i>입력 <b>${formatObservedTokens(t.tokIn)}</b></span>
+            <span class="out"><i></i>출력 <b>${formatObservedTokens(t.tokOut)}</b></span>
           </div>
         </div>
 
@@ -1105,8 +646,7 @@ function TurnDetailDrawer({
 
         <div class="kti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
-          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} t=${t} transcript=${transcript} />`}
-          ${tab === 'context' && html`<${ContextTab} t=${t} />`}
+          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} transcript=${transcript} />`}
           ${tab === 'meta' && html`<${MetaTab} record=${row.record} t=${t} source=${source} />`}
         </div>
       </div>
@@ -1130,8 +670,6 @@ function TurnRow({
     record.temperature != null ? `t=${record.temperature}` : null,
     record.top_p != null ? `p=${record.top_p}` : null,
     record.max_tokens != null ? `tok=${record.max_tokens}` : null,
-    record.thinking_budget != null ? `think=${record.thinking_budget}` : null,
-    record.enable_thinking === false ? 'no-think' : null,
   ].filter(Boolean)
 
   return html`
@@ -1155,7 +693,7 @@ function TurnRow({
           ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${sampling.join(' ')}</span>`
           : null}
         <span class="text-3xs text-[var(--color-fg-disabled)]">
-          블록 ${record.blocks.length} · 도구 ${record.execution_ids.length}
+          블록 ${record.blocks.length}
         </span>
         ${row.diff_vs_prev
           && (row.diff_vs_prev.added.length > 0
@@ -1184,18 +722,6 @@ function TurnRow({
             ? html`<${DiffSection} diff=${row.diff_vs_prev} />`
             : html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">같은 trace의 이전 턴 없음</div>`}
         </div>
-        ${record.execution_ids.length > 0
-          ? html`
-            <div>
-              <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
-                execution_ids
-              </div>
-              <div class="text-2xs font-mono text-[var(--color-fg-muted)] break-all v2-monitoring-row">
-                ${record.execution_ids.join(', ')}
-              </div>
-            </div>
-          `
-          : null}
       </div>
     </details>
   `
@@ -1203,58 +729,33 @@ function TurnRow({
 
 export function KeeperTurnInspector({
   keeperName,
-  initialTurnTimestamp,
   initialTurnRef,
 }: {
   keeperName: string
-  initialTurnTimestamp?: string | null
-  // RFC-0233 §7: exact turn join key from the originating chat row / board
-  // post. When present it supersedes [initialTurnTimestamp] (exact match, no
-  // window). Callers thread it as the turn_ref data flows (PR-C / follow-up).
+  // RFC-0233 §7: exact turn join key from the originating chat row / board post.
   initialTurnRef?: string | null
 }) {
-  const resource = useManagedAsyncResource<TurnInspectorData | null>(null)
+  const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
   const [initialMatchState, setInitialMatchState] = useState<'idle' | 'matched' | 'missed'>('idle')
   const appliedInitialTurnKey = useRef<string | null>(null)
 
   useEffect(() => {
-    void resource.load(async (signal) => {
-      const [turns, toolCalls] = await Promise.all([
-        fetchKeeperTurnRecords(keeperName, 50, { signal }),
-        fetchKeeperToolCalls(keeperName, 200, { signal }).then(
-          toolCalls => ({ toolCalls, toolCallError: null }),
-          error => ({ toolCalls: null, toolCallError: errorMessage(error) }),
-        ),
-      ])
-      return { turns, toolCalls: toolCalls.toolCalls, toolCallError: toolCalls.toolCallError }
-    })
+    void resource.load(signal => fetchKeeperTurnRecords(keeperName, 50, { signal }))
     return () => {
       resource.cancel()
     }
   }, [keeperName, resource])
 
-  const response = resource.state.value.data?.turns
-  const toolEntries = resource.state.value.data?.toolCalls?.entries ?? []
-  const toolCallError = resource.state.value.data?.toolCallError ?? null
+  const response = resource.state.value.data
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
-  const initialMatchedRow = useMemo(() => {
-    const exact = initialTurnRowForTurnRef(rows, initialTurnRef)
-    if (exact) return exact
-    // WORKAROUND (RFC-0233 §7.6 #3): legacy chat rows / board posts carry no
-    // turn_ref, so fall back to the 30-min timestamp window for those only.
-    // When a turn_ref IS present, a miss stays null — no fuzzy attribution.
-    // removal target: turn_ref backfilled onto persisted rows + populated by
-    // every producer (RFC-0233 follow-up).
-    if (initialTurnRef) return null
-    return initialTurnRowForTimestamp(rows, initialTurnTimestamp)
-  }, [rows, initialTurnRef, initialTurnTimestamp])
-
-  // Identity of the requested turn: the exact join key when available, else the
-  // timestamp. Drives the apply-once tracking below so either entry point works.
-  const initialTurnKey = initialTurnRef ?? initialTurnTimestamp ?? null
+  const initialMatchedRow = useMemo(
+    () => initialTurnRowForTurnRef(rows, initialTurnRef),
+    [rows, initialTurnRef],
+  )
+  const initialTurnKey = initialTurnRef ?? null
 
   useEffect(() => {
     appliedInitialTurnKey.current = null
@@ -1307,11 +808,6 @@ export function KeeperTurnInspector({
               malformed ${response.skipped_rows}행 제외됨
             </span>`
           : null}
-        ${toolCallError
-          ? html`<span class="text-3xs text-[var(--color-status-warn)]" data-testid="turn-timing-source-warning">
-              tool-call timing source unavailable
-            </span>`
-          : null}
       </div>
       ${memoryOsPanel}
       ${initialMatchState === 'missed'
@@ -1320,9 +816,7 @@ export function KeeperTurnInspector({
             class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
             data-testid="turn-linked-empty"
           >
-            ${initialTurnRef
-              ? '연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.'
-              : '메시지 시각과 30분 이내의 turn record 없음. 리스트에서 직접 선택하세요.'}
+            연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.
           </div>
         `
         : null}
@@ -1336,8 +830,6 @@ export function KeeperTurnInspector({
             keeperName=${keeperName}
             row=${selectedRow}
             source=${response?.source ?? 'turn_record'}
-            toolEntries=${toolEntries}
-            toolCallError=${toolCallError}
             onClose=${() => setSelectedRow(null)}
           />`
         : null}

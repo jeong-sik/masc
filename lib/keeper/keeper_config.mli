@@ -115,10 +115,7 @@ val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
-val keeper_batch_limit : unit -> int
-
 val keeper_unified_temperature : unit -> float
-val keeper_unified_max_tokens : unit -> int
 
 (** {2 HITL Context-Summary Worker Policy} *)
 

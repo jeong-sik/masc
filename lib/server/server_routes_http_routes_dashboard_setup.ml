@@ -60,18 +60,36 @@ let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_da
    ([observatory.ts] fetchTelemetry with since_ms/until_ms and no n) then
    Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
    source across all sources — enough to peg the single Eio domain on a
-   non-yielding parse and freeze the keeper fleet. Bound the DEFAULT here;
-   an explicit n=0 still honours the all-in-window contract from #20659. *)
+   non-yielding parse and freeze the keeper fleet. The page contract below
+   now rejects the retired n=0 unlimited form as well. *)
 let default_telemetry_limit = 100
 let default_windowed_telemetry_limit = 2000
+let max_telemetry_page_size = default_windowed_telemetry_limit
 
-(* Resolve the effective entry limit for /api/v1/dashboard/telemetry.
-   Absent or unparseable [n_param] falls back to a bounded default
-   (windowed: [default_windowed_telemetry_limit], else
-   [default_telemetry_limit]) so no request defaults to an unbounded read.
-   An explicit n=0 parses to [Some 0] and is preserved (all-in-window,
-   clamped downstream by #20659). Pure + exposed so the freeze guard
-   (no permissive 0 default) is unit-testable. *)
+type telemetry_limit_error =
+  | Telemetry_limit_not_an_integer of string
+  | Telemetry_limit_not_positive of int
+  | Telemetry_limit_exceeds_page_size of
+      { requested : int
+      ; maximum : int
+      }
+
+let telemetry_limit_error_to_string = function
+  | Telemetry_limit_not_an_integer supplied ->
+    Printf.sprintf "telemetry n must be an integer, received %S" supplied
+  | Telemetry_limit_not_positive supplied ->
+    Printf.sprintf "telemetry n must be positive, received %d" supplied
+  | Telemetry_limit_exceeds_page_size { requested; maximum } ->
+    Printf.sprintf
+      "telemetry n exceeds the page contract (requested=%d maximum=%d)"
+      requested
+      maximum
+
+(* Resolve the explicit page contract for /api/v1/dashboard/telemetry.
+   Absence selects a bounded default. Supplied values are never clamped or
+   normalized: malformed, non-positive, and oversized requests are typed
+   errors so the HTTP boundary can return 400 instead of running an unbounded
+   read or silently returning a partial "unlimited" result. *)
 let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
   let default_n =
     if has_time_window
@@ -79,8 +97,17 @@ let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
     else default_telemetry_limit
   in
   match n_param with
-  | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
-  | None -> default_n
+  | None -> Ok default_n
+  | Some raw ->
+    (match int_of_string_opt raw with
+     | None -> Error (Telemetry_limit_not_an_integer raw)
+     | Some supplied when supplied <= 0 ->
+       Error (Telemetry_limit_not_positive supplied)
+     | Some requested when requested > max_telemetry_page_size ->
+       Error
+         (Telemetry_limit_exceeds_page_size
+            { requested; maximum = max_telemetry_page_size })
+     | Some requested -> Ok requested)
 
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
@@ -105,10 +132,20 @@ let handle_telemetry request reqd =
         (float_query_param req "until_ms")
     in
     let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
-    let n =
+    match
       resolve_telemetry_n ~has_time_window
         ~n_param:(Server_utils.query_param req "n")
-    in
+    with
+    | Error error ->
+      Http.Response.json_value
+        ~status:`Bad_request
+        ~request:req
+        (`Assoc
+           [ "error", `String (telemetry_limit_error_to_string error)
+           ; "code", `String "invalid_telemetry_page_size"
+           ])
+        reqd
+    | Ok n ->
     let offset =
       match Server_utils.query_param req "offset" with
       | Some raw ->

@@ -6,7 +6,8 @@
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
-    - [<masc_root>/trajectories/<keeper>/]  — Trajectory tool-call rows
+    - [<masc_root>/keepers/<keeper>/trajectories/v1/]
+                                             — Trajectory tool-call rows
     - [<masc_root>/tool_usage/]             — Non-public registered tool calls
     - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
     - [<masc_root>/keepers/<name>/execution-receipts/]
@@ -34,6 +35,7 @@ type source =
 val source_to_string : source -> string
 val source_of_string : string -> source option
 val all_sources : source list
+val source_producer : source -> string
 
 type read_result = {
   entries : Yojson.Safe.t list;
@@ -60,7 +62,8 @@ val read_unified :
     reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
     window. Returns at most [n] entries (default 100) sorted by timestamp
-    descending (newest first).  When [n <= 0], no truncation is applied.
+    descending (newest first). [n] must be positive and [offset] non-negative;
+    unbounded reads are not part of this server-facing contract.
 
     [masc_root] is the cluster-aware .masc directory (use
     [Workspace.masc_root_dir config] to obtain it).  [base_path] is the

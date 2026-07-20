@@ -26,7 +26,6 @@ val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
-  last_successful_heartbeat_ts:float ref ->
   keeper_meta
 
 val collect_keepalive_board_events :
@@ -106,8 +105,8 @@ val record_provider_timeout_observation :
     already been recorded via
     [Keeper_registry.increment_turn_failures] — the same counter the
     unified-turn failure path uses — so the caller dispatches
-    [Turn_failed]. Such a cycle must not refresh the
-    work-as-heartbeat lease. *)
+    [Turn_failed]. Such a cycle must not run the post-turn workspace heartbeat
+    or reset its failure counter. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_crashed : bool;
@@ -172,7 +171,6 @@ val refresh_work_as_heartbeat :
   meta_after_proactive:keeper_meta ->
   proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
-  last_successful_heartbeat_ts:float ref ->
   consecutive_failures:int ref ->
   unit
 

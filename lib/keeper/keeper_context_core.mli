@@ -82,14 +82,9 @@ type history_migration_stats =
   ; malformed_lines : int
   }
 
-(** [true] iff [text] looks like a Current World State system
-    context block (used to drop legacy world-state echoes from
-    history.jsonl). *)
-val has_world_state_signature : string -> bool
-
 (** Move every internal-history entry from [history.jsonl] to
-    [history.internal.jsonl], drop world-state echoes, and dedupe
-    the merged internal log. *)
+    [history.internal.jsonl], route explicit prompt sources, and dedupe the
+    merged internal log. Content strings do not control routing. *)
 val migrate_session_history_logs :
   session_dir:string -> history_migration_stats
 

@@ -1,20 +1,13 @@
 (** Work-as-heartbeat refresher, extracted from
     [keeper_heartbeat_loop.ml] (godfile decomp).
 
-    [refresh_work_as_heartbeat] is the keepalive cycle's
-    "implicit heartbeat" path: when the keeper just finished a
-    productive turn (`work_as_hb () = true`) and the proactive warmup
-    has elapsed, we count any successful Workspace.heartbeat against any
-    session-bound workspace as evidence that the keeper is alive — and reset the
-    consecutive-failure counter accordingly.
-
-    Per-workspace failure logging is at DEBUG (not WARN) because the
-    *any-success* aggregation policy means a single live workspace is
-    sufficient; transient per-workspace misses are expected during workspace
-    rebalance and shouldn't pollute the WARN stream.
+    [refresh_work_as_heartbeat] is the keepalive cycle's post-turn heartbeat
+    path: when enabled and proactive warmup has elapsed, it calls
+    [Workspace.heartbeat] for [ctx.config]. Success resets the consecutive
+    failure counter. Failure is debug-logged and leaves the counter unchanged.
 
     Cancellation re-raises (preserves Eio cancellation semantics).
-    All other exceptions degrade to a per-workspace `false` result.
+    All other exceptions become an observed heartbeat failure.
 
     Pure helper move — no callback injection, no parent-local
     dependencies. *)
@@ -28,7 +21,6 @@ let refresh_work_as_heartbeat
       ~(meta_after_proactive : keeper_meta)
       ~(proactive_warmup_elapsed : bool)
       ~(work_as_hb : unit -> bool)
-      ~(last_successful_heartbeat_ts : float ref)
       ~(consecutive_failures : int ref)
   : unit
   =
@@ -36,7 +28,7 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       try
-        (* fire-and-forget: heartbeat persistence is enough; loop records only success/failure. *)
+        (* Heartbeat persistence is enough; the loop records only success/failure. *)
         ignore (Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
         true
       with
@@ -49,7 +41,5 @@ let refresh_work_as_heartbeat
         false
     in
     if hb_ok
-    then (
-      last_successful_heartbeat_ts := Time_compat.now ();
-      consecutive_failures := 0))
+    then consecutive_failures := 0)
 ;;

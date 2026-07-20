@@ -248,8 +248,9 @@ Risk levels, keyword lists, tool names, shell-command inspection, scores,
 consecutive counts, fixed ratios, elapsed age, and arbitrary numeric thresholds
 do not become objective by being encoded in a type.
 
-Cost, tokens, turns, tool rounds, idle turns, and elapsed time are observations.
-They do not authorize Stop, Pause, failure, or fleet-wide admission.
+Cost, tokens, Keeper turns, exact OAS Invocation schedule coordinates, idle
+periods, and elapsed time are observations. They do not authorize Stop, Pause,
+failure, or fleet-wide admission.
 
 ## 5. Gate Contract
 

@@ -1073,7 +1073,6 @@ let keeper_chat_history_json config name =
       Some
         (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
            ~max_lines:trajectory_max_limit
-           ~max_internal_lines:trajectory_max_limit
            ~config
            ~keeper_name:name
            ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
@@ -1463,11 +1462,15 @@ let handle_keeper_get_subroutes state req request reqd =
               List.rev coverage_gaps |> List.find_opt (fun _ -> true)
             in
             let health, stale_reason =
-              match latest_gap with
-              | Some gap ->
+              match read_result.Trajectory.io_errors, latest_gap with
+              | _ :: _, _ -> ("coverage_gap", "trajectory_read_failed")
+              | [], Some gap ->
                   ( "coverage_gap",
                     Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-              | None -> (
+              | [], None
+                when read_result.Trajectory.decode.invalid_entry_count > 0 ->
+                  ("coverage_gap", "trajectory_decode_invalid")
+              | [], None -> (
                   match latest_age_s with
                   | None -> ("empty", "no_entries")
                   | Some age when age > freshness_slo_s ->
@@ -1481,7 +1484,8 @@ let handle_keeper_get_subroutes state req request reqd =
               ("source", `String "trajectory_tool_call");
               ( "producer",
                 `String
-                  "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                  (Telemetry_unified.source_producer
+                     Telemetry_unified.Trajectory_tool_call) );
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
@@ -1494,14 +1498,12 @@ let handle_keeper_get_subroutes state req request reqd =
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
-              ( "gate_decode",
-                `Assoc
-                  [
-                    ( "parsed_gate_count",
-                      `Int read_result.Trajectory.gate_decode.parsed_gate_count );
-                    ( "legacy_default_count",
-                      `Int read_result.Trajectory.gate_decode.legacy_default_count );
-                  ] );
+              ( "decode",
+                Trajectory.entry_decode_summary_to_json
+                  read_result.Trajectory.decode );
+              ( "io_errors",
+                Trajectory.trajectory_read_errors_to_json
+                  read_result.Trajectory.io_errors );
               ("coverage_gaps", `List coverage_gaps);
               ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
@@ -1616,7 +1618,8 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("source", `String "tool_call_io");
                 ( "producer",
                   `String
-                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                    (Telemetry_unified.source_producer
+                       Telemetry_unified.Tool_call_io) );
                 ("durable_store", `String (Filename.concat masc_root "tool_calls"));
                 ("dashboard_surface", `String dashboard_surface);
                 ("freshness_slo_s", `Float freshness_slo_s);
@@ -1850,68 +1853,27 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:trajectory_default_limit
            |> max 1 |> min trajectory_max_limit
          in
-         (* Allow caller to request more result text up to a safe max.
-            Default 2000 chars is enough for the collapsed list view;
-            set result_max_len=10000 (or higher, capped at 10000) to
-            get full detail for an expanded entry. *)
-         let result_max_len =
-           Server_utils.int_query_param req "result_max_len"
-             ~default:2000
-           |> max 0 |> min 10000
-         in
-         let content_max_len =
-           Server_utils.int_query_param req "content_max_len"
-             ~default:Trajectory.default_thinking_truncation
-           |> max 0 |> min 50000
-         in
-         let include_thinking =
-           Server_utils.bool_query_param req "include_thinking"
-             ~default:false
-         in
-         let tail_scan_lines =
-           let multiplier = if include_thinking then 3 else 8 in
-           max 500 (min 5000 (limit * multiplier))
-         in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             "keeper:trajectory:%s:%s:%s:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
-             result_max_len
-             content_max_len
-             include_thinking
-             tail_scan_lines
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                let masc_root = Workspace.masc_root_dir config in
-               let trajectory_lines =
-                 Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
-                   ~trace_id ~max_lines:tail_scan_lines
+               let trajectory_page =
+                 Trajectory.read_recent_lines_page_result ~masc_root
+                   ~keeper_name:m.name ~trace_id
+                   ~scan_limits:Trajectory.standard_trajectory_scan_limits
+                   ~max_entries:limit ()
                in
-               let all_lines =
-                 if include_thinking then
-                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-                 else
-                   trajectory_lines
-               in
-               (* Filter out thinking entries if not requested *)
-               let lines =
-                 if include_thinking then all_lines
-                 else List.filter (function
-                   | Trajectory.Tool_call _ -> true
-                   | Trajectory.Thinking _ -> false) all_lines
-               in
+               let trajectory_read = trajectory_page.Trajectory.read in
+               let lines = trajectory_read.Trajectory.lines in
                let total = List.length lines in
-               let recent =
-                 if total <= limit then lines
-                 else
-                   let drop = total - limit in
-                   List.filteri (fun i _e -> i >= drop) lines
-               in
                `Assoc [
                  ("keeper", `String name);
                  ("trace_id", `String trace_id);
@@ -1919,10 +1881,35 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries", `Int total);
                  ("total_entries_scope", `String "tail");
                  ("total_entries_exact", `Bool false);
-                 ("tail_scan_lines", `Int tail_scan_lines);
-                 ("showing", `Int (List.length recent));
-                 ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+                 ("tail_scan_entries", `Int limit);
+                 ("showing", `Int total);
+                 ( "decode",
+                   Trajectory.trajectory_line_decode_summary_to_json
+                     trajectory_read.Trajectory.line_decode );
+                 ( "io_errors",
+                   Trajectory.trajectory_read_errors_to_json
+                     trajectory_read.Trajectory.io_errors );
+                 ( "scan",
+                   `Assoc
+                     [ ( "physical_rows",
+                         `Int trajectory_page.Trajectory.scan.physical_rows )
+                     ; ( "bytes_read",
+                         `Intlit
+                           (Int64.to_string
+                              trajectory_page.Trajectory.scan.bytes_read) )
+                     ; ( "stop",
+                         `String
+                           (Trajectory.trajectory_scan_stop_to_string
+                              trajectory_page.Trajectory.scan.stop) )
+                     ] );
+                 ( "next_cursor",
+                   match trajectory_page.Trajectory.next_cursor with
+                   | None -> `Null
+                   | Some cursor ->
+                       `String
+                         (Trajectory.trajectory_byte_cursor_to_string cursor) );
+                 ( "entries"
+                 , `List (List.map Trajectory.trajectory_line_to_json lines) );
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

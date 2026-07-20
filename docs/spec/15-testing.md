@@ -167,24 +167,40 @@ type scenario = {
 
 ### 5.4 Trajectory (lib/trajectory.ml)
 
-Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원한다.
+Keeper Tool/Thinking의 JSONL 기반 궤적 로깅. 결정적 재생, 정확한 호출·결과·latency 관측, eval_harness 연동을 지원한다. 모델 usage/cost는 OAS inference observation이 소유하며 trajectory는 Tool 이름으로 이를 추정하지 않는다.
 
-**기록 위치**: `.masc/trajectories/{keeper_name}/{trace_id}.jsonl`
+**기록 위치**:
+`.masc/keepers/{keeper_name}/trajectories/v1/{trace_id}.jsonl`
 
 **tool_call_entry 필드**:
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
+| `schema` | string | 정확히 `masc.keeper_trajectory.v1` |
+| `type` | string | 정확히 `tool_call` |
 | `ts` | float | Unix 타임스탬프 |
-| `turn` | int | 세션 내 턴 번호 |
-| `round` | int | 턴 내 도구 라운드 (1-3) |
+| `ts_iso` | string | ISO 8601 타임스탬프 |
+| `keeper_turn_id` | int | MASC Keeper 절대 턴 (`> 0`) |
+| `oas_turn` | int | OAS Invocation 턴 (`>= 0`) |
+| `schedule` | object | OAS의 `planned_index`, `batch_index`, `batch_size`, `execution_mode`를 그대로 보존 |
+| `tool_use_id` | string | OAS/provider 상관관계 증거. 빈 값·반복 허용, identity로 사용 금지 |
 | `tool_name` | string | 호출된 도구 |
-| `gate_decision` | Pass/Reject | 사전 게이트 결과 |
-| `result` | string option | 실행 결과 (게이트 차단 시 None) |
+| `args` | object | 구조화된 도구 입력 |
+| `outcome` | object | `status`와 성공 `output` 또는 실패 `error` |
 | `duration_ms` | int | 실행 시간 |
-| `cost_usd` | float | 추정 비용 |
+| `execution_id` | string | tool-call ledger와의 필수 typed join key |
 
-**trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
+**trajectory_outcome**: `Completed | Failed | Input_required | Cancelled`. Provider timeout은
+별도의 성공 상태나 재귀 제어 budget이 아니라 해당 실행의 typed OAS 오류로
+`Failed`에 관측된다. `Input_required`는 effect gate 거절이 아니라 OAS의
+명시적 사용자 입력 대기 결과다.
+
+Tool/Thinking/summary 이외의 row, 필수·중복·예상 밖 필드 및 malformed JSON은
+기본값이나 폐기된 계약으로 복구하지 않는다. 유효 row는 계속 읽고, row별
+decode 실패와 file별 I/O 실패는 구조화된 관측으로 함께 반환한다. Tool gate
+판정은 effect Gate의 별도 감사 계약이며 Trajectory Tool row가 복제하지 않는다.
+독립 호출순서 allocator는 없으며 OAS `Invocation.turn + schedule`만 occurrence
+좌표를 제공한다.
 
 ### 5.5 Judgment boundary tests
 

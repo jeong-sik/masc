@@ -1,9 +1,10 @@
 (** RFC-0233 §2.2 — append one TurnRecord per keeper turn, at the same
     cadence as the execution receipt.
 
-    Append failures never fail the turn: they log a WARN with the
-    keeper/trace coordinates (the receipt path already guards turn
-    integrity; this store is an observability surface). *)
+    Invalid observations and append failures never fail the turn: they
+    log a WARN with the keeper/trace coordinates and are not written (the
+    receipt path already guards turn integrity; this store is an
+    observability surface). *)
 
 val write :
   config:Workspace.config ->
@@ -20,7 +21,6 @@ val write :
   ttfrc_ms:float option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
-  execution_ids:Ids.Execution_id.t list ->
   blocks:Turn_record.prompt_block list ->
   unit ->
   unit

@@ -137,6 +137,7 @@ function turnRecordsPayload() {
           keeper: 'masc-improver',
           trace_id: 'trace-a',
           absolute_turn: 7,
+          turn_ref: 'trace-a#7',
           ts: 1_789_999_000,
           runtime_profile: 'local',
           blocks: [
@@ -145,7 +146,6 @@ function turnRecordsPayload() {
             { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
             { block: 'zero_block', bytes: 0, digest: '000000000000' },
           ],
-          execution_ids: [],
           input_tokens: 3500,
           context_window: 200000,
         },
@@ -577,8 +577,8 @@ describe('memory view-model helpers', () => {
   it('latestEntryWithBlocks skips an empty-block tail turn and returns the last assembled prompt', () => {
     const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
       record: {
-        keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
-        blocks, execution_ids: [],
+        keeper: 'k', trace_id: 't', absolute_turn: turn, turn_ref: `t#${turn}`, ts: turn, runtime_profile: 'local',
+        blocks,
       },
       diff_vs_prev: null,
     })
@@ -597,10 +597,10 @@ describe('memory view-model helpers', () => {
         keeper: 'k',
         trace_id: `trace-${turn}`,
         absolute_turn: turn,
+        turn_ref: `trace-${turn}#${turn}`,
         ts: turn,
         runtime_profile: 'local',
         blocks: [{ block, bytes, digest: `digest-${turn}` }],
-        execution_ids: [],
       },
       diff_vs_prev: null,
     })

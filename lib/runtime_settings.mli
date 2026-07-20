@@ -54,10 +54,6 @@ val keeper_snapshot_sec : int Runtime_params.param
 val keeper_work_as_hb_enabled : bool Runtime_params.param
 (** Enable work-as-heartbeat fallback. *)
 
-val keeper_work_as_hb_max_silence_sec : float Runtime_params.param
-(** Maximum silence allowed in work-as-heartbeat mode (seconds).
-    Range \[10.0, 600.0]. *)
-
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —
     runtime mutation requires keeper restart.  Range \[10, 1000]. *)

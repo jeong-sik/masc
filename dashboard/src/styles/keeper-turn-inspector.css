@@ -158,7 +158,7 @@
 /* ── Summary stat strip ── */
 .kti-summary {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1px;
   background: var(--color-border-subtle);
   border-bottom: 1px solid var(--color-border-default);
@@ -198,15 +198,11 @@
   color: var(--color-fg-disabled);
 }
 
-.kti-stat .v.ok {
-  color: var(--color-status-ok);
-}
-
 .kti-stat .v.volt {
   color: var(--color-accent-fg);
 }
 
-/* ── Token economics bar ── */
+/* ── Token observations bar ── */
 .kti-tok {
   /* Dashboard v2 uses the shared horizontal spacing token here while preserving
      the prototype's 13px vertical pad and no-border economics band. */
@@ -251,7 +247,6 @@
 .kti-tok-bar > span {
   display: block;
   height: 100%;
-  min-width: 2px;
 }
 
 .kti-tok-bar .seg-in {
@@ -262,6 +257,16 @@
 
 .kti-tok-bar .seg-out {
   background: var(--color-accent-fg);
+}
+
+.kti-tok-bar .kti-tok-unmeasured {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--color-fg-disabled);
 }
 
 .kti-tok-legend {
@@ -440,13 +445,6 @@
   white-space: nowrap;
 }
 
-.kti-wf-lbl .nm.mono {
-  font-family: var(--font-mono);
-  /* prototype .ti-wf-lbl .nm.mono (inspector.css:50): 11.5px. --fs-11 is bumped
-     to 13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 11.5px;
-}
-
 .kti-wf-ico {
   width: 8px;
   height: 8px;
@@ -465,15 +463,6 @@
   overflow: hidden;
 }
 
-.kti-wf-bar {
-  position: absolute;
-  top: 3px;
-  height: 12px;
-  border-radius: 3px;
-  min-width: 4px;
-  transition: none; /* v2 source: waterfall bars are not animated */
-}
-
 .kti-wf-dur {
   font-family: var(--font-mono);
   /* prototype .ti-wf-dur (inspector.css:54): 11px. --fs-11 is bumped to 13px at
@@ -484,17 +473,21 @@
   font-variant-numeric: tabular-nums;
 }
 
-.kti-k-ctx { background: var(--color-fg-disabled); }
-.kti-k-reason { background: var(--color-status-info); }
-.kti-k-tool { background: var(--color-accent-fg); }
-.kti-k-gen { background: var(--color-status-ok); }
-/* Unmeasured phases (durationSource === 'not_recorded'): no real duration, so
-   the bar is a placeholder, not a measurement. Hatch + dim it so it never reads
-   as a measured span alongside the tool bars that carry real ms. */
-.kti-wf-bar.is-unmeasured {
-  opacity: 0.5;
-  background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--color-bg-page) 60%, transparent) 0 5px, transparent 5px 10px);
-  border: 1px dashed color-mix(in oklab, var(--color-fg-muted) 45%, transparent);
+.kti-k-provider { background: var(--color-status-info); }
+
+.kti-wf-observed,
+.kti-wf-unmeasured {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--color-fg-disabled);
+}
+
+.kti-wf-observed {
+  color: var(--color-status-info);
 }
 
 .kti-wf-foot {
@@ -515,31 +508,6 @@
   font-family: var(--font-mono);
   color: var(--color-fg-primary);
   font-weight: 600;
-}
-
-.kti-wf-legend {
-  display: flex;
-  /* prototype .ti-wf-legend (keeper-v2/styles/inspector.css:61): gap 14px.
-     --sp-3 is 8px under v2; pin the literal so the reason/tool/gen swatches
-     sit at the prototype rhythm. */
-  gap: 14px;
-}
-
-.kti-wf-legend span {
-  display: inline-flex;
-  align-items: center;
-  /* prototype .ti-wf-legend span (inspector.css:62): gap 5px, font-size 10.5px.
-     --fs-10 is bumped to 12px at desktop :root (variables.css:723); pin the
-     literals. */
-  gap: 5px;
-  font-size: 10.5px;
-  color: var(--color-fg-disabled);
-}
-
-.kti-wf-legend i {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
 }
 
 /* ── Copy button ── */
@@ -572,138 +540,9 @@
   border-color: rgb(var(--color-status-ok-glow) / .4);
 }
 
-/* ── Code / context card ── */
-.kti-code {
-  border: 1px solid var(--color-border-subtle);
-  /* prototype .ti-code (inspector.css:66): --radius-sm (4px), background
-     --bg-well (deepest well, #06070a). --color-bg-page maps to --bg-deep
-     (#08090d); use the v2 base --bg-well token directly. */
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-well);
-  margin-top: 6px;
-}
-
-.kti-code-h {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  /* prototype .ti-code-h (inspector.css:67): background --bg-panel-alt.
-     --color-bg-hover maps to --bg-card-hover (lighter); use --color-bg-panel-alt
-     (= --bg-panel-alt). */
-  background: var(--color-bg-panel-alt);
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.kti-code-h .cap {
-  font-family: var(--font-mono);
-  /* prototype .ti-code-h .cap (inspector.css:68): 9.5px. --fs-10 is bumped to
-     12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-fg-disabled);
-}
-
-.kti-code-h .sz {
-  font-family: var(--font-mono);
-  /* prototype .ti-code-h .sz (inspector.css:69): 9.5px. --fs-10 is bumped to
-     12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 9.5px;
-  color: var(--color-fg-disabled);
-}
-
-.kti-code pre {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  font-family: var(--font-mono);
-  /* prototype .ti-code pre (inspector.css:70): 11.5px / line-height 1.62.
-     --fs-11 is bumped to 13px at desktop :root and --lh-loose is 1.6; pin the
-     prototype literals. */
-  font-size: 11.5px;
-  line-height: 1.62;
-  color: var(--color-fg-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.kti-code pre .jk {
-  color: var(--color-accent-fg);
-}
-
-.kti-code pre .js {
-  color: var(--color-status-ok);
-}
-
-/* ── Structured tool card (transcript) ── */
-.kti-tool {
-  border: 1px solid var(--color-border-default);
-  /* prototype .ti-tool (inspector.css:78): --radius-sm (4px). */
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.kti-tool-h {
-  display: flex;
-  align-items: center;
-  /* prototype .ti-tool-h (inspector.css:79): gap 9px, padding 9px 12px,
-     background --bg-panel-alt. --color-bg-hover maps to the lighter
-     --bg-card-hover; pin the literals + --color-bg-panel-alt. */
-  gap: 9px;
-  padding: 9px 12px;
-  background: var(--color-bg-panel-alt);
-}
-
-.kti-tool-h .seq {
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .seq (inspector.css:80): 9.5px. --fs-10 is bumped to
-     12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 9.5px;
-  color: var(--color-fg-disabled);
-}
-
-.kti-tool-h .tnm {
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .tnm (inspector.css:81): 12.5px. --fs-12 is bumped to
-     14px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 12.5px;
-  color: var(--color-fg-primary);
-}
-
-.kti-tool-h .pill {
-  font-family: var(--font-ui);
-  /* prototype .ti-tool-h .pill (inspector.css:82): 9px, padding 2px 7px. --fs-9
-     is bumped to 11px at desktop :root (variables.css:723); pin the literals. */
-  font-size: var(--fs-9);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-}
-
-.kti-tool-h .pill.ok {
-  color: var(--color-status-ok);
-  border: 1px solid rgb(var(--color-status-ok-glow) / .4);
-}
-
-.kti-tool-h .pill.bad {
+.kti-copy.failed {
   color: var(--color-status-err);
-  border: 1px solid rgb(var(--color-status-err-glow) / .4);
-}
-
-.kti-tool-h .lat {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .lat (inspector.css:85): 11px. --fs-11 is bumped to
-     13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: var(--fs-11);
-  color: var(--color-fg-disabled);
-}
-
-.kti-tool-b {
-  padding: 10px 12px;
+  border-color: rgb(var(--color-status-err-glow) / .4);
 }
 
 /* ── Role-tinted transcript message ── */
@@ -738,11 +577,6 @@
   border-radius: var(--radius-xs);
 }
 
-.kti-msg-role.system {
-  color: var(--color-status-info);
-  border: 1px solid rgb(var(--color-status-info-glow) / .35);
-}
-
 .kti-msg-role.user {
   /* prototype .ti-msg-role.user (inspector.css:93): color --volt-strong (the
      brighter brass #f0c373), border --volt-dim. --color-accent-fg maps to the
@@ -754,15 +588,6 @@
 .kti-msg-role.assistant {
   color: var(--color-fg-primary);
   border: 1px solid var(--color-border-strong);
-}
-
-.kti-msg-role.context {
-  /* prototype renders the injected-context chip with the SAME .system styling
-     (turn-inspector.jsx: <span className="ti-msg-role system">context</span>) —
-     info/--accent-ice text + 35% info border, not amber. Mirror .system so the
-     context chip matches the prototype rather than introducing a warn tint. */
-  color: var(--color-status-info);
-  border: 1px solid rgb(var(--color-status-info-glow) / .35);
 }
 
 .kti-msg-h .who {
@@ -796,73 +621,12 @@
   word-break: break-word;
 }
 
-.kti-msg-b.mono {
-  font-family: var(--font-mono);
-  /* prototype .ti-msg-b.mono (inspector.css:98): 11.5px. --fs-11 is bumped to
-     13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 11.5px;
-  color: var(--color-fg-muted);
-}
-
 .kti-seq-rail {
   display: flex;
   flex-direction: column;
   /* prototype .ti-seq-rail (inspector.css:100): gap 10px. --sp-3 is 8px under
      v2; pin the literal. */
   gap: 10px;
-}
-
-/* ── Context section card ── */
-.kti-ctx-card {
-  border: 1px solid var(--color-border-subtle);
-  /* prototype .ti-ctx-card (inspector.css:108): --radius-sm (4px). */
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.kti-ctx-h {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  /* prototype .ti-ctx-h (inspector.css:109): background --bg-panel-alt.
-     --color-bg-hover maps to the lighter --bg-card-hover; use --color-bg-panel-alt. */
-  background: var(--color-bg-panel-alt);
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.kti-ctx-h .t {
-  font-family: var(--font-ui);
-  /* prototype .ti-ctx-h .t (inspector.css:110): 10px. --fs-10 is bumped to 12px
-     at desktop :root (variables.css:723); pin the literal. */
-  font-size: var(--fs-10);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-fg-muted);
-}
-
-.kti-ctx-h .tok {
-  font-family: var(--font-mono);
-  /* prototype .ti-ctx-h .tok (inspector.css:111): 10px. --fs-10 is bumped to
-     12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: var(--fs-10);
-  color: var(--color-fg-disabled);
-}
-
-.kti-ctx-card pre {
-  margin: 0;
-  /* prototype .ti-ctx-card pre (inspector.css:112): padding 11px 13px, 11.5px,
-     line-height 1.62. --fs-11 is bumped to 13px at desktop :root and --lh-loose
-     is 1.6; pin the prototype literals. */
-  padding: 11px 13px;
-  max-height: 340px;
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.62;
-  color: var(--color-fg-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 /* ── Meta: parameter chips + kv ── */

@@ -29,6 +29,7 @@ val classify_store_dir : source -> site:string -> string -> store_dir_state
 val discover_keeper_metric_dirs : string -> (string * string) list
 val is_directory : source -> site:string -> string -> bool
 val is_jsonl_file : source -> site:string -> string -> bool
-val discover_trajectory_keeper_dirs_in_root : string -> (string * string) list
+val discover_trajectory_keeper_dirs_in_keepers_root :
+  masc_root:string -> string -> (string * string) list
 val discover_trajectory_keeper_dirs : string -> (string * string) list
 val discover_execution_receipt_dirs : string -> (string * string) list

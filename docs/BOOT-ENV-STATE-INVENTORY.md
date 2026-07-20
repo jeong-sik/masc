@@ -93,8 +93,7 @@ are not overwritten by the seed.
 
 ### 1.3 runtime.toml — per-base-path startup keeper env seeding
 
-All live startup-scoped `MASC_KEEPER_*` keeper runtime variables wired through
-`Env_config_keeper` / `Keeper_config` can be set declaratively in
+The Keeper-owned boot-static keys listed below can be set declaratively in
 `<active config root>/runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
@@ -112,39 +111,36 @@ Operational contract:
 3. Hardcoded default in `Env_config_keeper` / `Keeper_keepalive`
 
 Missing file is not an error (returns 0 overrides, uses env/defaults).
-Parse errors log a warning and fall back to env defaults.
-Legacy compatibility names are not TOML preemption keys. For example,
-`MASC_KEEPER_AUTOBOT_MAX` is ignored here; `bootstrap.autoboot_max` writes
-only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
-canonical process env var is already set.
+Parse errors and explicitly removed Keeper keys fail startup. Namespaces owned
+by the provider/model Runtime parser are not interpreted by this layer.
 
-**Sections** (80 knobs total):
+**Sections** (34 registered boot-seed mappings):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
-| `[bootstrap]` | 4 | `enabled`, `max_scan`, `autoboot_max` |
-| `[autonomous]` | 2 | `enabled`, `fairness_cooldown_sec` |
+| `[bootstrap]` | 3 | `enabled`, `stale_turn_sec`, `max_scan` |
+| `[autonomous]` | 1 | `enabled` |
 | `[reactive]` | 1 | `enabled` |
-| `[heartbeat]` | 6 | `interval_sec`, `max_silence_sec`, `sleep_chunk_sec`, `board_wakeup_max` |
+| `[heartbeat]` | 5 | `interval_sec`, `snapshot_sec`, `work_as_heartbeat`, `sleep_chunk_sec`, `board_wakeup_max` |
 | `[health]` | 1 | `durable_queue_stale_sec` |
 | `[wire_capture]` | 1 | `enabled` |
-| `[proactive]` | 4 | `enabled`, `min_interval_sec`, `noop_backoff_max_shift`, `idle_decay_max_periods` |
-| `[turn]` | 16 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `chat_waiting_cap`, `temperature` |
-| `[supervisor]` | 3 | `backoff_base_sec`, `backoff_max_sec`, `sweep_sec` |
+| `[proactive]` | 1 | `enabled` |
+| `[turn]` | 4 | `stream_idle_timeout_sec`, `cli_subprocess_idle_sec`, `temperature`, `enable_thinking` |
+| `[supervisor]` | 1 | `sweep_sec` |
 | `[lifecycle]` | 1 | `dead_ttl_sec` |
-| `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
 | `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
-| `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
-| `[web_search]` | 8 | `provider`, `fallbacks`, `timeout_sec`, `rate_limit_max_calls` |
+| `[web_search]` | 6 | `searxng_url`, `provider`, `provider_order`, `fallbacks`, `timeout_sec`, `cache_ttl_sec` |
 | `[debug]` | 1 | `enabled` |
 
 **Example** (`<active config root>/runtime.toml`):
 
 ```toml
 [autonomous]
+enabled = true
 
 [reactive]
+enabled = true
 
 [heartbeat]
 board_wakeup_max = 4 # caps total non-explicit board wakeups after reason prioritization
@@ -154,13 +150,9 @@ durable_queue_stale_sec = 0.0 # default: any durable backlog degrades full healt
 
 [turn]
 stream_idle_timeout_sec = 120
-# Optional Agent.run no-progress guard. Tool timeouts live in the tool layer.
-# execution_idle_timeout_sec = 300
-llm_rerank = true
-
-[watchdog]
-stale_sec = 600
-grace_sec = 900
+cli_subprocess_idle_sec = 120
+temperature = 0.4
+enable_thinking = false
 ```
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a

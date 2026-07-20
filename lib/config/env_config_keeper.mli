@@ -142,7 +142,6 @@ end
 
 module WorkAsHeartbeat : sig
   val enabled : bool
-  val max_silence_sec : float
 end
 
 (** {1 Keeper health policy} *)

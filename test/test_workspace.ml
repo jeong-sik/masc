@@ -1344,6 +1344,41 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       claimable
   )
 
+(* The self-authored exclusion must hold through [read_backlog_counts], not
+   only in [task_is_self_authored]: dropping the filter clause leaves every
+   predicate-level test green while the feedback loop stays open. Counts are
+   compared against a baseline because the fixture seeds its own tasks. *)
+let test_read_backlog_counts_excludes_self_authored_task () =
+  with_test_env (fun config ->
+    let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
+    let _, claimable_before, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    let _ =
+      Workspace.add_task config ~created_by:meta.name
+        ~title:"self-authored routing task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_self, claimable_after_self, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a keeper's own task is not offered back to it as claimable"
+      claimable_before claimable_after_self;
+    let _ =
+      Workspace.add_task config ~created_by:"peer-keeper"
+        ~title:"peer authored task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a peer-authored task is still claimable"
+      (claimable_before + 1) claimable_after_peer;
+    Alcotest.(check int)
+      "the unclaimed count still reports both tasks"
+      (unclaimed_after_self + 1) unclaimed_after_peer
+  )
+
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-task-audit-self-filter-agent" in
@@ -1753,6 +1788,9 @@ let () =
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "read backlog counts excludes self-authored task"
+        `Quick
+        test_read_backlog_counts_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
     ];

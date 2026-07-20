@@ -156,6 +156,9 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
         { guild_id; channel_id; parent_channel_id; thread_id }
   ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
   ; external_message_id = Some message_id
+    (* The guild IS the workspace identity; a DM has none, which rides the
+       typed delivery as explicit absence ([None]), never an empty string. *)
+  ; workspace_id = guild_id
   }
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
@@ -308,7 +311,11 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
            P1); the snowflake stands in only for malformed payloads
            missing both — the gate contract requires a non-empty name,
            and the id fallback preserves the pre-P1 behavior. *)
-      ; channel_workspace_id = channel_id
+      ; channel_workspace_id = Option.value guild_id ~default:""
+        (* sound-partial: allow — [guild_id]=None is a DM (a known state,
+           not a parse failure), so the "" default at the stringly gate
+           layer is total, not permissive; the typed
+           [delivery.workspace_id] carries the explicit absence ([None]). *)
       ; keeper_name
       ; content
       ; idempotency_key = Printf.sprintf "discord-msg-%s" message_id

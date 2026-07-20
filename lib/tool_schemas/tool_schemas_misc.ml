@@ -26,7 +26,6 @@ let config_category_enum_strings =
   ; "inference"
   ; "autonomy"
   ; "dashboard"
-  ; "economy"
   ; "operations"
   ; "channel"
   ; "process"

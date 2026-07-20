@@ -152,6 +152,10 @@ let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
   ; surface = Surface_ref.Slack { team_id; channel_id; thread_ts }
   ; conversation_id = Some (slack_conversation_id ~channel_id)
   ; external_message_id = Some ts
+    (* The team IS the workspace identity; when auth.test could not resolve
+       it, the typed delivery carries explicit absence ([None]), never an
+       empty string. *)
+  ; workspace_id = team_id
   }
 
 (* ---------------------------------------------------------------- *)
@@ -273,7 +277,12 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
            valid fallback when Slack omits [user_name] (a known case, mirroring
            the Discord gateway's id fallback). sound-partial: allow *)
       ; channel_user_name = Option.value user_name ~default:user_id
-      ; channel_workspace_id = channel_id
+      ; channel_workspace_id = Option.value team_id ~default:""
+        (* sound-partial: allow — [team_id]=None means auth.test could not
+           resolve the team (a known state, not a parse failure), so the ""
+           default at the stringly gate layer is total, not permissive; the
+           typed [delivery.workspace_id] carries the explicit absence
+           ([None]). *)
       ; keeper_name
       ; content = text
       ; idempotency_key = Printf.sprintf "slack-msg-%s" ts

@@ -105,13 +105,9 @@ let save_vote_log_jsonl content =
 let rewrite_vote_log store =
   save_vote_log_jsonl (vote_log_jsonl store)
 
-(* [vote_outcome] carries the information needed to run post-lock vote hooks.
-   [earn_upvote_for] is [Some author] only on the fresh peer-upvote path — a
-   self-upvote is not reputation, a vote flip does not earn credits (prevents
-   down/up alternation abuse), and a downvote does not earn at all. *)
+(* [vote_outcome] carries the information needed to run post-lock vote hooks. *)
 type vote_outcome = {
   delta : int;
-  earn_upvote_for : string option;
   vote_target : string;
   vote_voter : string;
   vote_direction : vote_direction;
@@ -183,9 +179,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
-                  (* No economy earn on flip: prevents down/up alternation abuse *)
                   Ok { delta = flipped.votes_up - flipped.votes_down;
-                       earn_upvote_for = None;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
@@ -201,34 +195,19 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
-                  let earn =
-                    if (=) direction Up && not (String.equal voter author_name)
-                    then Some author_name
-                    else None
-                  in
                   Ok { delta = updated.votes_up - updated.votes_down;
-                       earn_upvote_for = earn;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
                        vote_ts = now;
                        vote_author_name = author_name })
       in
-      (* Side-effect hooks run outside the store lock. Credit and selection
-         observers write their own state on unrelated paths and modify no board
-         state, so holding [store.mutex] across their I/O would be gratuitous
+      (* Side-effect hooks run outside the store lock. Selection observers
+         write their own state on unrelated paths and modify no board state,
+         so holding [store.mutex] across their I/O would be gratuitous
          contention with every other reader/writer. *)
       (match board_result with
-       | Ok ({ delta; earn_upvote_for = Some author_name } as outcome) ->
-           record_vote_side_effect store outcome;
-           (match Board_effect_hooks.earn
-              ~base_path:(board_base_path ()) ~agent_name:author_name
-              ~kind:Upvote ~reason:"upvote on post" () with
-            | Ok () -> ()
-            | Error e ->
-                Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
-           Ok delta
-       | Ok ({ delta; earn_upvote_for = None } as outcome) ->
+       | Ok ({ delta; _ } as outcome) ->
            record_vote_side_effect store outcome;
            Ok delta
        | Error _ as e -> e)
@@ -284,7 +263,6 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 let author_name = Agent_id.to_string cmt.author in
                 Ok {
                   delta = flipped.votes_up - flipped.votes_down;
-                  earn_upvote_for = None;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;
@@ -303,7 +281,6 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 let author_name = Agent_id.to_string cmt.author in
                 Ok {
                   delta = updated.votes_up - updated.votes_down;
-                  earn_upvote_for = None;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;

@@ -218,6 +218,7 @@ let upsert_rule
       ~input
       ?created_by
       ?source_approval_id
+      ?expires_at
       ()
   =
   with_rules_write_lock (fun () ->
@@ -233,6 +234,7 @@ let upsert_rule
         ; created_at = Unix.gettimeofday ()
         ; created_by
         ; source_approval_id
+        ; expires_at
         }
       in
       (match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
@@ -275,6 +277,8 @@ let find_matching_rule
       ~keeper_name
       ~tool_name
       ~input
+      (* NDT-OK: wall-clock default at this store I/O boundary; callers inject ~now. *)
+      ?(now = Unix.gettimeofday ())
       ()
   =
   with_rules_read_lock (fun () ->
@@ -290,6 +294,10 @@ let find_matching_rule
               && String.equal rule.request_fingerprint request_fingerprint)
            rules
        with
-       | None -> Ok None
-       | Some rule -> Ok (Some { rule_id = rule.id })))
+       | None -> Ok Rule_match_absent
+       | Some rule ->
+         let matched = { rule_id = rule.id } in
+         if rule_expired ~now rule
+         then Ok (Rule_match_expired matched)
+         else Ok (Rule_match_active matched)))
 ;;

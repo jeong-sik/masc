@@ -22,7 +22,7 @@ let register_keeper keeper =
     | Error error -> Alcotest.failf "register_keeper %s: %s" keeper error
   in
   ignore
-    (Registry.register ~base_path:(base_path ()) keeper meta : Registry.registry_entry)
+    (Registry.For_testing.register ~base_path:(base_path ()) keeper meta : Registry.registry_entry)
 ;;
 
 let test_observations_never_gate () =

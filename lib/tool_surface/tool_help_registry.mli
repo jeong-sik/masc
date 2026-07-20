@@ -9,14 +9,16 @@
     + Heuristic fallback (first-sentence summaries, derived
       details).
 
-    Internal: 11 text helpers ([normalize_spaces],
-    [trim_terminal_punctuation], [first_sentence], [truncate],
-    [help_doc_refs], [help_prompt_hints], [default_when_to_use],
-    [constraints_from_metadata], [manual_help_entry],
-    [derived_short_description], [derived_details]),
+    Internal: 7 text helpers ([normalize_spaces], [first_sentence],
+    [truncate], [help_doc_refs], [help_prompt_hints],
+    [default_when_to_use], [manual_help_entry]),
     [canonicalize_schema] (singular — folded into
-    {!canonicalize_schemas}), [index_json] (no external caller),
-    [validate_short_description] (no external caller). *)
+    {!canonicalize_schemas}),
+    [validate_short_description] (no external caller).
+
+    [trim_terminal_punctuation], [constraints_from_metadata],
+    [derived_short_description], [derived_details] and [index_json] were
+    deleted rather than hidden — nothing called them. *)
 
 (** {1 Help entry record} *)
 

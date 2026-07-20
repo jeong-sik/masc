@@ -161,6 +161,11 @@ type chat_message = {
           to decode (reported as a persistence read drop, row kept). *)
   conversation_id : string option;
   external_message_id : string option;
+  workspace_id : string option;
+      (** The connector workspace (guild/team) identity from the typed
+          delivery. Written on connector-intake user lines; [None] on
+          workspace-less deliveries (e.g. Discord DM), rows written before
+          this field existed, and non-connector lines. *)
   speaker : speaker option;
       (** Present on user lines written since RFC-0223 P1; [None] on
           older lines, tool/assistant lines, and lines whose persisted
@@ -341,6 +346,7 @@ val append_user_message_once :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?external_message_id:string ->
+  ?workspace_id:string ->
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
@@ -383,7 +389,7 @@ val load_page :
 
 (** JSON array of messages. Entries without a timestamp omit the
     [ts] field; [tool_call_id] / [tool_call_name] / [source] /
-    [conversation_id] / [external_message_id] /
+    [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
     when present. When [base_dir] is supplied, the history endpoint marks
     audio clips as [expired] when the underlying MP3 file is gone. *)

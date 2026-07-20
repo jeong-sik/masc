@@ -1217,14 +1217,14 @@ let with_running_keeper_metas config metas f =
   let base_path = config.Workspace.base_path in
   List.iter
     (fun (meta : Keeper_meta_contract.keeper_meta) ->
-      Keeper_registry.unregister ~base_path meta.name;
-      ignore (Keeper_registry.register ~base_path meta.name meta))
+      Keeper_registry.For_testing.unregister ~base_path meta.name;
+      ignore (Keeper_registry.For_testing.register ~base_path meta.name meta))
     metas;
   Fun.protect
     ~finally:(fun () ->
       List.iter
         (fun (meta : Keeper_meta_contract.keeper_meta) ->
-          Keeper_registry.unregister ~base_path meta.name)
+          Keeper_registry.For_testing.unregister ~base_path meta.name)
         metas)
     f
 
@@ -1276,8 +1276,8 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
 let mark_keeper_dead_with_registry_cause config
     (meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path in
-  Keeper_registry.record_restart ~base_path meta.name;
-  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
   Keeper_registry.set_failure_reason ~base_path meta.name
     (Some
        (Keeper_registry.Provider_runtime_error
@@ -3022,7 +3022,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
             restored.name
             ~restart_count:10
             ~last_restart_ts:1234.0
-            ~crash_log:(Keeper_registry.crash_log_of ~base_path restored.name);
+            ~crash_log:(Keeper_registry.For_testing.crash_log_of ~base_path restored.name);
           (match Keeper_registry.get ~base_path restored.name with
            | Some entry ->
              Alcotest.(check bool) "restore cleared typed failure reason" true

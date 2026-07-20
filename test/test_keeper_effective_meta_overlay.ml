@@ -919,12 +919,12 @@ let test_status_reads_live_registry_each_call () =
     ~instructions:"live registry observation";
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
+  Masc.Keeper_registry.For_testing.clear ();
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
       ignore
-        (Masc.Keeper_registry.register
+        (Masc.Keeper_registry.For_testing.register
            ~base_path:config.base_path
            name
            meta);
@@ -1038,10 +1038,10 @@ instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
       match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
       | None -> Alcotest.fail "expected error row for invalid effective meta"
@@ -1061,10 +1061,10 @@ instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
@@ -1139,9 +1139,9 @@ let test_reactive_overflow_stamps_compaction_decision () =
   let name = "overflow-observability" in
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
-  Fun.protect ~finally:Masc.Keeper_registry.clear (fun () ->
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
       let reason = "plan_provider_unavailable" in
       Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
       let latest =
@@ -1169,9 +1169,9 @@ let test_reactive_overflow_persists_compaction_decision_to_disk () =
   let name = "overflow-durable" in
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
-  Fun.protect ~finally:Masc.Keeper_registry.clear (fun () ->
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
       let reason = "plan_provider_unavailable" in
       Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
       match Store.read_meta config name with

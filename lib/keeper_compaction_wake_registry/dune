@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_compaction_wake_registry)
- (public_name masc.keeper_compaction_wake_registry)
- (wrapped false)
- (modules keeper_compaction_wake_registry)
- (libraries eio masc.keeper_registry))

@@ -816,6 +816,14 @@
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
 
+; A keeper must not be offered its own authored tasks as claimable work —
+; otherwise a routing/report persona re-triggers on its own output.
+
+(test
+ (name test_keeper_self_authored_task_exclusion)
+ (modules test_keeper_self_authored_task_exclusion)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
 
 (test
@@ -1021,7 +1029,6 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1041,6 +1048,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
@@ -1184,7 +1194,6 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1204,6 +1213,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))
@@ -1615,6 +1627,8 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_keeper_registry_admission_no_suspend.inc)
+(include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 

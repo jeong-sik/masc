@@ -27,63 +27,78 @@ let audio_payload_fields ~audio_file ~audio_device =
   | _ -> []
 ;;
 
-let available_stt_endpoints () =
-  match load_voice_config () with
-  | Ok config ->
-    config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
-  | Error _ -> []
+let available_stt_endpoints (config : Voice_config.t) =
+  config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
 let transcribe_audio ~audio_file ?language_code () =
-  let model =
-    match load_voice_config () with
-    | Ok config -> config.stt.default_model
-    | Error _ -> "scribe_v2"
-  in
-  let endpoints = available_stt_endpoints () in
-  let rec try_endpoints = function
-    | [] -> Error "no enabled STT endpoints configured"
-    | endpoint :: rest ->
-      (match transcribe_via_http_stt endpoint ~audio_file ~model with
-       | Ok json ->
-         let text =
-           Option.value
-             (Json_util.get_string json "text")
-             ~default:(Yojson.Safe.to_string json)
-         in
-         let lang =
-           match language_code with
-           | Some lc -> lc
-           | None ->
-             (match Json_util.get_string json "language_code" with
-              | Some lc -> lc
-              | None -> "unknown")
-         in
-         Ok
-           (`Assoc
-               [ "status", `String "transcribed"
-               ; "text", `String text
-               ; "language_code", `String lang
-               ; "endpoint_id", `String endpoint.id
-               ])
-       | Error _ when rest <> [] -> try_endpoints rest
-       | Error err -> Error err)
-  in
-  try_endpoints endpoints
+  match Voice_config.load_detailed () with
+  | Error (Voice_config.Invalid msg) ->
+    (* An explicit voice config exists but is broken: surface the
+       load failure instead of substituting a hardcoded model. *)
+    Error (Printf.sprintf "voice config load failed: %s" msg)
+  | Error Voice_config.Not_configured ->
+    (* Voice is not set up in this environment: STT is explicitly
+       disabled, which is not an error of the config itself. *)
+    Error "no enabled STT endpoints configured"
+  | Ok config ->
+    let model = config.stt.default_model in
+    let endpoints = available_stt_endpoints config in
+    let rec try_endpoints attempted = function
+      | [] ->
+        Error
+          (Printf.sprintf
+             "all enabled STT endpoints failed: %s"
+             (String.concat " | " (List.rev attempted)))
+      | endpoint :: rest ->
+        (match transcribe_via_http_stt endpoint ~audio_file ~model with
+         | Ok json ->
+           let text =
+             Option.value
+               (Json_util.get_string json "text")
+               ~default:(Yojson.Safe.to_string json)
+           in
+           let lang =
+             match language_code with
+             | Some lc -> lc
+             | None ->
+               (match Json_util.get_string json "language_code" with
+                | Some lc -> lc
+                | None -> "unknown")
+           in
+           Ok
+             (`Assoc
+                 [ "status", `String "transcribed"
+                 ; "text", `String text
+                 ; "language_code", `String lang
+                 ; "endpoint_id", `String endpoint.id
+                 ])
+         | Error error ->
+           let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+           (if rest <> []
+            then
+              log_error
+                (Printf.sprintf
+                   "STT endpoint %s failed; trying next endpoint: %s"
+                   endpoint.id
+                   error));
+           try_endpoints (attempt :: attempted) rest)
+    in
+    if endpoints = []
+    then Error "no enabled STT endpoints configured"
+    else try_endpoints [] endpoints
 ;;
 
-let available_tts_endpoints ?provider () =
-  match load_voice_config () with
-  | Ok config -> Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
-  | Error _ -> []
+let available_tts_endpoints ?provider (config : Voice_config.t) =
+  Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
 ;;
 
 (** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~agent_id ~message ~voice ~model ~audio_device () =
-  let endpoints = available_tts_endpoints () in
+let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_device () =
+  let endpoints = available_tts_endpoints config in
   let rec try_endpoint = function
     | [] -> None
     | endpoint :: rest ->
@@ -354,6 +369,7 @@ let attempt_tts_endpoint
       ~voice
       ~model
       ~priority
+      ~config
       ?audio_device
       endpoint
   =
@@ -472,6 +488,7 @@ let attempt_tts_endpoint
       let data =
         match
           try_http_tts_for_dashboard
+            ~config
             ~agent_id
             ~message
             ~voice
@@ -592,73 +609,87 @@ let agent_speak_json
       | _ -> None
     in
     cleanup_old_audio_files ();
-    let endpoints = available_tts_endpoints ?provider () in
-    let model =
-      match load_voice_config () with
-      | Ok config -> config.tts.default_model
-      | Error _ -> "eleven_multilingual_v2"
-    in
-    let rec try_endpoints attempted = function
-      | [] ->
-        Error
-          (Printf.sprintf
-             "all configured TTS endpoints failed: %s"
-             (String.concat " | " (List.rev attempted)))
-      | endpoint :: rest ->
-        (match
-           attempt_tts_endpoint
-             ~sw
-             ~clock
-             ~net
-             ~agent_id
-             ~message
-             ~voice
-             ~model
-             ~priority
-             ?audio_device
-             endpoint
-         with
-         | Ok _ as ok -> ok
-         | Error error ->
-           let attempt = Printf.sprintf "%s: %s" endpoint.id error in
-           try_endpoints (attempt :: attempted) rest)
-    in
-    if endpoints = []
-    then Error "no configured TTS endpoint"
-    else
-      match try_endpoints [] endpoints with
-      | Ok result when not (result_has_audio_file result) ->
-        (* The winning endpoint was [Voice_mcp]. Try a dashboard-playable
-           HTTP TTS clip in parallel so the dashboard has audio playback.
-           If no HTTP endpoint is available or all fail, the MCP result
-           still stands and the dashboard simply shows no audio player. *)
-        (match
-           try_http_tts_for_browser_audio
-             ~sw
-             ~clock
-             ~net
-             ~agent_id
-             ~message
-             ~voice
-             ~model
-             ~priority
-             ?audio_device
-             endpoints
-         with
-         | Some (audio_file, file_size) ->
-           log_info
-             (Printf.sprintf
-                "Voice MCP: synthesized parallel browser audio clip for agent=%s file=%s"
-                agent_id
-                audio_file);
-           Ok (merge_browser_audio_fields ~audio_file ~file_size ?audio_device result)
-         | None ->
-           log_info
-             (Printf.sprintf
-                "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
-                agent_id);
-           Ok result)
-      | other -> other)
+    match Voice_config.load_detailed () with
+    | Error (Voice_config.Invalid msg) ->
+      (* An explicit voice config exists but is broken: surface the
+         load failure instead of substituting a hardcoded model. *)
+      Error (Printf.sprintf "voice config load failed: %s" msg)
+    | Error Voice_config.Not_configured ->
+      (* Voice is not set up in this environment: TTS is explicitly
+         disabled, which is not an error of the config itself. *)
+      Error "no configured TTS endpoint"
+    | Ok config ->
+      let endpoints = available_tts_endpoints ?provider config in
+      let model = config.tts.default_model in
+      let rec try_endpoints attempted = function
+        | [] ->
+          Error
+            (Printf.sprintf
+               "all configured TTS endpoints failed: %s"
+               (String.concat " | " (List.rev attempted)))
+        | endpoint :: rest ->
+          (match
+             attempt_tts_endpoint
+               ~sw
+               ~clock
+               ~net
+               ~agent_id
+               ~message
+               ~voice
+               ~model
+               ~priority
+               ~config
+               ?audio_device
+               endpoint
+           with
+           | Ok _ as ok -> ok
+           | Error error ->
+             let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+             (if rest <> []
+              then
+                log_error
+                  (Printf.sprintf
+                     "TTS endpoint %s failed; trying next endpoint: %s"
+                     endpoint.id
+                     error));
+             try_endpoints (attempt :: attempted) rest)
+      in
+      if endpoints = []
+      then Error "no configured TTS endpoint"
+      else
+        match try_endpoints [] endpoints with
+        | Ok result when not (result_has_audio_file result) ->
+          (* The winning endpoint was [Voice_mcp]. Try a dashboard-playable
+             HTTP TTS clip in parallel so the dashboard has audio playback.
+             If no HTTP endpoint is available or all fail, the MCP result
+             still stands and the dashboard simply shows no audio player. *)
+          (match
+             try_http_tts_for_browser_audio
+               ~sw
+               ~clock
+               ~net
+               ~agent_id
+               ~message
+               ~voice
+               ~model
+               ~priority
+               ?audio_device
+               endpoints
+           with
+           | Some (audio_file, file_size) ->
+             log_info
+               (Printf.sprintf
+                  "Voice MCP: synthesized parallel browser audio clip for agent=%s file=%s"
+                  agent_id
+                  audio_file);
+             Ok (merge_browser_audio_fields ~audio_file ~file_size ?audio_device result)
+           | None ->
+             log_info
+               (Printf.sprintf
+                  "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
+                  agent_id);
+             Ok result)
+        | other -> other)
 ;;
 
 let decode_agent_speak_result payload =

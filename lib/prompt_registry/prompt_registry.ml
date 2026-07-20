@@ -11,26 +11,25 @@
     - Usage metrics tracking (count, avg score, last used)
     - Version support for A/B testing and rollbacks
 
+    Prompts enter the registry from markdown files, not from code: point
+    [set_markdown_dir] at the directory and call [load_prompts_from_directory],
+    which parses each [*.md] frontmatter and registers it. The in-code
+    registration API ([register] / [get] / [render] and the rest of the mutable
+    entry surface) was removed once nothing called it; do not reintroduce it to
+    add a prompt — add the markdown file instead.
+
     Usage:
     {[
-      (* Register a prompt *)
-      let entry = {
-        id = "code-review-v2";
-        template = "Review this code: {{source_code}}";
-        version = "2.0";
-        variables = ["source_code"];
-        metrics = None;
-        created_at = Unix.gettimeofday ();
-        deprecated = false;
-      } in
-      Prompt_registry.register entry;
+      Prompt_registry.set_markdown_dir "prompts";
+      Prompt_registry.load_prompts_from_directory "prompts";
 
-      (* Look up by ID *)
-      let prompt = Prompt_registry.get ~id:"code-review-v2" () in
+      (* Effective text for a key, override > file > default *)
+      let prompt = Prompt_registry.get_prompt "code-review-v2" in
 
-      (* Render with variables *)
-      let rendered = Prompt_registry.render ~id:"code-review-v2"
-        ~vars:[("source_code", "let x = 1")] () in
+      (* Every source's contribution, side by side *)
+      let resolution = Prompt_registry.resolve_prompt "code-review-v2" in
+      ignore prompt;
+      ignore resolution
     ]}
 *)
 

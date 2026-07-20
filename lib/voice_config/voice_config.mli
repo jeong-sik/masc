@@ -125,7 +125,35 @@ val load : unit -> (t, string) result
 
     Returns [Error _] when no candidate exists or JSON parsing
     fails.  Pinned at the contract seam — operators see one of
-    these 3 paths in the error message. *)
+    these 3 paths in the error message.
+
+    A broken [\[voice\]] section in runtime.toml is surfaced as an
+    error, not silently traded for the JSON fallback.  A syntactically
+    invalid [voice_config.json] reports the actual parse error
+    (["invalid voice config json: ..."]) instead of degrading to a
+    downstream schema error on an empty object.  Implemented on top
+    of {!load_detailed}; kept for callers that only need the legacy
+    string error. *)
+
+(** {1 Typed load status} *)
+
+type load_error =
+  | Not_configured
+      (** No [\[voice\]] section in runtime.toml and no
+          [voice_config.json] candidate exists: voice is simply not
+          set up in this environment.  Callers treat this as
+          "voice disabled", not as a failure. *)
+  | Invalid of string
+      (** A voice config source exists but could not be read or
+          parsed; the string names the source and the reason.
+          Callers must surface this to the operator instead of
+          substituting defaults. *)
+
+val load_detailed : unit -> (t, load_error) result
+(** [load_detailed ()] distinguishes "voice is not configured"
+    ({!Not_configured}) from "an explicit config exists but is
+    broken" ({!Invalid}), which {!load} conflates in a single
+    error string. *)
 
 (** {1 Endpoint selection} *)
 

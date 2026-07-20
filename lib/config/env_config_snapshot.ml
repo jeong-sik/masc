@@ -419,6 +419,8 @@ let model_routing_entries =
       "Default model id; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
       "Default provider name; None when unset";
+    entry ~default:"3600.0" "MASC_LANE_PREFERENCE_TTL_S"
+      "Sticky lane failover preference TTL (seconds, 1 hour); 0 disables";
   ]
 
 let oas_sse_entries =

@@ -180,6 +180,7 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
+    ?lane_id:string ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

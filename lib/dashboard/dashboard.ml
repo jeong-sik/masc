@@ -212,11 +212,6 @@ let count_locks_for_workspace (config : Workspace_utils.config) =
   let locks_dir = Filename.concat (Workspace.masc_dir config) "locks" in
   count_locks_for_dir config locks_dir
 
-let tempo_section (config : Workspace_utils.config) : section =
-  let state = Tempo.get_tempo config in
-  let content = [Tempo.format_state state] in
-  { title = "Tempo"; content; empty_msg = "" }
-
 let active_workspace_id = "workspace"
 
 let workspace_snapshot (config : Workspace_utils.config) =
@@ -227,34 +222,6 @@ let workspace_snapshot (config : Workspace_utils.config) =
     messages = Workspace.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
     locks = count_locks_for_workspace config;
   }
-
-let workspace_overview_section (snapshots : workspace_snapshot list) : section =
-  let content =
-    List.map (fun snapshot ->
-      let (active, pending) = split_tasks snapshot.tasks in
-      Printf.sprintf "%s: %d agents | %d active | %d pending | %d locks"
-        snapshot.workspace_id
-        (List.length snapshot.agents)
-        (List.length active)
-        (List.length pending)
-        snapshot.locks
-    ) snapshots
-  in
-  { title = "Workspace"; content; empty_msg = "(no workspace data)" }
-
-let workspace_section now (snapshot : workspace_snapshot) : section =
-  let (active, pending) = split_tasks snapshot.tasks in
-  let content =
-    [Printf.sprintf "Summary: %d agents | %d active | %d pending | %d locks"
-       (List.length snapshot.agents)
-       (List.length active)
-       (List.length pending)
-       snapshot.locks]
-    @ add_group "Agents" (agent_lines now snapshot.agents) "(no agents)"
-    @ add_group "Tasks" (task_lines snapshot.tasks) "(no tasks)"
-    @ add_group "Recent Messages" (message_lines snapshot.messages) "(no messages)"
-  in
-  { title = Printf.sprintf "Workspace: %s" snapshot.workspace_id; content; empty_msg = "" }
 
 let agents_section now (agents : Masc_domain.agent list) : section =
   let content = agent_lines now agents in
@@ -268,37 +235,6 @@ let messages_section (messages : Masc_domain.message list) : section =
   let content = message_lines messages in
   { title = "Recent Messages"; content; empty_msg = "(no messages)" }
 
-let locks_section locks : section =
-  let content = [Printf.sprintf "%d" locks] in
-  { title = "Locks"; content; empty_msg = "0" }
-
-let count_locks (config : Workspace_utils.config) : int =
-  count_locks_for_workspace config
-
-(* Agent workflow summaries: recent activity per active agent *)
-let agent_workflow_section now (_config : Workspace_utils.config) (agents : Masc_domain.agent list) : section =
-  let content =
-    agents
-    |> List.filter (fun (a : Masc_domain.agent) ->
-           match a.status with Masc_domain.Active | Masc_domain.Busy -> true | Masc_domain.Listening | Masc_domain.Inactive -> false)
-    |> List.map (fun (agent : Masc_domain.agent) ->
-           let status_icon =
-             match agent.status with
-             | Masc_domain.Active -> "[active]"
-             | Masc_domain.Busy -> "[busy]"
-             | Masc_domain.Listening | Masc_domain.Inactive -> "[idle]"
-           in
-           let task_info =
-             match agent.current_task with
-             | Some t -> Printf.sprintf " task=%s" (truncate_message t)
-             | None -> ""
-           in
-           let elapsed = format_elapsed now agent.last_seen agent.last_seen in
-           Printf.sprintf "%s %s %s%s" agent.name status_icon elapsed task_info)
-  in
-  { title = "Agent Workflows"; content; empty_msg = "(no active agents)" }
-
-(** Operator-friendly agents section grouped by Working / Stuck / Idle *)
 let agents_grouped_section now (agents : Masc_domain.agent list) : section =
   let format_agent (agent : Masc_domain.agent) =
     let status_label =

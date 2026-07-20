@@ -149,31 +149,6 @@ val log_action :
 
 (** {1 Logging — per-action helpers} *)
 
-val log_claim_task :
-  config ->
-  agent_id:string ->
-  task_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
-val log_done_task :
-  config ->
-  agent_id:string ->
-  task_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
-val log_cancel_task :
-  config ->
-  agent_id:string ->
-  task_id:string ->
-  reason:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
 val log_broadcast :
   config ->
   agent_id:string ->
@@ -182,16 +157,6 @@ val log_broadcast :
   ?token_count:int ->
   unit -> unit
 (** Truncates [message_preview] to 100 chars before logging. *)
-
-val log_suspend :
-  config ->
-  agent_id:string ->
-  target_agent:string ->
-  reason:string ->
-  workspaces_affected:int ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
 
 val log_tool_call :
   config ->
@@ -233,24 +198,6 @@ val log_client_tool_host_failure :
   ?timeout_ms:int ->
   unit -> unit
 
-val log_auth_attempt :
-  config ->
-  agent_id:string ->
-  success:bool ->
-  method_name:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
-val log_circuit_breaker :
-  config ->
-  agent_id:string ->
-  opened:bool ->
-  reason:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
 val log_gate_decision :
   config ->
   agent_id:string ->
@@ -261,9 +208,6 @@ val log_gate_decision :
   unit -> unit
 
 (** {1 Maintenance} *)
-
-val prune_old : config -> days:int -> unit
-(** Drop day-files older than [days] days. *)
 
 (** {1 Statistics} *)
 

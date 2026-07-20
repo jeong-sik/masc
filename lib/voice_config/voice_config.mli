@@ -5,8 +5,8 @@
     [session] / [local_playback] sections.  Each section carries
     its own endpoint list keyed by [endpoint_kind].
 
-    Internal: 30+ helpers stay private — JSON parsing
-    ([trim_opt], [string_list_opt], [require_string], etc.),
+    Internal: the parsing helpers stay private — JSON parsing
+    ([trim_nonempty_json], [require_string], etc.),
     path resolution helpers, voice-tuning extractors, and the
     \[default_*_*\] string constants for missing fields.  All
     consumed only inside {!load}'s parsing pipeline. *)

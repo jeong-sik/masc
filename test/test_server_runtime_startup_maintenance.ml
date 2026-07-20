@@ -89,6 +89,42 @@ let test_symlinked_child_not_followed () =
   Alcotest.(check bool)
     "return counts only the real child" true (n = String.length real_child)
 
+(* Regression: the traversal ROOT itself may be the symlink. Guarding only the
+   children does not help — [Sys.readdir] resolves a symlinked root, so the
+   target's real directories arrive as ordinary children and every one of them
+   gets pruned. Dropping the root [is_real_directory] check turns this RED
+   (counter 1 instead of 0). *)
+let test_symlinked_root_not_followed () =
+  counter := 0;
+  let external_target = fresh_dir "masc_prune_external_root_target" in
+  Fs_compat.mkdir_p (Filename.concat external_target "victim");
+  let link = Filename.concat (fresh_dir "masc_prune_root_link_parent") "linked-root" in
+  Unix.symlink external_target link;
+  let n = SM.prune_children_dirs ~prune_dir:record_prune link in
+  Alcotest.(check int) "prune never called through a symlinked root" 0 !counter;
+  Alcotest.(check int) "symlinked root counts zero" 0 n
+
+(* Regression: a real keeper dir can still hold a symlinked [metrics] store.
+   The keeper-level guard says nothing about its children, so without
+   [prune_store_dir] the external target is pruned. *)
+let test_symlinked_store_not_followed () =
+  counter := 0;
+  let keeper_dir = fresh_dir "masc_prune_keeper_store" in
+  let real_store = Filename.concat keeper_dir "crash-events" in
+  Fs_compat.mkdir_p real_store;
+  let external_target = fresh_dir "masc_prune_external_store_target" in
+  let linked_store = Filename.concat keeper_dir "metrics" in
+  Unix.symlink external_target linked_store;
+  let n =
+    SM.prune_store_dir ~prune_dir:record_prune linked_store
+    + SM.prune_store_dir ~prune_dir:record_prune real_store
+  in
+  Alcotest.(check int) "prune called only for the real store" 1 !counter;
+  Alcotest.(check bool)
+    "return counts only the real store"
+    true
+    (n = String.length real_store)
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -100,6 +136,13 @@ let () =
             test_subdirs_pruned_and_stray_files_skipped;
           Alcotest.test_case "symlinked child is not followed" `Quick
             test_symlinked_child_not_followed;
+          Alcotest.test_case "symlinked root is not followed" `Quick
+            test_symlinked_root_not_followed;
+        ] );
+      ( "prune_store_dir",
+        [
+          Alcotest.test_case "symlinked store is not followed" `Quick
+            test_symlinked_store_not_followed;
         ] );
       ( "prune_flat_jsonl_older_than",
         [

@@ -1,6 +1,7 @@
 (* See .mli. *)
 
 module Candidate = Keeper_board_attention_candidate
+module Failure = Keeper_board_attention_failure
 module Id_map = Map.Make (String)
 module Id_set = Set.Make (String)
 
@@ -41,6 +42,7 @@ type completed_item =
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
+  | Judgment_blocked of Failure.blocked
 
 type state =
   | Ready
@@ -49,7 +51,7 @@ type state =
       ; started_at : float
       }
   | Deferred of
-      { failure : Candidate.retryable_failure
+      { failure : Failure.retryable
       ; deferred_at : float
       }
   | Completed of
@@ -81,7 +83,7 @@ type claim_recovery =
   | Claim_already_transitioned of t
 
 let ( let* ) = Result.bind
-let schema_version = 1
+let schema_version = 2
 
 let state_to_string = function
   | Ready -> "ready"
@@ -97,6 +99,11 @@ let blocked_reason_to_yojson = function
     `Assoc [ "kind", `String "candidate_membership_conflict"; "detail", `String detail ]
   | Durable_partition_invariant detail ->
     `Assoc [ "kind", `String "durable_partition_invariant"; "detail", `String detail ]
+  | Judgment_blocked failure ->
+    `Assoc
+      [ "kind", `String "judgment_blocked"
+      ; "failure", Failure.blocked_to_yojson failure
+      ]
 ;;
 
 let completed_item_to_yojson (item : completed_item) =
@@ -117,7 +124,7 @@ let state_to_yojson = function
   | Deferred { failure; deferred_at } ->
     `Assoc
       [ "kind", `String "deferred"
-      ; "failure", Candidate.retryable_failure_to_yojson failure
+      ; "failure", Failure.retryable_to_yojson failure
       ; "deferred_at", `Float deferred_at
       ]
   | Completed { item; completed_at } ->
@@ -189,14 +196,24 @@ let float_json ~context = function
 let blocked_reason_of_yojson json =
   let context = "Board attention blocked reason" in
   let* fields = assoc ~context json in
-  let* () = exact_fields ~context [ "kind"; "detail" ] fields in
   let* kind_json = field ~context "kind" fields in
   let* kind = string_json ~context:(context ^ ".kind") kind_json in
-  let* detail_json = field ~context "detail" fields in
-  let* detail = string_json ~context:(context ^ ".detail") detail_json in
   match kind with
-  | "candidate_membership_conflict" -> Ok (Candidate_membership_conflict detail)
-  | "durable_partition_invariant" -> Ok (Durable_partition_invariant detail)
+  | "candidate_membership_conflict" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Candidate_membership_conflict detail)
+  | "durable_partition_invariant" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Durable_partition_invariant detail)
+  | "judgment_blocked" ->
+    let* () = exact_fields ~context [ "kind"; "failure" ] fields in
+    let* failure_json = field ~context "failure" fields in
+    let* failure = Failure.blocked_of_yojson failure_json in
+    Ok (Judgment_blocked failure)
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -231,7 +248,7 @@ let state_of_yojson json =
   | "deferred" ->
     let* () = exact_fields ~context [ "kind"; "failure"; "deferred_at" ] fields in
     let* failure_json = field ~context "failure" fields in
-    let* failure = Candidate.retryable_failure_of_yojson failure_json in
+    let* failure = Failure.retryable_of_yojson failure_json in
     let* deferred_json = field ~context "deferred_at" fields in
     let* deferred_at = float_json ~context:(context ^ ".deferred_at") deferred_json in
     Ok (Deferred { failure; deferred_at })
@@ -565,12 +582,50 @@ let recover_for_process_start ~base_path ~keeper_name =
       List.fold_left
         (fun (count, changed, acc) row ->
            match row.state with
-           | Running _ | Deferred _ -> count + 1, true, { row with state = Ready } :: acc
-           | Ready | Completed _ | Settled _ | Blocked _ -> count, changed, row :: acc)
+           | Running _ -> count + 1, true, { row with state = Ready } :: acc
+           | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
+             count, changed, row :: acc)
         (0, false, [])
         rows
     in
     Ok (changed, List.rev recovered, count))
+;;
+
+let release_due_provider_retries ~now ~base_path ~keeper_name =
+  let* () = valid_time "Provider retry release time" now in
+  update ~base_path ~keeper_name (fun rows ->
+    let released, changed, updated =
+      List.fold_left
+        (fun (released, changed, acc) row ->
+           match row.state with
+           | Deferred { failure; _ } ->
+             (match Failure.retry_deadline failure with
+              | Some deadline when Float.compare now deadline >= 0 ->
+                released + 1, true, { row with state = Ready } :: acc
+              | Some _ | None -> released, changed, row :: acc)
+           | Ready | Running _ | Completed _ | Settled _ | Blocked _ ->
+             released, changed, row :: acc)
+        (0, false, [])
+        rows
+    in
+    Ok (changed, List.rev updated, released))
+;;
+
+let next_provider_retry_deadline ~base_path ~keeper_name =
+  let* rows = load ~base_path ~keeper_name in
+  Ok
+    (List.fold_left
+       (fun earliest row ->
+          match row.state with
+          | Deferred { failure; _ } ->
+            (match earliest, Failure.retry_deadline failure with
+             | None, deadline -> deadline
+             | Some current, Some candidate
+               when Float.compare candidate current < 0 -> Some candidate
+             | Some _, Some _ | Some _, None -> earliest)
+          | Ready | Running _ | Completed _ | Settled _ | Blocked _ -> earliest)
+       None
+       rows)
 ;;
 
 let find_persisted partition rows =
@@ -612,9 +667,7 @@ let validate_judgment (judgment : Candidate.judgment) =
   |> Result.map ignore
 ;;
 
-let validate_failure (failure : Candidate.retryable_failure) =
-  let* () = nonempty "partition failure detail" failure.detail in
-  valid_time "partition failure failed_at" failure.failed_at
+let validate_failure = Failure.validate_retryable
 ;;
 
 let validate_blocked_reason = function
@@ -622,6 +675,7 @@ let validate_blocked_reason = function
     nonempty "candidate membership conflict detail" detail
   | Durable_partition_invariant detail ->
     nonempty "durable partition invariant detail" detail
+  | Judgment_blocked failure -> Failure.validate_blocked failure
 ;;
 
 let recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition =

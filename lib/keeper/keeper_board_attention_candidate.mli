@@ -141,7 +141,7 @@ val judge_singleton :
   net:Eio_context.eio_net option ->
   base_path:string ->
   candidate ->
-  (judgment, retryable_failure) result
+  (judgment, Keeper_board_attention_failure.attempt_failure) result
 (** Invoke the configured structured judge for exactly one immutable
     candidate. The response must cover that exact candidate identity. This is
     Provider work and must never run under Keeper turn admission. *)

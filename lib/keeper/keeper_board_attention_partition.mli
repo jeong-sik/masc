@@ -7,6 +7,7 @@
     membership. *)
 
 module Candidate = Keeper_board_attention_candidate
+module Failure = Keeper_board_attention_failure
 
 module Worker_epoch : sig
   type t
@@ -25,6 +26,7 @@ type completed_item =
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
+  | Judgment_blocked of Failure.blocked
 
 type state =
   | Ready
@@ -33,7 +35,7 @@ type state =
       ; started_at : float
       }
   | Deferred of
-      { failure : Candidate.retryable_failure
+      { failure : Failure.retryable
       ; deferred_at : float
       }
   | Completed of
@@ -81,9 +83,19 @@ val ensure_roots :
 
 val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
-(** Release every prior-process [Running] and [Deferred] row to [Ready] in one
-    rewrite. This operation is process-start authority and must not be used as
-    an ordinary retry signal. *)
+(** Release prior-process [Running] rows to [Ready] in one rewrite. [Deferred]
+    rows retain their exact retry requirement; process restart is not retry
+    authority. *)
+
+val release_due_provider_retries :
+  now:float -> base_path:string -> keeper_name:string -> (int, string) result
+(** Release only [Deferred] rows whose typed Provider retry-after deadline has
+    been reached. No local delay or retry counter is synthesized. *)
+
+val next_provider_retry_deadline :
+  base_path:string -> keeper_name:string -> (float option, string) result
+(** Earliest exact Provider-authored retry deadline, if any. Deferred rows
+    requiring another typed state change are intentionally absent. *)
 
 val claim_next :
   now:float ->
@@ -114,7 +126,7 @@ val defer :
   worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
-  Candidate.retryable_failure ->
+  Failure.retryable ->
   (completion, string) result
 
 val block :

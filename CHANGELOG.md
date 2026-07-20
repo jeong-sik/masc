@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.21.2] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.217.1` to `v0.217.3` (`cbc5168e`). Absorbs 0.217.2 (`reasoning_replay_dropped` logs at Info, oas#2721) and 0.217.3: the Ollama native tool-loop replay/correlation now flows through an immutable occurrence-scoped projection that rejects legacy User-role ToolResult and uncorrelated tool messages typed on Gemini/Ollama-native instead of silently repairing them (oas#2710, supersedes oas#2711), and durable `Error_occurred` error_domain is classified from the error rather than hardcoded `"Api"` (oas#2717). Public Agent SDK surface fingerprint unchanged (only the pin sha/version move). Live checkpoint audit 2026-07-20: 24/24 primary checkpoints carry zero legacy shapes, so the oas#2710 hard-cut is inert on the current fleet.
+
 ## [0.21.1] - 2026-07-20
 
 ### Changed

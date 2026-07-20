@@ -49,7 +49,6 @@ type failure_kind =
   | Delivery_failed
   | Cancelled
   | Internal_error
-  | Recovery_interrupted
 
 val failure_kind_to_string : failure_kind -> string
 
@@ -276,8 +275,6 @@ val nack :
   | `Error of mutation_error
   ]
 
-val pending_count : keeper_name:string -> (int, mutation_error) result
-val inflight_count : keeper_name:string -> (int, mutation_error) result
 val has_active_receipts : keeper_name:string -> (bool, mutation_error) result
 
 type lane_health =
@@ -377,9 +374,7 @@ module For_testing : sig
   val fail_next_commit_with : commit_failure -> unit
   val set_transaction_stage_observer :
     (transaction_stage -> unit) option -> unit
-  val set_before_entry_lock_observer : (string -> unit) option -> unit
   val set_inventory_classified_observer : (unit -> unit) option -> unit
-  val failure_kind_of_string : string -> (failure_kind, string) result
 
   val finalize_statement : Sqlite3.db -> Sqlite3.stmt -> (unit, string) result
   (** Total statement finalize: folds both the rc channel and the

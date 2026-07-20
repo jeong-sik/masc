@@ -15,6 +15,8 @@ include module type of struct
   include Board_core_json
 end
 
+(** Canonical cadence for deferred flush scheduling and failed flusher
+    obligation retry. *)
 val flush_interval_sec : float
 val flusher_inbox_capacity : int
 (** Capacity of {!store.flusher_inbox}. The scheduler reserves room for a whole

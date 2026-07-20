@@ -415,25 +415,6 @@ function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
     return false
   }
   switch (left.type) {
-    case 'selected':
-      return (
-        right.type === 'selected'
-        && left.trigger === right.trigger
-        && left.thompson_score === right.thompson_score
-        && left.final_score === right.final_score
-      )
-    case 'decision':
-      return (
-        right.type === 'decision'
-        && left.action === right.action
-        && left.trigger_reason === right.trigger_reason
-      )
-    case 'action_executed':
-      return (
-        right.type === 'action_executed'
-        && left.action === right.action
-        && left.success === right.success
-      )
     case 'keeper_lifecycle':
       return (
         right.type === 'keeper_lifecycle'

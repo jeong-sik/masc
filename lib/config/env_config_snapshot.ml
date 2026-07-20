@@ -141,12 +141,6 @@ let autonomy_entries =
   [
     entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
     entry ~default:"7" "MASC_AUTONOMY_QUIET_END" "Quiet hours end (0-23)";
-    entry ~default:"12" "MASC_AUTONOMY_MAX_STARVATION_TICKS"
-      "Max agent starvation ticks";
-    entry ~default:"0.15" "MASC_AUTONOMY_STARVATION_BONUS_COEF"
-      "Starvation bonus coefficient for agent selection";
-    entry ~default:"0.7" "MASC_AUTONOMY_THOMPSON_WEIGHT"
-      "Thompson sampling weight";
     entry ~default:"0.95" "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
       "Vote decay factor";
   ]

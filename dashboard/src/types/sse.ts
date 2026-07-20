@@ -57,9 +57,6 @@ export type SSEEventType =
   // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
   | 'masc/task_claimed'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
-  | 'oas:masc:autonomy:agent_selected'
-  | 'oas:masc:autonomy:agent_decision'
-  | 'oas:masc:autonomy:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
   | 'oas:masc:keeper:lifecycle'
   | 'oas:masc:trust_updated'

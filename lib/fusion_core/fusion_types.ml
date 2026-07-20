@@ -111,11 +111,35 @@ let answered_of outcomes =
 
 type skip_reason =
   | No_panel_answers of { total : int }
+  | Quorum_shortfall of
+      { answered : int
+      ; required : int
+      }
 [@@deriving yojson, show, eq]
 
 let render_skip_reason = function
   | No_panel_answers { total } ->
     Printf.sprintf "fusion aborted: none of %d panels returned an answer" total
+  | Quorum_shortfall { answered; required } ->
+    Printf.sprintf "fusion aborted: panel quorum not met (%d of %d required answers)"
+      answered required
+
+(* judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
+   응답 0이면 [No_panel_answers](objective input absence), 0 < 응답 < [min_answered]면
+   [Quorum_shortfall](N-of-M 정책 미달), 응답 >= [min_answered]면 [None] = judge 진행.
+   미달 응답을 judge에 넘기는 silent degrade는 금지다 — quorum은 RFC-0252 §5.1 (a)의
+   meta-degrade(실행 후 첫 성공으로 폭빽)와 다른 축(실행 전 입력 계약)이다.
+   [min_answered] 기본값(1)에서는 "응답 0일 때만 skip"으로 강제 전 동작과 정확히 동일.
+   [Validated_preset]가 1..패널 총합 범위를 증명하므로 여기선 범위 재검증을 하지 않는다.
+   순수 — 테스트 가능. *)
+let judge_skip_reason ~panel ~min_answered : skip_reason option =
+  match answered_of panel with
+  | [] -> Some (No_panel_answers { total = List.length panel })
+  | _ :: _ as answered ->
+    let answered_count = List.length answered in
+    if answered_count < min_answered
+    then Some (Quorum_shortfall { answered = answered_count; required = min_answered })
+    else None
 
 let no_panel_answers_error =
   "all panels failed: no answered panel to synthesize"
@@ -253,6 +277,44 @@ type judge_error_node =
 type judge_outcome =
   | Synthesized of judge_node  (** panel [Answered] 대칭. *)
   | Judge_failed of judge_error_node  (** panel [Failed] 대칭. *)
+[@@deriving yojson, show, eq]
+
+let result_to_yojson ok_to_yojson error_to_yojson = function
+  | Ok value -> `List [ `String "Ok"; ok_to_yojson value ]
+  | Error error -> `List [ `String "Error"; error_to_yojson error ]
+;;
+
+let result_of_yojson ok_of_yojson error_of_yojson = function
+  | `List [ `String "Ok"; value ] ->
+    Result.map (fun value -> Ok value) (ok_of_yojson value)
+  | `List [ `String "Error"; error ] ->
+    Result.map (fun error -> Error error) (error_of_yojson error)
+  | json ->
+    Error
+      (Printf.sprintf
+         "Fusion_types.deliberation_evidence.judge: unsupported shape %s"
+         (Yojson.Safe.to_string json))
+;;
+
+let equal_result equal_ok equal_error left right =
+  match left, right with
+  | Ok left, Ok right -> equal_ok left right
+  | Error left, Error right -> equal_error left right
+  | Ok _, Error _ | Error _, Ok _ -> false
+;;
+
+let pp_result pp_ok pp_error formatter = function
+  | Ok value -> Format.fprintf formatter "(Ok %a)" pp_ok value
+  | Error error -> Format.fprintf formatter "(Error %a)" pp_error error
+;;
+
+type deliberation_evidence =
+  { question : string
+  ; panel : panel_outcome list
+  ; judge : (judge_synthesis, judge_failure) result
+  ; judges : judge_outcome list
+  ; judge_usage : usage
+  }
 [@@deriving yojson, show, eq]
 
 type fusion_trigger =

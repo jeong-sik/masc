@@ -342,8 +342,7 @@ let compare_auto_judge_entries
       (left : Keeper_approval_queue.pending_approval)
       (right : Keeper_approval_queue.pending_approval)
   =
-  let by_time = Float.compare left.requested_at right.requested_at in
-  if by_time <> 0 then by_time else String.compare left.id right.id
+  Int.compare left.sequence right.sequence
 ;;
 
 let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
@@ -830,6 +829,25 @@ let observe_exact_rule_store_degraded request error =
     ()
 ;;
 
+let observe_exact_rule_expired request (rule_match : Keeper_approval_queue.rule_match) =
+  Log.Keeper.warn
+    ~keeper_name:request.keeper_name
+    "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
+    rule_match.rule_id
+    request.operation;
+  Keeper_approval_queue.audit_approval_event
+    ~base_path:request.base_path
+    ~event_type:"gate_exact_rule_expired"
+    ~id:(Keeper_approval_queue.generate_id ())
+    ~keeper_name:request.keeper_name
+    ~tool_name:request.operation
+    ?turn_id:(request_turn_id request)
+    ?task_id:request.task_id
+    ~goal_ids:request.goal_ids
+    ~rule_match
+    ()
+;;
+
 let decide_from_selected_mode request = function
   | Error detail -> defer request (Mode_state_invalid detail)
   | Ok Keeper_gate_mode.Manual -> defer request Human_requested
@@ -874,7 +892,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
         | Error error ->
           observe_exact_rule_store_degraded request error;
           decide_from_selected_mode request mode
-        | Ok (Some rule_match) ->
+        | Ok (Keeper_approval_queue.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
           audit_allow
             request
@@ -882,7 +900,11 @@ let decide_without_cycle_grant ~keeper_always_allow request =
             ~decision_source:Keeper_approval_queue.Always_allowed
             source;
           Allow { source }
-        | Ok None -> decide_from_selected_mode request mode))
+        | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->
+          observe_exact_rule_expired request rule_match;
+          decide_from_selected_mode request mode
+        | Ok Keeper_approval_queue.Rule_match_absent ->
+          decide_from_selected_mode request mode))
 ;;
 
 let decide ?cycle_grant ~keeper_always_allow request =
@@ -921,3 +943,12 @@ let decide ?cycle_grant ~keeper_always_allow request =
       ();
     Unavailable reason
 ;;
+
+module For_testing = struct
+  let ready_auto_judges_for_owner ~base_path ~keeper_name entries =
+    ready_auto_judges_for_owner ~base_path ~keeper_name entries
+  ;;
+
+  let claim_auto_judge = claim_auto_judge
+  let release_auto_judge = release_auto_judge
+end

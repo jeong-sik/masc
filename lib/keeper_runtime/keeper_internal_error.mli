@@ -25,7 +25,8 @@ type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
 
-(** Legacy cause carried by persisted [Capacity_backpressure] envelopes. *)
+(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
+    It has no retry, admission, or lifecycle authority. *)
 type provider_cooldown_cause =
   | Cooldown_provider_capacity
   | Cooldown_soft_rate_limited
@@ -37,12 +38,6 @@ type provider_cooldown_cause =
 
 val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
 val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
-
-(** [true] when waiting out the cooldown cannot resolve the cause (deterministic
-    config/build/credential/quota/structural failure); [false] for transient
-    causes expected to recover (capacity, HTTP 429, HTTP 5xx).  Drives whether a
-    cooldown-block turn error is auto-recoverable or escalates.  #23438. *)
-val provider_cooldown_cause_is_deterministic : provider_cooldown_cause -> bool
 
 type runtime_exhaustion_reason =
   | Connection_refused
@@ -96,8 +91,8 @@ type masc_internal_error =
       detail : string;
       retry_after : capacity_retry_after;
       cooldown_cause : provider_cooldown_cause option;
-      (** [Some cause] iff this is a pre-dispatch provider-health cooldown block;
-          [None] for genuine upstream capacity backpressure.  #23438. *)
+      (** Legacy diagnostic only. Current producers use [None]; decoded values
+          never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;

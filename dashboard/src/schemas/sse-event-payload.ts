@@ -20,7 +20,6 @@ import {
   readContentReplacementReplacedPayload,
   readContextCompactStartedPayload,
   readContextCompactedPayload,
-  readContextOverflowImminentPayload,
   readHandoffCompletedPayload,
   readHandoffRequestedPayload,
   readSlotSchedulerObservedPayload,
@@ -36,7 +35,6 @@ import {
   type ContentReplacementReplacedPayload,
   type ContextCompactStartedPayload,
   type ContextCompactedPayload,
-  type ContextOverflowImminentPayload,
   type HandoffCompletedPayload,
   type HandoffRequestedPayload,
   type SlotSchedulerObservedPayload,
@@ -80,7 +78,6 @@ export type TypedOasPayload =
   | { kind: 'handoff_requested'; payload: HandoffRequestedPayload }
   | { kind: 'handoff_completed'; payload: HandoffCompletedPayload }
   | { kind: 'context_compacted'; payload: ContextCompactedPayload }
-  | { kind: 'context_overflow_imminent'; payload: ContextOverflowImminentPayload }
   | { kind: 'context_compact_started'; payload: ContextCompactStartedPayload }
   | { kind: 'content_replacement_replaced'; payload: ContentReplacementReplacedPayload }
   | { kind: 'content_replacement_kept'; payload: ContentReplacementKeptPayload }
@@ -112,7 +109,6 @@ const READERS: ReaderMap = {
   handoff_requested: readHandoffRequestedPayload,
   handoff_completed: readHandoffCompletedPayload,
   context_compacted: readContextCompactedPayload,
-  context_overflow_imminent: readContextOverflowImminentPayload,
   context_compact_started: readContextCompactStartedPayload,
   content_replacement_replaced: readContentReplacementReplacedPayload,
   content_replacement_kept: readContentReplacementKeptPayload,
@@ -183,7 +179,6 @@ export function parseOasPayload(
     case 'turn_ready':
     case 'handoff_requested':
     case 'handoff_completed':
-    case 'context_overflow_imminent':
     case 'context_compact_started':
     case 'content_replacement_replaced':
     case 'content_replacement_kept':

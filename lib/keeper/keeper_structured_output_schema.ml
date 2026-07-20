@@ -294,6 +294,50 @@ let apply_schema_or_prompt_tier ~log_label schema provider_cfg =
     provider_cfg
 ;;
 
+(* Capability-aware three-tier response-format selection for a request whose
+   prompt already states the exact output shape (#25266). Tier 1: a provider
+   that supports strict [json_schema] gets the schema enforced. Tier 2: a
+   provider that supports only [json_object] JSON mode (GLM/DeepSeek/Kimi —
+   the OpenAI-compat endpoints that reject json_schema) gets [JsonMode], which
+   at least forces syntactically valid JSON; the caller's prompt carries the
+   schema and the caller validates the parse, so the missing strict guarantee
+   is covered. Tier 3: neither — prompt only. Without tier 2 every
+   json_object-only provider is silently dropped from structured lanes,
+   leaving the single json_schema-capable native endpoint (minimax) as a SPOF.
+   Use ONLY where the prompt states the schema and the parse is validated
+   downstream; [apply_to_provider_config] stays the strict default.
+
+   CONTRACT (#25324): the OpenAI-compatible [json_object] response format
+   requires the request messages to contain the literal token "json"
+   (case-insensitive) or the endpoint returns HTTP 400. DeepSeek and Kimi
+   enforce this; GLM is lenient. This function only sets [response_format] on
+   [provider_cfg] and cannot see the messages, so any caller that reaches the
+   JsonMode tier MUST include a "json" token in its prompt. The compaction
+   summarizer does so in [Keeper_compaction_llm_summarizer.messages_for_plan]
+   (locked by test_compaction_llm_summarizer). *)
+let apply_schema_json_mode_or_prompt_tier ~log_label schema provider_cfg =
+  let native_cfg = apply_to_provider_config schema provider_cfg in
+  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
+  | Ok () -> native_cfg
+  | Error detail ->
+    (match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+     | Some caps when caps.Llm_provider.Capabilities.supports_response_format_json ->
+       Log.Keeper.info
+         "%s: json_object tier (native schema unavailable: %s)"
+         log_label
+         detail;
+       { provider_cfg with
+         response_format = Agent_sdk.Types.JsonMode
+       ; output_schema = None
+       }
+     | _ ->
+       Log.Keeper.info
+         "%s: prompt tier (native schema and json mode unavailable: %s)"
+         log_label
+         detail;
+       provider_cfg)
+;;
+
 let validate_provider_config schema provider_cfg =
   provider_cfg
   |> apply_to_provider_config schema
@@ -304,4 +348,18 @@ let provider_config_accepts_schema schema provider_cfg =
   match validate_provider_config schema provider_cfg with
   | Ok () -> true
   | Error _ -> false
+;;
+
+(* A provider is an eligible structured-lane candidate when it can enforce the
+   schema (strict) OR at least honor JSON mode (#25266). The prompt-tier
+   fallback exists but is not sufficient for eligibility: a provider with
+   neither capability is filtered out, matching the pre-#25266 fail-closed
+   behavior for that case. *)
+let provider_config_accepts_schema_or_json_mode schema provider_cfg =
+  match validate_provider_config schema provider_cfg with
+  | Ok () -> true
+  | Error _ ->
+    (match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+     | Some caps -> caps.Llm_provider.Capabilities.supports_response_format_json
+     | None -> false)
 ;;

@@ -179,9 +179,9 @@ let make_fixture
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
-  ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
   let tools =
     KTO.make_tools
       ~config

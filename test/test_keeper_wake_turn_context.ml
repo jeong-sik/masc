@@ -165,7 +165,7 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
   }
 
 let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
-  let _system, user =
+  let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?turn_decision
       ?current_task ?active_goal_summaries ~observation ()
   in
@@ -298,7 +298,7 @@ let test_goal_holder_gets_self_direction_directive () =
           ("active_goal_ids", `List [ `String "goal-x" ]);
         ])
   in
-  let system, _user =
+  let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in
@@ -306,7 +306,7 @@ let test_goal_holder_gets_self_direction_directive () =
     (contains ~needle:"advance one of your active" system);
   check bool "defer is stated as valid" true
     (contains ~needle:"Deferring is a valid choice" system);
-  let no_goal_system, _user =
+  let { Prompt.system_prompt = no_goal_system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in

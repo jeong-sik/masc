@@ -136,8 +136,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       (* Preview the actual unified prompt the keeper turn uses.
          We build the observation from the current workspace state so the
-         system message and the "Current World State" user message both
-         match what a turn would see right now.
+         effective per-turn system side (identity + "Current World State"
+         dynamic context) and the persisted user message both match what a
+         turn would see right now.
 
          Board events are collected WITHOUT advancing the keeper's board
          cursor: passing [~pending_board_events:None] would route through
@@ -156,8 +157,17 @@ let keeper_config_json (config : Workspace.config) (name : string)
           Keeper_world_observation.observe
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
-        Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
-          ~profile_defaults:defaults ~observation ()
+        let parts =
+          Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
+            ~profile_defaults:defaults ~observation ()
+        in
+        (* Match what a turn actually sends: the observation frame rides the
+           per-turn dynamic context (system side), and the persisted user
+           message is the wake marker / utterances only. *)
+        ( parts.Keeper_unified_prompt.system_prompt
+          ^ "\n\n"
+          ^ parts.Keeper_unified_prompt.world_state,
+          parts.Keeper_unified_prompt.user_message )
       in
       let prompt =
         `Assoc [
@@ -208,11 +218,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("active_model_label", `Null);
           ("last_model_used_label", `Null);
           ("verify", `Bool false);
-        ]
-      in
-      let compaction =
-        `Assoc [
-          ("profile", `String m.compaction.profile);
         ]
       in
       let proactive =
@@ -293,7 +298,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
              profile_config_error );
          ("prompt", prompt);
          ("execution", execution);
-         ("compaction", compaction);
          ("proactive", proactive);
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());

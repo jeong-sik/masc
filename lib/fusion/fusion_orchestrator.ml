@@ -9,16 +9,20 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
-let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
+type compute_outcome =
+  | Compute_denied of Fusion_types.deny_reason
+  | Computed of Fusion_types.deliberation_evidence
+
+let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
     Fusion_metrics.record_invocation ~topology `Denied;
-    Denied reason
+    Compute_denied reason
   | Fusion_types.Allow req ->
     (match Fusion_policy.find_preset policy req.Fusion_types.preset with
-     | None ->
-       Fusion_metrics.record_invocation ~topology `Denied;
-       Denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
+       | None ->
+         Fusion_metrics.record_invocation ~topology `Denied;
+         Compute_denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
      | Some vp ->
           let preset = Fusion_policy.Validated_preset.preset vp in
           let groups = preset.Fusion_policy.panels in
@@ -300,15 +304,17 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                         ] )))
           in
           let judge_full, judge_nodes =
-            match Fusion_types.answered_of panel with
-            | [] ->
-              let reason = Fusion_types.No_panel_answers { total = List.length panel } in
+            match
+              Fusion_types.judge_skip_reason ~panel
+                ~min_answered:preset.Fusion_policy.min_answered
+            with
+            | Some reason ->
               (* typed 그대로 propagate — 문자열로 렌더해 [Internal_error]에 압축하면
-                 패널 전멸이 "judge failed"/failure_code=internal_error로 오귀속된다
-                 (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은 judge
-                 메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
+                 패널 전멸/정족수 미달이 "judge failed"/failure_code=internal_error로
+                 오귀속된다 (2026-07-01 사고: 8 run 전부 이 경로였는데 keeper 표면은
+                 judge 메커니즘 고장으로 보고했다). 렌더는 sink/텍스트 경계에서 한다. *)
               (Error (Fusion_types.Panels_unavailable reason, Fusion_types.zero_usage), [])
-            | _ :: _ ->
+            | None ->
             match topology with
             | Fusion_types.Simple ->
               (match run_single_judge () with
@@ -367,14 +373,35 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | Error (_, u) -> u
           in
           List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
-          (match
-             Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper
-               ~run_id:req.Fusion_types.run_id ~question:req.Fusion_types.prompt
-               ~panel ~judge ~judges:judge_nodes ~judge_usage
-           with
-           | Ok () ->
-             Fusion_metrics.record_invocation ~topology `Completed;
-             Completed { panel; judge }
-           | Error msg ->
-             Fusion_metrics.record_invocation ~topology `Sink_failed;
-             Sink_failed msg))
+          Computed
+            { Fusion_types.question = req.prompt
+            ; panel
+            ; judge
+            ; judges = judge_nodes
+            ; judge_usage
+            })
+
+let project
+    ~base_dir
+    ~topology
+    ~(request : Fusion_types.fusion_request)
+    (deliberation : Fusion_types.deliberation_evidence)
+  =
+  match
+    Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+      ~question:deliberation.question ~panel:deliberation.panel
+      ~judge:deliberation.judge ~judges:deliberation.judges
+      ~judge_usage:deliberation.judge_usage
+  with
+  | Ok () ->
+    Fusion_metrics.record_invocation ~topology `Completed;
+    Completed { panel = deliberation.panel; judge = deliberation.judge }
+  | Error msg ->
+    Fusion_metrics.record_invocation ~topology `Sink_failed;
+    Sink_failed msg
+;;
+
+let run ~sw ~net ~base_dir ~policy ~topology ~request () =
+  match compute ~sw ~net ~policy ~topology ~request () with
+  | Compute_denied reason -> Denied reason
+  | Computed deliberation -> project ~base_dir ~topology ~request deliberation

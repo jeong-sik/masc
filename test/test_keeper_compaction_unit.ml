@@ -271,6 +271,39 @@ let test_invalid_identity_prevents_plan_callback () =
   Alcotest.(check int) "plan callback count" 0 !plan_calls
 ;;
 
+let test_quarantine_overlapping_keeps_valid_prefix () =
+  let prefix = text T.User "valid prefix" in
+  let open_a = message T.Assistant [ use "a" ] in
+  let overlapping = message T.Assistant [ use "b" ] in
+  let history = [ prefix; open_a; overlapping ] in
+  (match U.partition history with
+   | Error (U.Overlapping_tool_cycle { message_index = 2; tool_use_id = "b" }) ->
+       ()
+   | _ -> Alcotest.fail "default partition must reject overlapping tool cycle");
+  let output = U.partition ~quarantine:true history |> require_ok in
+  check_exact "valid prefix compacted under quarantine"
+    [ U.Ordinary_message prefix ]
+    output.closed_prefix;
+  check_exact "open + overlapping protected under quarantine"
+    [ open_a; overlapping ]
+    output.protected_suffix
+;;
+
+let test_quarantine_orphan_keeps_valid_prefix () =
+  let prefix = text T.User "valid prefix" in
+  let orphan = message T.Tool [ result "x" ] in
+  let history = [ prefix; orphan ] in
+  (match U.partition history with
+   | Error (U.Orphan_tool_result _) ->
+       ()
+   | _ -> Alcotest.fail "default partition must reject orphan tool result");
+  let output = U.partition ~quarantine:true history |> require_ok in
+  check_exact "valid prefix compacted under quarantine"
+    [ U.Ordinary_message prefix ]
+    output.closed_prefix;
+  check_exact "orphan protected under quarantine" [ orphan ] output.protected_suffix
+;;
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -313,5 +346,9 @@ let () =
             test_nonblank_tool_ids_remain_exact
         ; Alcotest.test_case "invalid identity stops plan callback" `Quick
             test_invalid_identity_prevents_plan_callback
+        ; Alcotest.test_case "quarantine overlapping keeps valid prefix" `Quick
+            test_quarantine_overlapping_keeps_valid_prefix
+        ; Alcotest.test_case "quarantine orphan keeps valid prefix" `Quick
+            test_quarantine_orphan_keeps_valid_prefix
         ] )
     ]

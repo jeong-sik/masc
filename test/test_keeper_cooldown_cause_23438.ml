@@ -1,24 +1,18 @@
 (* test/test_keeper_cooldown_cause_23438.ml
 
-   #23438: the pre-dispatch provider-health cooldown gate must carry the
-   failure that armed the cooldown instead of erasing it into an
-   unconditional provider_capacity claim. On 2026-07-06 that erasure let
-   ~25 deterministic provider errors oscillate into 1,041 blocked turns:
-   Capacity_backpressure was always auto-recoverable, so no escalation
-   path could ever fire.
+   #23438 compatibility: persisted envelopes from the retired pre-dispatch
+   provider-health gate may still carry [cooldown_cause]. The field remains
+   decodable for evidence, but it has no retry, admission, or lifecycle
+   authority.
 
    Pinned invariants:
-   1. [provider_cooldown_cause_is_deterministic] truth table: hard_quota /
-      terminal_failure / provider_error / rejected are deterministic;
-      provider_capacity / soft_rate_limited / server_error are transient.
-   2. to_string/of_string is a total roundtrip over every constructor.
-   3. sdk_error embed -> classify roundtrip preserves [cooldown_cause]
+   1. to_string/of_string is a total roundtrip over every constructor.
+   2. sdk_error embed -> classify roundtrip preserves [cooldown_cause]
       (Some and None) through the JSON wire payload.
-   4. [summary_of_masc_internal_error] names the true cause; a cause-less
+   3. [summary_of_masc_internal_error] names the diagnostic; a cause-less
       block renders without the suffix (legacy shape preserved).
-   5. Classification: deterministic cause -> NOT auto-recoverable (feeds
-      counts_toward_crash so the failure-streak policy escalates);
-      transient cause and None -> auto-recoverable (today's behaviour). *)
+   4. Every legacy cause remains auto-recoverable; decoded history cannot
+      alter Keeper lifecycle behavior. *)
 
 module KIE = Keeper_internal_error
 module EC = Masc.Keeper_error_classify
@@ -34,19 +28,6 @@ let all_causes =
   ; KIE.Cooldown_rejected
   ]
 
-let deterministic_causes =
-  [ KIE.Cooldown_hard_quota
-  ; KIE.Cooldown_terminal_failure
-  ; KIE.Cooldown_provider_error
-  ; KIE.Cooldown_rejected
-  ]
-
-let transient_causes =
-  [ KIE.Cooldown_provider_capacity
-  ; KIE.Cooldown_soft_rate_limited
-  ; KIE.Cooldown_server_error
-  ]
-
 let backpressure_error ?cooldown_cause () =
   KIE.Capacity_backpressure
     { runtime_id = "runpod_rtxa6000.gemma4-coder-fable5-q4km"
@@ -55,26 +36,6 @@ let backpressure_error ?cooldown_cause () =
     ; retry_after = KIE.No_retry_hint
     ; cooldown_cause
     }
-
-let test_deterministic_truth_table () =
-  List.iter
-    (fun cause ->
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "%s is deterministic"
-           (KIE.provider_cooldown_cause_to_string cause))
-        true
-        (KIE.provider_cooldown_cause_is_deterministic cause))
-    deterministic_causes;
-  List.iter
-    (fun cause ->
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "%s is transient"
-           (KIE.provider_cooldown_cause_to_string cause))
-        false
-        (KIE.provider_cooldown_cause_is_deterministic cause))
-    transient_causes
 
 let test_cause_string_roundtrip () =
   List.iter
@@ -158,7 +119,7 @@ let test_summary_names_the_cause () =
     false
     (contains ~needle:"cooldown_cause=" legacy)
 
-let test_classification_escalates_deterministic_causes () =
+let test_legacy_causes_have_no_lifecycle_authority () =
   List.iter
     (fun cause ->
       let sdk_error =
@@ -167,24 +128,11 @@ let test_classification_escalates_deterministic_causes () =
       in
       Alcotest.(check bool)
         (Printf.sprintf
-           "deterministic %s is not auto-recoverable"
-           (KIE.provider_cooldown_cause_to_string cause))
-        false
-        (EC.is_auto_recoverable_turn_error sdk_error))
-    deterministic_causes;
-  List.iter
-    (fun cause ->
-      let sdk_error =
-        KTD.sdk_error_of_masc_internal_error
-          (backpressure_error ~cooldown_cause:cause ())
-      in
-      Alcotest.(check bool)
-        (Printf.sprintf
-           "transient %s stays auto-recoverable"
+           "legacy %s stays auto-recoverable"
            (KIE.provider_cooldown_cause_to_string cause))
         true
         (EC.is_auto_recoverable_turn_error sdk_error))
-    transient_causes;
+    all_causes;
   let cause_less =
     KTD.sdk_error_of_masc_internal_error (backpressure_error ())
   in
@@ -198,10 +146,6 @@ let () =
     "keeper_cooldown_cause_23438"
     [ ( "cooldown_cause"
       , [ Alcotest.test_case
-            "deterministic truth table"
-            `Quick
-            test_deterministic_truth_table
-        ; Alcotest.test_case
             "to_string/of_string roundtrip"
             `Quick
             test_cause_string_roundtrip
@@ -214,12 +158,12 @@ let () =
             `Quick
             test_sdk_error_roundtrip_none_cause
         ; Alcotest.test_case
-            "summary names the true cause"
+            "summary preserves the legacy diagnostic"
             `Quick
             test_summary_names_the_cause
         ; Alcotest.test_case
-            "deterministic causes escalate, transient stay recoverable"
+            "legacy causes have no lifecycle authority"
             `Quick
-            test_classification_escalates_deterministic_causes
+            test_legacy_causes_have_no_lifecycle_authority
         ] )
     ]

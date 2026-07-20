@@ -11,7 +11,6 @@ open Keeper_types_profile
 
 type parsed_args = {
   name : string;
-  compaction_profile_opt : string option;
   runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
@@ -20,9 +19,6 @@ type parsed_args = {
   max_context_override_opt : int option;
   max_context_override_present : bool;
   proactive_enabled_opt : bool option;
-  compaction_ratio_gate_opt : float option;
-  compaction_message_gate_opt : int option;
-  compaction_token_gate_opt : int option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
   instructions_arg : string option;
@@ -113,33 +109,23 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
-    let compaction_profile_opt_res =
-      parse_compaction_profile_opt args "compaction_profile"
-    in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     match
-      compaction_profile_opt_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, mention_targets_opt_res, runtime_id_opt_res
+      allowed_paths_opt_res, active_goal_ids_opt_res, mention_targets_opt_res,
+      runtime_id_opt_res
     with
-    | Error e, _, _, _, _
-    | _, Error e, _, _, _
-    | _, _, Error e, _, _
-    | _, _, _, Error e, _
-    | _, _, _, _, Error e -> Error (tool_result_error e)
-    | Ok compaction_profile_opt,
-      Ok allowed_paths_opt,
-      Ok active_goal_ids_opt,
-      Ok mention_targets_opt,
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> Error (tool_result_error e)
+    | Ok allowed_paths_opt, Ok active_goal_ids_opt, Ok mention_targets_opt,
       Ok runtime_id_opt ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
-    let compaction_ratio_gate_opt = Safe_ops.json_float_opt "compaction_ratio_gate" args in
-    let compaction_message_gate_opt = Safe_ops.json_int_opt "compaction_message_gate" args in
-    let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
@@ -180,7 +166,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
     | None, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
-      compaction_profile_opt;
       runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;
@@ -189,9 +174,6 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
       max_context_override_opt;
       max_context_override_present;
       proactive_enabled_opt;
-      compaction_ratio_gate_opt;
-      compaction_message_gate_opt;
-      compaction_token_gate_opt;
       sandbox_profile_opt;
       network_mode_opt;
       instructions_arg;

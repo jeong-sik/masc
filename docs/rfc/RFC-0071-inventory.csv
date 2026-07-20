@@ -180,7 +180,6 @@ lib/dated_jsonl/dated_jsonl.ml,67,None,unclassified
 lib/dated_jsonl/dated_jsonl.ml,72,None,unclassified
 lib/drift_guard.ml,50,None,unclassified
 lib/drift_guard.ml,108,false,unclassified
-lib/economy/economy.ml,97,None,unclassified
 lib/eio_context/eio_context.ml,142,None,unclassified
 lib/eval_calibration.ml,31,None,unclassified
 lib/eval_calibration.ml,40,None,unclassified

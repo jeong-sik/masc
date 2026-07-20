@@ -11,11 +11,35 @@ val format_board_event_text : Keeper_world_observation.pending_board_event -> st
     RFC-0320 W3(a) verifies that an [External_attention] event steers the woken
     keeper to reply into the originating conversation via keeper_surface_post. *)
 
-(** Build unified system prompt and user message from keeper state.
+(** Three-channel turn prompt. The observation frame is separated from the
+    persisted user message so it can be injected per-turn (via
+    [dynamic_context]) instead of accumulating in the OAS conversation.
 
-    Returns [(system_prompt, user_message)] where:
-    - [system_prompt] contains keeper identity, instructions, and turn intent
-    - [user_message] contains reactive triggers + resource state only
+    Feedback-loop invariant (#25193, RFC PR #25246, operator decision
+    2026-07-20): [world_state] must never be persisted as a conversation
+    message. A live audit found 943/945 user messages in one keeper's
+    checkpoint were byte-identical world-state frames (59% of payload),
+    which starved compaction and re-fed the model its own observations. *)
+type turn_prompt_parts = {
+  system_prompt : string;
+      (** Keeper identity, instructions, and turn intent. Stable across
+          turns of a generation. *)
+  world_state : string;
+      (** The "## Current World State" observation frame, rebuilt fresh
+          every turn. Inject as per-turn [dynamic_context]; never append
+          to the persisted message history. *)
+  user_message : string;
+      (** Persisted user-turn content: genuine utterances only. For
+          autonomous wake turns this is {!autonomous_wake_marker}; HITL
+          resolutions are appended by the turn driver. *)
+}
+
+val autonomous_wake_marker : string
+(** Persisted user-turn content for autonomous wake turns. Constant and
+    tiny by design: the observation frame lives in
+    {!turn_prompt_parts.world_state}, not in the message history. *)
+
+(** Build the three-channel unified prompt from keeper state.
 
     @param meta Keeper metadata (identity, soul, goals, instructions)
     @param observation Current world snapshot *)
@@ -28,7 +52,7 @@ val build_prompt :
   ?active_goal_summaries:(string * string) list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
-  string * string
+  turn_prompt_parts
 (** When [?profile_defaults] is omitted, [instructions] falls back to
     [meta.instructions]. Production hot path supplies profile defaults;
     tests can keep the bare call.

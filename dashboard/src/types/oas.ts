@@ -13,28 +13,6 @@ interface OasAgentEventBase {
   timestamp: number
 }
 
-interface OasAgentSelectedEvent extends OasAgentEventBase {
-  type: 'selected'
-  actor_kind: 'agent'
-  trigger?: string
-  thompson_score?: number
-  final_score?: number
-}
-
-interface OasAgentDecisionEvent extends OasAgentEventBase {
-  type: 'decision'
-  actor_kind: 'agent'
-  action?: string
-  trigger_reason?: string
-}
-
-interface OasAgentActionExecutedEvent extends OasAgentEventBase {
-  type: 'action_executed'
-  actor_kind: 'agent'
-  action?: string
-  success?: boolean
-}
-
 // `phase` is the keeper FSM phase at emit time. Backend emits the
 // lowercase wire form via `Keeper_state_machine.phase_to_string`
 // (lib/runtime/runtime_events.ml:170–179); the factory in
@@ -69,9 +47,6 @@ interface OasReputationChangedEvent extends OasAgentEventBase {
 }
 
 export type OasAgentEvent =
-  | OasAgentSelectedEvent
-  | OasAgentDecisionEvent
-  | OasAgentActionExecutedEvent
   | OasKeeperLifecycleEvent
   | OasTrustUpdatedEvent
   | OasReputationChangedEvent

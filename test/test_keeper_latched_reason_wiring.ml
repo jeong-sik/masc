@@ -180,15 +180,15 @@ let test_grpc_pause_directive_records_reason () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "grpc-directive-keeper" in
        let meta = make_meta keeper_name in
-       Keeper_registry.clear ();
-       ignore (Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       Keeper_registry.For_testing.clear ();
+       ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
        Keeper_keepalive.process_directive
          ~agent_name:keeper_name
          Keeper_directive.Pause;

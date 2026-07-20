@@ -145,6 +145,89 @@ let test_consolidate_applies_plan () =
           claims))))
 ;;
 
+(* A plan whose drop_indices cover every row is refused and the store is left
+   byte-for-byte intact. This is the shape a truncated response takes when its
+   groups array is lost but drop_indices survives. *)
+let test_consolidate_rejects_total_deletion () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "deploy uses blue-green"
+          ; fact "build runs on dune 3.x"
+          ; fact "tests live under test/"
+          ];
+        let plan = {|{"groups":[],"drop_indices":[0,1,2]}|} in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete plan)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Plan_rejected_total_deletion { before } ->
+           Alcotest.(check int) "before" 3 before
+         | _ -> Alcotest.fail "expected Plan_rejected_total_deletion");
+        let claims =
+          Io.read_facts_all ~keeper_id
+          |> List.map (fun f -> f.Types.claim)
+          |> List.sort String.compare
+        in
+        Alcotest.(check (list string))
+          "store untouched"
+          [ "build runs on dune 3.x"; "deploy uses blue-green"; "tests live under test/" ]
+          claims))))
+;;
+
+(* Counterpart to the guard: dropping all but one row is a legitimate outcome for
+   a store of near-duplicates and must still be applied. The guard refuses total
+   erasure only — it is not a ratio floor. *)
+let test_consolidate_allows_large_deletion () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "keeper is idle"
+          ; fact "keeper is idle this turn"
+          ; fact "no actionable signal"
+          ; fact "nothing actionable detected"
+          ];
+        let plan = {|{"groups":[],"drop_indices":[1,2,3]}|} in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete plan)
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~runtime_id:unconfigured_runtime_id
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Consolidated { before; after } ->
+           Alcotest.(check int) "before" 4 before;
+           Alcotest.(check int) "after (3 of 4 dropped)" 1 after
+         | _ -> Alcotest.fail "expected Consolidated");
+        Alcotest.(check (list string))
+          "sole survivor persisted"
+          [ "keeper is idle" ]
+          (Io.read_facts_all ~keeper_id |> List.map (fun f -> f.Types.claim))))))
+;;
+
 let test_consolidate_judges_single_fact () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -440,6 +523,13 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_prompt_matches_template := String.equal expected_prompt rendered_prompt)
             plan
         in
+        let resolved_cfg =
+          match
+            Runtime.resolve_provider_for_consolidation (provider_cfg ~max_tokens:512 ())
+          with
+          | Ok cfg -> cfg
+          | Error msg -> Alcotest.failf "resolver rejected provider config: %s" msg
+        in
         let outcome =
           Runtime.consolidate_keeper
             ~complete
@@ -447,7 +537,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
             ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(provider_cfg ~max_tokens:512 ())
+            ~provider_cfg:resolved_cfg
             ~now
             ~keeper_id
             ()
@@ -478,12 +568,81 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           !seen_prompt_matches_template))))
 ;;
 
+(* #25324 tier 2 wiring: a provider that declares json_object but not native
+   json_schema (GLM/DeepSeek/Kimi) must get [JsonMode] from the consolidation
+   resolver — before this fix the 2-tier helper dropped such providers straight
+   to the prompt tier, forfeiting the wire-level JSON guarantee the endpoint
+   offers. *)
+let test_resolver_selects_json_mode_for_json_object_only_provider () =
+  let json_object_only_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"json-object-only"
+      ~base_url:"https://json-object-only.invalid/v1"
+      ~model_capabilities_override:
+        { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+          supports_structured_output = false
+        }
+      ()
+  in
+  match Runtime.resolve_provider_for_consolidation json_object_only_cfg with
+  | Error msg -> Alcotest.failf "resolver rejected json_object-only provider: %s" msg
+  | Ok resolved ->
+    Alcotest.(check bool)
+      "json_object-only provider gets JsonMode"
+      true
+      (match resolved.Llm_provider.Provider_config.response_format with
+       | Atypes.JsonMode -> true
+       | Atypes.JsonSchema _ | Atypes.Off -> false);
+    Alcotest.(check bool)
+      "JsonMode carries no output_schema"
+      true
+      (Option.is_none resolved.Llm_provider.Provider_config.output_schema);
+    Alcotest.(check (option bool))
+      "thinking is disabled for the consolidation request"
+      (Some false)
+      resolved.Llm_provider.Provider_config.enable_thinking;
+    Alcotest.(check (option bool))
+      "thinking output is not preserved"
+      (Some false)
+      resolved.Llm_provider.Provider_config.preserve_thinking
+;;
+
+(* The OpenAI-compatible json_object contract rejects (HTTP 400) requests whose
+   messages lack the literal token "json" (DeepSeek/Kimi enforce; GLM is
+   lenient). The consolidation prompt must therefore always state that it
+   returns JSON — this locks the token in place for every JsonMode-tier
+   request. *)
+let test_consolidation_prompt_carries_json_token () =
+  with_prompts (fun () ->
+    let facts = [ fact "a"; fact "b" ] in
+    match
+      Prompt_registry.render_prompt_template
+        Keeper_prompt_names.librarian_memory_consolidation
+        [ "numbered_facts", Consolidation.render_numbered_facts facts ]
+    with
+    | Error msg -> Alcotest.failf "failed to render consolidation prompt: %s" msg
+    | Ok rendered ->
+      Alcotest.(check bool)
+        "consolidation prompt states the json contract"
+        true
+        (contains "json" (String.lowercase_ascii rendered)))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation_runtime"
     [ ( "loop"
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "judges a single fact" `Quick test_consolidate_judges_single_fact
+        ; Alcotest.test_case
+            "rejects a plan that deletes every fact"
+            `Quick
+            test_consolidate_rejects_total_deletion
+        ; Alcotest.test_case
+            "applies a large but partial deletion"
+            `Quick
+            test_consolidate_allows_large_deletion
 	        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
         ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
         ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
@@ -504,5 +663,15 @@ let () =
             `Quick
             test_consolidate_respects_provider_config_and_prompt_template
 	        ] )
+    ; ( "output_contract"
+      , [ Alcotest.test_case
+            "resolver selects JsonMode for json_object-only provider"
+            `Quick
+            test_resolver_selects_json_mode_for_json_object_only_provider
+        ; Alcotest.test_case
+            "consolidation prompt carries the json token"
+            `Quick
+            test_consolidation_prompt_carries_json_token
+        ] )
     ]
 ;;

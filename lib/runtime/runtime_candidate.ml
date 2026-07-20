@@ -12,8 +12,6 @@
 
 type t = Llm_provider.Provider_config.t
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
-
 let of_provider_config (cfg : Llm_provider.Provider_config.t) : t = cfg
 
 let of_provider_configs (cfgs : Llm_provider.Provider_config.t list) : t list = cfgs

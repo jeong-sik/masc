@@ -272,17 +272,37 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
        raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after
-     they freeze. The opt-in timeouts (stream_idle_timeout_sec and the
-     body-timeout override) are None when unset; without this line a knob that
-     is CONFIGURED in runtime.toml but did not reach Keeper_runtime_resolved is
-     indistinguishable at runtime from an unset one — the exact ambiguity that
-     blocked diagnosing #25128 (idle timeout configured at 120s yet never
-     observed to fire). No existing surface exposes the resolved value. *)
+     they freeze. Without this line a knob that is CONFIGURED in runtime.toml but
+     did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
+     unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
+     configured yet never observed to fire). The body-timeout override is None
+     when unset; stream_idle_timeout_sec now resolves to the RFC-0345 fail-safe
+     floor when unset (stated on the dedicated line below). No existing surface
+     exposes the resolved value. *)
   Log.Runtime.info
     ~category:Log.Boundary
     "resolved runtime config: %s"
     (Yojson.Safe.to_string
        (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
+  (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
+     came from an operator value (env/toml) or the fail-safe floor, so operators
+     can see the floor is active and raise it if their provider legitimately
+     idles longer. The resolver always yields [Some] after the floor; the [None]
+     arm is retained as total handling and reports the pre-floor freeze-risk
+     posture should the floor ever be removed. *)
+  Keeper_runtime_resolved.(
+    let idle = (current ()).stream_idle_timeout_sec in
+    match idle.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string idle.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
   Keeper_task_owner_backend.install_hooks ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock

@@ -140,6 +140,7 @@
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
+  test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -186,6 +187,9 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
+  test_keeper_board_attention_failure
+  test_keeper_board_attention_partition
+  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -274,6 +278,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
+  test_inference_drop_orphan_tool_calls
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -448,6 +453,7 @@
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
   test_server_dashboard_http_keeper_memory_health
+  test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -494,6 +500,9 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
+  test_keeper_board_attention_failure
+  test_keeper_board_attention_partition
+  test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
   test_lsp_process_manager
@@ -582,6 +591,7 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
+  test_inference_drop_orphan_tool_calls
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_task_completion_claim
@@ -727,6 +737,11 @@
  (modules test_fusion_wake)
  (libraries masc_test_deps masc.fusion_core))
 
+(test
+ (name test_fusion_delivery_obligation)
+ (modules test_fusion_delivery_obligation)
+ (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
+
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
 ; Pins the poison/transient classification table and the reported incident
@@ -804,6 +819,14 @@
 (test
  (name test_runtime_modality_reroute)
  (modules test_runtime_modality_reroute)
+ (libraries masc_test_deps))
+
+; A keeper must not be offered its own authored tasks as claimable work —
+; otherwise a routing/report persona re-triggers on its own output.
+
+(test
+ (name test_keeper_self_authored_task_exclusion)
+ (modules test_keeper_self_authored_task_exclusion)
  (libraries masc_test_deps))
 
 ; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
@@ -895,6 +918,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_runtime_startup_maintenance
   test_server_hibernation
   test_server_base_path_diagnostics
   test_server_base_path_guard
@@ -1010,7 +1034,6 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1030,6 +1053,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
@@ -1058,6 +1084,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_runtime_startup_maintenance
   test_server_hibernation
   test_server_base_path_diagnostics
   test_server_base_path_guard
@@ -1172,7 +1199,6 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1192,6 +1218,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))
@@ -1307,6 +1336,21 @@
  (name test_schedule_domain)
  (modules test_schedule_domain)
  (libraries alcotest yojson masc_schedule))
+
+(test
+ (name test_schedule_ical_recur)
+ (modules test_schedule_ical_recur)
+ (libraries alcotest masc_schedule))
+
+(test
+ (name test_schedule_ical_content_line)
+ (modules test_schedule_ical_content_line)
+ (libraries alcotest masc_schedule))
+
+(test
+ (name test_schedule_ical_vevent)
+ (modules test_schedule_ical_vevent)
+ (libraries alcotest masc_schedule))
 
 (test
  (name test_schedule_store)
@@ -1588,6 +1632,8 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_keeper_registry_admission_no_suspend.inc)
+(include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
@@ -1865,6 +1911,7 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
+(include stanzas/test_keeper_supervisor_persona_drift_order.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 

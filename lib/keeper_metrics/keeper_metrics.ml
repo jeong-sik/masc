@@ -101,7 +101,6 @@ type t =
   | OasTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
-  | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
@@ -319,7 +318,6 @@ let to_string = function
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
   | NoToolProvider -> "masc_keeper_no_tool_provider_total"
   | ProactiveOutcome -> "masc_keeper_proactive_outcome_total"
-  | OllamaSaturationSkip -> "masc_keeper_ollama_saturation_skip_total"
   | TaskLoadFailures -> "masc_keeper_task_load_failures_total"
   | ToolSelectionFailures -> "masc_keeper_tool_selection_failures_total"
   | ReconcileFailures -> "masc_keeper_reconcile_failures_total"

@@ -94,7 +94,7 @@ let test_reports_terminal_residue () =
     in
     (match Eio.Promise.await settled with
      | Async.Status_settlement
-         { status = Async.Done _
+         { entry = { status = Async.Done _; _ }
          ; durability = Async.Durable
          ; origin = Async.Transition_commit
          } ->

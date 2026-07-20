@@ -101,6 +101,16 @@ let image_block_json ~url ~caption =
     ; ("alt_text", `String alt_text)
     ]
 
+(* Plain mrkdwn section for notices that have no URL (e.g. an attachment
+   whose stored metadata failed the typed decode — the surface must name it,
+   not drop it). Same redact/escape/truncate pipeline as the other builders. *)
+let section_block_json ~text =
+  let text = redact text |> escape_mrkdwn_text |> truncate_block_text in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
+    ]
+
 let audio_block_json ~base_url ~token ~message_text =
   let url = public_voice_audio_url ?base_url token |> escape_mrkdwn_text in
   let message_text = redact message_text |> escape_mrkdwn_text in

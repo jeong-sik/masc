@@ -880,9 +880,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
-           ("compaction_policy", `Assoc [
-             ("profile", `String m.compaction.profile);
-           ]);
            ("status_options", `Assoc [
              ("tail_turns", `Int tail_turns);
              ("tail_messages", `Int tail_messages);

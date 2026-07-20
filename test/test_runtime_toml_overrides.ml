@@ -333,14 +333,22 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
-let test_resolved_stream_idle_timeout_defaults_disabled () =
+let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
+  (* RFC-0345 / #25128: with no explicit env/toml value the resolver substitutes
+     the fail-safe liveness floor (not [None]) so OAS enforces a bound and a hung
+     stream cannot freeze the lane forever. Reverting the floor (back to [None])
+     makes this fail. *)
   with_clean_boot_overrides @@ fun () ->
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
-  check (option (float 0.0001)) "stream idle timeout disabled by default"
-    None runtime.stream_idle_timeout_sec.value;
-  check string "stream idle timeout default source"
-    "default"
+  check (option (float 0.0001)) "stream idle timeout defaults to fail-safe floor"
+    (Some Keeper_runtime_resolved.stream_idle_failsafe_floor_sec)
+    runtime.stream_idle_timeout_sec.value;
+  check (option (float 0.0001)) "accessor returns the floor when unset"
+    (Some Keeper_runtime_resolved.stream_idle_failsafe_floor_sec)
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ());
+  check string "stream idle timeout floor source"
+    "failsafe_floor"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
 let test_resolved_stream_idle_timeout_uses_toml () =
@@ -380,6 +388,17 @@ let test_resolved_stream_idle_timeout_does_not_clamp () =
   Keeper_runtime_resolved.init ();
   check (option (float 0.0001)) "explicit value is preserved"
     (Some 3600.0)
+    (Keeper_runtime_resolved.stream_idle_timeout_sec ())
+
+let test_resolved_stream_idle_timeout_env_below_floor_preserved () =
+  (* Override precedence: an explicit value BELOW the floor is honoured verbatim.
+     The resolver substitutes the floor only for [None]; it does not clamp an
+     operator value up to the floor. A [max env floor] mutation fails this. *)
+  with_clean_boot_overrides @@ fun () ->
+  with_env "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" (Some "30") @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  check (option (float 0.0001)) "explicit sub-floor value preserved (no clamp-up)"
+    (Some 30.0)
     (Keeper_runtime_resolved.stream_idle_timeout_sec ())
 
 let expect_stream_idle_timeout_env_config_error raw =
@@ -480,7 +499,7 @@ let () =
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
-        ; test_case "resolved stream idle timeout defaults disabled" `Quick test_resolved_stream_idle_timeout_defaults_disabled
+        ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error
         ; test_case "wrong-type stream idle TOML returns Error" `Quick test_stream_idle_timeout_toml_wrong_type_returns_error
@@ -490,6 +509,7 @@ let () =
         ; test_case "cli subprocess idle clamps to 600s ceiling" `Quick test_resolved_cli_subprocess_idle_clamps_high
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ; test_case "resolved stream idle timeout does not clamp" `Quick test_resolved_stream_idle_timeout_does_not_clamp
+        ; test_case "resolved stream idle timeout env below floor preserved" `Quick test_resolved_stream_idle_timeout_env_below_floor_preserved
         ; test_case "invalid stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_invalid_env_fails_loud
         ; test_case "empty stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_empty_env_fails_loud
         ; test_case "whitespace stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_whitespace_env_fails_loud

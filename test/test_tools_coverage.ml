@@ -578,19 +578,26 @@ let test_keeper_goal_arg_rejected () =
     Alcotest.(check bool) "goal mentioned" true
       (contains_substring ~needle:"goal" msg)
 
-let test_keeper_compaction_cooldown_arg_rejected () =
-  let args = `Assoc [ "compaction_cooldown_sec", `Int 15 ] in
-  match
-    Masc.Keeper_config.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      args
-  with
-  | Ok () -> Alcotest.fail "removed compaction cooldown arg should be rejected"
-  | Error msg ->
-    Alcotest.(check bool)
-      "compaction_cooldown_sec mentioned"
-      true
-      (contains_substring ~needle:"compaction_cooldown_sec" msg)
+let test_keeper_removed_compaction_args_rejected () =
+  [ "compaction_cooldown_sec"
+  ; "compaction_profile"
+  ; "compaction_ratio_gate"
+  ; "compaction_message_gate"
+  ; "compaction_token_gate"
+  ]
+  |> List.iter (fun key ->
+    let args = `Assoc [ key, `Int 15 ] in
+    match
+      Masc.Keeper_config.reject_removed_keeper_input_keys
+        ~tool_name:"masc_keeper_up"
+        args
+    with
+    | Ok () -> Alcotest.failf "removed %s arg should be rejected" key
+    | Error msg ->
+      Alcotest.(check bool)
+        (key ^ " mentioned")
+        true
+        (contains_substring ~needle:key msg))
 
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
@@ -611,7 +618,15 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props)
+            (List.mem_assoc "active_model" props);
+          [ "compaction_profile"
+          ; "compaction_ratio_gate"
+          ; "compaction_message_gate"
+          ; "compaction_token_gate"
+          ]
+          |> List.iter (fun key ->
+            Alcotest.(check bool) ("omits " ^ key) false
+              (List.mem_assoc key props))
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_keeper_sandbox_args_rejected () =
@@ -797,6 +812,31 @@ let test_property_types_valid () =
   ) schema_inventory
 
 (* ============================================================ *)
+(* Keeper runtime front door                                     *)
+(* ============================================================ *)
+
+(* A keeper whose context outgrows its provider window cannot shrink it on its
+   own, so an explicit compaction request is the operator's escape hatch. It
+   must therefore be reachable from the MCP front door, not only from the
+   keeper-internal tool surface. *)
+let test_keeper_compact_is_public_mcp () =
+  Alcotest.(check bool)
+    "masc_keeper_compact is on the public MCP surface"
+    true
+    (Tool_catalog.is_public_mcp "masc_keeper_compact")
+;;
+
+(* Pin the deliberate scope boundary: [masc_keeper_clear] wipes transcript
+   messages, which is a different operator decision from asking a keeper to
+   compact. Opening the escape hatch must not also expose the destructive one. *)
+let test_keeper_clear_stays_internal () =
+  Alcotest.(check bool)
+    "masc_keeper_clear stays off the public MCP surface"
+    false
+    (Tool_catalog.is_public_mcp "masc_keeper_clear")
+;;
+
+(* ============================================================ *)
 (* Test Runner                                                   *)
 (* ============================================================ *)
 
@@ -866,8 +906,8 @@ let () =
         test_keeper_shards_arg_rejected;
       Alcotest.test_case "keeper-goal-arg-rejected" `Quick
         test_keeper_goal_arg_rejected;
-      Alcotest.test_case "keeper-compaction-cooldown-arg-rejected" `Quick
-        test_keeper_compaction_cooldown_arg_rejected;
+      Alcotest.test_case "keeper-compaction-policy-args-rejected" `Quick
+        test_keeper_removed_compaction_args_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
@@ -898,5 +938,11 @@ let () =
       Alcotest.test_case "description_not_long" `Quick test_description_not_too_long;
       Alcotest.test_case "no_duplicate_props" `Quick test_no_duplicate_properties;
       Alcotest.test_case "valid_prop_types" `Quick test_property_types_valid;
+    ];
+    "keeper_front_door", [
+      Alcotest.test_case "compact_is_public_mcp" `Quick
+        test_keeper_compact_is_public_mcp;
+      Alcotest.test_case "clear_stays_internal" `Quick
+        test_keeper_clear_stays_internal;
     ];
   ]

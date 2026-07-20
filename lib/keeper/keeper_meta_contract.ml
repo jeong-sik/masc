@@ -10,13 +10,6 @@ let now_iso () = Masc_domain.now_iso ()
 
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
-type compaction_policy =
-  { profile : string
-  ; ratio_gate : float
-  ; message_gate : int
-  ; token_gate : int
-  }
-
 type proactive_policy =
   { enabled : bool }
 
@@ -35,6 +28,16 @@ type compaction_runtime_decision = Compaction_runtime_decision of string
 
 let compaction_runtime_decision_to_string (Compaction_runtime_decision value) = value
 let compaction_runtime_decision_of_string value = Compaction_runtime_decision value
+
+(* SSOT for the API/dashboard projection of [last_compaction_decision]: the
+   decision string, or [`Null] when empty. keeper_status.ml and
+   dashboard_http_keeper.ml share this null-guard so the policy is defined once
+   (previously copied verbatim across both — issue #25323). keeper_meta_json.ml
+   serializes the raw string for its own on-disk representation and does not use
+   this guard. *)
+let compaction_decision_json_or_null decision : Yojson.Safe.t =
+  let s = compaction_runtime_decision_to_string decision in
+  if String.trim s = "" then `Null else `String s
 
 type compaction_runtime =
   { count : int
@@ -360,7 +363,6 @@ type keeper_meta =
   ; allowed_paths : string list
   ; mention_targets : string list
   ; proactive : proactive_policy
-  ; compaction : compaction_policy
   ; multimodal_policy : Keeper_types_profile.multimodal_policy
   ; (* -- Lifecycle -- *)
     created_at : string

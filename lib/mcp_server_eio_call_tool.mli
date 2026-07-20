@@ -36,6 +36,11 @@ val record_mcp_server_operation_duration_sample :
 module For_testing : sig
   val arguments_of_params : Yojson.Safe.t -> Yojson.Safe.t
 
+  val failure_observation :
+    duration_ms:int ->
+    Tool_result.result ->
+    (Tool_result.tool_failure_class * string) option
+
   val activity_tool_called_payload :
     tool_name:string ->
     success:bool ->

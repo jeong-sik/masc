@@ -2,10 +2,10 @@
 
 Keeper approval rules are persisted allow rules. The authoritative path is
 `Keeper_approval_queue_rules.rules_path`, which resolves beneath
-`Workspace_utils.masc_dir_from_base_path`. They are only loaded when each rule
-entry parses as a complete rule. Malformed entries are ignored, reported as
-persistence read drops, and cannot match a future request or auto-approve a tool
-call.
+`Workspace_utils.masc_dir_from_base_path`. They are only loaded when every rule
+entry parses as a complete rule. A malformed entry fails the whole load, is
+reported as a persistence read drop, and cannot match a future request or
+auto-approve a tool call.
 
 ## Critical Approval Timeout Policy
 
@@ -42,28 +42,36 @@ required fields:
 - `keeper_name`: non-blank string
 - `tool_name`: non-blank string
 - `request_fingerprint`: non-blank string
-- `max_risk`: one of `low`, `medium`, `high`, or `critical`
 - `created_at`: number
-- `match_count`: non-negative integer
 
-Optional fields such as `sandbox_profile`, `backend`, `created_by`,
-`last_matched_at`, and `source_approval_id` remain optional. A missing
-`request_fingerprint_preview` is derived from a valid fingerprint.
+`created_by`, `source_approval_id`, and `expires_at` are optional and may be
+absent or null. `expires_at` is an absolute Unix timestamp: at and after that
+time the rule no longer authorizes. A malformed non-null `expires_at` fails
+the entry rather than silently becoming a permanent rule.
 
-No malformed required field receives a permissive default. In particular,
-invalid or missing `max_risk` does not default to `high`.
+No malformed required field receives a permissive default, and any unsupported
+or duplicate field rejects the whole file with `explicit re-approval is
+required`.
+
+## Rule Expiry
+
+An exact Always Allowed rule with `expires_at` set stops matching at that
+timestamp. `find_matching_rule` then reports `Rule_match_expired` instead of
+applying the rule; the Gate logs the exclusion and appends a
+`gate_exact_rule_expired` audit event carrying the rule id, then falls back to
+the configured Gate mode. Expiry never deletes the rule: it stays in the store
+and dashboard listing until an operator removes it through the existing delete
+path. Rules without `expires_at` never expire, so pre-expiry persisted files
+keep their previous behavior.
 
 ## Rejection Proof
 
-`test/test_keeper_approval_queue_rules.ml` writes a persisted rule whose keeper,
-tool, and request fingerprint would otherwise match a low-risk request, but whose
-`max_risk` is malformed. The test verifies that:
+`test/test_keeper_approval_queue_rules.ml` writes a persisted rule entry with
+an unsupported field. The test verifies that:
 
-- `list_rules` skips the malformed rule during load
-- `find_matching_rule` returns `None` for the matching request
-- the skipped malformed entry increments the `keeper_approval_rules`
+- `list_rules` rejects the whole rules file
+- the rejected entry increments the `keeper_approval_rules`
   `invalid_payload` persistence-read-drop counter
-- rewriting the same persisted shape with a valid `max_risk` loads and matches
 
 This pins the operational behavior: malformed persisted approval rules are not
 silently allowed or silently erased.

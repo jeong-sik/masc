@@ -59,9 +59,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       selected_runtime_canonical: 'tier-group.keeper_unified',
       runtime_options: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     },
-    compaction: {
-      profile: 'balanced',
-    },
     proactive: {
       enabled: true,
     },
@@ -416,7 +413,7 @@ describe('keeperConfigControlInventory', () => {
       },
     })
 
-    expect(findItem('policy', persona, 'kcf-policy-continuity').kind).toBe('unsupported')
+    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('unsupported')
     expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
   })
 
@@ -440,9 +437,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     effective_allowed_paths: [],
     prompt: {} as KeeperConfig['prompt'],
     execution: {} as KeeperConfig['execution'],
-    compaction: {
-      profile: 'balanced',
-    } as KeeperConfig['compaction'],
     proactive: {
       enabled: false,
     } as KeeperConfig['proactive'],
@@ -621,22 +615,17 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.mention_targets).toEqual([])
   })
 
-  it('emits compaction_profile, autoboot, and max_context_override edits', () => {
+  it('emits autoboot and max_context_override edits', () => {
     const c = makeKeeperConfigForSandbox({
       autoboot_enabled: true,
       max_context_override: null,
-      compaction: {
-        profile: 'balanced',
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       autoboot_enabled: false,
       max_context_override: '64000',
-      compaction_profile: 'conservative',
     }), c)
     expect(payload.autoboot_enabled).toBe(false)
     expect(payload.max_context_override).toBe(64000)
-    expect(payload.compaction_profile).toBe('conservative')
   })
 
   it('emits null to clear max_context_override when draft is zero', () => {
@@ -1113,7 +1102,6 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    expect(container.querySelector('select[aria-label="compaction_profile"]')).toBeNull()
     expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
     expect(container.querySelector('button[aria-label="자동 부팅"]')).toBeNull()
     selectKcfTab(container, '권한·샌드박스')
@@ -1333,16 +1321,11 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
-  it('patches compaction profile, autoboot, and max-context override from the dashboard panel', async () => {
-    const base = makeKeeperConfig()
+  it('patches autoboot and max-context override from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         autoboot_enabled: false,
         max_context_override: 64000,
-        compaction: {
-          ...base.compaction,
-          profile: 'conservative',
-        },
       }),
     )
 
@@ -1360,12 +1343,6 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    const compactionProfile = container.querySelector('select[aria-label="compaction_profile"]') as HTMLSelectElement | null
-    expect(compactionProfile).not.toBeNull()
-    compactionProfile!.value = 'conservative'
-    compactionProfile!.dispatchEvent(new Event('change', { bubbles: true }))
-    await flush()
-
     const autoboot = container.querySelector('button[aria-label="자동 부팅"]') as HTMLButtonElement | null
     expect(autoboot).not.toBeNull()
     autoboot!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1383,7 +1360,6 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         autoboot_enabled: false,
         max_context_override: 64000,
-        compaction_profile: 'conservative',
       }),
     )
   })

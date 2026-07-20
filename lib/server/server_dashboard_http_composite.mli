@@ -34,7 +34,6 @@ val composite_latest_activity_epoch :
   Yojson.Safe.t -> Yojson.Safe.t -> float option
 val composite_snapshot_is_idle : Yojson.Safe.t -> bool
 val composite_execution_config_blocked : Yojson.Safe.t -> bool
-val composite_execution_saturated : Yojson.Safe.t -> bool
 val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool
 val composite_execution_config_drift : Yojson.Safe.t -> bool
 val keeper_activation_readiness_json :

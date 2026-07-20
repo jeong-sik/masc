@@ -22,8 +22,8 @@
     - {b Vote log persistence}: [append_vote_log],
       [rewrite_vote_log].
     - {b Internal vote outcome}: the [vote_outcome] record
-      carries the score delta, optional fresh peer-upvote economy
-      credit, and post-lock vote log / feedback side effects.
+      carries the score delta and post-lock vote log / feedback
+      side effects.
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].

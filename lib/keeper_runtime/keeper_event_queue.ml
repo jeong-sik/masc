@@ -178,9 +178,7 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
-let fusion_completion_post_id (fc : fusion_completion) =
-  if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
-  else fc.board_post_id
+let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =
   if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
@@ -261,6 +259,24 @@ let failure_judgment_identity_equal left right =
        left.fj_provenance
        right.fj_provenance
 
+let fusion_terminal_equal left right =
+  match left, right with
+  | Fusion_succeeded left, Fusion_succeeded right
+  | Fusion_failed left, Fusion_failed right -> String.equal left right
+  | Fusion_cancelled, Fusion_cancelled -> true
+  | Fusion_succeeded _, (Fusion_failed _ | Fusion_cancelled)
+  | Fusion_failed _, (Fusion_succeeded _ | Fusion_cancelled)
+  | Fusion_cancelled, (Fusion_succeeded _ | Fusion_failed _) -> false
+
+let fusion_completion_identity_equal left right =
+  String.equal left.run_id right.run_id
+  && fusion_terminal_equal left.terminal right.terminal
+  (* The first durably committed row owns optional Board evidence and recipient
+     authority. A retry may observe a recovered Board sink or a consumed
+     in-memory route; neither changes the Fusion result identity.
+     [enqueue_external_decision] retains the existing row, so excluding these
+     projections never overwrites their first committed values. *)
+
 let stimulus_identity_equal a b =
   String.equal a.post_id b.post_id
   && a.urgency = b.urgency
@@ -268,6 +284,8 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Failure_judgment left, Failure_judgment right ->
     failure_judgment_identity_equal left right
+  | Fusion_completed left, Fusion_completed right ->
+    fusion_completion_identity_equal left right
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =

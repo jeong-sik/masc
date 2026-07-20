@@ -221,18 +221,10 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
-  | Some (Keeper_turn_driver.Capacity_backpressure { cooldown_cause; _ }) ->
-      (* A pre-dispatch provider-health cooldown block carries the failure that
-         armed the cooldown.  Deterministic causes (config/build error, depleted
-         balance, structural provider failure) re-fail on the next tick, so they
-         must NOT be auto-recoverable: returning [false] makes [counts_toward_crash]
-         true so the existing failure-streak policy escalates instead of the
-         keeper oscillating (#23438).  Genuine upstream capacity backpressure
-         ([None]) and transient causes stay auto-recoverable. *)
-      (match cooldown_cause with
-       | Some cause ->
-         not (Keeper_turn_driver.provider_cooldown_cause_is_deterministic cause)
-       | None -> true)
+  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
+      (* Legacy [cooldown_cause] values are diagnostic-only. A decoded receipt
+         from the retired pre-dispatch gate must not regain lifecycle authority. *)
+      true
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
@@ -453,10 +445,9 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            where OAS surfaces the error directly) should still trigger rotation
            when a different runtime may succeed.
 
-           429 rate-limit (non-hard-quota): rotate only to candidates outside
-           the throttled runtime's credential pool. The filter lives at the
-           candidate boundary below, where runtime/provider credentials are
-           available.
+           429 rate-limit (non-hard-quota): rotate through explicitly declared
+           candidates. The error type does not carry model/account/provider
+           scope, so this boundary must not infer a broader blocked set.
 
            [ServerError]: the provider is unhealthy or overloaded; a
            different runtime may be healthy.
@@ -466,8 +457,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
 
            [PaymentRequired] and provider [HardQuota] are handled above by
            [sdk_error_is_hard_quota]. Rate limits intentionally keep [Rate_limit]
-           so pool-aware candidate filtering can preserve independent-provider
-           failover. *)
+           so declared runtime fallback remains available. *)
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
@@ -580,10 +570,8 @@ let default_degraded_rotation_candidates
     (* Phase B-1: include the full runtime catalog so transient infrastructure
        failures (notably capacity_backpressure) can fail over to a healthy
        runtime outside the narrow [base; default; phase_recovery] set.
-       Without this, two runtimes in cooldown had nowhere to go (#23373,
-       incidents 2026-05-21 / 2026-07-06). Credential-pool filtering is
-       applied downstream by [degraded_rotation_after_recoverable_error] via
-       [filter_quota_pool_rotation_candidates]. *)
+       Without this, two unavailable runtimes had nowhere to go (#23373,
+       incidents 2026-05-21 / 2026-07-06). *)
     candidates_with_catalog
   | Some (Hard_quota | Rate_limit)
   | None ->
@@ -629,23 +617,7 @@ let degraded_rotation_candidates
   |> List.filter (fun candidate ->
          not (String.equal candidate normalized_effective))
 
-let filter_quota_pool_rotation_candidates
-      ~credential_pool_of_runtime_id
-      ~effective_runtime
-      candidates
-  =
-  match credential_pool_of_runtime_id effective_runtime with
-  | None -> candidates
-  | Some effective_pool ->
-    List.filter
-      (fun candidate ->
-         match credential_pool_of_runtime_id candidate with
-         | None -> true
-         | Some candidate_pool -> not (String.equal candidate_pool effective_pool))
-      candidates
-
 let degraded_rotation_after_recoverable_error
-      ?(credential_pool_of_runtime_id = fun _ -> None)
       ?fallback_hint
       ~(base_runtime : string)
       ~(effective_runtime : string)
@@ -669,23 +641,6 @@ let degraded_rotation_after_recoverable_error
           ~fallback_reason
           ~fallback_hint
           ~base_runtime ~effective_runtime
-      in
-      let candidates =
-        match fallback_reason with
-        | Hard_quota
-        | Rate_limit ->
-          filter_quota_pool_rotation_candidates
-            ~credential_pool_of_runtime_id
-            ~effective_runtime
-            candidates
-        | Empty_no_progress
-        | Thinking_only_no_progress
-        | Resumable_cli_session
-        | Runtime_candidates_filtered
-        | Runtime_exhausted
-        | Capacity_backpressure
-        | Server_error
-        | Auth_error -> candidates
       in
       let untried =
         List.find_opt

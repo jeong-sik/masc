@@ -233,11 +233,12 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
     ; clear_thinking = Some true
     }
   in
-  (* Native json_schema when the provider declares it; otherwise fall back to the
-     schema-free tuned config so json_object / free-text providers (GLM, MiMo,
-     ollama cloud) can still serve the librarian. Invalid structured output is
+  (* Native json_schema when the provider declares it; json_object JSON mode for
+     providers that only declare that (GLM/DeepSeek/Kimi, #25324 tier 2); the
+     schema-free tuned config only for free-text providers (MiMo, ollama cloud)
+     so they can still serve the librarian. Invalid structured output is
      surfaced as a typed failure after the single provider attempt. *)
-  Keeper_structured_output_schema.apply_schema_or_prompt_tier
+  Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
     ~log_label:"keeper librarian output contract"
     Keeper_structured_output_schema.librarian_episode_output_schema
     tuned_cfg

@@ -2,13 +2,31 @@
 
 ## Unreleased
 
+## [0.21.2] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.217.1` to `v0.217.3` (`cbc5168e`). Absorbs 0.217.2 (`reasoning_replay_dropped` logs at Info, oas#2721) and 0.217.3: the Ollama native tool-loop replay/correlation now flows through an immutable occurrence-scoped projection that rejects legacy User-role ToolResult and uncorrelated tool messages typed on Gemini/Ollama-native instead of silently repairing them (oas#2710, supersedes oas#2711), and durable `Error_occurred` error_domain is classified from the error rather than hardcoded `"Api"` (oas#2717). Public Agent SDK surface fingerprint unchanged (only the pin sha/version move). Live checkpoint audit 2026-07-20: 24/24 primary checkpoints carry zero legacy shapes, so the oas#2710 hard-cut is inert on the current fleet.
+
+## [0.21.1] - 2026-07-20
+
+### Changed
+- Re-cut of the 0.21.0 release line: the `v0.21.0` tag points at a commit whose generated `masc.opam` still carried version 0.20.1, so its own version-truth gate (and the tag-triggered release workflow) fail on it. 0.21.1 is the first version-truth-clean release commit; `v0.21.0` remains an unpublished historical tag. Also aligns the previously ungated `masc.opam.locked` version field (was 0.19.54) and the ROADMAP/PRODUCT-OPERATING-PLAN/SPEC-INDEX version headers.
+
+## [0.21.0] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.216.5` to `v0.217.1` (`8147cfc7` chain). Absorbs the 0.217.0 breaking change — streaming rejects malformed tool-call batches whole-batch (oas#2702) — plus resume totality over crash-reachable journal states (oas#2713/oas#2715), overflow wire finish_reason decoding (oas#2703), finite retry_after parsing (oas#2708), admission-warning URL sanitisation (oas#2706), Kimi native token-count admission (oas#2705), admission-SSOT projected input (oas#2707), exact provider turn identity (oas#2709), and typed rejection of unencodable explicit thinking (oas#2716).
+- Runtime prep for oas#2716: the deployment `oas-models-overlay.toml` now declares `thinking_control_format = "none"` + `supports_reasoning = true` for the OpenAI-compatible `ollama_cloud` rows (`kimi-k2.6`, `minimax-m3`, `deepseek-v4-pro`), so `enable_thinking=true` keeper turns admit as declared-inherent reasoning instead of failing with `Enable_not_encodable` on the /v1 wire (2026-07-20 flip-risk audit).
+
 ### Fixed
+- Keeper streaming responses now resolve a fail-safe inter-line idle timeout floor of 600 s (10 min) when neither `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` nor `runtime.toml`'s `turn.stream_idle_timeout_sec` is set. Previously the resolved value was `None` and OAS applied no inter-line idle bound, so a hung provider stream (bytes stop arriving mid-response) froze the keeper chat lane until an external restart (#25128, measured 30+ min). An explicit env/toml value still overrides the floor verbatim; the boot log now states the effective idle timeout and its source (env/toml vs floor). Implements RFC-0345 Option A.
 - CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
 - The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
 - Keeper context-metrics projection now reads its JSONL ledger through `Dated_jsonl.read_recent_result` and exposes typed storage or malformed-row unavailability instead of silently falling back to metadata. `Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files` now returns a `result`; there is no compatibility wrapper for the former `option` signature.
 
 ### Removed
+- Removed the zero-consumer Keeper compaction policy authoring record: profile aliases, hardcoded threshold tables, ratio/message/token Runtime params and env knobs, keeper-up/schema/meta fields, status/config projections, and dashboard controls. Retired inputs and persisted fields now fail explicitly; the typed compaction runtime, owner-lane execution, provider-overflow recovery, and durable observations remain unchanged.
 - Removed dead compaction ratio/message/token gates from Keeper status, metrics, TUI, dashboard config, and PATCH surfaces, including the unused `context_within_budget` FSM condition and inferred dashboard threshold marker. Observable compaction transitions now name the typed `Compaction_started` event; no UI fallback manufactures a gate.
 - Removed the superseded `Runtime_agent.media_reroute_candidates` helper (the live reroute path builds candidates inline) and narrowed `Keeper_runtime`'s interface by dropping five internal-only exported vals (`supervisor_sweeps`, `supervisor_sweeps_mu`, `with_sweeps_ro`, `with_sweeps_rw`, `existing_keepalive_bootstrap_done`). No replacement: zero external consumers.
 - Removed the public MASC JSON Schema classifiers `Tool_bridge.param_type_of_string` and `Sdk_tool_contract.param_type_of_schema_opt`, plus the zero-consumer `Sdk_tool_contract.tool_params_of_input_schema`. Consumers must use the OAS-owned `Agent_sdk.Mcp.json_schema_to_params`; missing, unsupported, or ambiguous property types now fail at that boundary instead of defaulting to `String`. No compatibility alias remains.

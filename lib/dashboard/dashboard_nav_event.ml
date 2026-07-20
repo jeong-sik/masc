@@ -47,7 +47,7 @@ let valid_sections =
   ; ( "workspace"
     , [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification"; "work" ] )
   ; ( "lab"
-    , [ "tools"; "harness"; "performance"; "memory-subsystems"; "keeper-memory-health" ]
+    , [ "tools"; "harness"; "performance"; "memory-subsystems"; "keeper-memory-health"; "audit-integrity" ]
     )
   ; "code", [ "ide-shell" ]
   ; ( "settings"

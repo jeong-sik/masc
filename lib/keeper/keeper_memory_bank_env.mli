@@ -10,3 +10,9 @@ val max_memory_text_length : unit -> int
 (* RFC keeper-memory-consolidation Stage 1: memory_bank long-term inject
    kill-switch (MASC_KEEPER_BANK_LONGTERM_INJECT, default=true). *)
 val bank_longterm_inject_enabled : unit -> bool
+
+(* RFC keeper-memory-bank-write-reduction: memory-bank write kill-switch
+   (MASC_KEEPER_MEMORY_BANK_WRITE, default=true). When false, explicit,
+   tool-result, and voice bank writes are skipped so the deprecated bank stops
+   accumulating; continuity is bank-independent. *)
+val bank_write_enabled : unit -> bool

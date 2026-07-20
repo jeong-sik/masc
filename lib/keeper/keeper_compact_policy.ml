@@ -268,10 +268,57 @@ let selected_message_count units selected =
     selected
 ;;
 let requested_messages (meta : keeper_meta) messages =
-  match Keeper_compaction_unit.partition messages with
+  match Keeper_compaction_unit.partition ~quarantine:true messages with
   | Error error -> Error (Invalid_structure error)
   | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
+    (* Persistence-gate precondition, checked BEFORE the summarizer runs.
+
+       [partition ~quarantine:true] tolerates a structural break by freezing
+       the valid prefix and moving the break plus its successors into
+       [protected_suffix]. The persist boundary does not tolerate it: a
+       checkpoint must preserve every message exactly, so it runs
+       [Keeper_compaction_unit.validate] with quarantine off
+       (keeper_context_core.ml:71 -> Tool_history_invalid ->
+       Invalid_structural_source). Because quarantine PRESERVES the break in
+       [protected_suffix], that break is carried into the compacted checkpoint
+       and rejected there — after the summarizer call has already been paid
+       for. [validate messages] failing therefore implies the compacted result
+       fails too, so rejecting here refuses no compaction that could have
+       persisted.
+
+       The observable outcome is deliberately NOT identical to the late
+       failure, and the difference is the point:
+
+       - Late: [commit_prepared_compaction] returns [Error], which
+         [Keeper_manual_compaction.run_commit] folds into its catch-all
+         [Error (Recovery _)] -> [Manual_compaction_failed] -> [Requeue
+         Context_compaction_retry]. That settlement is not an ack
+         (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
+         every cycle — one summarizer call each time. This is the live
+         livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
+         after the #25413 build went live.
+       - Early: the typed [No_compaction] arm of
+         [Keeper_manual_compaction.finish_preparation] acks and settles
+         terminally, with a ledger row and a [compaction_rejected] log line.
+
+       Terminating is correct here because [validate] rejection is monotone
+       under append: appending messages never repairs an existing structural
+       break, so retrying the identical source cannot succeed.
+
+       Because this gate precedes summarizer selection, a keeper with BOTH a
+       broken history and an unavailable summarizer now reports
+       [Invalid_structure] (terminal) rather than [Summarizer_unavailable]
+       (retryable). That ordering is intended: the structural break is the
+       condition that no retry can clear.
+
+       Scope: this stops the retry loop and its cost. It does not make a
+       structurally broken history compactable — the break has to be prevented
+       at the write boundary that admitted a tool_use with no matching
+       tool_result (#25443). *)
+    (match Keeper_compaction_unit.validate messages with
+     | Error error -> Error (Invalid_structure error)
+     | Ok () ->
     if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
     then Error No_eligible_history
     else
@@ -309,7 +356,7 @@ let requested_messages (meta : keeper_meta) messages =
                        selected_message_count
                          units
                          (Keeper_compaction_llm_summarizer.dropped_indices plan)
-                   })))
+                   }))))
 ;;
 
 let tool_block_counts messages =

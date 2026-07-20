@@ -11,7 +11,7 @@ code_refs:
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
 > Last Updated: 2026-07-03
-> Snapshot baseline: `dune-project` version `0.20.1`
+> Snapshot baseline: `dune-project` version `0.21.2`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 작업할 때 필요한 조율과 관찰성을 제공한다. Workspace 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper turn, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Retired orchestration surfaces and internal references remain only as migration context.
 
@@ -31,7 +31,7 @@ used as evidence.
 | `.mli` interfaces under `lib/` | 401 |
 | MCP tool modules (`tool_*.ml`) | 109 |
 | Test files (`test/*.ml`) | 449 |
-| Executables | 11 public (`masc`, `masc-stdio`, `masc-cost`, `masc-recall-outcome-eval`, `masc-compaction-audit`, `masc-keeper-chat-backfill-mentions`, `masc-keeper-feature-proof`, `masc-trace`, `masc-tui`, `masc-worker-run`, `masc-fusion-run`) + 4 internal (`public_tool_manifest`, `env_knob_catalog`, `masc_shell_ir_probe`, `gen_tool_descriptors`) |
+| Executables | 9 public (`masc`, `masc-stdio`, `masc-cost`, `masc-compaction-audit`, `masc-keeper-feature-proof`, `masc-trace`, `masc-tui`, `masc-worker-run`, `masc-fusion-run`) + 3 internal (`public_tool_manifest`, `env_knob_catalog`, `gen_tool_descriptors`) |
 
 숫자는 2026-04-23 repo snapshot 기준. `rg --files lib/ test/ bin/` 및 `wc -l`로 재계산. 최신 truth는 다시 계산해야 한다.
 

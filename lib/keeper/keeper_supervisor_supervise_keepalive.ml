@@ -80,9 +80,6 @@ let supervise_keepalive
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
     then ()
     else
-    let () =
-      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
-    in
     (* Register in Keeper_registry — single source of truth. *)
     match
       Keeper_registry.register_offline_if_admitted
@@ -111,6 +108,18 @@ let supervise_keepalive
          keeper_name
          detail
      | Ok reg ->
+    (* Persona drift is a property of a keeper that is actually joining the
+       fleet, so it is reported only once registration has committed. Reporting
+       it before [register_offline_if_admitted] meant every rejected
+       registration attempt also emitted a drift warning: when a shutdown
+       operation owns admission the supervisor retries roughly every 30s
+       forever, so a single blocked keeper produced ~120 drift warnings per
+       hour whose remediation ("add persona profile") cannot unblock it. The
+       drift condition itself is unchanged and still surfaces on the
+       registration that succeeds. *)
+    let () =
+      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
+    in
     (* Workspace initialization *)
     (try
        if not (Workspace_utils.is_initialized ctx.config)

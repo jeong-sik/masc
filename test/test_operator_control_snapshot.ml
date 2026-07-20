@@ -496,7 +496,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   let keeper_name = "dead-tombstone-operator-resume" in
   Eio.Switch.on_release sw (fun () ->
     Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
-    Keeper_registry.clear ();
+    Keeper_registry.For_testing.clear ();
     Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
   let config = Workspace.default_config base_dir in
@@ -752,7 +752,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
@@ -862,7 +862,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
@@ -978,7 +978,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1114,7 +1114,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1223,7 +1223,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1492,7 +1492,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Dashboard_cache.invalidate_all ();
       Eio_guard.disable ();
       Keeper_keepalive.stop_keepalive "lightweight-audit";
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->

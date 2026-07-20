@@ -148,6 +148,21 @@ val create_post :
   unit ->
   (Board.post, Board.board_error) Result.t
 
+val create_post_once_by_fusion_run_id :
+  fusion_run_id:string ->
+  author:string ->
+  content:string ->
+  post_kind:Board.post_kind ->
+  ?meta_json:Yojson.Safe.t ->
+  visibility:Board.visibility ->
+  ttl_hours:int ->
+  origin:Board.post_origin ->
+  unit ->
+  (Board_core_persist.create_post_once_result, Board.board_error) Result.t
+(** Emit post-created hooks only for the durable first creation. Exact replays
+    return the existing typed-origin post without a duplicate Board signal;
+    conflicting replays return [Already_exists]. *)
+
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid

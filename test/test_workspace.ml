@@ -1058,21 +1058,23 @@ let find_task config task_id =
 
 (* === RFC-0323 G-3: completion side effects are state-keyed === *)
 
-(* Records economy-earn calls while [f] runs, restoring the previous hook. *)
-let with_economy_recorder f =
+(* Records done-hook dispatch targets while [f] runs, restoring the previous
+   hook.  Observes [relation_on_task_done_fn] because it receives the assignee
+   the completion side effects are keyed on. *)
+let with_done_hook_recorder f =
   let recorded = ref [] in
   let prev =
-    Atomic.exchange Workspace_hooks.agent_economy_earn_fn
-      (fun ~base_path:_ ~agent_name ~reason:_ ->
-        recorded := agent_name :: !recorded)
+    Atomic.exchange Workspace_hooks.relation_on_task_done_fn
+      (fun ~assignee ~active_agents:_ ->
+        recorded := assignee :: !recorded)
   in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Workspace_hooks.agent_economy_earn_fn prev)
+    ~finally:(fun () -> Atomic.set Workspace_hooks.relation_on_task_done_fn prev)
     (fun () -> f recorded)
 
 let test_approve_completion_credits_assignee () =
   with_test_env (fun config ->
-    with_economy_recorder (fun recorded ->
+    with_done_hook_recorder (fun recorded ->
       let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
       let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
@@ -1082,7 +1084,7 @@ let test_approve_completion_credits_assignee () =
       in
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
-      Alcotest.(check (list string)) "no earn before approve" [] !recorded;
+      Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
           ~task_id:"task-001" ~action:Masc_domain.Approve_verification
@@ -1090,7 +1092,8 @@ let test_approve_completion_credits_assignee () =
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
-      (* The acting agent is the verifier; the earn must credit the assignee. *)
+      (* The acting agent is the verifier; the done hook must fire for the
+         assignee. *)
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded))
 
@@ -1342,6 +1345,41 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       "claimable count falls back to unscoped todo"
       1
       claimable
+  )
+
+(* The self-authored exclusion must hold through [read_backlog_counts], not
+   only in [task_is_self_authored]: dropping the filter clause leaves every
+   predicate-level test green while the feedback loop stays open. Counts are
+   compared against a baseline because the fixture seeds its own tasks. *)
+let test_read_backlog_counts_excludes_self_authored_task () =
+  with_test_env (fun config ->
+    let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
+    let _, claimable_before, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    let _ =
+      Workspace.add_task config ~created_by:meta.name
+        ~title:"self-authored routing task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_self, claimable_after_self, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a keeper's own task is not offered back to it as claimable"
+      claimable_before claimable_after_self;
+    let _ =
+      Workspace.add_task config ~created_by:"peer-keeper"
+        ~title:"peer authored task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a peer-authored task is still claimable"
+      (claimable_before + 1) claimable_after_peer;
+    Alcotest.(check int)
+      "the unclaimed count still reports both tasks"
+      (unclaimed_after_self + 1) unclaimed_after_peer
   )
 
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
@@ -1753,6 +1791,9 @@ let () =
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "read backlog counts excludes self-authored task"
+        `Quick
+        test_read_backlog_counts_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
     ];

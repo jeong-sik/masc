@@ -215,7 +215,7 @@ case "$cmd" in
       echo 1 > "$state"
       echo "Error: Files lib/.masc.objs/native/masc__Keeper_context_core.cmx" >&2
       echo "       and lib/.masc.objs/native/masc__Inference_utils.cmx" >&2
-      echo "       make inconsistent assumptions over implementation Agent_sdk__Context_reducer" >&2
+      echo "       make inconsistent assumptions over implementation Agent_sdk__Streaming" >&2
       exit 1
     fi
     mkdir -p _build/default/bin
@@ -867,7 +867,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
             (contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true
             (contains_substring stderr
-               "make inconsistent assumptions over implementation Agent_sdk__Context_reducer");
+               "make inconsistent assumptions over implementation Agent_sdk__Streaming");
           check bool "retry is explained" true
             (contains_substring stderr
                "Stale Dune artifacts detected while building main_eio.exe");

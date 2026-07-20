@@ -562,11 +562,8 @@ Used for runtime-service observation windows, rate-limit cleanup, autonomy
 scoring, and operator projection cache policy.
 
 ```text
-MASC_AUTONOMY_MAX_STARVATION_TICKS
 MASC_AUTONOMY_QUIET_END
 MASC_AUTONOMY_QUIET_START
-MASC_AUTONOMY_STARVATION_BONUS_COEF
-MASC_AUTONOMY_THOMPSON_WEIGHT
 MASC_AUTONOMY_VOTE_DECAY_FACTOR
 MASC_DASHBOARD_FIXTURE
 MASC_DASHBOARD_FIXTURES_ENABLED
@@ -596,7 +593,7 @@ Important operator-facing families still outside the centralized inventory:
 - dashboard and operator HTTP surfaces: `MASC_DASHBOARD_*`, `MASC_OPERATOR_*`, `MASC_WARM_DELAY_*`
 - advanced keeper tuning: extra `MASC_KEEPER_*` reads from `keeper_config.ml`, `keeper_memory_bank.ml`, `keeper_tool_affinity.ml`, and related files
 - transport edge cases: `MASC_FORCE_JSON_RESPONSE`, `MASC_POST_SSE_KEEPALIVE_SEC`, `MASC_SSE_*`
-- goal, swarm, economy, and notify lanes: `MASC_GOAL_*`, `MASC_SWARM_*`, `MASC_ECONOMY_*`, `MASC_NOTIFY_*`
+- goal, swarm, and notify lanes: `MASC_GOAL_*`, `MASC_SWARM_*`, `MASC_NOTIFY_*`
 - connector overrides: `MASC_DISCORD_*`
 
 To regenerate the inventories:

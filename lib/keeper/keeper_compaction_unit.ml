@@ -143,8 +143,21 @@ let is_result_role = function
   | T.User | T.Tool -> true
   | T.System | T.Assistant -> false
 
-let partition messages =
-  let ( let* ) = Result.bind in
+(* [stop_with_units] freezes the valid closed units accumulated so far and moves
+   the in-flight open tool cycle plus the offending message and everything after
+   it into the protected suffix. Used only when [partition] runs in quarantine
+   mode, so a single structural break compacts the valid prefix instead of
+   rejecting the whole history. *)
+let stop_with_units ~units_rev ~open_cycle ~message ~rest =
+  let open_prefix =
+    match open_cycle with None -> [] | Some cycle -> List.rev cycle.messages_rev
+  in
+  Ok
+    { closed_prefix = List.rev units_rev
+    ; protected_suffix = open_prefix @ (message :: rest)
+    }
+
+let partition ?(quarantine = false) messages =
   let rec loop index units_rev seen_tools seen_results open_cycle = function
     | [] ->
         let protected_suffix =
@@ -154,69 +167,90 @@ let partition messages =
         in
         Ok { closed_prefix = List.rev units_rev; protected_suffix }
     | (message : T.message) :: rest ->
-        let* tool_ids, result_ids =
-          validated_top_level_anchors ~message_index:index message
-        in
-        (match message.role, tool_ids with
-        | (T.System | T.User | T.Tool), tool_use_id :: _ ->
-            Error (Non_assistant_tool_use { message_index = index; tool_use_id })
-        | _ -> (
-            match open_cycle, tool_ids, result_ids with
-            | Some _, tool_use_id :: _, _ ->
-                Error (Overlapping_tool_cycle { message_index = index; tool_use_id })
-            | None, _, _ -> (
-                match add_tool_ids ~message_index:index Id_set.empty tool_ids with
-                | Error _ as error -> error
-                | Ok seen_tools -> (
-                    match tool_ids, result_ids with
-                    | [], tool_use_id :: _ ->
-                        if Id_set.mem tool_use_id seen_results then
-                          Error
-                            (Duplicate_tool_result
-                               { message_index = index; tool_use_id })
-                        else
-                          Error
-                            (Orphan_tool_result
-                               { message_index = index; tool_use_id })
-                    | [], [] ->
-                        loop (index + 1)
-                          (Ordinary_message message :: units_rev)
-                          seen_tools seen_results None rest
-                    | tool_use_id :: _, _ :: _ ->
-                        Error
-                          (Tool_request_contains_result
-                             { message_index = index; tool_use_id })
-                    | _ :: _, [] ->
-                        let expected = Id_set.of_list tool_ids in
-                        loop (index + 1) units_rev seen_tools seen_results
-                          (Some
-                             { expected
-                             ; pending = expected
-                             ; messages_rev = [ message ]
-                             })
-                          rest))
-            | Some cycle, [], [] ->
-                loop (index + 1) units_rev seen_tools seen_results
-                  (Some { cycle with messages_rev = message :: cycle.messages_rev })
-                  rest
-            | Some _, [], tool_use_id :: _ when not (is_result_role message.role) ->
-                Error (Non_result_tool_role { message_index = index; tool_use_id })
-            | Some cycle, [], _ :: _ -> (
-                match
-                  consume_results ~message_index:index ~expected:cycle.expected
-                    cycle.pending seen_results result_ids
-                with
-                | Error _ as error -> error
-                | Ok (pending, seen_results) ->
-                    let messages_rev = message :: cycle.messages_rev in
-                    if Id_set.is_empty pending then
-                      loop (index + 1)
-                        (Closed_tool_cycle (List.rev messages_rev) :: units_rev)
-                        Id_set.empty Id_set.empty None rest
-                    else
-                      loop (index + 1) units_rev seen_tools seen_results
-                        (Some { cycle with pending; messages_rev })
-                        rest)))
+        (match validated_top_level_anchors ~message_index:index message with
+         | Error _ when quarantine ->
+             stop_with_units ~units_rev ~open_cycle ~message ~rest
+         | Error _ as error -> error
+         | Ok (tool_ids, result_ids) ->
+             (match message.role, tool_ids with
+              | (T.System | T.User | T.Tool), tool_use_id :: _ ->
+                  if quarantine then
+                    stop_with_units ~units_rev ~open_cycle ~message ~rest
+                  else
+                    Error (Non_assistant_tool_use { message_index = index; tool_use_id })
+              | _ ->
+                  (match open_cycle, tool_ids, result_ids with
+                   | Some _, tool_use_id :: _, _ ->
+                       if quarantine then
+                         stop_with_units ~units_rev ~open_cycle ~message ~rest
+                       else
+                         Error
+                           (Overlapping_tool_cycle { message_index = index; tool_use_id })
+                   | None, _, _ ->
+                       (match add_tool_ids ~message_index:index Id_set.empty tool_ids with
+                        | Error _ when quarantine ->
+                            stop_with_units ~units_rev ~open_cycle ~message ~rest
+                        | Error _ as error -> error
+                        | Ok seen_tools ->
+                            (match tool_ids, result_ids with
+                             | [], tool_use_id :: _ ->
+                                 if quarantine then
+                                   stop_with_units ~units_rev ~open_cycle ~message ~rest
+                                 else if Id_set.mem tool_use_id seen_results then
+                                   Error
+                                     (Duplicate_tool_result
+                                        { message_index = index; tool_use_id })
+                                 else
+                                   Error
+                                     (Orphan_tool_result
+                                        { message_index = index; tool_use_id })
+                             | [], [] ->
+                                 loop (index + 1)
+                                   (Ordinary_message message :: units_rev)
+                                   seen_tools seen_results None rest
+                             | tool_use_id :: _, _ :: _ ->
+                                 if quarantine then
+                                   stop_with_units ~units_rev ~open_cycle ~message ~rest
+                                 else
+                                   Error
+                                     (Tool_request_contains_result
+                                        { message_index = index; tool_use_id })
+                             | _ :: _, [] ->
+                                 let expected = Id_set.of_list tool_ids in
+                                 loop (index + 1) units_rev seen_tools seen_results
+                                   (Some
+                                      { expected
+                                      ; pending = expected
+                                      ; messages_rev = [ message ]
+                                      })
+                                   rest))
+                   | Some cycle, [], [] ->
+                       loop (index + 1) units_rev seen_tools seen_results
+                         (Some { cycle with messages_rev = message :: cycle.messages_rev })
+                         rest
+                   | Some _, [], tool_use_id :: _ when not (is_result_role message.role) ->
+                       if quarantine then
+                         stop_with_units ~units_rev ~open_cycle ~message ~rest
+                       else
+                         Error (Non_result_tool_role { message_index = index; tool_use_id })
+                   | Some cycle, [], _ :: _ ->
+                       (match
+                          consume_results ~message_index:index ~expected:cycle.expected
+                            cycle.pending seen_results result_ids
+                        with
+                        | Error _ when quarantine ->
+                            stop_with_units ~units_rev ~open_cycle ~message ~rest
+                        | Error _ as error -> error
+                        | Ok (pending, seen_results) ->
+                            let messages_rev = message :: cycle.messages_rev in
+                            if Id_set.is_empty pending then
+                              loop (index + 1)
+                                (Closed_tool_cycle (List.rev messages_rev) :: units_rev)
+                                Id_set.empty Id_set.empty None rest
+                            else
+                              loop (index + 1) units_rev seen_tools seen_results
+                                (Some { cycle with pending; messages_rev })
+                                rest))))
   in
   loop 0 [] Id_set.empty Id_set.empty None messages
 

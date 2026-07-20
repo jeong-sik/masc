@@ -1,4 +1,5 @@
-(** Keeper_memory_os_gc — exact explicit-expiry cleanup for facts. *)
+(** Keeper_memory_os_gc — exact explicit-expiry cleanup for facts and episode
+    files. *)
 
 open Keeper_memory_os_types
 
@@ -133,6 +134,95 @@ let run_gc_for_keepers_dir ~keepers_dir ?dry_run ~keeper_id ~now () =
       Io.read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
     ~rewrite_facts_atomically:(fun facts ->
       Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts)
+    ?dry_run
+    ~keeper_id
+    ~now
+    ()
+;;
+
+(** {1 Episode-store retention sweep} *)
+
+type episode_gc_report =
+  { episodes_total : int
+  ; episodes_expired : int
+  ; episodes_deleted : int
+  ; dry_run : bool
+  }
+
+exception Episode_store_corrupt of string
+
+(* Same exact producer validity boundary as [ttl_expired]: [ts >= now] is
+   current, anything strictly past expires, and an absent [valid_until] never
+   expires. No created_at- or age-derived fallback participates. *)
+let episode_ttl_expired ~now (episode : episode) =
+  match episode.valid_until with
+  | None -> false
+  | Some ts -> not (ts >= now)
+;;
+
+(* The episode store is one [trace-generation-timestamp].json file per episode
+   under [keeper_id/episodes/], so the sweep classifies-then-deletes per file
+   instead of the facts read-modify-rewrite. Both phases run under the same
+   per-keeper episode-bundle lock the librarian write path
+   (Keeper_librarian_runtime, via [Io.with_episode_bundle_lock]) holds when it
+   publishes an episode, so the sweep cannot remove a file a concurrent writer
+   is mid-publish on. Same discipline as the facts sweep: strict read, and one
+   malformed episode file aborts the sweep with every file — expired or not —
+   left on disk and the error raised (preserve over delete). A failed
+   [Sys.remove] is equally loud. Must run inside an Eio context, like
+   [run_gc]. *)
+let run_episode_gc_with_store
+      ~lock_path
+      ~read_episode_files_all_strict
+      ~delete_episode_file
+      ?(dry_run = false)
+      ~keeper_id
+      ~now
+      ()
+  =
+  File_lock_eio.with_lock lock_path (fun () ->
+    match read_episode_files_all_strict () with
+    | Error message ->
+      raise (Episode_store_corrupt ("memory os gc episode store read failed: " ^ message))
+    | Ok stored ->
+      let expired =
+        List.filter (fun (_path, episode) -> episode_ttl_expired ~now episode) stored
+      in
+      let expired_count = List.length expired in
+      if not dry_run
+      then (
+        List.iter (fun (path, _episode) -> delete_episode_file path) expired;
+        if expired_count > 0
+        then
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string MemoryOsEpisodeRetentionPruned)
+            ~labels:[ "keeper", keeper_id ]
+            ~delta:(float_of_int expired_count)
+            ());
+      { episodes_total = List.length stored
+      ; episodes_expired = expired_count
+      ; episodes_deleted = (if dry_run then 0 else expired_count)
+      ; dry_run
+      })
+;;
+
+let run_episode_gc ?dry_run ~keeper_id ~now () =
+  run_episode_gc_with_store
+    ~lock_path:(Io.episode_bundle_lock_path ~keeper_id)
+    ~read_episode_files_all_strict:(fun () -> Io.read_episode_files_all_strict ~keeper_id)
+    ~delete_episode_file:Sys.remove
+    ?dry_run
+    ~keeper_id
+    ~now
+    ()
+;;
+
+let run_episode_gc_for_keepers_dir ~keepers_dir ?dry_run ~keeper_id ~now () =
+  run_episode_gc_with_store
+    ~lock_path:(Io.episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~read_episode_files_all_strict:(fun () ->
+      Io.read_episode_files_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~delete_episode_file:Sys.remove
     ?dry_run
     ~keeper_id
     ~now

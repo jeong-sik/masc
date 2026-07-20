@@ -993,9 +993,14 @@ candidates = [
 # has no keeper assignments").
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
 # judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
+#
+# Assignment targets must be runtime ids (<provider>.<model>); a lane id here
+# is rejected at load. A keeper reaches a [runtime.lanes] failover group only
+# when the lane id shadows a runtime id (resolve_assignment prefers the lane
+# on collision).
 [runtime.assignments]
-# example: route a test keeper through the failover lane
-# canary = "default"
+# example: pin a test keeper to an explicit runtime
+# canary = "deepseek.deepseek-v4-pro"
 
 # ── Discord ──────────────────────────────────────────────────────────
 # Trigger policy controls which inbound Discord events the bot responds to.

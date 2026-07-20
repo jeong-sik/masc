@@ -538,11 +538,18 @@ module KeeperKeepalive = struct
       snapshot, board scan, turn) runs at this cadence. *)
   let interval_sec = keepalive_interval_sec_
 
-  (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
-      response but more CPU polling. Default: 2.0.
-      Range: [0.1, 10.0]. *)
+  (** Interruptible sleep chunk size in seconds: the upper bound on how long a
+      keeper's heartbeat sleep takes to notice a wakeup atomic set by an incoming
+      stimulus (board/mention/goal/schedule/approval). Smaller = faster wakeup
+      response but more CPU polling. Default: 0.5 (was 2.0) — a queued event now
+      wakes the lane within 0.5s instead of up to 2s; at ~2 CAS checks/sec/keeper
+      the extra polling is negligible, and the dominant reaction cost remains the
+      turn's own LLM call, not this floor.
+      Range: [0.1, 10.0].
+      @category Thresholds
+      @ops_class operator *)
   let sleep_chunk_sec =
-    Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+    Float.max 0.1 (Float.min 10.0 (get_float ~default:0.5 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
   ;;
 
   let parse_stream_idle_timeout_sec raw =

@@ -490,7 +490,7 @@ let with_lane_gate ~on_wait ?(floor_s = lane_acquire_floor_seconds) mutex f =
       acquire ())
 ;;
 
-let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
+let with_keeper_lane_lock observation table ?floor_s ~base_path ~keeper_name f =
   let key : Keeper_lane_key.t = { base_path; keeper_name } in
   let lock =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
@@ -522,7 +522,7 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
   in
   let run () =
     match
-      with_lane_gate ~on_wait lock.mutex (fun () ->
+      with_lane_gate ~on_wait ?floor_s lock.mutex (fun () ->
         leave_pending ();
         match observation with
         | Unobserved_lane -> `Unobserved (f ())
@@ -571,19 +571,21 @@ let with_keeper_lane_lock observation table ~base_path ~keeper_name f =
     run
 ;;
 
-let with_keeper_submission_lock ~base_path ~keeper_name f =
+let with_keeper_submission_lock ?floor_s ~base_path ~keeper_name f =
   with_keeper_lane_lock
     Unobserved_lane
     keeper_submission_locks
+    ?floor_s
     ~base_path
     ~keeper_name
     f
 ;;
 
-let with_keeper_persistence_lock ~base_path ~keeper_name f =
+let with_keeper_persistence_lock ?floor_s ~base_path ~keeper_name f =
   with_keeper_lane_lock
     Persistence_lane
     keeper_persistence_locks
+    ?floor_s
     ~base_path
     ~keeper_name
     f
@@ -2992,6 +2994,14 @@ module For_testing = struct
 
   let bounded_lane_gate ~floor_s mutex f =
     with_lane_gate ~on_wait:(fun () -> ()) ~floor_s mutex f
+  ;;
+
+  let keeper_persistence_lane ~floor_s ~base_path ~keeper_name f =
+    with_keeper_persistence_lock ~floor_s ~base_path ~keeper_name f
+  ;;
+
+  let keeper_submission_lane ~floor_s ~base_path ~keeper_name f =
+    with_keeper_submission_lock ~floor_s ~base_path ~keeper_name f
   ;;
 
   let lane_acquire_floor_seconds = lane_acquire_floor_seconds

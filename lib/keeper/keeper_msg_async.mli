@@ -490,4 +490,23 @@ module For_testing : sig
       state: it takes the mutex it is given and installs no overrides. *)
 
   val lane_acquire_floor_seconds : float
+
+  val keeper_persistence_lane
+    :  floor_s:float
+    -> base_path:string
+    -> keeper_name:Keeper_id.Keeper_name.t
+    -> (unit -> 'a)
+    -> ('a, lane_unavailable) result
+  (** The real per-keeper persistence lane, keyed on [{base_path;
+      keeper_name}], so lane isolation can be exercised against the lane table
+      rather than a standalone mutex. *)
+
+  val keeper_submission_lane
+    :  floor_s:float
+    -> base_path:string
+    -> keeper_name:Keeper_id.Keeper_name.t
+    -> (unit -> 'a)
+    -> ('a, lane_unavailable) result
+  (** The real per-keeper submission lane. Held in a table separate from the
+      persistence lanes. *)
 end

@@ -80,6 +80,138 @@ let test_body_exception_releases_lane () =
     check bool "lane released after exception" true (Eio.Mutex.try_lock mutex))
 ;;
 
+(* --- Real lane table -------------------------------------------------------
+
+   The tests above use a standalone mutex, which proves the bound but says
+   nothing about whether keepers actually get *separate* lanes. The whole
+   premise of #25398 — that a hung durable write wedges one keeper and not the
+   fleet — rests on the lane key being [{base_path; keeper_name}]. These
+   exercise the real lane tables. *)
+
+let keeper_name_exn name =
+  match Keeper_id.Keeper_name.of_string name with
+  | Ok keeper_name -> keeper_name
+  | Error reason -> failwith reason
+;;
+
+let persistence_lane = Keeper_msg_async.For_testing.keeper_persistence_lane
+let submission_lane = Keeper_msg_async.For_testing.keeper_submission_lane
+let base_path = "/tmp/masc-lane-floor-test"
+
+(* Runs [hold] holding a lane while [probe] executes, then releases. The held
+   fiber parks on a promise so the lane stays taken for exactly as long as the
+   probe needs, with no sleep-based racing. *)
+let while_lane_held ~lane ~keeper ~probe =
+  let release, resolve_release = Eio.Promise.create () in
+  let probe_result = ref None in
+  Eio.Fiber.both
+    (fun () ->
+       let held =
+         lane ~floor_s:test_floor_s ~base_path ~keeper_name:(keeper_name_exn keeper)
+           (fun () -> Eio.Promise.await release)
+       in
+       match held with
+       | Ok () -> ()
+       | Error _ -> fail "the holder must acquire a free lane")
+    (fun () ->
+       probe_result := Some (probe ());
+       Eio.Promise.resolve resolve_release ());
+  match !probe_result with
+  | Some result -> result
+  | None -> fail "probe did not run"
+;;
+
+let test_other_keeper_lane_is_unaffected () =
+  with_eio (fun _env ->
+    let acquired =
+      while_lane_held ~lane:persistence_lane ~keeper:"keeper-alpha" ~probe:(fun () ->
+        persistence_lane
+          ~floor_s:test_floor_s
+          ~base_path
+          ~keeper_name:(keeper_name_exn "keeper-beta")
+          (fun () -> "beta ran"))
+    in
+    match acquired with
+    | Ok value -> check string "beta acquired while alpha is wedged" "beta ran" value
+    | Error _ ->
+      fail "a wedged lane on one keeper must not block a different keeper")
+;;
+
+let test_same_keeper_other_base_path_is_unaffected () =
+  with_eio (fun _env ->
+    let acquired =
+      while_lane_held ~lane:persistence_lane ~keeper:"keeper-alpha" ~probe:(fun () ->
+        persistence_lane
+          ~floor_s:test_floor_s
+          ~base_path:(base_path ^ "-other")
+          ~keeper_name:(keeper_name_exn "keeper-alpha")
+          (fun () -> "other store ran"))
+    in
+    match acquired with
+    | Ok value -> check string "other base_path acquired" "other store ran" value
+    | Error _ -> fail "the lane key includes base_path, so this must not block")
+;;
+
+let test_same_keeper_same_lane_hits_the_floor () =
+  with_eio (fun _env ->
+    let acquired =
+      while_lane_held ~lane:persistence_lane ~keeper:"keeper-alpha" ~probe:(fun () ->
+        persistence_lane
+          ~floor_s:test_floor_s
+          ~base_path
+          ~keeper_name:(keeper_name_exn "keeper-alpha")
+          (fun () -> fail "body must not run on a wedged lane"))
+    in
+    match acquired with
+    | Ok () -> fail "the same keeper's held lane must not be acquired"
+    | Error { floor_s; waited_s } ->
+      check (float 0.001) "reported floor" test_floor_s floor_s;
+      check bool "waited at least the floor" true (waited_s >= test_floor_s))
+;;
+
+let test_submission_and_persistence_lanes_are_separate () =
+  with_eio (fun _env ->
+    let acquired =
+      while_lane_held ~lane:persistence_lane ~keeper:"keeper-alpha" ~probe:(fun () ->
+        submission_lane
+          ~floor_s:test_floor_s
+          ~base_path
+          ~keeper_name:(keeper_name_exn "keeper-alpha")
+          (fun () -> "submission ran"))
+    in
+    match acquired with
+    | Ok value ->
+      check string "submission lane is a separate table" "submission ran" value
+    | Error _ ->
+      fail "persistence and submission lanes must not share a table")
+;;
+
+(* The rejection is a new exit path out of the lane gate. If it skipped the
+   pending-counter cleanup, the gauge would drift upward on every wedged lane
+   and mislead exactly the operator trying to diagnose the hang. *)
+let test_rejection_does_not_leak_pending_gauge () =
+  with_eio (fun _env ->
+    let pending () =
+      let _waits, pending, _in_flight =
+        Keeper_msg_async.For_testing.persistence_lane_observation ()
+      in
+      pending
+    in
+    let before = pending () in
+    let rejected =
+      while_lane_held ~lane:persistence_lane ~keeper:"keeper-gauge" ~probe:(fun () ->
+        persistence_lane
+          ~floor_s:test_floor_s
+          ~base_path
+          ~keeper_name:(keeper_name_exn "keeper-gauge")
+          (fun () -> ()))
+    in
+    (match rejected with
+     | Ok () -> fail "expected the probe to be rejected"
+     | Error _ -> ());
+    check int "pending gauge returned to its starting value" before (pending ()))
+;;
+
 (* Wiring: a lane rejection must not be mistaken for a published write. This is
    what routes the caller to plain rejection instead of the reconciliation path
    that deletes record files (RFC-0348 §2.2). *)
@@ -113,6 +245,28 @@ let () =
             `Quick
             test_lane_released_by_holder_is_acquirable
         ; test_case "body exception releases lane" `Quick test_body_exception_releases_lane
+        ] )
+    ; ( "lane isolation"
+      , [ test_case
+            "another keeper is unaffected"
+            `Quick
+            test_other_keeper_lane_is_unaffected
+        ; test_case
+            "same keeper in another store is unaffected"
+            `Quick
+            test_same_keeper_other_base_path_is_unaffected
+        ; test_case
+            "same keeper same lane hits the floor"
+            `Quick
+            test_same_keeper_same_lane_hits_the_floor
+        ; test_case
+            "submission and persistence lanes are separate"
+            `Quick
+            test_submission_and_persistence_lanes_are_separate
+        ; test_case
+            "rejection does not leak the pending gauge"
+            `Quick
+            test_rejection_does_not_leak_pending_gauge
         ] )
     ; ( "rejection wiring"
       , [ test_case

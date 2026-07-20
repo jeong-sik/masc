@@ -1906,6 +1906,7 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
+(include stanzas/test_keeper_supervisor_persona_drift_order.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 

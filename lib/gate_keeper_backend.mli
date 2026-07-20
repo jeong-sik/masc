@@ -17,10 +17,14 @@ type connector_delivery =
   ; surface : Surface_ref.t
   ; conversation_id : string option
   ; external_message_id : string option
+  ; workspace_id : string option
   }
 (** Immutable projection of the connector-owned delivery coordinates. The leaf
     parses its own protocol and supplies this value; the Keeper adapter treats
-    every field as typed opaque input and does not inspect product metadata. *)
+    every field as typed opaque input and does not inspect product metadata.
+    [workspace_id] is the connector workspace identity (Discord guild / Slack
+    team); [None] is the explicit typed absence (e.g. a Discord DM), never an
+    empty string. *)
 
 val accept_connector :
   delivery:connector_delivery ->
@@ -40,7 +44,10 @@ val accept_connector :
     this adapter neither identifies products nor derives routes from
     product-specific metadata. The producer's typed request identity is the
     queue receipt and transcript delivery key; retries converge without a
-    derived hash namespace. *)
+    derived hash namespace. The typed [delivery.workspace_id] is persisted on
+    the durable user row like the speaker identity; any disagreement between
+    the typed delivery, the gate [channel_workspace_id], or the connector
+    metadata fails closed instead of guessing a workspace. *)
 
 val dispatch :
   submitted_by:string ->

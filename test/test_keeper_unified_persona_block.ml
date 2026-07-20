@@ -116,7 +116,7 @@ let test_persona_reaches_unified_system_prompt () =
   write_file
     (Filename.concat persona_dir "AGENT.md")
     "집요하고 직설적. 근본 원인을 잡을 때까지 <blame>을 판다.";
-  let system_prompt, _user =
+  let { Masc.Keeper_unified_prompt.system_prompt; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
       ~base_path:"/tmp" ~observation:base_observation ()
   in
@@ -131,7 +131,7 @@ let test_persona_reaches_unified_system_prompt () =
 
 let test_no_persona_file_means_no_block () =
   with_config_dir @@ fun ~config_dir:_ ->
-  let system_prompt, _user =
+  let { Masc.Keeper_unified_prompt.system_prompt; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
       ~base_path:"/tmp" ~observation:base_observation ()
   in
@@ -145,7 +145,7 @@ let test_persona_sits_between_identity_and_shared_body () =
   let persona_dir = Filename.concat config_dir "personas/test-keeper" in
   mkdir_p persona_dir;
   write_file (Filename.concat persona_dir "AGENT.md") "차분하고 꼼꼼함.";
-  let system_prompt, _user =
+  let { Masc.Keeper_unified_prompt.system_prompt; _ } =
     Masc.Keeper_unified_prompt.build_prompt ~meta:(make_meta "test-keeper")
       ~base_path:"/tmp" ~observation:base_observation ()
   in

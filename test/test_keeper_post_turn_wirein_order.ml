@@ -182,6 +182,7 @@ let test_invalid_plan_is_distinct_from_provider_unavailable () =
              Compact_policy.compact_for_request_typed
                ~meta
                ~trigger:Compaction_trigger.Manual
+               ~projection_request:(projection_request_of_meta meta)
                context)
         |> fun preparation -> preparation.Compact_policy.decision
       in

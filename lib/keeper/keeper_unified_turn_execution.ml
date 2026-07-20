@@ -437,7 +437,14 @@ let run (ctx : ctx)
              let turn_state =
                { turn_state with degraded_retry_info = Some degraded_retry }
              in
-             Log.Keeper.warn
+             (* A rotation retry was scheduled: the runtime failed but the lane
+                stays usable and recovers on the next runtime. This is a
+                recovering, receipted event (Rotation_retry_scheduled above), not
+                a failure that stalled the lane — Info per
+                docs/spec/18-log-severity-taxonomy.md. WARN is reserved for the
+                terminal setup-failed arm above, so WARN tracks failures that did
+                not self-heal instead of narrating every rotation. *)
+             Log.Keeper.info
                "%s: recoverable runtime failure in %s; rotation \
                retry on runtime=%s reason=%s max_context=%d \
                 context_budget=%d primary_budget=%d \

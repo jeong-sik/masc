@@ -132,3 +132,87 @@ supports_native_streaming = true
 supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
+
+# --- oas#2716 (v0.217.0) enable_thinking admission prep, 2026-07-20 ---
+# The upstream ollama_cloud catalog rows declare thinking_control_format =
+# "ollama_think", which only encodes on the native /api/chat wire. These lanes
+# ride the OpenAI-compatible /v1 wire, where that format encodes nothing, so
+# after the v0.217.0 pin bump an explicit enable_thinking=true keeper turn
+# would be AcceptRejected(Enable_not_encodable) instead of silently dropped.
+# Declare the /v1 truth: inherent reasoning, no wire control ("none" =>
+# No_thinking_control + supports_reasoning=true => admission accepts as
+# declared-inherent). Budget likewise has no /v1 control wire => false.
+# Rows mirror oas models.toml verbatim otherwise (kimi-k2.6 @734, minimax-m3
+# @821, deepseek-v4-pro @491). Audit: 2026-07-20 enable_thinking flip-risk.
+[[models]]
+id_prefix = "kimi-k2.6"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_replay = "preserve_always"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_structured_output = false
+
+[[models]]
+id_prefix = "minimax-m3"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_structured_output = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "deepseek-v4-pro"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+supports_structured_output = false
+
+# Same oas#2716 /v1-truth remediation as the three rows above — this lane was
+# missed by the 2026-07-20 audit (it covered deepseek-v4-pro but analyst is
+# bound to deepseek-v4-flash via the deepseek-direct substitute,
+# runtime.toml:492) and surfaced live as Enable_not_encodable on the first
+# post-bump turn. Mirrors oas models.toml @476.
+[[models]]
+id_prefix = "deepseek-v4-flash"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true

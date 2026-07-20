@@ -137,10 +137,9 @@ let derive_phase (c : conditions) : phase =
     || (not c.turn_healthy)
     || c.credential_archived
   then Failing (* 10. Healthy running *)
-  else if c.fiber_alive
-  then Running
-  (* 11. Initial / unreachable fallback *)
-  else Offline
+  (* [fiber_alive] is guaranteed here: branch 3 routes a dead fiber to
+     Crashed, so the fallthrough can only be Running. *)
+  else Running
 ;;
 
 (* ── Condition Updaters ────────────────────────────────── *)

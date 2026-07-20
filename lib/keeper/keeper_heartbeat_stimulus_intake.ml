@@ -366,9 +366,6 @@ let heartbeat_event_intake
         | Keeper_event_queue_persistence.Board_batch, batch ->
           consume_board_stimulus_batch ~meta_after_triage batch
         | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), [ stimulus ] ->
-          consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stimulus
-        | ( Keeper_event_queue_persistence.Single
           | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
           List.concat_map
             (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)

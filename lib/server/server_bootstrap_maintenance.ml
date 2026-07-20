@@ -355,8 +355,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      facts every cadence turn; without this pass a keeper's Tier-1 store only
      grows. Off the hot path: every [interval]s it asks the model to merge
      duplicate/superseded facts and rewrites the store atomically. Gated by
-     [MASC_KEEPER_MEMORY_OS_CONSOLIDATION] (default false) until a live shadow
-     run validates what the model would prune on the user's data. *)
+     [MASC_KEEPER_MEMORY_OS_CONSOLIDATION] (default true, RFC
+     keeper-memory-bank-write-reduction §4b operator decision): this is the only
+     sanctioned decider of fact survival now that deterministic retention is
+     gone; a failed pass is a graceful no-op. Set the env false to disable. *)
   if Env_config.KeeperMemoryOs.consolidation_enabled () then
     fork_logged_fiber
       ~sw

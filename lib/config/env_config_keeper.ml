@@ -173,7 +173,14 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
-  let consolidation_enabled_default = false
+  (* On by default (RFC keeper-memory-bank-write-reduction §4b, operator decision
+     2026-07-20): the LLM-judged per-keeper consolidation is the only sanctioned
+     decider of which facts survive (RFC-0247; spec/12 §Compaction) — deterministic
+     TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
+     the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
+     Failures are graceful no-ops (transport/parse errors never mutate the store),
+     and the runtime inherits the librarian's model. Set the env false to disable. *)
+  let consolidation_enabled_default = true
   let consolidation_runtime_id_default = None
 
   (* Env-key SSOT: the config-introspection registry
@@ -301,7 +308,7 @@ module KeeperMemoryOs = struct
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
-      Default: false; invalid values fail closed to false.
+      Default: true; invalid values fail closed to false.
       @category Policies
       @ops_class operator *)
   let consolidation_enabled () =

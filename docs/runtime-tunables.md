@@ -51,52 +51,52 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | unclassified | unclassified | 643 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
-| `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 589 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
+| `MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO` | typed:float | unclassified | unclassified | 650 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
+| `MASC_KEEPER_BODY_TIMEOUT_SEC` | string_literal | n/a | n/a | 596 | Total HTTP body-consumption deadline for non-streaming OAS completion calls. In agent_sdk this wraps [Complete.comple... |
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | feature_flag | n/a | n/a | 20 | Enable startup keeper bootstrap scan |
 | `MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC` | typed:float | unclassified | unclassified | 41 | Polling interval (seconds) for the lazy-startup wait loop in [server_bootstrap_loops.ml]. The autoboot fiber wakes up... |
 | `MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC` | typed:float | unclassified | unclassified | 53 | Polling interval (seconds) for the keeper-lifecycle listener retry loop in [server_bootstrap_loops.ml]. After a liste... |
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 65 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 609 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; other CLI providers need an OAS upstream chan... |
-| `MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT` | typed:int | Runtime | operator | 336 | Default item limit for [GET /keepers/:name/compaction-snapshots]. Default: 25. @category Runtime @ops_class operator |
-| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER` | typed:int | Runtime | operator | 362 | Multiplier from requested item limit to manifest files scanned. Default: 4. @category Runtime @ops_class operator |
-| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES` | typed:int | Runtime | operator | 352 | Minimum manifest files scanned before applying [limit * multiplier]. Default: 8. @category Runtime @ops_class operator |
-| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_TAIL_MAX_LINES` | typed:int | Runtime | operator | 372 | Tail line count read from each selected manifest file. Default: 200. @category Runtime @ops_class operator |
-| `MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT` | typed:int | Runtime | operator | 342 | Maximum accepted item limit for the compaction snapshot endpoint. Default: 100. @category Runtime @ops_class operator |
+| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 616 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; other CLI providers need an OAS upstream chan... |
+| `MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT` | typed:int | Runtime | operator | 343 | Default item limit for [GET /keepers/:name/compaction-snapshots]. Default: 25. @category Runtime @ops_class operator |
+| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER` | typed:int | Runtime | operator | 369 | Multiplier from requested item limit to manifest files scanned. Default: 4. @category Runtime @ops_class operator |
+| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES` | typed:int | Runtime | operator | 359 | Minimum manifest files scanned before applying [limit * multiplier]. Default: 8. @category Runtime @ops_class operator |
+| `MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_TAIL_MAX_LINES` | typed:int | Runtime | operator | 379 | Tail line count read from each selected manifest file. Default: 200. @category Runtime @ops_class operator |
+| `MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT` | typed:int | Runtime | operator | 349 | Maximum accepted item limit for the compaction snapshot endpoint. Default: 100. @category Runtime @ops_class operator |
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 143 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 151 | Enable keeper debug logging. Default: false. |
-| `MASC_KEEPER_DURABLE_QUEUE_STALE_SEC` | typed:float | Telemetry | operator | 521 | Durable event-queue backlog age threshold for fleet health degradation. The durable queue remains fully reported rega... |
-| `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` | typed:int | Policies | operator | 459 | Maximum total bytes retained in [<masc_dir>/media] after opportunistic cleanup. Default is 500 MiB. Range: [1, 5 GiB]... |
-| `MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES` | typed:int | Policies | operator | 448 | Maximum raw generated-media bytes accepted by the durable store and serve route. Default is 10 MiB. Range: [1, 50 MiB... |
-| `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` | typed:float | Policies | operator | 470 | Maximum generated-media file age retained by opportunistic cleanup. Default is 24 hours. Range: [1 second, 30 days]. ... |
-| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 622 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
-| `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | Thresholds | operator | 482 | Shared keepalive interval, read early so WorkAsHeartbeat can reference it. Any positive interval is valid; the schedu... |
-| `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 503 | Maximum seconds since last successful workspace heartbeat before presence sync is required again. Floor = keepalive i... |
-| `MASC_KEEPER_MEMORY_OS_CONSOLIDATION` | typed:bool | Policies | operator | 310 | Per-keeper Memory OS consolidation maintenance fiber kill switch. Default: false; invalid values fail closed to false... |
-| `MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID` | typed:string | Runtime | operator | 320 | Optional runtime id override for Memory OS consolidation. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_GC` | typed:bool | Storage | operator | 299 | Per-keeper Memory OS GC maintenance fiber kill switch. Default: true; invalid values fail closed to false. Env var ac... |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN` | typed:bool | Policies | operator | 229 | Memory OS librarian post-turn extraction kill switch. Default: true; invalid values fail closed to false so malformed... |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS` | typed:int | Runtime | operator | 241 | Turns between librarian extraction attempts per keeper. Default: 3, floored to 1. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` | typed:int | Concurrency | operator | 287 | Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0 disables the gate. @category Concurrency @ops... |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES` | typed:int | Runtime | operator | 253 | Base recent-message window for librarian extraction. Default: 24, floored to 1. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS` | typed:int | Runtime | operator | 265 | Output token cap for librarian extraction, applied as min with the provider max_tokens. Default: 4096, floored to 1. ... |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` | typed:string | Runtime | operator | 275 | Optional runtime id override for librarian extraction. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 217 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
+| `MASC_KEEPER_DURABLE_QUEUE_STALE_SEC` | typed:float | Telemetry | operator | 528 | Durable event-queue backlog age threshold for fleet health degradation. The durable queue remains fully reported rega... |
+| `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` | typed:int | Policies | operator | 466 | Maximum total bytes retained in [<masc_dir>/media] after opportunistic cleanup. Default is 500 MiB. Range: [1, 5 GiB]... |
+| `MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES` | typed:int | Policies | operator | 455 | Maximum raw generated-media bytes accepted by the durable store and serve route. Default is 10 MiB. Range: [1, 50 MiB... |
+| `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` | typed:float | Policies | operator | 477 | Maximum generated-media file age retained by opportunistic cleanup. Default is 24 hours. Range: [1 second, 30 days]. ... |
+| `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 629 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
+| `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | Thresholds | operator | 489 | Shared keepalive interval, read early so WorkAsHeartbeat can reference it. Any positive interval is valid; the schedu... |
+| `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 510 | Maximum seconds since last successful workspace heartbeat before presence sync is required again. Floor = keepalive i... |
+| `MASC_KEEPER_MEMORY_OS_CONSOLIDATION` | typed:bool | Policies | operator | 317 | Per-keeper Memory OS consolidation maintenance fiber kill switch. Default: true; invalid values fail closed to false.... |
+| `MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID` | typed:string | Runtime | operator | 327 | Optional runtime id override for Memory OS consolidation. @category Runtime @ops_class operator |
+| `MASC_KEEPER_MEMORY_OS_GC` | typed:bool | Storage | operator | 306 | Per-keeper Memory OS GC maintenance fiber kill switch. Default: true; invalid values fail closed to false. Env var ac... |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN` | typed:bool | Policies | operator | 236 | Memory OS librarian post-turn extraction kill switch. Default: true; invalid values fail closed to false so malformed... |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS` | typed:int | Runtime | operator | 248 | Turns between librarian extraction attempts per keeper. Default: 3, floored to 1. @category Runtime @ops_class operator |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` | typed:int | Concurrency | operator | 294 | Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0 disables the gate. @category Concurrency @ops... |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES` | typed:int | Runtime | operator | 260 | Base recent-message window for librarian extraction. Default: 24, floored to 1. @category Runtime @ops_class operator |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS` | typed:int | Runtime | operator | 272 | Output token cap for librarian extraction, applied as min with the provider max_tokens. Default: 4096, floored to 1. ... |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` | typed:string | Runtime | operator | 282 | Optional runtime id override for librarian extraction. @category Runtime @ops_class operator |
+| `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 224 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 73 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 76 | Number of rotated files to keep (default: 1, i.e. .1 only) |
-| `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | unclassified | unclassified | 538 | Interruptible sleep chunk size in seconds. Smaller = faster wakeup response but more CPU polling. Default: 2.0. Range... |
+| `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | unclassified | unclassified | 545 | Interruptible sleep chunk size in seconds. Smaller = faster wakeup response but more CPU polling. Default: 2.0. Range... |
 | `MASC_KEEPER_SNAPSHOT_SEC` | typed:int | unclassified | unclassified | 154 | Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. |
-| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | unclassified | unclassified | 632 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
-| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | string_literal | n/a | n/a | 549 |  |
-| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 409 | Base delay before trying the next vision runtime after a failed provider attempt. A small default avoids tight failov... |
-| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 419 | Upper bound for the per-candidate vision failover delay. Range: [base, 30] seconds, so a typo cannot exceed the tool'... |
-| `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 399 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Default is 5 MiB t... |
+| `MASC_KEEPER_STAGE_TIMING_RING_SIZE` | typed:int | unclassified | unclassified | 639 | Stage timing ring buffer size for Phase 0 profiling. Default: 100. Range: [10, 1000]. |
+| `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | string_literal | n/a | n/a | 556 |  |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 416 | Base delay before trying the next vision runtime after a failed provider attempt. A small default avoids tight failov... |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 426 | Upper bound for the per-candidate vision failover delay. Range: [base, 30] seconds, so a typo cannot exceed the tool'... |
+| `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 406 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Default is 5 MiB t... |
 | `MASC_KEEPER_WIRE_CAPTURE` | feature_flag | Policies | operator | 88 | Master switch for diagnostic MASC->OAS wire capture. Default off. @category Policies @ops_class operator |
 | `MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES` | typed:int | Policies | operator | 114 | Maximum bytes for the active [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] file and maximum total bytes retained below ... |
 | `MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS` | typed:int | Policies | operator | 103 | Maximum age for [<masc_root>/wire-capture] day files retained by the diagnostic MASC->OAS wire-capture harness. Defau... |
-| `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 497 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
+| `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 504 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 
 ## Env_config_keeper_supervisor (3 knobs; typed classification 2/2)
 

@@ -208,7 +208,7 @@ let search_memory_bank
         match m.kind with
         | Keeper_memory_policy.Long_term -> 1.10
         | Keeper_memory_policy.Progress | Keeper_memory_policy.Open_question ->
-          if m.generation >= meta.runtime.generation then 1.05 else 0.65
+          if m.generation >= meta.runtime.nonce then 1.05 else 0.65
         | Keeper_memory_policy.Goal | Keeper_memory_policy.Decision -> 1.0
       in
       let source_bonus =
@@ -544,7 +544,7 @@ let keeper_context_status_json
     (`Assoc
         ([ "name", `String meta.name
          ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-         ; "generation", `Int meta.runtime.generation
+         ; "generation", `Int meta.runtime.nonce
          ; "checkpoint_bytes", `Int checkpoint_bytes
          ; "message_count", `Int (List.length (messages_of_context ctx_work))
          ; "last_model_used", `Null

@@ -1209,14 +1209,14 @@ let test_cancelled_transition_is_projected_as_typed_history () =
   let cancellation : Keeper_event_queue_state.accepted_cancellation =
     { source = stimulus
     ; source_revision = Keeper_event_queue_state.revision claimed
-    ; owner_generation = 7
+    ; owner_nonce = 7
     ; operator_operation_id = "operator-cancel-1"
     ; reason = "operator rejected paused work"
     }
   in
   let cancelled, _ =
     Keeper_event_queue_state.cancel_accepted
-      ~current_owner_generation:7
+      ~current_owner_nonce:7
       ~settled_at:1236.0
       ~lease
       ~cancellation

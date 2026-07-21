@@ -223,7 +223,7 @@ let parse_keeper_state
          ; "site", "retired_auto_resume_field_migration_needed"
          ]
        ());
-  let generation = Safe_ops.json_int ~default:0 "generation" json in
+  let nonce = Safe_ops.json_int ~default:0 "nonce" json in
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
@@ -326,7 +326,7 @@ let parse_keeper_state
       { usage = parse_usage_metrics json
       ; compaction_rt = parse_compaction_runtime json
       ; proactive_rt = parse_proactive_runtime json
-      ; generation
+      ; nonce
       ; trace_id
       ; trace_history
       ; last_handoff_ts

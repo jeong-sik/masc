@@ -61,22 +61,22 @@ let nonnegative_int64 field value =
 let parse_resume = function
   | [ ("operation", `String "resume_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_generation", `Int owner_generation)
+    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ]
     when String.equal request_schema schema ->
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_generation = nonnegative_int "owner_generation" owner_generation in
-    Ok (Resume_owner Resume.{ owner_generation; operator_operation_id })
+    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
+    Ok (Resume_owner Resume.{ owner_nonce; operator_operation_id })
   | _ -> Error "resume_owner request fields are not exact"
 ;;
 
 let parse_cancel_pending = function
   | [ ("operation", `String "cancel_accepted")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_generation", `Int owner_generation)
+    ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
     ; ("settled_at", settled_at_json)
@@ -93,13 +93,13 @@ let parse_cancel_pending = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* reason = nonblank "reason" reason in
-    let* owner_generation = nonnegative_int "owner_generation" owner_generation in
+    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Cancel_pending
          Cancellation.
            { source
            ; source_revision
-           ; owner_generation
+           ; owner_nonce
            ; operator_operation_id
            ; reason
            ; settled_at
@@ -111,7 +111,7 @@ let parse_cancel_active_lease = function
   | [ ("lease", lease_json)
     ; ("operation", `String "cancel_accepted")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_generation", `Int owner_generation)
+    ; ("owner_nonce", `Int owner_nonce)
     ; ("reason", `String reason)
     ; ("schema", `String request_schema)
     ; ("settled_at", settled_at_json)
@@ -127,12 +127,12 @@ let parse_cancel_active_lease = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* reason = nonblank "reason" reason in
-    let* owner_generation = nonnegative_int "owner_generation" owner_generation in
+    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Cancel_active_lease
          Cancellation.
            { source_revision
-           ; owner_generation
+           ; owner_nonce
            ; lease
            ; operator_operation_id
            ; reason
@@ -145,7 +145,7 @@ let parse_transfer = function
   | [ ("continuation_binding", continuation_binding_json)
     ; ("operation", `String "transfer_owner")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_generation", `Int owner_generation)
+    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("settled_at", settled_at_json)
     ; ("source", source_json)
@@ -165,7 +165,7 @@ let parse_transfer = function
       nonblank "operator_operation_id" operator_operation_id
     in
     let* to_keeper = nonblank "to_keeper" to_keeper in
-    let* owner_generation = nonnegative_int "owner_generation" owner_generation in
+    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     let* target_generation = nonnegative_int "target_generation" target_generation in
     Ok
       (Transfer_owner
@@ -174,7 +174,7 @@ let parse_transfer = function
              Transfer.
                { source
                ; source_revision
-               ; owner_generation
+               ; owner_nonce
                ; target_generation
                ; continuation_binding
                ; operator_operation_id
@@ -187,7 +187,7 @@ let parse_transfer = function
 let parse_source_terminal = function
   | [ ("operation", `String "settle_from_source_terminal")
     ; ("operator_operation_id", `String operator_operation_id)
-    ; ("owner_generation", `Int owner_generation)
+    ; ("owner_nonce", `Int owner_nonce)
     ; ("schema", `String request_schema)
     ; ("settled_at", settled_at_json)
     ; ("source", source_json)
@@ -211,13 +211,13 @@ let parse_source_terminal = function
     let* operator_operation_id =
       nonblank "operator_operation_id" operator_operation_id
     in
-    let* owner_generation = nonnegative_int "owner_generation" owner_generation in
+    let* owner_nonce = nonnegative_int "owner_nonce" owner_nonce in
     Ok
       (Settle_from_source_terminal
          Source_terminal.
            { source
            ; source_revision
-           ; owner_generation
+           ; owner_nonce
            ; source_receipt
            ; operator_operation_id
            ; settled_at

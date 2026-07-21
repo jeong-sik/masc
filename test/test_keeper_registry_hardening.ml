@@ -206,7 +206,7 @@ let test_get_filters_corrupted_entry () =
     { entry with
       meta =
         { entry.meta with
-          runtime = { entry.meta.runtime with generation = -1 }
+          runtime = { entry.meta.runtime with nonce = -1 }
         }
     }
   in
@@ -352,7 +352,7 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
       Reservation.acquire
         ~base_path
         ~keeper_name:captured.name
-        ~expected_generation:captured.meta.runtime.generation
+        ~expected_generation:captured.meta.runtime.nonce
         ~purpose:Reservation.Dead_revival
     with
     | Ok token -> token

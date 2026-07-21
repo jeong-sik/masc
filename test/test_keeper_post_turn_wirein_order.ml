@@ -275,7 +275,7 @@ let test_manual_compaction_serializes_owner_lane () =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:context
-            ~generation:meta.runtime.generation
+            ~generation:meta.runtime.nonce
         with
         | Ok (checkpoint, Masc.Keeper_checkpoint_store.Saved _) -> checkpoint
         | Ok (_, Stale_noop _) -> fail "initial checkpoint save was stale"
@@ -549,7 +549,7 @@ let test_manual_compaction_serializes_owner_lane () =
            ~session
            ~agent_name:meta.agent_name
            ~ctx:(Masc.Keeper_context_core.context_of_oas_checkpoint race_checkpoint)
-           ~generation:meta.runtime.generation
+           ~generation:meta.runtime.nonce
        with
        | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
        | Ok (_, Stale_noop _) -> fail "race fixture checkpoint save was stale"

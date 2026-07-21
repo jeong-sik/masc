@@ -48,7 +48,7 @@ type no_compaction =
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -56,7 +56,7 @@ type accepted_cancellation =
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -70,7 +70,7 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -557,7 +557,7 @@ let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   then Error "accepted cancellation source post id must not be empty"
   else if Int64.compare cancellation.source_revision 0L < 0
   then Error "accepted cancellation source revision must not be negative"
-  else if cancellation.owner_generation < 0
+  else if cancellation.owner_nonce < 0
   then Error "accepted cancellation owner generation must not be negative"
   else if String.equal (String.trim cancellation.operator_operation_id) ""
   then Error "accepted cancellation operator operation id must not be empty"
@@ -571,7 +571,7 @@ let validate_accepted_transfer (transfer : accepted_transfer) =
   then Error "accepted transfer source post id must not be empty"
   else if Int64.compare transfer.source_revision 0L < 0
   then Error "accepted transfer source revision must not be negative"
-  else if transfer.owner_generation < 0
+  else if transfer.owner_nonce < 0
   then Error "accepted transfer owner generation must not be negative"
   else if String.equal (String.trim transfer.operator_operation_id) ""
   then Error "accepted transfer operator operation id must not be empty"
@@ -607,7 +607,7 @@ let validate_accepted_source_terminal source_terminal =
   then Error "source-terminal settlement source post id must not be empty"
   else if Int64.compare source_terminal.source_revision 0L < 0
   then Error "source-terminal settlement source revision must not be negative"
-  else if source_terminal.owner_generation < 0
+  else if source_terminal.owner_nonce < 0
   then Error "source-terminal settlement owner generation must not be negative"
   else if String.equal (String.trim source_terminal.operator_operation_id) ""
   then Error "source-terminal settlement operation id must not be empty"
@@ -818,7 +818,7 @@ let settle ~settled_at ~lease ~settlement state =
 ;;
 
 let cancel_accepted
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~(lease : lease)
       ~cancellation
@@ -830,14 +830,14 @@ let cancel_accepted
   | None ->
     let* () = validate_accepted_cancellation cancellation in
     let* () =
-      if Int.equal current_owner_generation cancellation.owner_generation
+      if Int.equal current_owner_nonce cancellation.owner_nonce
       then Ok ()
       else
         Error
           (Printf.sprintf
              "accepted cancellation owner generation changed: expected %d, current %d"
-             cancellation.owner_generation
-             current_owner_generation)
+             cancellation.owner_nonce
+             current_owner_nonce)
     in
     let* () =
       if Int64.equal state.revision cancellation.source_revision
@@ -891,7 +891,7 @@ let accepted_pending_cancellation_replay cancellation state =
 ;;
 
 let cancel_pending_accepted
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~cancellation
       state
@@ -904,14 +904,14 @@ let cancel_pending_accepted
   | Ok None ->
     let* () = validate_accepted_cancellation cancellation in
     let* () =
-      if Int.equal current_owner_generation cancellation.owner_generation
+      if Int.equal current_owner_nonce cancellation.owner_nonce
       then Ok ()
       else
         Error
           (Printf.sprintf
              "accepted cancellation owner generation changed: expected %d, current %d"
-             cancellation.owner_generation
-             current_owner_generation)
+             cancellation.owner_nonce
+             current_owner_nonce)
     in
     let* () =
       if Int64.equal state.revision cancellation.source_revision
@@ -970,7 +970,7 @@ let accepted_pending_transfer_replay transfer state =
 ;;
 
 let transfer_pending_accepted
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~transfer
       state
@@ -982,14 +982,14 @@ let transfer_pending_accepted
   | Ok None ->
     let* () = validate_accepted_transfer transfer in
     let* () =
-      if Int.equal current_owner_generation transfer.owner_generation
+      if Int.equal current_owner_nonce transfer.owner_nonce
       then Ok ()
       else
         Error
           (Printf.sprintf
              "accepted transfer owner generation changed: expected %d, current %d"
-             transfer.owner_generation
-             current_owner_generation)
+             transfer.owner_nonce
+             current_owner_nonce)
     in
     let* () =
       if Int64.equal state.revision transfer.source_revision
@@ -1052,7 +1052,7 @@ let accepted_pending_source_terminal_replay source_terminal state =
 ;;
 
 let settle_pending_from_source_terminal
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~source_terminal
       state
@@ -1064,14 +1064,14 @@ let settle_pending_from_source_terminal
   | Ok None ->
     let* () = validate_accepted_source_terminal source_terminal in
     let* () =
-      if Int.equal current_owner_generation source_terminal.owner_generation
+      if Int.equal current_owner_nonce source_terminal.owner_nonce
       then Ok ()
       else
         Error
           (Printf.sprintf
              "source-terminal settlement owner generation changed: expected %d, current %d"
-             source_terminal.owner_generation
-             current_owner_generation)
+             source_terminal.owner_nonce
+             current_owner_nonce)
     in
     let* () =
       if Int64.equal state.revision source_terminal.source_revision
@@ -1212,7 +1212,7 @@ let replay_transition_outbox_entry entry state =
              else
                let* replayed, result =
                  cancel_pending_accepted
-                   ~current_owner_generation:cancellation.owner_generation
+                   ~current_owner_nonce:cancellation.owner_nonce
                    ~settled_at:entry.receipt.settled_at
                    ~cancellation
                    state
@@ -1246,7 +1246,7 @@ let replay_transition_outbox_entry entry state =
              else
                let* replayed, result =
                  transfer_pending_accepted
-                   ~current_owner_generation:transfer.owner_generation
+                   ~current_owner_nonce:transfer.owner_nonce
                    ~settled_at:entry.receipt.settled_at
                    ~transfer
                    state
@@ -1281,7 +1281,7 @@ let replay_transition_outbox_entry entry state =
              else
                let* replayed, result =
                  settle_pending_from_source_terminal
-                   ~current_owner_generation:source_terminal.owner_generation
+                   ~current_owner_nonce:source_terminal.owner_nonce
                    ~settled_at:entry.receipt.settled_at
                    ~source_terminal
                    state
@@ -1554,7 +1554,7 @@ let settlement_to_yojson = function
       [ "kind", `String "cancel_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson cancellation.source
       ; "source_revision", int64_json cancellation.source_revision
-      ; "owner_generation", `Int cancellation.owner_generation
+      ; "owner_nonce", `Int cancellation.owner_nonce
       ; "operator_operation_id", `String cancellation.operator_operation_id
       ; "reason", `String cancellation.reason
       ]
@@ -1563,7 +1563,7 @@ let settlement_to_yojson = function
       [ "kind", `String "transfer_accepted"
       ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
       ; "source_revision", int64_json transfer.source_revision
-      ; "owner_generation", `Int transfer.owner_generation
+      ; "owner_nonce", `Int transfer.owner_nonce
       ; "operator_operation_id", `String transfer.operator_operation_id
       ; "from_keeper", `String transfer.from_keeper
       ; "to_keeper", `String transfer.to_keeper
@@ -1579,7 +1579,7 @@ let settlement_to_yojson = function
       [ "kind", `String "settle_from_source_terminal"
       ; "source", Keeper_event_queue.stimulus_to_yojson source_terminal.source
       ; "source_revision", int64_json source_terminal.source_revision
-      ; "owner_generation", `Int source_terminal.owner_generation
+      ; "owner_nonce", `Int source_terminal.owner_nonce
       ; "operator_operation_id", `String source_terminal.operator_operation_id
       ; "source_receipt_kind", `String receipt_kind
       ]
@@ -1625,7 +1625,7 @@ let settlement_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_revision"
-          ; "owner_generation"
+          ; "owner_nonce"
           ; "operator_operation_id"
           ; "reason"
           ]
@@ -1634,13 +1634,13 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_generation = int_field ~context "owner_generation" fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
     let* reason = string_field ~context "reason" fields in
     let cancellation =
-      { source; source_revision; owner_generation; operator_operation_id; reason }
+      { source; source_revision; owner_nonce; operator_operation_id; reason }
     in
     let* () = validate_accepted_cancellation cancellation in
     Ok (Cancel_accepted cancellation)
@@ -1652,7 +1652,7 @@ let settlement_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_revision"
-          ; "owner_generation"
+          ; "owner_nonce"
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
@@ -1662,7 +1662,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_generation = int_field ~context "owner_generation" fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -1671,7 +1671,7 @@ let settlement_of_yojson json =
     let transfer =
       { source
       ; source_revision
-      ; owner_generation
+      ; owner_nonce
       ; operator_operation_id
       ; from_keeper
       ; to_keeper
@@ -1687,7 +1687,7 @@ let settlement_of_yojson json =
           [ "kind"
           ; "source"
           ; "source_revision"
-          ; "owner_generation"
+          ; "owner_nonce"
           ; "operator_operation_id"
           ; "source_receipt_kind"
           ]
@@ -1696,7 +1696,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_generation = int_field ~context "owner_generation" fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -1718,7 +1718,7 @@ let settlement_of_yojson json =
     let source_terminal =
       { source
       ; source_revision
-      ; owner_generation
+      ; owner_nonce
       ; operator_operation_id
       ; source_receipt
       }

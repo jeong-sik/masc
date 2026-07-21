@@ -885,14 +885,14 @@ type parsed_bulk_directive =
 
 let required_resume_owner_request json =
   match
-    Safe_ops.json_int_opt "owner_generation" json,
+    Safe_ops.json_int_opt "owner_nonce" json,
     Safe_ops.json_string_opt "operator_operation_id" json
   with
-  | Some owner_generation, Some operator_operation_id ->
+  | Some owner_nonce, Some operator_operation_id ->
     Ok
       Keeper_paused_work_resume_transaction.
-        { owner_generation; operator_operation_id }
-  | None, _ -> Error "resume requires integer \"owner_generation\""
+        { owner_nonce; operator_operation_id }
+  | None, _ -> Error "resume requires integer \"owner_nonce\""
   | _, None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
@@ -985,7 +985,7 @@ module For_testing = struct
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->
-      Ok (request.owner_generation, request.operator_operation_id)
+      Ok (request.owner_nonce, request.operator_operation_id)
     | Ok (Plain_directive _) -> Error "request is not Resume_owner"
     | Error _ as error -> error
   ;;
@@ -997,7 +997,7 @@ module For_testing = struct
         (List.map
            (fun target ->
               ( target.name
-              , target.request.owner_generation
+              , target.request.owner_nonce
               , target.request.operator_operation_id ))
            targets)
     | Ok (Bulk_plain _) -> Error "request is not bulk Resume_owner"
@@ -1016,11 +1016,11 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_meta_missing -> `Not_found
   | Reservation_conflict _
   | Receipt_conflict _
-  | Durable_owner_generation_changed _
+  | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
-  | Registry_owner_generation_changed _
+  | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed
   | Registry_owner_not_paused _ -> `Conflict
   | Receipt_lock_failed _
@@ -1127,7 +1127,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
          Log.Keeper.warn
            "directive resume_owner rejected for %s generation=%d operation_id=%s: %s"
            name
-           request.owner_generation
+           request.owner_nonce
            request.operator_operation_id
            (Keeper_paused_work_resume_transaction.error_to_string error);
          Http.Response.json_value
@@ -1150,14 +1150,14 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
             Log.Keeper.info
               "directive resume_owner applied for %s generation=%d operation_id=%s"
               name
-              request.owner_generation
+              request.owner_nonce
               request.operator_operation_id;
             Http.Response.json_value ~compress:true ~request:req response reqd
           | Committed_followup_failed failure ->
             Log.Keeper.warn
               "directive resume_owner committed with pending projection for %s generation=%d operation_id=%s: %s"
               name
-              request.owner_generation
+              request.owner_nonce
               request.operator_operation_id
               (resume_failure_message failure);
             Http.Response.json_value
@@ -1272,7 +1272,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
 
 (** Bulk variant of [handle_keeper_directive_post]. Pause and wakeup accept
     [{names: [name, ...]}]. Resume accepts exact per-owner
-    [{targets: [{name, owner_generation, operator_operation_id}, ...]}] fences.
+    [{targets: [{name, owner_nonce, operator_operation_id}, ...]}] fences.
     Cache invalidation still runs once for the whole batch. *)
 let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let parsed =

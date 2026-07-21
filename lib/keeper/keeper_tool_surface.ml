@@ -661,11 +661,11 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
-             — the keeper_unified_turn retry loop uses meta.runtime.generation
+             — the keeper_unified_turn retry loop uses meta.runtime.nonce
              to detect stale contexts. *)
           let current_gen =
             match meta_for_trace with
-            | Some meta -> meta.runtime.generation
+            | Some meta -> meta.runtime.nonce
             | None -> 0
           in
           (match meta_for_trace with

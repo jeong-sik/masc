@@ -424,20 +424,20 @@ let apply_post_turn_lifecycle_with_resilience_handles
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        turn_generation = meta.runtime.generation;
+        turn_generation = meta.runtime.nonce;
         checkpoint_bytes = 0;
         message_count = 0;
       }
   | Some cp ->
       let ctx = context_of_oas_checkpoint cp in
       let current_generation =
-        checkpoint_generation cp ~fallback:meta.runtime.generation
+        checkpoint_generation cp ~fallback:meta.runtime.nonce
       in
       let base_meta =
-        if current_generation = meta.runtime.generation then meta
+        if current_generation = meta.runtime.nonce then meta
         else
           map_runtime
-            (fun rt -> { rt with generation = current_generation })
+            (fun rt -> { rt with nonce = current_generation })
             meta
       in
       let decision = Keeper_compact_policy.Not_requested in
@@ -558,12 +558,12 @@ let prepare_compaction
     Error (Checkpoint_ref_load_failed error)
   | Ok (checkpoint, source_ref) ->
     let turn_generation =
-      checkpoint_generation checkpoint ~fallback:meta.runtime.generation
+      checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
     in
     let ctx = context_of_oas_checkpoint checkpoint in
     let retry_meta =
-      if turn_generation = meta.runtime.generation then meta
-      else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
+      if turn_generation = meta.runtime.nonce then meta
+      else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
     in
     let preparation =
       Keeper_compact_policy.compact_for_request_typed

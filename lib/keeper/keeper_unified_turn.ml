@@ -1025,7 +1025,7 @@ let run_keeper_cycle
                      + String.length user_message)
                     latency_ms
                     (if is_server_parse_rejection
-                     then " (server parse rejection, auto-recoverable)"
+                     then " (server parse rejection, counts toward crash threshold)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err

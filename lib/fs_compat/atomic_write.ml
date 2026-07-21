@@ -102,14 +102,6 @@ type publication_recovery_reconciliation_row_kind =
   | Publication_recovery_owner_store_unavailable
   | Publication_recovery_owner_inventory_unavailable
 
-let publication_recovery_reconciliation_report_owner =
-  Capability_recovery_reconciler.report_owner
-;;
-
-let publication_recovery_reconciliation_report_is_ready =
-  Capability_recovery_reconciler.report_is_ready
-;;
-
 let publication_recovery_prepared_outcome_kind = function
   | Capability_recovery_reconciler.Prepared_unmaterialized ->
     Publication_recovery_prepared_unmaterialized
@@ -196,10 +188,6 @@ let publication_recovery_reconciliation_report_row_kinds report =
 
 let publication_recovery_reconciliation_report_to_string =
   Capability_recovery_reconciler.report_to_string
-;;
-
-let publication_recovery_reconciliation_report_to_yojson =
-  Capability_recovery_reconciler.report_to_yojson
 ;;
 
 let atomic_replace_recovery_target_error_to_string = function

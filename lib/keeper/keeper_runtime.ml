@@ -144,11 +144,13 @@ type autoboot_exclusion_reason =
   | Paused
   | Declarative_autoboot_disabled
   | Autoboot_disabled
+  | Shutdown_admission_fence
 
 let autoboot_exclusion_reason_to_string = function
   | Paused -> "paused"
   | Declarative_autoboot_disabled -> "declarative_autoboot_disabled"
   | Autoboot_disabled -> "autoboot_disabled"
+  | Shutdown_admission_fence -> "shutdown_admission_fence"
 
 let autoboot_exclusion_reason_to_yojson reason =
   `String (autoboot_exclusion_reason_to_string reason)

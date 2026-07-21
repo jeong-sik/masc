@@ -150,6 +150,28 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_paused_work_route_is_admin_exact () =
+  let path = "/api/v1/keepers/idealist/paused-work" in
+  check bool
+    "paused-work POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_paused_work);
+  check bool
+    "paused-work GET route kind"
+    true
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
+  check string
+    "paused-work keeper name"
+    "idealist"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
+  check bool
+    "paused-work route rejects trailing segment"
+    false
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
+
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
     match
@@ -2071,6 +2093,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper paused-work route is exact" `Quick
+            test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick

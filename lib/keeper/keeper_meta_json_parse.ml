@@ -223,7 +223,12 @@ let parse_keeper_state
          ; "site", "retired_auto_resume_field_migration_needed"
          ]
        ());
-  let nonce = Safe_ops.json_int ~default:0 "nonce" json in
+  (* The OCaml field is [nonce]; the persisted JSON key stays ["generation"] for
+     backward compatibility with existing on-disk meta files (every other JSON
+     surface — keeper status, dashboard — already keeps this key while reading
+     [rt.nonce]). Renaming the key here would load every pre-rename meta file
+     as [nonce = 0] and silently reset the fencing counter. *)
+  let nonce = Safe_ops.json_int ~default:0 "generation" json in
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in

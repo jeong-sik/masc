@@ -510,7 +510,7 @@ let test_resume_owner_completes_prepared_receipt_projection () =
      | Ok (Ok (Disposition_receipt.Existing _)) ->
        Alcotest.fail "prepared Resume_owner receipt already existed"
      | Ok (Error detail) | Error detail -> Alcotest.fail detail);
-    Keeper_registry.clear ();
+    Keeper_registry.For_testing.clear ();
     let interrupted =
       Resume_transaction.resume config ~keeper_name request
       |> Result.map_error Resume_transaction.error_to_string
@@ -536,7 +536,7 @@ let test_resume_owner_completes_prepared_receipt_projection () =
       false
       durably_resumed.paused;
     ignore
-      (Keeper_registry.register
+      (Keeper_registry.For_testing.register
          ~base_path:config.Workspace.base_path
          keeper_name
          durably_resumed);

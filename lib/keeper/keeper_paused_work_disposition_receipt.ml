@@ -1,5 +1,7 @@
 type operation = Resume_owner
 
+type keeper_lock = { keeper_name : string }
+
 type t =
   { keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
@@ -13,7 +15,6 @@ type save_result =
   | Created
   | Existing of t
 
-type keeper_lock = { keeper_name : string }
 
 let ( let* ) = Result.bind
 
@@ -143,13 +144,13 @@ let with_keeper_lock config ~keeper_name f =
     (match
        File_lock_eio.with_durable_lock
          ~lock_path:(Filename.concat dir "keeper-disposition.lock")
-         (fun () -> f { keeper_name })
+         (fun () -> f ({ keeper_name } : keeper_lock))
      with
      | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
      | Ok result -> Ok result)
 ;;
 
-let save_if_absent lock config receipt =
+let save_if_absent (lock : keeper_lock) config receipt =
   let* () = validate receipt in
   let* () =
     if String.equal lock.keeper_name receipt.keeper_name

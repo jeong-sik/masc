@@ -142,7 +142,8 @@ let read_meta config keeper_name =
   |> Result.map_error (fun detail -> Durable_meta_read_failed detail)
 ;;
 
-let validate_identity receipt (meta : Keeper_meta_contract.keeper_meta) =
+let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
+      (meta : Keeper_meta_contract.keeper_meta) =
   if not (Int.equal meta.runtime.generation receipt.expected_generation)
   then
     Error
@@ -212,7 +213,8 @@ let project_registry token entry committed =
         token
         entry
         Keeper_state_machine.Operator_resume
-      |> Result.map (fun transition -> transition.new_phase)
+      |> Result.map (fun (transition : Keeper_state_machine.transition_result) ->
+           transition.new_phase)
       |> Result.map_error (fun error ->
         Projection_failed
           { stage = Registry_transition
@@ -225,7 +227,7 @@ let project_registry token entry committed =
   Ok phase
 ;;
 
-let project_receipt token config receipt =
+let project_receipt token config (receipt : Keeper_paused_work_disposition_receipt.t) =
   let* current = read_meta config receipt.keeper_name in
   let* current =
     match current with

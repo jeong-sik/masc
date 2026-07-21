@@ -13,9 +13,17 @@ type transfer_owner =
   ; continuation_binding : continuation_binding
   }
 
+type source_terminal_operation =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; settled_at : float
+  ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
+  }
+
 type operation =
   | Resume_owner
   | Transfer_owner of transfer_owner
+  | Settle_from_source_terminal of source_terminal_operation
 
 type keeper_lock = { keeper_name : string }
 
@@ -92,6 +100,19 @@ let validate receipt =
         <> continuation_binding_of_source transfer.source
       then Error "paused-work transfer continuation binding does not match source"
       else Ok ()
+    | Settle_from_source_terminal operation ->
+      if Int64.compare operation.source_revision 0L < 0
+      then Error "paused-work source-terminal revision must not be negative"
+      else if not (Float.is_finite operation.settled_at)
+      then Error "paused-work source-terminal settlement time must be finite"
+      else
+        let* exact =
+          Keeper_event_queue_state.source_terminal_receipt_of_stimulus
+            operation.source
+        in
+        if exact = operation.source_receipt
+        then Ok ()
+        else Error "paused-work source-terminal receipt does not match source"
 ;;
 
 let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
@@ -131,6 +152,22 @@ let transfer_owner_to_yojson transfer =
     ]
 ;;
 
+let source_terminal_receipt_kind = function
+  | Keeper_event_queue_state.Fusion_terminal _ -> "fusion_terminal"
+  | Keeper_event_queue_state.Background_job_terminal _ ->
+    "background_job_terminal"
+  | Keeper_event_queue_state.Hitl_terminal _ -> "hitl_terminal"
+;;
+
+let source_terminal_operation_to_yojson operation =
+  `Assoc
+    [ "source", Keeper_event_queue.stimulus_to_yojson operation.source
+    ; "source_revision", `Intlit (Int64.to_string operation.source_revision)
+    ; "settled_at", `Float operation.settled_at
+    ; "source_receipt_kind", `String (source_terminal_receipt_kind operation.source_receipt)
+    ]
+;;
+
 let to_yojson receipt =
   let common operation schema extra =
     `Assoc
@@ -153,6 +190,11 @@ let to_yojson receipt =
       "transfer_owner"
       "masc.keeper.paused-work-disposition.v2"
       [ "transfer", transfer_owner_to_yojson transfer ]
+  | Settle_from_source_terminal operation ->
+    common
+      "settle_from_source_terminal"
+      "masc.keeper.paused-work-disposition.v3"
+      [ "source_terminal", source_terminal_operation_to_yojson operation ]
 ;;
 
 let sorted fields =
@@ -174,8 +216,8 @@ let source_revision_of_yojson = function
   | `Intlit value ->
     (match Int64.of_string_opt value with
      | Some value -> Ok value
-     | None -> Error "paused-work transfer source revision is invalid")
-  | _ -> Error "paused-work transfer source revision must be an integer"
+     | None -> Error "paused-work disposition source revision is invalid")
+  | _ -> Error "paused-work disposition source revision must be an integer"
 ;;
 
 let continuation_binding_of_yojson = function
@@ -220,6 +262,30 @@ let transfer_owner_of_yojson = function
          }
      | _ -> Error "paused-work transfer fields are not exact")
   | _ -> Error "paused-work transfer must be an object"
+;;
+
+let source_terminal_operation_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("settled_at", settled_at_json)
+       ; ("source", source_json)
+       ; ("source_receipt_kind", `String source_receipt_kind)
+       ; ("source_revision", source_revision_json)
+       ] ->
+       let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+       let* source_revision = source_revision_of_yojson source_revision_json in
+       let* settled_at = requested_at_of_yojson settled_at_json in
+       let* source_receipt =
+         Keeper_event_queue_state.source_terminal_receipt_of_stimulus source
+       in
+       let* () =
+         if String.equal source_receipt_kind (source_terminal_receipt_kind source_receipt)
+         then Ok ()
+         else Error "paused-work source-terminal receipt kind does not match source"
+       in
+       Ok { source; source_revision; settled_at; source_receipt }
+     | _ -> Error "paused-work source-terminal fields are not exact")
+  | _ -> Error "paused-work source-terminal operation must be an object"
 ;;
 
 let receipt_of_common
@@ -280,6 +346,23 @@ let of_yojson = function
          ~operator_operation_id
          ~requested_at_json
          ~operation:(Transfer_owner transfer)
+     | [ ("expected_generation", `Int expected_generation)
+       ; ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "settle_from_source_terminal")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String "masc.keeper.paused-work-disposition.v3")
+       ; ("source_terminal", source_terminal_json)
+       ] ->
+       let* operation = source_terminal_operation_of_yojson source_terminal_json in
+       receipt_of_common
+         ~keeper_name
+         ~expected_trace_id
+         ~expected_generation
+         ~operator_operation_id
+         ~requested_at_json
+         ~operation:(Settle_from_source_terminal operation)
      | _ -> Error "paused-work disposition receipt fields are not exact")
   | _ -> Error "paused-work disposition receipt must be a JSON object"
 ;;

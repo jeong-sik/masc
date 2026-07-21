@@ -15,9 +15,17 @@ type transfer_owner =
   ; continuation_binding : continuation_binding
   }
 
+type source_terminal_operation =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; settled_at : float
+  ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
+  }
+
 type operation =
   | Resume_owner
   | Transfer_owner of transfer_owner
+  | Settle_from_source_terminal of source_terminal_operation
 
 type t =
   { keeper_name : string

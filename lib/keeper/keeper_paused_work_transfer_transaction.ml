@@ -235,6 +235,8 @@ let transfer_of_receipt receipt =
   | Keeper_paused_work_disposition_receipt.Transfer_owner transfer -> Ok transfer
   | Keeper_paused_work_disposition_receipt.Resume_owner ->
     Error (Receipt_conflict receipt)
+  | Keeper_paused_work_disposition_receipt.Settle_from_source_terminal _ ->
+    Error (Receipt_conflict receipt)
 ;;
 
 let receipt_matches_request ~from_keeper ~to_keeper request receipt =
@@ -281,7 +283,8 @@ let create_receipt config ~from_keeper ~to_keeper request =
      : Keeper_paused_work_disposition_receipt.t)
 ;;
 
-let source_settlement config receipt transfer =
+let source_settlement config receipt
+      (transfer : Keeper_paused_work_disposition_receipt.transfer_owner) =
   let causal : Keeper_registry_event_queue.accepted_transfer =
     { source = transfer.Keeper_paused_work_disposition_receipt.source
     ; source_revision = transfer.source_revision

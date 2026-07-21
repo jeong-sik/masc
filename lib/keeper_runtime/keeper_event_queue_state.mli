@@ -74,6 +74,21 @@ type accepted_transfer =
     this settlement links the source queue terminal effect to that receipt by
     stable operator operation ID. *)
 
+type source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+(** Closed terminal source families that are intrinsically represented by a
+    durable event payload. No prose or external status inference is admitted. *)
+
+type accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 
@@ -87,6 +102,7 @@ type settlement =
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -203,6 +219,15 @@ val transfer_pending_accepted :
     are checked before removal, and the source-bearing WAL remains the replay
     authority until the target projection completes. *)
 
+val settle_pending_from_source_terminal :
+  current_owner_generation:int ->
+  settled_at:float ->
+  source_terminal:accepted_source_terminal ->
+  t ->
+  (t * settle_result, string) result
+(** Terminally settle one exact pending event only when its closed payload
+    exactly matches [source_terminal.source_receipt]. *)
+
 val accepted_cancellation_replay :
   lease ->
   accepted_cancellation ->
@@ -225,6 +250,16 @@ val accepted_pending_transfer_replay :
   (transition_receipt option, string) result
 (** Look up an already committed pending transfer by its stable operator
     operation ID and exact source-bearing settlement. *)
+
+val accepted_pending_source_terminal_replay :
+  accepted_source_terminal ->
+  t ->
+  (transition_receipt option, string) result
+
+val source_terminal_receipt_of_stimulus :
+  Keeper_event_queue.stimulus -> (source_terminal_receipt, string) result
+(** Accept only [Fusion_completed], [Bg_completed], or [Hitl_resolved] and
+    retain their exact typed terminal payload. *)
 
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying

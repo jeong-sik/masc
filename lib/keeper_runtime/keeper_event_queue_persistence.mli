@@ -62,11 +62,25 @@ type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   ; to_keeper : string
   }
 
+type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
 type settlement = Keeper_event_queue_state.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -226,6 +240,16 @@ val transfer_pending_accepted_result :
   (settle_result, string) result
 (** Append and fsync the canonical source-bearing transfer settlement before
     checkpointing removal of the exact pending source. *)
+
+val settle_pending_from_source_terminal_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  source_terminal:accepted_source_terminal ->
+  unit ->
+  (settle_result, string) result
 
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

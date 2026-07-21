@@ -29,7 +29,7 @@ let with_source_terminal_lane f =
   let base_path = Filename.temp_dir "keeper-paused-source-terminal" "" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       remove_tree base_path)
     (fun () ->
        let config = Workspace.default_config base_path in

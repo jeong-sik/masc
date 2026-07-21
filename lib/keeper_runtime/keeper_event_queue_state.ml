@@ -470,7 +470,7 @@ let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   else Ok ()
 ;;
 
-let validate_accepted_transfer transfer =
+let validate_accepted_transfer (transfer : accepted_transfer) =
   if String.equal (String.trim transfer.source.post_id) ""
   then Error "accepted transfer source post id must not be empty"
   else if Int64.compare transfer.source_revision 0L < 0

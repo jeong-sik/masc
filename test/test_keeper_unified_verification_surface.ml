@@ -354,6 +354,20 @@ let test_world_state_never_in_persisted_user_message () =
   check bool "persisted user message carries no board observation" false
     (contains_sub "### Board Activity" user_message)
 
+(* RFC-0351 section 5 / #25462: splitting the frame out of the user message
+   (above) left the marker itself still being recorded once per wake, so the
+   duplication moved from bytes to message count — one keeper accumulated 359
+   copies of the same 147B constant, part of a 25.7% exact-dup transcript
+   share. A bare wake now skips the transcript entirely; only a turn carrying a
+   HITL resolution is recorded. *)
+let test_bare_autonomous_wake_is_not_recorded () =
+  check bool "bare autonomous wake skips the transcript" true
+    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution None
+     = Masc.Keeper_run_prompt.Skip_uninformative_wake);
+  check bool "a turn carrying a HITL resolution is recorded" true
+    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution (Some ())
+     = Masc.Keeper_run_prompt.Record_user_turn)
+
 let () =
   run "keeper_unified_verification_surface"
     [
@@ -400,5 +414,8 @@ let () =
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;
+          test_case
+            "invariant: a bare autonomous wake is not recorded in the transcript"
+            `Quick test_bare_autonomous_wake_is_not_recorded;
         ] );
     ]

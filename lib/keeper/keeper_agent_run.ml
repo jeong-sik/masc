@@ -189,6 +189,7 @@ let run_turn
       ?world_observation
       ~(generation : int)
       ?(history_user_source = "direct_user")
+      ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       ?(history_assistant_source = "direct_assistant")
       ?temperature
       ?on_event
@@ -375,6 +376,7 @@ let run_turn
       ~config
       ~meta
       ~history_user_source
+      ~user_turn_record
       ~is_retry
       ~start_turn_count
   in

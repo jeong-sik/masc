@@ -676,6 +676,117 @@ let test_librarian_does_not_infer_validity () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+(* RFC-0351 S2: the extracting model may declare a lifetime per claim; the
+   parser stamps the exact valid_until boundary the recall filter and expiry
+   GC already honor. Declaration only — categories still never infer one
+   (locked by test_librarian_does_not_infer_validity above). *)
+let test_librarian_stamps_declared_lifetime () =
+  let now = 1_000_000.0 in
+  let output =
+    `Assoc
+      [ "episode_summary", `String "declared lifetime claims"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "the agent is blocked on a sandbox limit today"
+                ; "category", `String "ephemeral"
+                ; "claim_kind", `String "self_observation"
+                ; "source_turn", `Int 0
+                ; "valid_for_days", `Int 2
+                ]
+            ; `Assoc
+                [ "claim", `String "parse boundaries own validation"
+                ; "category", `String "lesson"
+                ; "source_turn", `Int 1
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-declared-lifetime"
+    ; generation = 0
+    ; messages = [ text_message "x" ]
+    }
+  in
+  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
+  | Some episode ->
+    let find cat = List.find (fun f -> f.Types.category = cat) episode.Types.claims in
+    let declared = find Types.Ephemeral in
+    let durable = find Types.Lesson in
+    Alcotest.(check (option (float 0.001)))
+      "declared lifetime becomes the exact expiry boundary"
+      (Some (now +. (2. *. 86_400.)))
+      declared.Types.valid_until;
+    Alcotest.(check (option (float 0.001)))
+      "undeclared lifetime stays durable"
+      None
+      durable.Types.valid_until;
+    Alcotest.(check bool)
+      "declared-lifetime claim is current before its boundary"
+      true
+      (Types.fact_is_current ~now:(now +. 86_400.) declared);
+    Alcotest.(check bool)
+      "declared-lifetime claim expires after its boundary"
+      false
+      (Types.fact_is_current ~now:(now +. (3. *. 86_400.)) declared)
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
+let test_librarian_rejects_invalid_lifetime () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-invalid-lifetime"
+    ; generation = 0
+    ; messages = [ text_message "x" ]
+    }
+  in
+  List.iter
+    (fun (label, value) ->
+       let raw =
+         `Assoc
+           [ "episode_summary", `String "summary"
+           ; ( "claims"
+             , `List
+                 [ `Assoc
+                     [ "claim", `String "claim with a malformed lifetime"
+                     ; "category", `String "ephemeral"
+                     ; "source_turn", `Int 0
+                     ; "valid_for_days", value
+                     ]
+                 ] )
+           ; "open_items", `List []
+           ; "constraints", `List []
+           ; "preserved_tool_refs", `List []
+           ]
+         |> Yojson.Safe.to_string
+       in
+       match
+         Librarian.episode_of_output_result
+           ~now:1_000_000.0
+           ~generation:inp.generation
+           inp
+           raw
+       with
+       | Error Librarian.Claim_schema_mismatch -> ()
+       | Error error ->
+         Alcotest.failf
+           "%s: expected Claim_schema_mismatch, got %s"
+           label
+           (Librarian.parse_error_to_string error)
+       | Ok _ ->
+         Alcotest.failf
+           "%s: a malformed lifetime must not be stored as forever"
+           label)
+    [ "zero days", `Int 0
+    ; "negative days", `Int (-3)
+    ; "beyond the shared bound", `Int 999
+    ; "wrong JSON type", `String "7"
+    ]
+;;
+
 let test_librarian_accepts_wrapped_json_output () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-wrapped-json"
@@ -4829,6 +4940,14 @@ let () =
             "librarian does not infer validity"
             `Quick
             test_librarian_does_not_infer_validity
+        ; Alcotest.test_case
+            "librarian stamps a declared lifetime"
+            `Quick
+            test_librarian_stamps_declared_lifetime
+        ; Alcotest.test_case
+            "librarian rejects a malformed lifetime"
+            `Quick
+            test_librarian_rejects_invalid_lifetime
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick

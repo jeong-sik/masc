@@ -566,14 +566,15 @@ let keeper_context_status_json
 (* --- Explicit memory write (RFC-0035 P4 surface) ----------------- *)
 
 let keeper_memory_write_max_title_chars = 120
-let seconds_per_day = 86_400.
 
 (* An explicit lifetime is a claim about scope, so it has to be a real
    boundary: a claim that expires today or a decade out is a producer mistake,
    not a lifetime. Rejecting both ends keeps [valid_until] meaningful rather
-   than becoming a second way to say "forever". *)
+   than becoming a second way to say "forever". Bound and day arithmetic are
+   the shared producer SSOT in [Keeper_memory_os_types] (the librarian
+   extraction path declares lifetimes through the same contract). *)
 let keeper_memory_write_min_valid_days = 1
-let keeper_memory_write_max_valid_days = 365
+let keeper_memory_write_max_valid_days = Keeper_memory_os_types.max_valid_for_days
 
 (* [Safe_ops.json_int] cannot tell "absent" from "0", and 0 days is exactly
    the mistake this field must reject, so the member is read raw. A wrong JSON
@@ -769,7 +770,7 @@ let append_durable_fact
            747 of 747 across the live fleet. This is the first writer. The
            lifetime is the producer's own claim about scope, not a rule
            inferred from the text. *)
-        Option.map (fun days -> now +. (float_of_int days *. seconds_per_day)) valid_for_days
+        Option.map (Keeper_memory_os_types.valid_until_of_days ~now) valid_for_days
     ; last_verified_at = None
     ; schema_version = Keeper_memory_os_types.schema_version
     ; claim_id = None

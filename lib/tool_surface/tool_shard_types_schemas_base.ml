@@ -136,6 +136,16 @@ let base_tools : Masc_domain.tool_schema list =
                             "Body. Required, must be non-empty. For decisions, lead with \
                              the decision then **Why** and **How to apply** lines." )
                       ] )
+                ; ( "valid_for_days"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; ( "description"
+                        , `String
+                            "Optional, long_term only: how many days this claim stays \
+                             true (1-365). Recall stops injecting it after that. Omit \
+                             when the claim has no expiry; do not omit it merely \
+                             because you are unsure how long it holds." )
+                      ] )
                 ] )
           ; "required", `List [ `String "kind"; `String "content" ]
           ]

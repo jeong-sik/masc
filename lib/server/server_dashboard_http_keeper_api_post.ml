@@ -896,6 +896,8 @@ let required_resume_owner_request json =
   | _, None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
+  (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
+     typed directive; any unknown value becomes a typed Error. *)
   match Safe_ops.json_string_opt "action" json with
   | Some "pause" -> Ok (Plain_directive Plain_pause)
   | Some "resume" ->
@@ -957,6 +959,8 @@ let parse_bulk_plain_names json =
   | Some _ | None -> Error "names must be a non-empty list of valid keeper names"
 
 let parse_bulk_directive_json json =
+  (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
+     typed directive; any unknown value becomes a typed Error. *)
   match Safe_ops.json_string_opt "action" json with
   | Some "resume" ->
     Result.map

@@ -18,7 +18,6 @@ type compress_result =
   | Compressed of compressed
 
 let min_size = 32
-let legacy_min_size = 256
 let max_dict_size = 2048
 
 let should_use_dict (size : int) : bool =
@@ -37,11 +36,6 @@ let of_used_dict used_dict =
 let content_encoding = function
   | Dictionary -> "zstd-dict"
   | Standard -> "zstd"
-
-let legacy_standard_result ~original = function
-  | Unchanged payload -> payload, false
-  | Compressed { payload; encoding = Standard } -> payload, true
-  | Compressed { encoding = Dictionary; _ } -> original, false
 
 let compress ?(level = 3) (data : string) : compress_result =
   let orig_size = String.length data in

@@ -151,8 +151,6 @@ val audit_approval_event :
 val audit_rule_event :
   base_path:string -> event_type:string -> approval_rule -> unit
 
-val approval_audit_pending_event : string
-val approval_audit_resolved_event : string
 val generate_id : unit -> string
 val recent_resolved_history_limit : int
 
@@ -211,7 +209,11 @@ val resolve_error_to_string : resolve_error -> string
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
     [Decision.Approve], then wake only the Keeper captured by the pending entry.
     [rule_expires_at] is an absolute Unix expiry applied to the remembered
-    rule; it is ignored unless [remember_rule] is [true]. *)
+    rule; it is ignored unless [remember_rule] is [true].
+
+    [base_path] is the authenticated caller workspace. The pending or
+    in-progress delivery entry must belong to it exactly before any resolution
+    claim or journal mutation is attempted. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->
@@ -223,18 +225,11 @@ val resolve_with_policy :
   unit ->
   (resolution_result, resolve_error) result
 
-val resolve :
-  base_path:string ->
-  id:string ->
-  decision:decision ->
-  (unit, resolve_error) result
-
 (** {1 Query} *)
 
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
 val list_pending_entries : unit -> pending_approval list
-val get_pending_json : id:string -> Yojson.Safe.t option
 val get_pending_entry : id:string -> pending_approval option
 
 val mark_summary_pending : id:string -> (bool, storage_error) result
@@ -259,6 +254,4 @@ val restart_failed_summary : id:string -> (bool, storage_error) result
     action may reopen those entries. Returns the reopened approval ids. *)
 val restart_failed_summaries : base_path:string -> (string list, storage_error) result
 
-val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int
-val has_pending_for_keeper : keeper_name:string -> bool

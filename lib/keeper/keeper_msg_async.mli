@@ -433,19 +433,6 @@ module For_testing : sig
     -> unit
     -> (submit_outcome, submit_error) result
 
-  val submit_with_request_id
-    :  request_ops
-    -> ?on_accepted:(string -> (unit, string) result)
-    -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
-    -> ?on_worker_settled:(worker_settlement -> unit)
-    -> background_sw:Eio.Switch.t
-    -> base_path:string
-    -> caller:string
-    -> f:(request_id:string -> Eio.Switch.t -> Keeper_types_profile.tool_result)
-    -> keeper_name:string
-    -> unit
-    -> (submit_outcome, submit_error) result
-
   val cancel : request_ops -> base_path:string -> caller:string -> string -> cancel_result
   val record_schema_version : int
   val is_safe_request_id : string -> bool
@@ -459,6 +446,5 @@ module For_testing : sig
     base_path:string -> unit -> recovery_report
   val reserved_request_id_count : unit -> int
   val active_switch_count : unit -> int
-  val persistence_lane_observation : unit -> int * int * int
   val persistence_lane_samples : unit -> Otel_metrics.sample list
 end

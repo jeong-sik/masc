@@ -200,6 +200,7 @@ export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboa
 
 export type {
   DashboardToolInventoryItem,
+  DashboardFullHealthResponse,
   ToolMetricsTopEntry,
   ToolMetricsResponse,
   DashboardScheduledAutomationFsm,
@@ -223,6 +224,8 @@ export type {
   DashboardKeeperBackgroundKeeper,
   DashboardKeeperBackground,
   DashboardToolsResponse,
+  DashboardScheduleRunnerCounts,
+  DashboardScheduleRunnerStatus,
 } from './dashboard-tools-prompts'
 
 export type {
@@ -249,6 +252,7 @@ export type {
 export {
   fetchToolMetrics,
   fetchDashboardRuntimeProbe,
+  fetchDashboardFullHealth,
   fetchDashboardTools,
   fetchDashboardPrompts,
   savePromptOverride,

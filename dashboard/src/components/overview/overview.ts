@@ -20,7 +20,11 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
 import { tasks, keepers, boardPosts, goals, fusionRuns } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
-import type { FusionRunRecord } from '../../api/dashboard'
+import type {
+  DashboardScheduledAutomation,
+  DashboardScheduledAutomationRequest,
+  FusionRunRecord,
+} from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import type {
   DashboardMissionResponse,
@@ -36,11 +40,15 @@ import { createAsyncResource, type AsyncResource, type AsyncState } from '../../
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
+import { toolsData } from '../tools/tool-state'
 import {
   fetchTelemetry,
   fetchTelemetrySummary,
+  fetchDashboardFullHealth,
   type TelemetryEntry,
   type TelemetrySourceSummary,
+  type DashboardFullHealthResponse,
+  type DashboardScheduleRunnerStatus,
 } from '../../api/dashboard'
 import {
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
@@ -166,10 +174,7 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 //
 // The prototype reads window.GOALS / APPROVALS / CONNECTORS / FUSION_RUNS etc.
 // from a mock. The live v2 dashboard exposes goals + fusion runs as signals, and
-// surfaces operator-awaiting keepers as the approval queue. Connectors and the
-// scheduled-automation queue have no live store on this surface yet, so their KPI
-// values render as "—" (em dash) rather than inventing data — see CLAUDE.md
-// "Unknown → Permissive Default": absence is shown as unknown, not as 0.
+// surfaces operator-awaiting keepers as the approval queue.
 
 export interface OverviewDigest {
   /** Exact pending requests from the Gate queue SSOT. */
@@ -186,6 +191,326 @@ export interface OverviewDigest {
   fusionTotal: number
   /** Latest fusion run record (newest startedAt), or null. */
   fusionLatest: FusionRunRecord | null
+  /** Scheduled-automation projection snapshot summary for the domain cards. */
+  scheduledAutomation: OverviewScheduledAutomationDigest
+  /** schedule_runner liveness summary from /health?full=1. */
+  scheduleRunner: OverviewScheduleRunnerDigest
+}
+
+export interface OverviewScheduleRunnerDigest {
+  hasProjection: boolean
+  status: string
+  tone: 'ok' | 'warn' | 'bad' | 'volt'
+  tickInFlight: boolean
+  tickCount: number
+  successCount: number
+  failureCount: number
+  crashCount: number
+  lastTickAgeSec: number | null
+  lastSuccessAgeSec: number | null
+  lastErrorAgeSec: number | null
+  lastDurationSec: number | null
+  staleAfterSec: number | null
+  lastError: string | null
+  lastCounts:
+    | {
+      dueChanged?: number | null
+      emitted?: number | null
+      rescheduled?: number | null
+      dispatchSucceeded?: number | null
+      dispatchFailed?: number | null
+      dispatchUnsupported?: number | null
+      dispatchStartRejected?: number | null
+      wakeEnqueued?: number | null
+      wakeSkippedNoKeeper?: number | null
+      wakeSkippedMissingSchedule?: number | null
+      wakeSkippedNonKeeperActor?: number | null
+      wakeSkippedUnregisteredKeeper?: number | null
+      wakeFailed?: number | null
+    }
+    | null
+}
+
+export interface OverviewScheduledAutomationDigest {
+  /** Whether the scheduled-automation projection is present on this surface. */
+  hasProjection: boolean
+  /** Total request count (projection or inferred). */
+  requestCount: number
+  /** Projection quota metadata for diagnostics. */
+  requestLimit: number
+  /** FSM state from the scheduler surface. */
+  fsmState: string
+  /** FSM active_count from scheduler projection. */
+  fsmActiveCount: number
+  /** FSM terminal_count from scheduler projection. */
+  fsmTerminalCount: number
+  /** Next due time (projection field) if available. */
+  nextDueAt: string | null
+  /** Non-terminal by status count from projection/status inference. */
+  dueCount: number
+  /** Running-by-status count from projection/status inference. */
+  runningCount: number
+  /** Scheduled-by-status count from projection/status inference. */
+  scheduledCount: number
+  /** Number of warning rows returned by the backend for this projection. */
+  warningCount: number
+  /** Unsupported payload request count. */
+  unsupportedPayloadCount: number
+  /** Unknown payload request count. */
+  unknownPayloadCount: number
+  /** Whether scheduler projection was marked truncated. */
+  truncated: boolean
+  /** Recommended card tone derived from the above state. */
+  tone: 'ok' | 'warn' | 'bad' | 'volt'
+}
+
+const SCHEDULE_TERMINAL_STATUS_KEY = new Set(['succeeded', 'failed', 'cancelled', 'expired'])
+
+function normalizeScheduleStatus(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? ''
+}
+
+function requestCountByStatus(requests: readonly DashboardScheduledAutomationRequest[], target: string): number {
+  const key = normalizeScheduleStatus(target)
+  let count = 0
+  for (const request of requests) {
+    if (normalizeScheduleStatus(request.status) === key) count += 1
+  }
+  return count
+}
+
+function requestCountByPayloadSupport(
+  requests: readonly DashboardScheduledAutomationRequest[],
+  target: string,
+): number {
+  const key = target.trim().toLowerCase()
+  let count = 0
+  for (const request of requests) {
+    if (request.payload_support === key) count += 1
+  }
+  return count
+}
+
+function requestCountByProjectionCount(
+  requests: readonly DashboardScheduledAutomationRequest[],
+  counts: Record<string, number> | undefined,
+  target: string,
+): number {
+  const key = normalizeScheduleStatus(target)
+  const projected = counts?.[key]
+  if (typeof projected === 'number' && Number.isFinite(projected)) {
+    return projected
+  }
+  return requestCountByStatus(requests, key)
+}
+
+function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {
+  let sum = 0
+  for (const terminalStatus of SCHEDULE_TERMINAL_STATUS_KEY) {
+    const n = counts?.[terminalStatus]
+    if (typeof n === 'number' && Number.isFinite(n)) sum += n
+  }
+  return sum
+}
+
+function summarizeScheduleRunnerStatus(
+  scheduleRunner: DashboardScheduleRunnerStatus | null | undefined,
+): OverviewScheduleRunnerDigest {
+  if (!scheduleRunner) {
+    return {
+      hasProjection: false,
+      status: 'unknown',
+      tone: 'warn',
+      tickInFlight: false,
+      tickCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      crashCount: 0,
+      lastTickAgeSec: null,
+      lastSuccessAgeSec: null,
+      lastErrorAgeSec: null,
+      lastDurationSec: null,
+      staleAfterSec: null,
+      lastError: null,
+      lastCounts: null,
+    }
+  }
+
+  const counts = scheduleRunner.last_counts
+  const status = scheduleRunner.status ?? 'unknown'
+  const tickInFlight = scheduleRunner.tick_in_flight === true
+  const tickCount = Number.isFinite(scheduleRunner.tick_count ?? Number.NaN)
+    ? Number(scheduleRunner.tick_count)
+    : 0
+  const successCount = Number.isFinite(scheduleRunner.success_count ?? Number.NaN)
+    ? Number(scheduleRunner.success_count)
+    : 0
+  const failureCount = Number.isFinite(scheduleRunner.failure_count ?? Number.NaN)
+    ? Number(scheduleRunner.failure_count)
+    : 0
+  const crashCount = Number.isFinite(scheduleRunner.crash_count ?? Number.NaN)
+    ? Number(scheduleRunner.crash_count)
+    : 0
+
+  const tone = tickInFlight || status === 'running'
+    ? 'volt'
+    : status === 'ok' && failureCount === 0 && crashCount === 0
+      ? 'ok'
+      : status === 'degraded' || failureCount > 0 || crashCount > 0
+        ? 'bad'
+        : 'warn'
+
+  return {
+    hasProjection: true,
+    status,
+    tone,
+    tickInFlight,
+    tickCount,
+    successCount,
+    failureCount,
+    crashCount,
+    lastTickAgeSec:
+      typeof scheduleRunner.last_tick_age_sec === 'number' && Number.isFinite(scheduleRunner.last_tick_age_sec)
+        ? scheduleRunner.last_tick_age_sec
+        : null,
+    lastSuccessAgeSec:
+      typeof scheduleRunner.last_success_age_sec === 'number' && Number.isFinite(scheduleRunner.last_success_age_sec)
+        ? scheduleRunner.last_success_age_sec
+        : null,
+    lastErrorAgeSec:
+      typeof scheduleRunner.last_error_age_sec === 'number' && Number.isFinite(scheduleRunner.last_error_age_sec)
+        ? scheduleRunner.last_error_age_sec
+        : null,
+    lastDurationSec:
+      typeof scheduleRunner.last_duration_sec === 'number' && Number.isFinite(scheduleRunner.last_duration_sec)
+        ? scheduleRunner.last_duration_sec
+        : null,
+    staleAfterSec:
+      typeof scheduleRunner.stale_after_sec === 'number' && Number.isFinite(scheduleRunner.stale_after_sec)
+        ? scheduleRunner.stale_after_sec
+        : null,
+    lastError: typeof scheduleRunner.last_error === 'string' && scheduleRunner.last_error.trim() !== ''
+      ? scheduleRunner.last_error
+      : null,
+    lastCounts: counts
+      ? {
+          dueChanged: typeof counts.due_changed === 'number' ? counts.due_changed : null,
+          emitted: typeof counts.emitted === 'number' ? counts.emitted : null,
+          rescheduled: typeof counts.rescheduled === 'number' ? counts.rescheduled : null,
+          dispatchSucceeded: typeof counts.dispatch_succeeded === 'number' ? counts.dispatch_succeeded : null,
+          dispatchFailed: typeof counts.dispatch_failed === 'number' ? counts.dispatch_failed : null,
+          dispatchUnsupported: typeof counts.dispatch_unsupported === 'number' ? counts.dispatch_unsupported : null,
+          dispatchStartRejected: typeof counts.dispatch_start_rejected === 'number' ? counts.dispatch_start_rejected : null,
+          wakeEnqueued: typeof counts.wake_enqueued === 'number' ? counts.wake_enqueued : null,
+          wakeSkippedNoKeeper: typeof counts.wake_skipped_no_keeper === 'number' ? counts.wake_skipped_no_keeper : null,
+          wakeSkippedMissingSchedule:
+            typeof counts.wake_skipped_missing_schedule === 'number'
+              ? counts.wake_skipped_missing_schedule
+              : null,
+          wakeSkippedNonKeeperActor:
+            typeof counts.wake_skipped_non_keeper_actor === 'number'
+              ? counts.wake_skipped_non_keeper_actor
+              : null,
+          wakeSkippedUnregisteredKeeper:
+            typeof counts.wake_skipped_unregistered_keeper === 'number'
+              ? counts.wake_skipped_unregistered_keeper
+              : null,
+          wakeFailed: typeof counts.wake_failed === 'number' ? counts.wake_failed : null,
+        }
+      : null,
+  }
+}
+
+export function summarizeScheduledAutomation(
+  automation: DashboardScheduledAutomation | null | undefined,
+): OverviewScheduledAutomationDigest {
+  if (!automation) {
+    return {
+      hasProjection: false,
+      requestCount: 0,
+      requestLimit: 0,
+      fsmState: 'unknown',
+      fsmActiveCount: 0,
+      fsmTerminalCount: 0,
+      nextDueAt: null,
+      dueCount: 0,
+      runningCount: 0,
+      scheduledCount: 0,
+      warningCount: 0,
+      unsupportedPayloadCount: 0,
+      unknownPayloadCount: 0,
+      truncated: false,
+      tone: 'warn',
+    }
+  }
+
+  const requests = automation.requests ?? []
+  const counts = automation.counts && typeof automation.counts === 'object' ? automation.counts : {}
+  const payloadSupport = automation.payload_support
+
+  const warningCount = automation.warnings?.length ?? 0
+  const unsupportedPayloadCount = Math.max(
+    payloadSupport?.unsupported_request_count ?? 0,
+    requestCountByPayloadSupport(requests, 'unsupported'),
+  )
+  const unknownPayloadCount = Math.max(
+    payloadSupport?.unknown_request_count ?? 0,
+    requestCountByPayloadSupport(requests, 'unknown'),
+  )
+
+  const fsmActiveCount = Math.max(0, Number(automation.fsm?.active_count ?? 0))
+  const fsmTerminalCount = Math.max(
+    0,
+    Number(automation.fsm?.terminal_count ?? 0),
+    sumTerminalCountFromProjection(counts),
+  )
+  const dueCount = requestCountByProjectionCount(requests, counts, 'due')
+  const runningCount = requestCountByProjectionCount(requests, counts, 'running')
+  const scheduledCount = requestCountByProjectionCount(requests, counts, 'scheduled')
+
+  const hasProjection = true
+  const requestCount = Math.max(
+    0,
+    Number.isFinite(automation.request_count ?? Number.NaN)
+      ? Number(automation.request_count)
+      : requests.length,
+  )
+  const requestLimit = Math.max(
+    0,
+    Number.isFinite(automation.request_limit ?? Number.NaN)
+      ? Number(automation.request_limit)
+      : requests.length,
+  )
+
+  const fsmState = automation.fsm?.state?.trim() ? automation.fsm.state.trim() : 'unknown'
+  const nextDueAt = automation.fsm?.next_due_at?.trim() ? automation.fsm.next_due_at.trim() : null
+
+  const hasActive = dueCount > 0 || runningCount > 0 || scheduledCount > 0
+  const hasWarnings = unsupportedPayloadCount > 0 || unknownPayloadCount > 0 || warningCount > 0
+
+  return {
+    hasProjection,
+    requestCount,
+    requestLimit,
+    fsmState,
+    fsmActiveCount,
+    fsmTerminalCount,
+    nextDueAt,
+    dueCount,
+    runningCount,
+    scheduledCount,
+    warningCount,
+    unsupportedPayloadCount,
+    unknownPayloadCount,
+    truncated: typeof automation.truncated === 'boolean' ? automation.truncated : false,
+    tone: hasWarnings
+      ? 'warn'
+      : hasActive
+        ? 'volt'
+        : requestCount > 0
+          ? 'ok'
+          : 'ok',
+  }
 }
 
 function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
@@ -199,6 +524,8 @@ export function computeOverviewDigest(
   openGateRequests: number,
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
+  scheduledAutomation?: DashboardScheduledAutomation | null,
+  scheduleRunnerStatus?: DashboardScheduleRunnerStatus | null,
 ): OverviewDigest {
   // Highest priority first; ties keep input order (stable sort).
   const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
@@ -208,6 +535,8 @@ export function computeOverviewDigest(
   const fusionRunning = fusionList.filter(r => r.status === 'running').length
   const fusionDone = fusionList.filter(r => r.status === 'completed').length
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
+  const scheduledAutomationDigest = summarizeScheduledAutomation(scheduledAutomation)
+  const scheduleRunnerDigest = summarizeScheduleRunnerStatus(scheduleRunnerStatus)
 
   return {
     openGateRequests,
@@ -217,6 +546,8 @@ export function computeOverviewDigest(
     fusionDone,
     fusionTotal: fusionList.length,
     fusionLatest,
+    scheduledAutomation: scheduledAutomationDigest,
+    scheduleRunner: scheduleRunnerDigest,
   }
 }
 
@@ -646,6 +977,14 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
   })
 }
 
+const overviewFullHealthResource: AsyncResource<DashboardFullHealthResponse> = createAsyncResource()
+
+function loadOverviewFullHealth(): Promise<void> {
+  return overviewFullHealthResource.load(async () => {
+    return fetchDashboardFullHealth()
+  })
+}
+
 // ─── Keeper-v2 overview surfaces ─────────────────────────────────────────────
 
 function nowHMKst(): string {
@@ -906,6 +1245,22 @@ function OverviewDomainSection({
   stats: OverviewStats
   digest: OverviewDigest
 }) {
+  const scheduleSummary = digest.scheduledAutomation
+  const scheduleRunnerSummary = digest.scheduleRunner
+
+  const scheduleRunnerRows: string[] = []
+  if (scheduleRunnerSummary.hasProjection) {
+    scheduleRunnerRows.push(`runner: ${scheduleRunnerSummary.status}`)
+    scheduleRunnerRows.push(`tick ${scheduleRunnerSummary.tickCount} (성공 ${scheduleRunnerSummary.successCount} / 실패 ${scheduleRunnerSummary.failureCount} / Crash ${scheduleRunnerSummary.crashCount})`)
+    if (scheduleRunnerSummary.tickInFlight) scheduleRunnerRows.push('현재 tick 실행 중')
+    if (scheduleRunnerSummary.lastError) scheduleRunnerRows.push(`오류 ${scheduleRunnerSummary.lastError}`)
+  } else {
+    scheduleRunnerRows.push('schedule_runner 미연결')
+  }
+
+  const scheduleRunnerCountLabel = scheduleRunnerSummary.hasProjection
+    ? `runner ${scheduleRunnerSummary.status}`
+    : 'runner unavailable'
   return html`
     <h2 class="ov-section-h v2-overview-section-h" data-testid="overview-domains-header">도메인 현황</h2>
     <div class="ov-domains v2-overview-domains" data-testid="overview-domains">
@@ -949,11 +1304,73 @@ function OverviewDomainSection({
         </div>
       <//>
 
-      <!-- SCHEDULE · overview.jsx:201-215 (no live schedule store yet) -->
-      <${DomainCard} title="예약 · 자동화" linkLabel="예약" nav=${{ tab: 'schedule' }} testId="domain-schedule">
-        <div class="ov-mini-list">
-          <div class="ov-mini-empty ov-empty">예약 데이터 미연결</div>
-        </div>
+      <!-- SCHEDULE · overview.jsx:201-215 -->
+      <${DomainCard}
+        title="예약 · 자동화"
+        count=${scheduleSummary.hasProjection ? String(scheduleSummary.requestCount) : null}
+        tone=${scheduleSummary.hasProjection ? scheduleSummary.tone : 'warn'}
+        linkLabel="예약"
+        nav=${{ tab: 'schedule' }}
+        testId="domain-schedule"
+      >
+      ${scheduleSummary.hasProjection
+        ? html`
+              <div class="ov-mini-list">
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">상태: ${scheduleSummary.fsmState}</span>
+                </div>
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">
+                    Due ${scheduleSummary.dueCount} · Running ${scheduleSummary.runningCount} · 예약 ${scheduleSummary.scheduledCount}
+                  </span>
+                </div>
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">
+                    payload: unsupported ${scheduleSummary.unsupportedPayloadCount} / unknown ${scheduleSummary.unknownPayloadCount}
+                  </span>
+                </div>
+                ${scheduleSummary.nextDueAt
+                  ? html`
+                      <div class="ov-mini-row">
+                        <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                        <span class="ov-mini-txt mono">next ${scheduleSummary.nextDueAt}</span>
+                      </div>
+                    `
+                  : null}
+                ${scheduleSummary.warningCount > 0
+                  ? html`
+                      <div class="ov-mini-row">
+                        <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                        <span class="ov-mini-txt">projection warning ${scheduleSummary.warningCount}</span>
+                      </div>
+                    `
+                  : null}
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">${scheduleRunnerCountLabel}</span>
+                </div>
+                ${scheduleRunnerRows.map((row, index) => html`
+                  <div class="ov-mini-row" key=${index}>
+                    <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                    <span class="ov-mini-txt">${row}</span>
+                  </div>
+                `)}
+              </div>
+            `
+          : html`
+              <div class="ov-mini-list">
+                <div class="ov-mini-empty ov-empty">예약 자동화 projection 미연결</div>
+                ${scheduleRunnerRows.map((row, index) => html`
+                  <div class="ov-mini-row" key=${index}>
+                    <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                    <span class="ov-mini-txt">${row}</span>
+                  </div>
+                `)}
+              </div>
+            `}
       <//>
 
       <!-- FUSION · overview.jsx:218-230 -->
@@ -1014,8 +1431,10 @@ export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
     void loadOverviewTelemetry()
+    void loadOverviewFullHealth()
     const interval = window.setInterval(() => {
       void loadOverviewTelemetry()
+      void loadOverviewFullHealth()
     }, 60_000)
     return () => window.clearInterval(interval)
   }, [])
@@ -1024,10 +1443,15 @@ export function Overview() {
   const goalList = goals.value
   const fusionList = fusionRuns.value
   const openGateRequests = gateData.value?.approval_queue?.length ?? 0
+  const scheduledAutomation = toolsData.value?.scheduled_automation ?? null
+  const scheduleRunnerStatus =
+    overviewFullHealthResource.state.value.status === 'loaded'
+      ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
+      : null
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(openGateRequests, goalList, fusionList),
-    [openGateRequests, goalList, fusionList],
+    () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus),
+    [openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus],
   )
   const telemetry = overviewTelemetryResource.state.value
 

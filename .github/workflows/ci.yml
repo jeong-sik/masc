@@ -47,11 +47,13 @@ jobs:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: origin/${{ github.base_ref }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
             --pr-number "$PR_NUMBER" \
+            --base-ref "$BASE_REF" \
             --expected-head-sha "$PR_HEAD_SHA"
 
   pr-live-gate:

@@ -28,11 +28,12 @@ let base_tools : Masc_domain.tool_schema list =
   ; (* Memory *)
     { name = "keeper_memory_search"
     ; description =
-        "Search memory for explicit durable notes or conversation history. \
+        "Search this run's working notes or conversation history. \
          Returns results with provenance metadata. Default searches the structured memory \
          bank. Use 'kind' to filter the typed note categories exposed by the runtime. \
          Use source='history' for raw user messages, \
-         source='all' for both."
+         source='all' for both. Durable long_term claims are not searched here; they \
+         are rendered into your context automatically."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -89,17 +90,19 @@ let base_tools : Masc_domain.tool_schema list =
           ]
     }
   ; (* RFC-0035 P4: explicit memory write surface.
-     Symmetric to the memory search tool; promotes a structured note
-     (kind/title/content) into the memory bank, queryable on later
-     turns. long_term kind is reserved for tool-result emission and
-     is rejected here. *)
+     Symmetric to the memory search tool; takes a structured note
+     (kind/title/content). RFC-0351 L1: the kind picks the store —
+     long_term writes the durable claim recall reads back on later
+     turns, the rest write turn-scoped working notes. *)
     { name = "keeper_memory_write"
     ; description =
-        "Promote an explicit decision, question, goal, or progress note into the memory \
-         bank for later search. Task sequencing and operating constraints belong to \
-         their typed domain stores, not memory prose. The runtime records explicit \
-         typed provenance and returns validation or persistence failures directly. \
-         'long_term' kind is reserved for tool-result emission and is not callable here."
+        "Record something you want to keep. 'long_term' writes a durable claim that \
+         later turns read back; the other kinds write a working note for the run in \
+         progress, searchable but not carried forward on its own. Your context resets \
+         between turns, so a conclusion you leave only in this turn's reasoning is \
+         gone. Task sequencing and operating constraints belong to their typed domain \
+         stores, not memory prose. The runtime records explicit typed provenance and \
+         returns validation or persistence failures directly."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -112,12 +115,12 @@ let base_tools : Masc_domain.tool_schema list =
                         , `List
                             (List.map
                                (fun s -> `String s)
-                               writable_memory_kind_enum_strings) )
+                               memory_kind_enum_strings) )
                       ; ( "description"
                         , `String
-                            "Memory kind. One of \
-                             goal/progress/decision/open_question. long_term not \
-                             supported." )
+                            "Memory kind. 'long_term' is the durable store later \
+                             turns read back; goal/progress/decision/open_question \
+                             are working notes for the run in progress." )
                       ] )
                 ; ( "title"
                   , `Assoc

@@ -78,7 +78,6 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_rejected
-  | Long_term_via_explicit_write_not_yet_supported
   | Persistence_failed
   | No_memory_write_error
 

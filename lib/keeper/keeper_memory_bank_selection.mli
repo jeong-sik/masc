@@ -65,10 +65,14 @@ type memory_kind =
 val memory_kind_to_wire : memory_kind -> string
 val memory_kind_of_wire : string -> memory_kind option
 val all_memory_kinds : memory_kind list
-val memory_kind_is_writable : memory_kind -> bool
-val writable_memory_kinds : memory_kind list
+type memory_write_destination = Keeper_memory_policy.memory_write_destination =
+  | Turn_scoped_bank
+  | Durable_fact_store
+
+val memory_write_destination : memory_kind -> memory_write_destination
+val bank_writable_memory_kinds : memory_kind list
 val valid_memory_kind_strings : string list
-val writable_memory_kind_strings : string list
+val bank_writable_memory_kind_strings : string list
 val memory_horizon_of_kind : memory_kind -> string
 val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
 val priority_for_kind : kind:memory_kind -> int

@@ -141,6 +141,10 @@ type finalization_evidence =
 
 type supersession =
   | Operator_metadata_update of { actor : string }
+  | Operator_reconciliation_accepted of
+      { actor : string
+      ; unreconciled_turn : active_turn
+      }
 
 type phase =
   | Prepared
@@ -356,7 +360,7 @@ let validate operation =
            Error
              (Finalized_completion_mismatch
                 (operation.cleanup_intent.reason, completion)))
-    | Superseded (Operator_metadata_update _) ->
+    | Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _) ->
       (match operation.cleanup_intent.reason with
        | Operator_stop_retain_meta -> Ok ()
        | ( Operator_stop_remove_meta

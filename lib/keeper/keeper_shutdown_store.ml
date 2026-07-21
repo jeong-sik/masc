@@ -23,12 +23,25 @@ type supersede_blocked_result =
   | Superseded_persisted of Keeper_shutdown_types.t
   | Superseded_already_persisted of Keeper_shutdown_types.t
 
+(* What the operator is releasing. [Blocked_operator_stop] carries no
+   effect-duplication risk: the shutdown worker failed, so the turn it was
+   finalizing did not proceed. [Unreconciled_turn] does: the process ended
+   without a lane receipt while that turn was in flight, so its external
+   effects may or may not have landed. The two are kept apart here so the
+   durable [Superseded] record states which one an operator signed off on —
+   the prior phase is overwritten by the supersession, so the turn cannot be
+   recovered from the record afterwards. *)
+type superseded_admission =
+  | Blocked_operator_stop
+  | Unreconciled_turn of Keeper_shutdown_types.active_turn
+
 type operator_metadata_supersession_token =
   { base_path : string
   ; keeper_name : string
   ; operation_id : Operation_id.t
   ; expected_revision : int
   ; actor : string
+  ; superseded_admission : superseded_admission
   }
 
 type corrupt_record =
@@ -288,6 +301,12 @@ let supersession_to_json = function
     `Assoc
       [ "kind", `String "operator_metadata_update"
       ; "actor", `String actor
+      ]
+  | Operator_reconciliation_accepted { actor; unreconciled_turn } ->
+    `Assoc
+      [ "kind", `String "operator_reconciliation_accepted"
+      ; "actor", `String actor
+      ; "unreconciled_turn", active_turn_to_json unreconciled_turn
       ]
 ;;
 
@@ -647,6 +666,11 @@ let supersession_of_json json =
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
+  | "operator_reconciliation_accepted" ->
+    let* actor = string "actor" json in
+    let* turn_json = assoc "unreconciled_turn" json in
+    let* unreconciled_turn = active_turn_of_json turn_json in
+    Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
   | value ->
     Error
       (Decode_error
@@ -1151,12 +1175,44 @@ let prepare_operator_metadata_supersession
        ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
        ; revision
        ; _ } as _operation) ->
-    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_operator_stop
+      }
+    (* #25491: a [Reconciliation_required] fence had no release path at all —
+       the worker and boot recovery deliberately refuse to assume the turn's
+       effects landed, and the operator was refused too, which left the keeper
+       with no reachable state at all (RFC-0000 §1.2 LAW 1 "No dead-end"). The
+       operator route is reopened here; the automatic ones stay closed. *)
   | Ok
-      ({ phase = Superseded (Operator_metadata_update _)
+      ({ phase = Reconciliation_required turn
+       ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
        ; revision
        ; _ } as _operation) ->
-    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Unreconciled_turn turn
+      }
+  | Ok
+      ({ phase = Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _)
+       ; revision
+       ; _ } as _operation) ->
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_operator_stop
+      }
   | Ok ({ phase = Blocked _; _ } as operation) ->
     Error (Supersession_intent_mismatch operation)
   | Ok operation -> Error (Supersession_phase_mismatch operation)
@@ -1198,10 +1254,14 @@ let supersede_blocked_operator_stop ~config ~token ~now =
              ~operation_id:token.operation_id
          with
          | Error _ as error -> error
-         | Ok ({ phase = Superseded (Operator_metadata_update _); _ } as existing) ->
+         | Ok
+             ({ phase =
+                  Superseded
+                    (Operator_metadata_update _ | Operator_reconciliation_accepted _)
+              ; _ } as existing) ->
            Ok (Superseded_already_persisted existing)
          | Ok
-             ({ phase = Blocked _
+             ({ phase = Blocked _ | Reconciliation_required _
               ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
               ; _ } as existing) ->
            if not (Int.equal existing.revision token.expected_revision)
@@ -1210,10 +1270,21 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                (Revision_conflict
                   { expected = token.expected_revision; actual = existing.revision })
            else
+             (* The recorded supersession follows the token minted at preflight,
+                not the phase re-read here: preflight is what the operator acted
+                on, and the revision check above proves nothing changed since. *)
+             let supersession =
+               match token.superseded_admission with
+               | Blocked_operator_stop ->
+                 Operator_metadata_update { actor = token.actor }
+               | Unreconciled_turn unreconciled_turn ->
+                 Operator_reconciliation_accepted
+                   { actor = token.actor; unreconciled_turn }
+             in
              let superseded =
                { existing with
                  revision = existing.revision + 1
-               ; phase = Superseded (Operator_metadata_update { actor = token.actor })
+               ; phase = Superseded supersession
                ; updated_at = now ()
                }
              in

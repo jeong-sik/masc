@@ -86,10 +86,13 @@ let test_persisted_identity_counter_key_is_generation () =
        "writer does not emit a nonce key"
        false
        (List.mem_assoc "nonce" fields);
-     Alcotest.(check int)
-       "generation:7 round-trips (reader did not default the absent nonce key to 0)"
-       7
-       (List.assoc "generation" fields)
+     (match List.assoc "generation" fields with
+      | `Int n ->
+        Alcotest.(check int)
+          "generation:7 round-trips (reader did not default the absent nonce key to 0)"
+          7
+          n
+      | _ -> Alcotest.fail "generation value must be a JSON integer")
    | _ -> Alcotest.fail "meta_to_json must emit an object")
 ;;
 

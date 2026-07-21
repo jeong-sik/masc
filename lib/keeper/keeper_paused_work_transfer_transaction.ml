@@ -283,7 +283,9 @@ let create_receipt config ~from_keeper ~to_keeper request =
      : Keeper_paused_work_disposition_receipt.t)
 ;;
 
-let accepted_transfer receipt transfer : Keeper_registry_event_queue.accepted_transfer =
+let accepted_transfer receipt
+      (transfer : Keeper_paused_work_disposition_receipt.transfer_owner)
+    : Keeper_registry_event_queue.accepted_transfer =
   { source = transfer.Keeper_paused_work_disposition_receipt.source
   ; source_revision = transfer.source_revision
   ; owner_generation = receipt.Keeper_paused_work_disposition_receipt.expected_generation
@@ -368,7 +370,7 @@ let project_receipt config receipt =
   let* transfer = transfer_of_receipt receipt in
   let* source_settlement = source_settlement config receipt transfer in
   let* target_projection = target_enqueue config receipt transfer in
-  Ok { source_settlement; target_projection }
+  Ok (Applied { source_settlement; target_projection })
 ;;
 
 let run_owned receipt_lock config ~from_keeper ~to_keeper request =
@@ -404,7 +406,7 @@ let run_owned receipt_lock config ~from_keeper ~to_keeper request =
   in
   let projection =
     match project_receipt config receipt with
-    | Ok applied -> Applied applied
+    | Ok projection -> projection
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)
@@ -446,6 +448,7 @@ let transfer_pending config ~from_keeper ~to_keeper request =
              Error { cause; reservation_release = Some reservation_release })
         with
         | exn ->
+          (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
 ;;

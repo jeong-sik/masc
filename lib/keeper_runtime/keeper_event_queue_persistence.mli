@@ -309,7 +309,7 @@ val enqueue_stimulus_if_absent_result :
     full durable state: pending, active leases, and transition outbox. *)
 
 val project_accepted_transfer_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   transfer:accepted_transfer ->

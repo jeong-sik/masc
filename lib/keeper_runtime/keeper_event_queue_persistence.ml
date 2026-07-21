@@ -657,7 +657,7 @@ let enqueue_stimulus_if_absent_result
 ;;
 
 let project_accepted_transfer_result
-      ?(after_commit = fun _ -> ())
+      ~after_commit
       ~base_path
       ~keeper_name
       ~transfer

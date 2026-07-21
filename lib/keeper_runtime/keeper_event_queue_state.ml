@@ -1885,7 +1885,8 @@ let duplicate_by key values =
 ;;
 
 let duplicate_transfer_source (transfers : accepted_transfer list) =
-  let rec loop seen = function
+  let rec loop seen (l : accepted_transfer list) =
+    match l with
     | [] -> None
     | transfer :: rest ->
       (match

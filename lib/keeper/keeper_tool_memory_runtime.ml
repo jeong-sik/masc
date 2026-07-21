@@ -575,6 +575,37 @@ let seconds_per_day = 86_400.
 let keeper_memory_write_min_valid_days = 1
 let keeper_memory_write_max_valid_days = 365
 
+(* [Safe_ops.json_int] cannot tell "absent" from "0", and 0 days is exactly
+   the mistake this field must reject, so the member is read raw. A wrong JSON
+   type is its own producer error and keeps its own arm: collapsing it into a
+   number would answer a type mistake with a range complaint the caller already
+   satisfied. *)
+type valid_for_days_arg =
+  | Lifetime_absent
+  | Lifetime_days of int
+  | Lifetime_not_an_integer of string (* the JSON type actually supplied *)
+
+let json_type_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+;;
+
+let parse_valid_for_days (args : Yojson.Safe.t) : valid_for_days_arg =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "valid_for_days" fields with
+     | None | Some `Null -> Lifetime_absent
+     | Some (`Int n) -> Lifetime_days n
+     | Some other -> Lifetime_not_an_integer (json_type_name other))
+  | _ -> Lifetime_absent
+;;
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -613,21 +644,56 @@ type memory_write_validation =
       ; extras : (string * Yojson.Safe.t) list
       }
 
+(* Each way a lifetime can be wrong gets its own answer. A producer that sent
+   the wrong JSON type has not violated the range, and telling it the range is
+   1-365 sends it looking for a bug it does not have. *)
+let check_lifetime ~kind lifetime : (int option, memory_write_validation) result =
+  let out_of_range d =
+    d < keeper_memory_write_min_valid_days || d > keeper_memory_write_max_valid_days
+  in
+  let durable =
+    match Keeper_memory_policy.memory_write_destination kind with
+    | Keeper_memory_policy.Durable_fact_store -> true
+    | Keeper_memory_policy.Turn_scoped_bank -> false
+  in
+  match lifetime with
+  | Lifetime_absent -> Ok None
+  | Lifetime_not_an_integer provided_type ->
+    Error
+      (Memory_write_invalid
+         { error_kind = Invalid_valid_for_days
+         ; extras =
+             [ "reason", `String "not_an_integer"
+             ; "provided_type", `String provided_type
+             ]
+         })
+  | Lifetime_days d when out_of_range d ->
+    Error
+      (Memory_write_invalid
+         { error_kind = Invalid_valid_for_days
+         ; extras =
+             [ "reason", `String "out_of_range"
+             ; "provided_days", `Int d
+             ; "min_days", `Int keeper_memory_write_min_valid_days
+             ; "max_days", `Int keeper_memory_write_max_valid_days
+             ]
+         })
+  | Lifetime_days _ when not durable ->
+    (* A turn-scoped note already dies with the run. Silently accepting a
+       lifetime for it would report a boundary the store does not keep. *)
+    Error
+      (Memory_write_invalid
+         { error_kind = Valid_for_days_on_turn_scoped_kind
+         ; extras = [ "kind", `String (Keeper_memory_policy.memory_kind_to_wire kind) ]
+         })
+  | Lifetime_days d -> Ok (Some d)
+;;
+
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
   let kind_wire = Safe_ops.json_string ~default:"" "kind" args in
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
-  (* [Safe_ops.json_int] cannot tell "absent" from "0", and 0 days is exactly
-     the mistake this field must reject, so read the raw member instead. *)
-  let valid_for_days =
-    match args with
-    | `Assoc fields ->
-      (match List.assoc_opt "valid_for_days" fields with
-       | None | Some `Null -> None
-       | Some (`Int n) -> Some n
-       | Some _ -> Some 0 (* wrong type falls into the range rejection below *))
-    | _ -> None
-  in
+  let lifetime = parse_valid_for_days args in
   match Keeper_memory_policy.memory_kind_of_wire kind_wire with
   | None ->
     Memory_write_invalid
@@ -653,40 +719,16 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
         }
     else if content = ""
     then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-    else if
-      (match valid_for_days with
-       | None -> false
-       | Some d ->
-         d < keeper_memory_write_min_valid_days
-         || d > keeper_memory_write_max_valid_days)
-    then
-      Memory_write_invalid
-        { error_kind = Invalid_valid_for_days
-        ; extras =
-            [ "min_days", `Int keeper_memory_write_min_valid_days
-            ; "max_days", `Int keeper_memory_write_max_valid_days
-            ]
-        }
-    else if
-      Option.is_some valid_for_days
-      &&
-      match Keeper_memory_policy.memory_write_destination kind with
-      | Keeper_memory_policy.Turn_scoped_bank -> true
-      | Keeper_memory_policy.Durable_fact_store -> false
-    then
-      (* A turn-scoped note already dies with the run. Silently accepting a
-         lifetime for it would report a boundary the store does not keep. *)
-      Memory_write_invalid
-        { error_kind = Valid_for_days_on_turn_scoped_kind
-        ; extras = [ "kind", `String (Keeper_memory_policy.memory_kind_to_wire kind) ]
-        }
-    else
-      let body =
-        if title = "" then content else Printf.sprintf "**%s** %s" title content
-      in
-      if Keeper_memory_bank.is_meaningful_memory_text body
-      then Memory_write_ok { kind; body; valid_for_days }
-      else Memory_write_invalid { error_kind = Content_rejected; extras = [] }
+    else (
+      match check_lifetime ~kind lifetime with
+      | Error invalid -> invalid
+      | Ok valid_for_days ->
+        let body =
+          if title = "" then content else Printf.sprintf "**%s** %s" title content
+        in
+        if Keeper_memory_bank.is_meaningful_memory_text body
+        then Memory_write_ok { kind; body; valid_for_days }
+        else Memory_write_invalid { error_kind = Content_rejected; extras = [] })
 ;;
 
 (* RFC-0351 L1. [Long_term] is the one kind a later turn reads back, so an

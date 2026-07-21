@@ -157,7 +157,30 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"invalid_valid_for_days";
   Runtime.validate_memory_write_args
     (with_days (make_args ~kind:"goal" ~title:"" ~content:"body") 7)
-  |> assert_invalid ~expected:"valid_for_days_on_turn_scoped_kind"
+  |> assert_invalid ~expected:"valid_for_days_on_turn_scoped_kind";
+  (* A wrong JSON type is not a range violation. Answering it with the range
+     would send the producer looking for a bug it does not have. *)
+  (match
+     Runtime.validate_memory_write_args
+       (`Assoc
+         [ "kind", `String "long_term"
+         ; "title", `String ""
+         ; "content", `String "body"
+         ; "valid_for_days", `String "7"
+         ])
+   with
+   | Runtime.Memory_write_invalid { error_kind; extras } ->
+     Alcotest.(check string)
+       "error kind"
+       "invalid_valid_for_days"
+       (error_label error_kind);
+     Alcotest.(check (option string))
+       "reason names the type, not the range"
+       (Some "not_an_integer")
+       (match List.assoc_opt "reason" extras with
+        | Some (`String r) -> Some r
+        | _ -> None)
+   | Runtime.Memory_write_ok _ -> Alcotest.fail "a string lifetime must be rejected")
 ;;
 
 let test_valid_body_has_no_intermediate_projection () =

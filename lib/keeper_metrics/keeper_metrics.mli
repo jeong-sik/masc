@@ -182,6 +182,7 @@ type t =
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
   | MemoryOsExplicitFactWrite
+  | MemoryOsInertTurnExtractionSkipped
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget

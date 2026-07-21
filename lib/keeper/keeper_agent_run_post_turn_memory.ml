@@ -12,6 +12,7 @@ let run
   ~response_text
   ~actual_tools
   ~librarian_messages
+  ~(memory_extraction_record : Keeper_run_prompt.memory_extraction_record)
   ~post_turn_t0
   ~runtime_id
   ~inference_telemetry
@@ -134,12 +135,23 @@ let run
       ~keeper_name:meta.name
       det_write_series
   in
-  let (_ : Keeper_memory_lane.outcome) =
-    Keeper_memory_lane.submit
-      ~base_path:config.base_path
-      ~keeper_name:meta.name
-      librarian_series
-  in
+  (match memory_extraction_record with
+   | Keeper_run_prompt.Extract_turn ->
+     let (_ : Keeper_memory_lane.outcome) =
+       Keeper_memory_lane.submit
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         librarian_series
+     in
+     ()
+   | Keeper_run_prompt.Skip_inert_turn ->
+     (* Not submitted at all, so the cadence counter does not advance either:
+        an idle stretch leaves the extraction budget untouched instead of
+        spending it on prose about the idleness. *)
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string MemoryOsInertTurnExtractionSkipped)
+       ~labels:[ "keeper", meta.name ]
+       ());
   (* Post-turn memory recall evidence is logged to decisions.jsonl. *)
   (try
      let used_search =

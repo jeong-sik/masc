@@ -708,6 +708,7 @@ let run_turn
                           ~session ~append_manifest ~model
                           ~acc
                           ~actual_keeper_tool_names
+                          ~user_turn_record
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ~runtime_id_string
                           ~history_messages

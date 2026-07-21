@@ -197,6 +197,7 @@ let finalize
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
+    ~(user_turn_record : Keeper_run_prompt.user_turn_record)
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -366,6 +367,10 @@ let finalize
       ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
+      ~memory_extraction_record:
+        (Keeper_run_prompt.memory_extraction_record_of_turn
+           ~user_turn_record
+           ~tool_calls_made:(actual_keeper_tool_names <> []))
       ~post_turn_t0
       ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry

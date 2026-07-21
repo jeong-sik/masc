@@ -131,6 +131,8 @@ let duplicate_positions_to_drop ~dup_threshold transformed_items =
        match transformed.dedup_key with
        | Some key ->
          let positions =
+           (* DET-OK: Hashtbl accumulator — an absent key is the empty group
+              by construction, not unknown input collapsed to a default. *)
            Option.value ~default:[] (Hashtbl.find_opt groups key)
          in
          Hashtbl.replace groups key (position :: positions)

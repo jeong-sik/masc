@@ -192,8 +192,9 @@ val handle_keeper_lifecycle_post :
   action:String.t ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Generic handler for boot / shutdown / reset / clear posts; the
-    [action] parameter selects the keeper FSM event. *)
+(** Generic handler for boot / shutdown / reset / clear posts. Boot does not
+    resume an ordinary paused owner; callers must commit [Resume_owner] through
+    the directive endpoint. Dead-tombstone revival remains separate. *)
 
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->

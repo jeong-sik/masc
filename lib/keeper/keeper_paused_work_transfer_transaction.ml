@@ -441,6 +441,7 @@ let transfer_pending config ~from_keeper ~to_keeper request =
              Error { cause; reservation_release = Some reservation_release })
         with
         | exn ->
+          (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
 ;;

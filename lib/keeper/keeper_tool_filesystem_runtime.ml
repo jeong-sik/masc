@@ -84,6 +84,9 @@ let read_line_window_of_args args =
           read up to the byte budget."
          limit)
   | offset, max_lines ->
+    (* DET-OK: absent offset resolves to the schema-declared default (line 1,
+       "start of file"); out-of-range values are rejected above, so this is
+       documented-default resolution, not permissive unknown handling. *)
     Ok { start_line = Option.value ~default:1 offset; max_lines }
 ;;
 

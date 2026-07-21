@@ -69,6 +69,13 @@ type apply_stats =
   ; dropped : int
   }
 
+val gate_rejection_count : apply_stats -> int
+(** Merge-gate disagreements only ([rejected_kind_mismatch] +
+    [rejected_valid_until_mismatch]). [rejected_too_few_members] is excluded
+    by design: first-group-wins legitimately shrinks a later overlapping
+    group below two free members on ordinary contested-duplicate plans, so
+    counting it would fire the rejection signal on normal behavior. *)
+
 (** Apply a plan to a keeper's facts, returning the new fact list and the typed
     apply statistics. Each group of >= 2 in-range, not-yet-consumed members
     collapses into one consolidated fact (claim/category from the plan;

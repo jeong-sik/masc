@@ -474,7 +474,42 @@ let test_apply_stats_count_gate_rejections () =
     "consumed/short group counted as too few members"
     1
     stats.Consolidation.rejected_too_few_members;
-  Alcotest.(check int) "no drops" 0 stats.Consolidation.dropped
+  Alcotest.(check int) "no drops" 0 stats.Consolidation.dropped;
+  Alcotest.(check int)
+    "gate rejection count excludes the too-few bucket"
+    1
+    (Consolidation.gate_rejection_count stats)
+;;
+
+(* The ordinary contested-duplicate plan (first group consumes a fact a later
+   group also references) must NOT read as a gate disagreement: the rejection
+   signal fires only when the judge and the kind/valid_until gate disagree.
+   This is the cry-wolf case the adversarial review of PR #25522 flagged. *)
+let test_first_group_wins_is_not_a_gate_rejection () =
+  let facts = [ fact "x"; fact "y"; fact "z" ] in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "xy"
+          ; category = Types.Fact
+          }
+        ; { Consolidation.member_indices = [ 1; 2 ]
+          ; consolidated_claim = "yz"
+          ; category = Types.Fact
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+  Alcotest.(check int)
+    "later overlapping group lands in the too-few bucket"
+    1
+    stats.Consolidation.rejected_too_few_members;
+  Alcotest.(check int)
+    "an ordinary contested plan raises no gate rejection"
+    0
+    (Consolidation.gate_rejection_count stats)
 ;;
 
 let test_parse_plan_json () =
@@ -614,6 +649,10 @@ let () =
             "apply stats count gate rejections"
             `Quick
             test_apply_stats_count_gate_rejections
+        ; Alcotest.test_case
+            "first-group-wins is not a gate rejection"
+            `Quick
+            test_first_group_wins_is_not_a_gate_rejection
         ] )
     ; ( "explicit_validity"
       , [ Alcotest.test_case "old unbounded fact remains eligible" `Quick

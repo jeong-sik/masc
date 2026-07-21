@@ -186,29 +186,37 @@ let consolidate_keeper
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
                 let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
-                let rejected_groups =
-                  stats.Consolidation.rejected_kind_mismatch
-                  + stats.rejected_valid_until_mismatch
-                  + stats.rejected_too_few_members
+                (* Only the gate mismatches mean the judge and the apply gate
+                   disagreed — with the gate fields rendered into the prompt
+                   that should be rare, so it is loud. The sum deliberately
+                   excludes [rejected_too_few_members]; see
+                   [Consolidation.gate_rejection_count]. *)
+                let gate_rejected_groups =
+                  Consolidation.gate_rejection_count stats
                 in
-                if rejected_groups > 0
+                if gate_rejected_groups > 0
                 then (
-                  (* A structurally rejected merge means the judge and the
-                     apply gate disagreed — with the gate fields now rendered
-                     into the prompt this should be rare, so it is loud. *)
                   Log.Keeper.warn
-                    "memory_os_keeper_consolidation rejected %d group(s) keeper=%s: kind_mismatch=%d valid_until_mismatch=%d too_few_members=%d (merged=%d dropped=%d)"
-                    rejected_groups
+                    "memory_os_keeper_consolidation rejected %d group(s) at the merge gate keeper=%s: kind_mismatch=%d valid_until_mismatch=%d (merged=%d dropped=%d too_few_members=%d)"
+                    gate_rejected_groups
                     keeper_id
                     stats.rejected_kind_mismatch
                     stats.rejected_valid_until_mismatch
-                    stats.rejected_too_few_members
                     stats.merged_groups
-                    stats.dropped;
+                    stats.dropped
+                    stats.rejected_too_few_members;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
                     ~labels:[ "keeper", keeper_id ]
-                    ());
+                    ())
+                else if stats.rejected_too_few_members > 0
+                then
+                  Log.Keeper.info
+                    "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"
+                    stats.rejected_too_few_members
+                    keeper_id
+                    stats.merged_groups
+                    stats.dropped;
                 let after = List.length survivors in
                 (* [before > 0] is guaranteed by the [Skipped_too_few] guard above,
                    so [after = 0] here means the plan asked to erase the store. A

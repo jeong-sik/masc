@@ -301,6 +301,15 @@ type apply_stats =
   ; dropped : int
   }
 
+(* Gate disagreements only. [rejected_too_few_members] is deliberately
+   excluded: first-group-wins legitimately shrinks a later overlapping group
+   below two free members, so a plan with contested duplicates produces
+   too-few rejections on every ordinary run — counting those as gate
+   disagreements would fire the rejection counter on normal behavior and
+   bury the real signal. *)
+let gate_rejection_count stats =
+  stats.rejected_kind_mismatch + stats.rejected_valid_until_mismatch
+
 (* Apply a plan to a keeper's facts. Returns the new fact list and typed
    apply statistics. Conservative: a fact not claimed by any valid group and
    not explicitly dropped survives unchanged; a group needs >= 2 in-range

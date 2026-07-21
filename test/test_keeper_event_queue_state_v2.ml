@@ -1251,12 +1251,29 @@ let test_in_lane_compaction_streak_bounds_retries () =
     ~attempts:3
     "third in-lane recovery failure requeued instead of escalating"
     (settlement ~streak:2 attempt_failed);
-  (* A committed compaction is progress: the retry reloads a durably smaller
-     checkpoint and must never be replaced by exhaustion, whatever the prior
-     streak. *)
+  (* Below the ceiling a committed compaction requeues: the retry reloads a
+     durably smaller checkpoint. *)
   expect_compaction_requeue
-    "committed in-lane compaction was escalated despite durable progress"
-    (settlement ~streak:2 committed);
+    "committed in-lane compaction below the ceiling did not requeue"
+    (settlement ~streak:0 committed);
+  expect_compaction_requeue
+    "second committed episode below the ceiling did not requeue"
+    (settlement ~streak:1 committed);
+  (* #25538: at the ceiling a commit proves the floor — the savings keep
+     committing yet the context re-overflows every episode, so the settlement
+     escalates with the commit-distinguishing reason instead of looping. *)
+  (match settlement ~streak:2 committed with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason =
+           Masc.Keeper_registry_event_queue.Compaction_floor_exceeded
+             { attempts; _ }
+       ; successor = None
+       } ->
+     Alcotest.(check int) "floor escalation reports the attempt count" 3 attempts
+   | _ ->
+     Alcotest.fail
+       "committed episode at the ceiling requeued instead of escalating as \
+        a floor");
   (* A terminal no-compaction below the ceiling keeps today's route (the
      judgment successor); at the ceiling the settlement replaces the route,
      because a context that cannot shrink re-overflows deterministically. *)
@@ -1303,14 +1320,21 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
     let actual =
       match Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome outcome with
       | Some `Committed -> "committed"
+      | Some `Overflow_episode_committed -> "overflow_episode_committed"
       | Some `Failed -> "failed"
+      | Some `Recovered -> "recovered"
       | None -> "none"
     in
     Alcotest.(check string) label expected actual
   in
+  (* #25538: an in-lane commit is one provider-overflow episode — it advances
+     the streak instead of resetting it, so an incompressible floor whose
+     commits keep "succeeding" still reaches the ceiling. The old
+     reset-on-commit expectation was the blind spot (measured: a committed
+     920B/0.07% plan reset the streak forever). *)
   check
-    "in-lane committed compaction resets the streak"
-    "committed"
+    "in-lane committed compaction counts the overflow episode"
+    "overflow_episode_committed"
     (failed
        (Masc.Keeper_unified_turn.Requeue_after_context_compaction
           Masc.Keeper_unified_turn.Compaction_committed));
@@ -1336,8 +1360,8 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
     "none"
     (failed Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling);
   check
-    "a completed cycle leaves the streak untouched"
-    "none"
+    "a completed overflow-free turn resets the streak"
+    "recovered"
     (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
   check "no outcome leaves the streak untouched" "none" None
 ;;

@@ -305,8 +305,30 @@ let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
     Keeper_registry_event_queue.Ack
   | Keeper_unified_turn.Requeue_after_context_compaction
       Keeper_unified_turn.Compaction_committed ->
-    Keeper_registry_event_queue.Requeue
-      Keeper_registry_event_queue.Context_compaction_retry
+    (* RFC-0351 S0 / #25538: a committed in-lane compaction is normally
+       progress — but the streak now counts overflow episodes and only an
+       overflow-free turn resets it, so reaching the ceiling *through
+       commits* proves the committed savings cannot bring the context under
+       the provider window (incompressible floor; measured: an LLM plan
+       committing 920B, 0.07%, looped forever under the old
+       reset-on-commit semantics). *)
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      Keeper_registry_event_queue.Escalate
+        { reason =
+            Keeper_registry_event_queue.Compaction_floor_exceeded
+              { attempts
+              ; detail =
+                  "compactions keep committing but the context re-overflows \
+                   on consecutive attempts; the committed savings cannot \
+                   bring the context under the provider window — retry \
+                   suspended pending operator inspection"
+              }
+        ; successor = None
+        }
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Context_compaction_retry
   | Keeper_unified_turn.Requeue_after_context_compaction
       (Keeper_unified_turn.Compaction_attempt_failed _) ->
     if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
@@ -477,16 +499,21 @@ let compaction_outcome_of_cycle_outcome = function
   | Some (Cycle.Failed { failure; _ }) ->
     (match failure.Keeper_unified_turn.source_lease_disposition with
      | Keeper_unified_turn.Requeue_after_context_compaction
-         Keeper_unified_turn.Compaction_committed -> Some `Committed
+         Keeper_unified_turn.Compaction_committed ->
+       (* #25538: an in-lane commit is still one provider-overflow episode.
+          Advancing (not resetting) the streak is what lets an
+          incompressible floor reach the ceiling; only an overflow-free
+          completed turn — or the operator's manual commit — resets. *)
+       Some `Overflow_episode_committed
      | Keeper_unified_turn.Requeue_after_context_compaction
          (Keeper_unified_turn.Compaction_attempt_failed _)
      | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
        Some `Failed
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> None)
+  | Some (Cycle.Completed _) -> Some `Recovered
   | Some
-      ( Cycle.Completed _
-      | Cycle.Cancelled _
+      ( Cycle.Cancelled _
       | Cycle.Skipped _
       | Cycle.Busy _
       | Cycle.Judgment_settled _
@@ -984,6 +1011,12 @@ let run_keepalive_unified_turn
           in
           match compaction_outcome with
           | None -> ()
+          | Some `Recovered
+            when meta_after_triage.runtime.compaction_rt.consecutive_failures
+                 = 0 ->
+            (* Streak already clear: skip the read-modify-write that every
+               healthy completed turn would otherwise pay. *)
+            ()
           | Some outcome ->
             (match
                Keeper_meta_store.persist_compaction_outcome

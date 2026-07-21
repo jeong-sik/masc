@@ -38,6 +38,16 @@ type escalation_reason =
           failures reach the escalation threshold.  A requeue is not an ack, so
           without this ceiling the same stimulus re-enters every heartbeat
           cycle. *)
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+      (** RFC-0351 S0 / #25538: consecutive provider-overflow episodes reached
+          the threshold even though compactions were committing — the
+          committed savings cannot bring the context under the provider
+          window (an incompressible floor).  Distinct from
+          [Compaction_retry_exhausted] so "compaction keeps failing" and
+          "compaction succeeds but cannot help" stay operator-distinguishable. *)
 
 type no_compaction_reason =
   | No_eligible_history

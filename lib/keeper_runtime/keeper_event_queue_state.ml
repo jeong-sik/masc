@@ -33,6 +33,17 @@ type escalation_reason =
        [compaction_retry_escalation_threshold] consecutive failures the
        settlement escalates instead, surfacing the blocker rather than
        re-firing. *)
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+    (* RFC-0351 S0 / #25538: consecutive provider-overflow episodes reached
+       the threshold even though compactions were committing — the committed
+       savings cannot bring the context under the provider window (an
+       incompressible floor; measured: an LLM plan committing 920B, 0.07% of
+       the checkpoint, reset the streak forever). Distinct from
+       [Compaction_retry_exhausted] so the operator can tell "compaction keeps
+       failing" from "compaction succeeds but cannot help". *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -79,7 +90,8 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
-  | Compaction_retry_exhausted _ -> false
+  | Compaction_retry_exhausted _
+  | Compaction_floor_exceeded _ -> false
 ;;
 
 type settlement =
@@ -384,6 +396,7 @@ let escalation_reason_label = function
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
+  | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -396,6 +409,8 @@ let escalation_reason_detail_to_yojson = function
       ; "rationale", `String rationale
       ]
   | Compaction_retry_exhausted { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Compaction_floor_exceeded { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
 ;;
 
@@ -463,6 +478,28 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_retry_exhausted { attempts; detail })
+  | "compaction_floor_exceeded", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"compaction_floor_exceeded"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "compaction_floor_exceeded.attempts must be positive"
+      | Some _ -> Error "compaction_floor_exceeded.attempts must be an int"
+      | None -> Error "compaction_floor_exceeded.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"compaction_floor_exceeded"
+        "detail"
+        fields
+    in
+    Ok (Compaction_floor_exceeded { attempts; detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -670,6 +707,9 @@ let validate_settlement = function
   | Escalate { reason = Compaction_retry_exhausted _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_retry_exhausted _; successor = Some _ } ->
     Error "compaction retry exhaustion must not enqueue a successor"
+  | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> Ok ()
+  | Escalate { reason = Compaction_floor_exceeded _; successor = Some _ } ->
+    Error "compaction floor exhaustion must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle

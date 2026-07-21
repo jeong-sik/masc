@@ -47,6 +47,136 @@ let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 let read_file_min_max_bytes = 512
 let read_file_max_max_bytes = 200_000
 
+(** Read line window. The Read descriptor (agent.read_file) exposes
+    [offset]/[limit] as LINE coordinates — the shape mainstream Read tools
+    train models on: [offset] is the 1-based first line, [limit] caps
+    returned lines. [max_bytes] stays a byte budget on the returned content.
+    The descriptor used to translate [limit] straight into [max_bytes], so a
+    model asking for 200 lines received max(512, 200) = 512 bytes with
+    [truncated=true] and could never read past the file head — live keepers
+    re-issued the byte-identical Read for 200+ calls inside a single turn.
+    [next_offset] in the payload is what makes forward progress expressible. *)
+type read_line_window =
+  { start_line : int (* 1-based first line to return *)
+  ; max_lines : int option (* cap on returned lines; None = to EOF *)
+  }
+
+let read_window_is_whole_prefix = function
+  | { start_line = 1; max_lines = None } -> true
+  | _ -> false
+;;
+
+(* Range violations are rejected loudly instead of being defaulted: a model
+   that sent [limit=0] or [offset=-3] gets a payload naming the contract, so
+   the next attempt can self-correct. *)
+let read_line_window_of_args args =
+  match Safe_ops.json_int_opt "offset" args, Safe_ops.json_int_opt "limit" args with
+  | Some offset, _ when offset < 1 ->
+    Error
+      (Printf.sprintf
+         "offset must be a 1-based line number (got %d). Read returns lines; \
+          use next_offset from the previous response to continue."
+         offset)
+  | _, Some limit when limit < 1 ->
+    Error
+      (Printf.sprintf
+         "limit must be a positive number of lines (got %d). Omit limit to \
+          read up to the byte budget."
+         limit)
+  | offset, max_lines ->
+    Ok { start_line = Option.value ~default:1 offset; max_lines }
+;;
+
+type read_window_slice =
+  { window_content : string
+  ; returned_lines : int
+  ; next_offset : int option (* set iff content remains past the window *)
+  ; window_truncated : bool
+  ; last_line_partial : bool
+    (* the byte budget cut inside the final returned line; [next_offset]
+       already points past that line so retrying cannot loop on it *)
+  }
+
+(* Byte index where 1-based [line] starts in [content], or None when the
+   scanned content ends before that line begins. *)
+let rec line_start_index content len idx line =
+  if line <= 1
+  then Some idx
+  else if idx >= len
+  then None
+  else (
+    match String.index_from_opt content idx '\n' with
+    | None -> None
+    | Some nl -> line_start_index content len (nl + 1) (line - 1))
+;;
+
+let count_returned_lines capped =
+  let len = String.length capped in
+  if len = 0
+  then 0
+  else (
+    let newlines = String.fold_left (fun n c -> if c = '\n' then n + 1 else n) 0 capped in
+    if capped.[len - 1] = '\n' then newlines else newlines + 1)
+;;
+
+(* [scan_complete=false] means [content] is a byte-budgeted prefix of the
+   file (sandbox fetch cut), so exhausting [content] does not prove EOF and
+   line numbers past the scan horizon cannot be mapped. *)
+let slice_read_window ~(window : read_line_window) ~max_bytes ~scan_complete content =
+  let len = String.length content in
+  match line_start_index content len 0 window.start_line with
+  | None ->
+    if scan_complete
+    then
+      Ok
+        { window_content = ""
+        ; returned_lines = 0
+        ; next_offset = None
+        ; window_truncated = false
+        ; last_line_partial = false
+        }
+    else Error `Offset_beyond_scan
+  | Some start ->
+    let stop =
+      match window.max_lines with
+      | None -> len
+      | Some lines ->
+        let rec advance idx remaining =
+          if remaining = 0 || idx >= len
+          then idx
+          else (
+            match String.index_from_opt content idx '\n' with
+            | None -> len
+            | Some nl -> advance (nl + 1) (remaining - 1))
+        in
+        advance start lines
+    in
+    let raw = String.sub content start (stop - start) in
+    let capped, last_line_partial =
+      if String.length raw <= max_bytes
+      then raw, false
+      else (
+        match String.rindex_from_opt raw (max_bytes - 1) '\n' with
+        | Some nl -> String.sub raw 0 (nl + 1), false
+        | None -> String.sub raw 0 max_bytes, true)
+    in
+    let returned_lines = count_returned_lines capped in
+    let consumed_to = start + String.length capped in
+    let more_in_scan = consumed_to < len in
+    let more_beyond_scan = (not scan_complete) && consumed_to >= len in
+    let window_truncated = more_in_scan || more_beyond_scan || last_line_partial in
+    let next_offset =
+      if window_truncated then Some (window.start_line + returned_lines) else None
+    in
+    Ok
+      { window_content = capped
+      ; returned_lines
+      ; next_offset
+      ; window_truncated
+      ; last_line_partial
+      }
+;;
+
 type read_file_resolution_error = Read_path_error of string
 
 let string_opt_nonempty name json =
@@ -124,9 +254,57 @@ let handle_read_file_with_outcome
     |> fun n -> max read_file_min_max_bytes (min read_file_max_max_bytes n)
   in
   let cwd = string_opt_nonempty "cwd" args in
-  match resolve_read_file_target ~config ~meta ~args ~raw_path:path with
-  | Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
-  | Ok target ->
+  match read_line_window_of_args args, resolve_read_file_target ~config ~meta ~args ~raw_path:path with
+  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
+  | Ok _, Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
+  | Ok window, Ok target ->
+    let payload_of_slice ~via ~file_bytes ~scan_complete body =
+      match slice_read_window ~window ~max_bytes ~scan_complete body with
+      | Error `Offset_beyond_scan ->
+        Read_failed_payload
+          (error_json
+             ~fields:
+               [ "path", `String target
+               ; "offset", `Int window.start_line
+               ; "scanned_bytes", `Int (String.length body)
+               ]
+             (Printf.sprintf
+                "offset %d is beyond the scanned window (%d bytes; the file \
+                 continues past the scan budget). Read line ranges within the \
+                 first %d bytes, or narrow the file another way (e.g. Grep)."
+                window.start_line
+                (String.length body)
+                read_file_max_max_bytes))
+      | Ok slice ->
+        let optional_fields =
+          List.concat
+            [ (match slice.next_offset with
+               | Some next -> [ "next_offset", `Int next ]
+               | None -> [])
+            ; (if slice.last_line_partial
+               then [ "last_line_partial", `Bool true ]
+               else [])
+            ; (match file_bytes with
+               | Some total -> [ "file_bytes", `Int total ]
+               | None -> [])
+            ; (match via with
+               | Some via -> [ "via", `String via ]
+               | None -> [])
+            ]
+        in
+        Read_succeeded
+          (Yojson.Safe.to_string
+             (`Assoc
+                 ([ "ok", `Bool true
+                  ; "path", `String target
+                  ; "bytes", `Int (String.length slice.window_content)
+                  ; "truncated", `Bool slice.window_truncated
+                  ; "offset", `Int window.start_line
+                  ; "returned_lines", `Int slice.returned_lines
+                  ; "content", `String slice.window_content
+                  ]
+                  @ optional_fields)))
+    in
     let run_read () =
          (* RFC-0006 Phase B-1: Docker keepers are always contained to their
             playground bundle on the host before any read-side I/O proceeds.
@@ -143,28 +321,31 @@ let handle_read_file_with_outcome
            let timeout_sec =
              Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
            in
+           (* A line window that starts past line 1 (or caps lines) needs
+              bytes beyond the response budget to locate its lines, so the
+              fetch runs to the scan ceiling; the response stays bounded by
+              [max_bytes] either way. *)
+           let fetch_bytes =
+             if read_window_is_whole_prefix window
+             then max_bytes
+             else read_file_max_max_bytes
+           in
            let+ body =
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory
                ~config
                ~meta
                ~host_path:target
-               ~max_bytes
+               ~max_bytes:fetch_bytes
                ~timeout_sec
                ()
            in
-           let total = String.length body in
-           let truncated = total >= max_bytes in
-           Read_succeeded
-             (Yojson.Safe.to_string
-                (`Assoc
-                    [ "ok", `Bool true
-                    ; "path", `String target
-                    ; "bytes", `Int total
-                    ; "truncated", `Bool truncated
-                    ; "content", `String body
-                    ; "via", `String Keeper_sandbox_read_runner.backend_via
-                    ])))
+           let scan_complete = String.length body < fetch_bytes in
+           payload_of_slice
+             ~via:(Some Keeper_sandbox_read_runner.backend_via)
+             ~file_bytes:None
+             ~scan_complete
+             body)
          else (
            match Safe_ops.read_file_safe target with
            | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
@@ -177,21 +358,12 @@ let handle_read_file_with_outcome
                      ~error:e))
            | Error e -> Ok (Read_failed_message e)
            | Ok content ->
-             let total = String.length content in
-             let truncated = total > max_bytes in
-             let body =
-               if truncated then String.sub content 0 max_bytes else content
-             in
              Ok
-               (Read_succeeded
-                  (Yojson.Safe.to_string
-                     (`Assoc
-                          [ "ok", `Bool true
-                          ; "path", `String target
-                          ; "bytes", `Int total
-                          ; "truncated", `Bool truncated
-                          ; "content", `String body
-                          ]))))
+               (payload_of_slice
+                  ~via:None
+                  ~file_bytes:(Some (String.length content))
+                  ~scan_complete:true
+                  content))
     in
     (match run_read () with
      | Ok (Read_succeeded json) -> Keeper_tool_execution.success json

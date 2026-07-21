@@ -47,10 +47,20 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
   ; reason : string
   }
 
+type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -120,6 +130,16 @@ val cancel_pending_accepted_result :
 (** Commit an exact pending accepted cancellation and publish the post-commit
     pending projection when the owner currently has a live registry lane. *)
 
+val transfer_pending_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  transfer:accepted_transfer ->
+  (settle_result, string) result
+(** Commit an exact pending accepted transfer settlement and publish the
+    post-commit source pending projection when the owner is registered. *)
+
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later
     registration can replay it instead of dropping the wake at the
@@ -171,6 +191,14 @@ val enqueue_stimulus_durable_result :
     path is for structurally addressed signals whose delivery must commit
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)
+
+val enqueue_exact_stimulus_durable_result :
+  base_path:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> enqueue_stimulus_durable_result
+(** Strict transfer projection: replay succeeds only for the exact full source
+    snapshot. Same identity with changed arrival/payload is a storage conflict. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

@@ -673,6 +673,11 @@
  (libraries alcotest masc_test_deps eio_main))
 
 (test
+ (name test_keeper_paused_work_transfer_transaction)
+ (modules test_keeper_paused_work_transfer_transaction)
+ (libraries alcotest masc_test_deps eio_main))
+
+(test
  (name test_keeper_current_operations)
  (modules test_keeper_current_operations)
  (libraries alcotest masc_test_deps))

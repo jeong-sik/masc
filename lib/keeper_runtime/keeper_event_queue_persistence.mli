@@ -49,10 +49,20 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   ; reason : string
   }
 
+type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
 type settlement = Keeper_event_queue_state.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -201,6 +211,18 @@ val cancel_pending_accepted_result :
     checkpointing removal of the exact pending source. WAL replay can complete
     the transition from the pre-removal state after a crash. *)
 
+val transfer_pending_accepted_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  transfer:accepted_transfer ->
+  unit ->
+  (settle_result, string) result
+(** Append and fsync the canonical source-bearing transfer settlement before
+    checkpointing removal of the exact pending source. *)
+
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -252,6 +274,16 @@ val enqueue_stimulus_if_absent_result :
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
     full durable state: pending, active leases, and transition outbox. *)
+
+val enqueue_exact_stimulus_if_absent_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  Keeper_event_queue.stimulus ->
+  (enqueue_stimulus_result, string) result
+(** Transfer-only strict variant: an existing identity is idempotent only when
+    the full source snapshot, including [arrived_at], is structurally equal.
+    A changed snapshot or duplicate accounted identity is a conflict. *)
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit

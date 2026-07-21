@@ -48,10 +48,20 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
   ; reason : string
   }
 
+type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -291,6 +301,19 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
+let enqueue_exact_stimulus_durable_result ~base_path name stimulus =
+  match
+    Keeper_event_queue_persistence.enqueue_exact_stimulus_if_absent_result
+      ~base_path
+      ~keeper_name:name
+      ~after_commit:(publish_pending ~base_path name)
+      stimulus
+  with
+  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Error detail -> Stimulus_storage_error detail
+;;
+
 let enqueue_hitl_resolution_durable_result
     ~base_path
     ~keeper_name
@@ -404,6 +427,23 @@ let cancel_pending_accepted_result
     ~current_owner_generation
     ~settled_at
     ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let transfer_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~transfer
+  =
+  Keeper_event_queue_persistence.transfer_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~transfer
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

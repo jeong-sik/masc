@@ -12,7 +12,9 @@ val get_bus : unit -> Agent_sdk.Event_bus.t option
 
 val register_grpc_heartbeat_starter : Keeper_keepalive_signal.grpc_heartbeat_starter_fn -> unit
 
-(** Apply one typed control-plane directive to a Keeper lane. *)
+(** Apply one typed control-plane directive to a Keeper lane. [Wakeup] only
+    signals scheduling and never clears an operator pause; paused-work resume
+    belongs to [Keeper_paused_work_resume_transaction]. *)
 val process_directive : agent_name:string -> Keeper_directive.t -> unit
 
 (** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.

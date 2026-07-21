@@ -115,6 +115,7 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_dashboard_http_keeper_api_trace
+  test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -428,6 +429,7 @@
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
   test_server_dashboard_http_keeper_api_trace
+  test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state

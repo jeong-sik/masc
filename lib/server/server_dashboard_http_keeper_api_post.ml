@@ -855,55 +855,234 @@ let handle_keeper_secrets_post state req reqd body_str =
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 
-let directive_action_to_string = function
-  | Keeper_directive.Pause -> "pause"
-  | Keeper_directive.Resume -> "resume"
-  | Keeper_directive.Wakeup -> "wakeup"
-  | Keeper_directive.Assign_task _ -> "assign_task"
+type plain_keeper_directive =
+  | Plain_pause
+  | Plain_wakeup
 
-let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
-    _ Keeper_tool_surface.context =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  {
-    config = workspace_scope.config;
-    agent_name;
-    sw;
-    clock;
-    proc_mgr = state.Mcp_server.proc_mgr;
-    net = state.Mcp_server.net;
-    publication_recovery_provider =
-      Mcp_server.publication_recovery_availability_provider state;
+let plain_directive_action = function
+  | Plain_pause -> "pause"
+  | Plain_wakeup -> "wakeup"
+
+let plain_directive_to_keeper_directive = function
+  | Plain_pause -> Keeper_directive.Pause
+  | Plain_wakeup -> Keeper_directive.Wakeup
+
+type parsed_keeper_directive =
+  | Plain_directive of plain_keeper_directive
+  | Resume_owner of Keeper_paused_work_resume_transaction.request
+
+type bulk_resume_target =
+  { name : string
+  ; request : Keeper_paused_work_resume_transaction.request
   }
 
-let meta_with_directive_paused_state
-    (meta : Keeper_meta_contract.keeper_meta)
-    paused =
-  let base =
-    if paused
-    then
-      (* Pause: set the bit and drop the stale blocker; any existing latch
-         stays paired with [paused = true]. *)
-      { meta with paused = true; runtime = { meta.runtime with last_blocker = None } }
-    else
-      (* Resume: [mark_resumed] couples clearing [paused] with clearing the
-         typed latch (Dead_tombstone included). Previously this path set
-         [paused = false] while leaving [latched_reason], stranding the keeper
-         in the un-recoverable paused=false + Dead_tombstone split that
-         lifecycle admission denies forever. *)
-      Keeper_meta_contract.mark_resumed meta
+type parsed_bulk_directive =
+  | Bulk_plain of
+      { names : string list
+      ; directive : plain_keeper_directive
+      }
+  | Bulk_resume_owner of bulk_resume_target list
+
+let required_resume_owner_request json =
+  match
+    Safe_ops.json_int_opt "owner_generation" json,
+    Safe_ops.json_string_opt "operator_operation_id" json
+  with
+  | Some owner_generation, Some operator_operation_id ->
+    Ok
+      Keeper_paused_work_resume_transaction.
+        { owner_generation; operator_operation_id }
+  | None, _ -> Error "resume requires integer \"owner_generation\""
+  | _, None -> Error "resume requires string \"operator_operation_id\""
+
+let parse_keeper_directive_json json =
+  (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
+     typed directive; any unknown value becomes a typed Error. *)
+  match Safe_ops.json_string_opt "action" json with
+  | Some "pause" -> Ok (Plain_directive Plain_pause)
+  | Some "resume" ->
+    Result.map
+      (fun request -> Resume_owner request)
+      (required_resume_owner_request json)
+  | Some "wakeup" -> Ok (Plain_directive Plain_wakeup)
+  | Some action ->
+    Error
+      (Printf.sprintf
+         "invalid action %S: expected pause, resume, or wakeup"
+         action)
+  | None -> Error "missing \"action\" field"
+
+let parse_bulk_resume_target = function
+  | `Assoc _ as json ->
+    (match Safe_ops.json_string_opt "name" json with
+     | Some name when is_valid_keeper_name name ->
+       Result.map
+         (fun request -> { name; request })
+         (required_resume_owner_request json)
+     | Some _ -> Error "resume target has an invalid keeper name"
+     | None -> Error "resume target requires string \"name\"")
+  | _ -> Error "resume targets must be JSON objects"
+
+let parse_bulk_resume_targets json =
+  match Json_util.assoc_member_opt "targets" json with
+  | Some (`List targets) when targets <> [] ->
+    let rec collect seen parsed = function
+      | [] -> Ok (List.rev parsed)
+      | target :: rest ->
+        (match parse_bulk_resume_target target with
+         | Ok target when List.mem target.name seen ->
+           Error (Printf.sprintf "duplicate resume target %S" target.name)
+         | Ok target -> collect (target.name :: seen) (target :: parsed) rest
+         | Error _ as error -> error)
+    in
+    collect [] [] targets
+  | Some (`List []) -> Error "resume targets must be a non-empty list"
+  | Some _ -> Error "resume requires array \"targets\""
+  | None -> Error "resume requires array \"targets\""
+
+let parse_bulk_plain_names json =
+  match Json_util.assoc_member_opt "names" json with
+  | Some (`List items) ->
+    let rec collect seen parsed = function
+      | [] -> Ok (List.rev parsed)
+      | `String name :: rest when is_valid_keeper_name name ->
+        if List.mem name seen
+        then Error (Printf.sprintf "duplicate keeper name %S" name)
+        else collect (name :: seen) (name :: parsed) rest
+      | `String name :: _ ->
+        Error (Printf.sprintf "invalid keeper name %S" name)
+      | _ :: _ -> Error "names must contain only valid keeper-name strings"
+    in
+    (match items with
+     | [] -> Error "names must be a non-empty list of valid keeper names"
+     | _ -> collect [] [] items)
+  | Some _ | None -> Error "names must be a non-empty list of valid keeper names"
+
+let parse_bulk_directive_json json =
+  (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
+     typed directive; any unknown value becomes a typed Error. *)
+  match Safe_ops.json_string_opt "action" json with
+  | Some "resume" ->
+    Result.map
+      (fun targets -> Bulk_resume_owner targets)
+      (parse_bulk_resume_targets json)
+  | Some "pause" ->
+    Result.map
+      (fun names -> Bulk_plain { names; directive = Plain_pause })
+      (parse_bulk_plain_names json)
+  | Some "wakeup" ->
+    Result.map
+      (fun names -> Bulk_plain { names; directive = Plain_wakeup })
+      (parse_bulk_plain_names json)
+  | Some action ->
+    Error
+      (Printf.sprintf
+         "invalid action %S: expected pause, resume, or wakeup"
+         action)
+  | None -> Error "missing \"action\" field"
+
+module For_testing = struct
+  let parse_resume_request json =
+    match parse_keeper_directive_json json with
+    | Ok (Resume_owner request) ->
+      Ok (request.owner_generation, request.operator_operation_id)
+    | Ok (Plain_directive _) -> Error "request is not Resume_owner"
+    | Error _ as error -> error
+  ;;
+
+  let parse_bulk_resume_requests json =
+    match parse_bulk_directive_json json with
+    | Ok (Bulk_resume_owner targets) ->
+      Ok
+        (List.map
+           (fun target ->
+              ( target.name
+              , target.request.owner_generation
+              , target.request.operator_operation_id ))
+           targets)
+    | Ok (Bulk_plain _) -> Error "request is not bulk Resume_owner"
+    | Error _ as error -> error
+  ;;
+end
+
+let resume_failure_message failure =
+  Keeper_paused_work_resume_transaction.error_to_string
+    Keeper_paused_work_resume_transaction.
+      { cause = failure; reservation_release = None }
+
+let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
+  match error.cause with
+  | Invalid_request _ -> `Bad_request
+  | Durable_meta_missing -> `Not_found
+  | Reservation_conflict _
+  | Receipt_conflict _
+  | Durable_owner_generation_changed _
+  | Durable_owner_identity_changed
+  | Durable_owner_not_paused
+  | Durable_owner_dead_tombstone
+  | Registry_owner_generation_changed _
+  | Registry_owner_identity_changed
+  | Registry_owner_not_paused _ -> `Conflict
+  | Receipt_lock_failed _
+  | Receipt_read_failed _
+  | Receipt_write_failed _
+  | Durable_meta_read_failed _
+  | Registry_owner_missing
+  | Projection_failed _ -> `Internal_server_error
+
+let resume_receipt_json
+    (receipt : Keeper_paused_work_disposition_receipt.t) =
+  `Assoc
+    [ "keeper_name", `String receipt.keeper_name
+    ; "expected_trace_id", `String (Keeper_id.Trace_id.to_string receipt.expected_trace_id)
+    ; "expected_generation", `Int receipt.expected_generation
+    ; "operator_operation_id", `String receipt.operator_operation_id
+    ; "requested_at", `Float receipt.requested_at
+    ; "operation", `String "resume_owner"
+    ]
+
+let resume_result_json ~name
+    (success : Keeper_paused_work_resume_transaction.success) =
+  let commit_status =
+    match success.commit_status with
+    | Committed -> "committed"
+    | Already_committed -> "already_committed"
   in
-  { base with updated_at = Keeper_meta_contract.now_iso () }
+  let ok, projection, error =
+    match success.projection with
+    | Applied phase ->
+      true, Keeper_state_machine.phase_to_string phase, None
+    | Committed_followup_failed failure ->
+      false, "committed_followup_failed", Some (resume_failure_message failure)
+  in
+  `Assoc
+    ([ "ok", `Bool ok
+     ; "action", `String "resume"
+     ; "operation", `String "resume_owner"
+     ; "name", `String name
+     ; "committed", `Bool true
+     ; "commit_status", `String commit_status
+     ; "projection", `String projection
+     ; "receipt", resume_receipt_json success.receipt
+     ]
+     @ match error with
+       | None -> []
+       | Some message -> [ "error", `String message ])
 
-let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
-  match directive with
-  | Keeper_directive.Resume -> true
-  | Keeper_directive.Pause | Keeper_directive.Wakeup
-  | Keeper_directive.Assign_task _ -> not (Bool.equal meta.paused paused)
+let run_resume_owner config ~name request =
+  Keeper_paused_work_resume_transaction.resume config ~keeper_name:name request
 
-let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
-  let updated_meta = meta_with_directive_paused_state meta paused in
-    (* Pause/resume toggle via CAS merge: do not rewind a concurrent
-       turn's cumulative usage counters. *)
+let persist_directive_pause ~config ~name
+    (meta : Keeper_meta_contract.keeper_meta) =
+  let updated_meta =
+    { meta with
+      paused = true
+    ; runtime = { meta.runtime with last_blocker = None }
+    ; updated_at = Keeper_meta_contract.now_iso ()
+    }
+  in
+  (* Pause toggle via CAS merge: do not rewind a concurrent turn's cumulative
+     usage counters. Resume is owned exclusively by the receipt transaction. *)
   match
        Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.monotonic_usage_counters
@@ -913,8 +1092,7 @@ let persist_directive_paused_state ~config ~name ~action_str directive meta paus
   | Ok () -> Ok ()
   | Error err ->
     Log.Keeper.warn
-      "directive %s: write_meta failed for %s: %s"
-      action_str
+      "directive pause: write_meta failed for %s: %s"
       name
       err;
     Otel_metric_store.inc_counter
@@ -927,254 +1105,180 @@ let persist_directive_paused_state ~config ~name ~action_str directive meta paus
       ();
     Error err
 
-let ensure_registered_for_resume ~sw ~clock state agent_name name =
-  let config = Mcp_server.workspace_config state in
-  match Keeper_registry.get ~base_path:config.base_path name with
-  | Some _ -> Ok `Already_registered
-  | None ->
-      let keeper_ctx = keeper_ctx_of_dashboard_state ~sw ~clock state agent_name in
-      let args = `Assoc [ ("name", `String name) ] in
-      (match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
-       | Some result when Tool_result.is_success result ->
-           (match Keeper_registry.get ~base_path:config.base_path name with
-            | Some _ -> Ok `Booted_missing_registry
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "resume boot for %s succeeded but no registry entry was created"
-                     name))
-       | Some result -> Error (Tool_result.message result)
-       | None -> Error "masc_keeper_up dispatch returned None")
-
-let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
+let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let action =
+    let parsed =
       try
         let json = Yojson.Safe.from_string body_str in
-        match Safe_ops.json_string_opt "action" json with
-        | Some "pause" -> Ok Keeper_directive.Pause
-        | Some "resume" -> Ok Keeper_directive.Resume
-        | Some "wakeup" -> Ok Keeper_directive.Wakeup
-        | Some a ->
-            Error
-              (Printf.sprintf
-                 "invalid action %S: expected pause, resume, or wakeup" a)
-        | None -> Error "missing \"action\" field"
+        parse_keeper_directive_json json
       with Yojson.Json_error e ->
         Error (Printf.sprintf "invalid json: %s" e)
     in
-  match action with
-  | Error msg ->
-      respond_error ~ok:false reqd msg
-    | Ok directive ->
-        let config = (Mcp_server.workspace_config state) in
-        let action_str = directive_action_to_string directive in
-        (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from [Error _]
-           (IO/parse failure). For pause/resume the operator expects state to
-           change; silent 200 hides the failure. For wakeup we preserve the
-           prior best-effort semantics (wakeup does not require meta). *)
-        let read_result = Keeper_meta_store.read_meta config name in
-        let meta_opt =
-          match read_result with
-          | Ok (Some meta) -> Some meta
-          | Ok None -> None
-          | Error err ->
-              Log.Keeper.warn "directive %s %s: read_meta failed: %s"
-                action_str name err;
-              None
+    match parsed with
+    | Error message -> respond_error ~ok:false reqd message
+    | Ok (Resume_owner request) ->
+      let config = Mcp_server.workspace_config state in
+      (match run_resume_owner config ~name request with
+       | Error error ->
+         Log.Keeper.warn
+           "directive resume_owner rejected for %s generation=%d operation_id=%s: %s"
+           name
+           request.owner_generation
+           request.operator_operation_id
+           (Keeper_paused_work_resume_transaction.error_to_string error);
+         Http.Response.json_value
+           ~status:(resume_error_status error)
+           ~request:req
+           (`Assoc
+              [ "ok", `Bool false
+              ; "action", `String "resume"
+              ; "operation", `String "resume_owner"
+              ; "name", `String name
+              ; "committed", `Bool false
+              ; "error", `String (Keeper_paused_work_resume_transaction.error_to_string error)
+              ])
+           reqd
+       | Ok success ->
+         refresh_keeper_execution_surfaces ~config ~name "resume_owner";
+         let response = resume_result_json ~name success in
+         (match success.projection with
+          | Applied _ ->
+            Log.Keeper.info
+              "directive resume_owner applied for %s generation=%d operation_id=%s"
+              name
+              request.owner_generation
+              request.operator_operation_id;
+            Http.Response.json_value ~compress:true ~request:req response reqd
+          | Committed_followup_failed failure ->
+            Log.Keeper.warn
+              "directive resume_owner committed with pending projection for %s generation=%d operation_id=%s: %s"
+              name
+              request.owner_generation
+              request.operator_operation_id
+              (resume_failure_message failure);
+            Http.Response.json_value
+              ~status:`Accepted
+              ~compress:true
+              ~request:req
+              response
+              reqd))
+    | Ok (Plain_directive plain_directive) ->
+      let config = Mcp_server.workspace_config state in
+      let action_str = plain_directive_action plain_directive in
+      let directive = plain_directive_to_keeper_directive plain_directive in
+      let read_result = Keeper_meta_store.read_meta config name in
+      let needs_meta =
+        match plain_directive with
+        | Plain_pause -> true
+        | Plain_wakeup -> false
+      in
+      let proceed meta_opt =
+        let persist_result =
+          match plain_directive, meta_opt with
+          | Plain_pause, Some meta ->
+            persist_directive_pause ~config ~name meta
+          | Plain_pause, None | Plain_wakeup, _ -> Ok ()
         in
-        let persist_paused_state paused =
-          match meta_opt with
-          | Some meta
-            when should_persist_directive_paused_state directive meta paused ->
-              persist_directive_paused_state
-                ~config
-                ~name
-                ~action_str
-                directive
-                meta
-                paused
-          | Some _ | None -> Ok ()
-        in
-        let proceed () =
-          let ensure_result =
-            match directive with
-            | Keeper_directive.Resume ->
-              ensure_registered_for_resume ~sw ~clock state agent_name name
-            | Keeper_directive.Pause | Keeper_directive.Wakeup
-            | Keeper_directive.Assign_task _ -> Ok `Already_registered
+        match persist_result with
+        | Error error ->
+          Http.Response.json_value
+            ~status:`Internal_server_error
+            ~request:req
+            (`Assoc
+               [ "ok", `Bool false
+               ; "action", `String action_str
+               ; "name", `String name
+               ; "error", `String error
+               ])
+            reqd
+        | Ok () ->
+          let resolved_agent_name =
+            match Keeper_registry_lookup.find_by_name name, meta_opt with
+            | Some entry, _ -> entry.meta.agent_name
+            | None, Some meta -> meta.agent_name
+            | None, None -> Keeper_identity.keeper_agent_name name
           in
-          match ensure_result with
-          | Error err ->
-              Log.Keeper.error
-                "directive %s: failed to ensure registered keeper for %s: %s"
-                action_str
-                name
-                err;
-              Http.Response.json_value ~status:`Internal_server_error ~request:req
-                (`Assoc
-                   [
-                     ("ok", `Bool false);
-                     ("action", `String action_str);
-                     ("name", `String name);
-                     ("error", `String err);
-                   ])
-                reqd
-          | Ok registration_state ->
-              let persist_result =
-                match directive, registration_state with
-                | Keeper_directive.Pause, _ -> persist_paused_state true
-                | Keeper_directive.Resume, `Already_registered ->
-                  persist_paused_state false
-                | Keeper_directive.Resume, `Booted_missing_registry -> Ok ()
-                | Keeper_directive.Wakeup, _
-                | Keeper_directive.Assign_task _, _ -> Ok ()
-              in
-              (match persist_result with
-              | Error err ->
-                  Log.Keeper.error
-                    "directive %s: failed to persist paused state for %s: %s"
-                    action_str
-                    name
-                    err;
-                  Http.Response.json_value
-                    ~status:`Internal_server_error
-                    ~request:req
-                    (`Assoc
-                       [
-                         ("ok", `Bool false);
-                         ("action", `String action_str);
-                         ("name", `String name);
-                         ("error", `String err);
-                       ])
-                    reqd
-              | Ok () ->
-                  let resolved_agent_name =
-                    match Keeper_registry_lookup.find_by_name name with
-                    | Some entry -> entry.meta.agent_name
-                    | None -> (
-                        match meta_opt with
-                        | Some meta -> meta.agent_name
-                        | None -> Keeper_identity.keeper_agent_name name)
-                  in
-                  Keeper_keepalive.process_directive
-                    ~agent_name:resolved_agent_name directive;
-                  (match directive with
-                   | Keeper_directive.Pause ->
-                     refresh_keeper_execution_surfaces ~config ~name "paused"
-                   | Keeper_directive.Resume ->
-                       refresh_keeper_execution_surfaces ~config ~name "resumed"
-                   | Keeper_directive.Wakeup
-                   | Keeper_directive.Assign_task _ ->
-                     invalidate_keeper_execution_surfaces ~config ());
-                  Http.Response.json_value ~compress:true ~request:req
-                    (`Assoc
-                       [
-                         ("ok", `Bool true);
-                         ("action", `String action_str);
-                         ("name", `String name);
-                       ])
-                    reqd)
-        in
-        let needs_meta_for_state_transition =
-          match directive with
-          | Keeper_directive.Pause | Keeper_directive.Resume -> true
-          | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> false
-        in
-        (match read_result, needs_meta_for_state_transition with
-         | Error err, true ->
-             Log.Keeper.error
-               "directive %s: read_meta failed for %s: %s"
-               action_str
-               name
-               err;
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string PausedStatePersistErrors)
-               ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
-                        ("reason", "read_meta_error")]
-               ();
-             Http.Response.json_value ~status:`Internal_server_error ~request:req
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("action", `String action_str);
-                    ("name", `String name);
-                    ("error", `String (Printf.sprintf "read_meta failed: %s" err));
-                  ])
-               reqd
-         | Ok None, true ->
-             Log.Keeper.warn
-               "directive %s: keeper meta missing for %s — refusing silent no-op"
-               action_str
-               name;
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string PausedStatePersistErrors)
-               ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
-                        ("reason", "meta_missing")]
-               ();
-             Http.Response.json_value ~status:`Not_found ~request:req
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("action", `String action_str);
-                    ("name", `String name);
-                    ("error", `String "keeper meta not found");
-                  ])
-               reqd
-         | Error err, false ->
-             (* Wakeup does not require meta; log but proceed. *)
-             Log.Keeper.warn
-               "directive %s: read_meta failed for %s (best-effort proceed): %s"
-               action_str
-               name
-               err;
-             proceed ()
-         | Ok None, false
-         | Ok (Some _), _ ->
-             proceed ())
+          Keeper_keepalive.process_directive
+            ~agent_name:resolved_agent_name
+            directive;
+          (match plain_directive with
+           | Plain_pause ->
+             refresh_keeper_execution_surfaces ~config ~name "paused"
+           | Plain_wakeup ->
+             invalidate_keeper_execution_surfaces ~config ());
+          Http.Response.json_value ~compress:true ~request:req
+            (`Assoc
+               [ "ok", `Bool true
+               ; "action", `String action_str
+               ; "name", `String name
+               ])
+            reqd
+      in
+      (match read_result, needs_meta with
+       | Error error, true ->
+         Log.Keeper.error
+           "directive %s: read_meta failed for %s: %s"
+           action_str
+           name
+           error;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string PausedStatePersistErrors)
+           ~labels:
+             [ "phase", Keeper_paused_state_persist_phase.(to_label Directive)
+             ; "reason", "read_meta_error"
+             ]
+           ();
+         Http.Response.json_value ~status:`Internal_server_error ~request:req
+           (`Assoc
+              [ "ok", `Bool false
+              ; "action", `String action_str
+              ; "name", `String name
+              ; "error", `String (Printf.sprintf "read_meta failed: %s" error)
+              ])
+           reqd
+       | Ok None, true ->
+         Log.Keeper.warn
+           "directive %s: keeper meta missing for %s — refusing silent no-op"
+           action_str
+           name;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string PausedStatePersistErrors)
+           ~labels:
+             [ "phase", Keeper_paused_state_persist_phase.(to_label Directive)
+             ; "reason", "meta_missing"
+             ]
+           ();
+         Http.Response.json_value ~status:`Not_found ~request:req
+           (`Assoc
+              [ "ok", `Bool false
+              ; "action", `String action_str
+              ; "name", `String name
+              ; "error", `String "keeper meta not found"
+              ])
+           reqd
+       | Error error, false ->
+         Log.Keeper.warn
+           "directive %s: read_meta failed for %s (best-effort proceed): %s"
+           action_str
+           name
+           error;
+         proceed None
+       | Ok None, false -> proceed None
+       | Ok (Some meta), _ -> proceed (Some meta))
 
-(** Bulk variant of [handle_keeper_directive_post].
-    Accepts [{names: [name, ...], action: "pause"|"resume"|"wakeup"}].
-    Each keeper goes through the same meta read / persist / dispatch path
-    as the per-name handler, but cache invalidation runs once at the end.
-    This avoids N round-trip latency and N×cache-rebuild cost when an
-    operator wants to (re)pause the whole fleet from the dashboard.
-    @since 0.20.0 *)
-let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_str =
+(** Bulk variant of [handle_keeper_directive_post]. Pause and wakeup accept
+    [{names: [name, ...]}]. Resume accepts exact per-owner
+    [{targets: [{name, owner_generation, operator_operation_id}, ...]}] fences.
+    Cache invalidation still runs once for the whole batch. *)
+let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let parsed =
     try
       let json = Yojson.Safe.from_string body_str in
-      let names_list =
-        match Json_util.assoc_member_opt "names" json with
-        | Some (`List items) ->
-            List.filter_map
-              (function
-                | `String s when is_valid_keeper_name s -> Some s
-                | _ -> None)
-              items
-            |> List.sort_uniq String.compare
-        | None | Some _ -> []
-      in
-      let action_result =
-        match Safe_ops.json_string_opt "action" json with
-        | Some "pause" -> Ok Keeper_directive.Pause
-        | Some "resume" -> Ok Keeper_directive.Resume
-        | Some "wakeup" -> Ok Keeper_directive.Wakeup
-        | Some a ->
-            Error
-              (Printf.sprintf
-                 "invalid action %S: expected pause, resume, or wakeup" a)
-        | None -> Error "missing \"action\" field"
-      in
-      match action_result with
-      | Error e -> Error e
-      | Ok _ when names_list = [] ->
-          Error "names must be a non-empty list of valid keeper names"
-      | Ok action -> Ok (names_list, action)
+      parse_bulk_directive_json json
     with Yojson.Json_error e ->
       Error (Printf.sprintf "invalid json: %s" (String.escaped e))
   in
@@ -1183,92 +1287,79 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       Http.Response.json_value ~status:`Bad_request
         (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
-  | Ok (names, directive) ->
-      let config = (Mcp_server.workspace_config state) in
-      let action_str = directive_action_to_string directive in
-      let needs_meta =
-        match directive with
-        | Keeper_directive.Pause | Keeper_directive.Resume -> true
-        | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> false
-      in
-      let process_one name =
-        let read_result = Keeper_meta_store.read_meta config name in
-        let meta_opt =
-          match read_result with
-          | Ok (Some m) -> Some m
-          | Ok None | Error _ -> None
-        in
-        match read_result, needs_meta with
-        | Error err, true ->
-            `Assoc
-              [
-                ("name", `String name);
-                ("ok", `Bool false);
-                ( "error",
-                  `String (Printf.sprintf "read_meta failed: %s" err) );
-              ]
-        | Ok None, true ->
-            `Assoc
-              [
-                ("name", `String name);
-                ("ok", `Bool false);
-                ("error", `String "keeper meta not found");
-              ]
-        | Error _, false | Ok None, false | Ok (Some _), _ ->
-            let target_paused =
-              match directive with
-              | Keeper_directive.Pause -> Some true
-              | Keeper_directive.Resume -> Some false
-              | Keeper_directive.Wakeup | Keeper_directive.Assign_task _ -> None
-            in
-            (match
-               match directive with
-               | Keeper_directive.Resume ->
-                 ensure_registered_for_resume ~sw ~clock state agent_name name
-               | Keeper_directive.Pause | Keeper_directive.Wakeup
-               | Keeper_directive.Assign_task _ -> Ok `Already_registered
-             with
-             | Error err ->
+  | Ok parsed ->
+      let config = Mcp_server.workspace_config state in
+      let action_str, requested_count, results =
+        match parsed with
+        | Bulk_resume_owner targets ->
+          let process_target target =
+            match run_resume_owner config ~name:target.name target.request with
+            | Error error ->
+              `Assoc
+                [ "name", `String target.name
+                ; "ok", `Bool false
+                ; "committed", `Bool false
+                ; "error", `String (Keeper_paused_work_resume_transaction.error_to_string error)
+                ]
+            | Ok success -> resume_result_json ~name:target.name success
+          in
+          "resume", List.length targets, List.map process_target targets
+        | Bulk_plain { names; directive = plain_directive } ->
+          let action_str = plain_directive_action plain_directive in
+          let directive = plain_directive_to_keeper_directive plain_directive in
+          let needs_meta =
+            match plain_directive with
+            | Plain_pause -> true
+            | Plain_wakeup -> false
+          in
+          let process_name name =
+            let read_result = Keeper_meta_store.read_meta config name in
+            match read_result, needs_meta with
+            | Error error, true ->
+              `Assoc
+                [ "name", `String name
+                ; "ok", `Bool false
+                ; "error", `String (Printf.sprintf "read_meta failed: %s" error)
+                ]
+            | Ok None, true ->
+              `Assoc
+                [ "name", `String name
+                ; "ok", `Bool false
+                ; "error", `String "keeper meta not found"
+                ]
+            | Error _, false | Ok None, false | Ok (Some _), _ ->
+              let meta_opt =
+                match read_result with
+                | Ok meta -> meta
+                | Error _ -> None
+              in
+              let persist_result =
+                match plain_directive, meta_opt with
+                | Plain_pause, Some meta ->
+                  persist_directive_pause ~config ~name meta
+                | Plain_pause, None | Plain_wakeup, _ -> Ok ()
+              in
+              (match persist_result with
+               | Error error ->
                  `Assoc
-                   [ ("name", `String name); ("ok", `Bool false); ("error", `String err) ]
-             | Ok registration_state ->
-                 let persist_result =
-                   match directive, registration_state, target_paused, meta_opt with
-                   | Keeper_directive.Resume, `Booted_missing_registry, _, _ -> Ok ()
-                   | _, _, Some target, Some meta
-                     when should_persist_directive_paused_state directive meta target
-                     ->
-                       persist_directive_paused_state
-                         ~config
-                         ~name
-                         ~action_str
-                         directive
-                         meta
-                         target
-                   | _ -> Ok ()
+                   [ "name", `String name
+                   ; "ok", `Bool false
+                   ; "error", `String error
+                   ]
+               | Ok () ->
+                 let resolved_agent_name =
+                   match Keeper_registry_lookup.find_by_name name, meta_opt with
+                   | Some entry, _ -> entry.meta.agent_name
+                   | None, Some meta -> meta.agent_name
+                   | None, None -> Keeper_identity.keeper_agent_name name
                  in
-                 (match persist_result with
-                  | Error err ->
-                      `Assoc
-                        [
-                          ("name", `String name);
-                          ("ok", `Bool false);
-                          ("error", `String err);
-                        ]
-                  | Ok () ->
-                      let resolved_agent_name =
-                        match Keeper_registry_lookup.find_by_name name with
-                        | Some entry -> entry.meta.agent_name
-                        | None -> (
-                            match meta_opt with
-                            | Some meta -> meta.agent_name
-                            | None -> Keeper_identity.keeper_agent_name name)
-                      in
-                      Keeper_keepalive.process_directive
-                        ~agent_name:resolved_agent_name directive;
-                      `Assoc [ ("name", `String name); ("ok", `Bool true) ]))
+                 Keeper_keepalive.process_directive
+                   ~agent_name:resolved_agent_name
+                   directive;
+                 `Assoc [ "name", `String name; "ok", `Bool true ])
+          in
+          action_str, List.length names, List.map process_name names
       in
-      let results = List.map process_one names in
       let ok_count =
         List.fold_left
           (fun acc r ->
@@ -1277,9 +1368,18 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
             | _ -> acc)
           0 results
       in
-      let requested_count = List.length names in
       let failed_count = requested_count - ok_count in
-      if ok_count > 0 then invalidate_keeper_execution_surfaces ~config ();
+      let committed_count =
+        List.fold_left
+          (fun acc result ->
+             match Json_util.assoc_member_opt "committed" result with
+             | Some (`Bool true) -> acc + 1
+             | _ -> acc)
+          0
+          results
+      in
+      if ok_count > 0 || committed_count > 0
+      then invalidate_keeper_execution_surfaces ~config ();
       let response =
         `Assoc
           [
@@ -1293,6 +1393,9 @@ let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_
       in
       if failed_count = 0 then
         Http.Response.json_value ~compress:true ~request:req response reqd
+      else if committed_count > 0 then
+        Http.Response.json_value ~status:`Accepted ~compress:true
+          ~request:req response reqd
       else
         Http.Response.json_value ~status:`Internal_server_error ~compress:true
           ~request:req response reqd

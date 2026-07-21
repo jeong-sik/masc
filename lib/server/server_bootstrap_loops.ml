@@ -1359,12 +1359,30 @@ let start_keeper_loops_owned
         masc_root
         keeper_dir
         all_count;
-      let names =
-        Keeper_runtime.bootable_keeper_names config
-        |> List.filter (fun name ->
-          not (Keeper_name_set.mem name shutdown_blocked_names))
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      (* A keeper filtered out here is config-bootable but its admission is
+         still owned by a durable shutdown operation from the boot scan.
+         Stamp it into the excluded list instead of dropping it silently —
+         the 2026-07-21 wedge left rondo absent from both the boot set and
+         the excluded list, so the outage was invisible in the autoboot
+         report. Boot recovery settles recoverable operations in this same
+         bootstrap, after which the supervisor's periodic pass registers the
+         keeper; this snapshot stays honest about what autoboot itself saw. *)
+      let names, shutdown_fenced_exclusions =
+        List.partition_map
+          (fun name ->
+             if Keeper_name_set.mem name shutdown_blocked_names
+             then
+               Either.Right
+                 Keeper_runtime.
+                   { keeper_name = name; reason = Shutdown_admission_fence }
+             else Either.Left name)
+          bootable_names
       in
-      let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        @ shutdown_fenced_exclusions
+      in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "keeper-autoboot"

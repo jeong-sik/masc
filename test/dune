@@ -2014,6 +2014,8 @@
 
 (include stanzas/test_shutdown_flag.inc)
 
+(include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
+
 (include stanzas/test_log_file_sink_self_heal.inc)
 
 (include stanzas/test_limit_schema_widen.inc)

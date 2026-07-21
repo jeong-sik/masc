@@ -698,8 +698,17 @@ let dispatch_option_to_execution ~name = function
 ;;
 
 let handle_masc_task_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  (* Task actor identity must match the claim path, which acts as
+     [meta.agent_name] (keeper_tool_task_runtime.ml claim_next_r). Passing
+     [meta.name] here made a keeper a stranger to its own claims:
+     [same_task_actor] compares raw strings, so release/done on a task the
+     same physical keeper claimed was refused with
+     [task_release_requires_current_owner] — whose tool_suggestion then
+     prescribed keeper_board_post every wake (the 2026-07-18 40× duplicate
+     board post loop, executor/task-2296). Root ratchet stays open: fold both
+     spellings into one typed actor id so the mismatch is unrepresentable. *)
   let ctx : Task.Tool.context =
-    { config; agent_name = meta.name; sw = None }
+    { config; agent_name = Keeper_tool_shared_runtime.keeper_agent_sender ~meta; sw = None }
   in
   Task.Tool.dispatch_for_keeper ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;

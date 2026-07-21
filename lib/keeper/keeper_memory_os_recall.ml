@@ -315,18 +315,21 @@ let render_context_exn ~keeper_id ~now () =
       ~rendered_bytes:(fact_bytes + episode_bytes)
       ~byte_budget:max_bytes
   in
+  (* An empty store still renders the wrapper: the gauge ("facts 0/0
+     injected") and the "anything that should survive belongs in a fact"
+     advisory are exactly what a cold-start keeper needs to begin writing
+     memory. Short-circuiting to an empty block here meant the keepers with
+     nothing stored — the ones the RFC-0351 L1 nudge targets most — never
+     saw the gauge at all. *)
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
-    match facts, episodes with
-    | [], [] -> "", [], [], None
-    | _ ->
-      (match render_recall_context ~gauge_line ~fact_lines ~episode_lines with
-       | Ok context -> context, injected_fact_keys, injected_episode_keys, None
-       | Error msg ->
-         Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-         ( render_unavailable_context Prompt_render_error
-         , []
-         , []
-         , Some Prompt_render_error ))
+    match render_recall_context ~gauge_line ~fact_lines ~episode_lines with
+    | Ok context -> context, injected_fact_keys, injected_episode_keys, None
+    | Error msg ->
+      Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
+      ( render_unavailable_context Prompt_render_error
+      , []
+      , []
+      , Some Prompt_render_error )
   in
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;

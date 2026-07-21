@@ -869,7 +869,7 @@ let start_keepalive
              m
        with
        | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-         Log.Keeper.info
+         Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);

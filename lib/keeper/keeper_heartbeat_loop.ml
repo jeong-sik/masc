@@ -264,33 +264,69 @@ let failure_judgment_successor
   }
 ;;
 
-let settlement_of_failure ~settled_at failure =
+let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
+  let follow_route () =
+    match failure.Keeper_unified_turn.route with
+    | Keeper_runtime_failure_route.Retry_after_observed _ ->
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Retry_after_observed
+    | Keeper_runtime_failure_route.Rotate_now _ ->
+      Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+    | Keeper_runtime_failure_route.Escalate_judgment
+        { judgment; provenance; detail } ->
+      Keeper_registry_event_queue.Escalate
+        { reason = Keeper_registry_event_queue.Failure_judgment_requested
+        ; successor =
+            Some
+              (failure_judgment_successor
+                 ~arrived_at:settled_at
+                 failure
+                 judgment
+                 provenance
+                 detail)
+        }
+  in
+  (* RFC-0351 S0 / #25461: this failure is the
+     [compaction_consecutive_failures + 1]-th compaction failure in a row when
+     the disposition carries an in-lane compaction outcome; the counter itself
+     is advanced by [compaction_outcome_of_cycle_outcome] on
+     [keeper_meta.runtime.compaction_rt] after the settlement is decided. *)
+  let attempts = compaction_consecutive_failures + 1 in
+  let escalate_exhausted detail =
+    Keeper_registry_event_queue.Escalate
+      { reason =
+          Keeper_registry_event_queue.Compaction_retry_exhausted
+            { attempts; detail }
+      ; successor = None
+      }
+  in
   match failure.Keeper_unified_turn.source_lease_disposition with
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
-  | Keeper_unified_turn.Requeue_after_context_compaction ->
+  | Keeper_unified_turn.Requeue_after_context_compaction
+      Keeper_unified_turn.Compaction_committed ->
     Keeper_registry_event_queue.Requeue
       Keeper_registry_event_queue.Context_compaction_retry
-  | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.route with
-     | Keeper_runtime_failure_route.Retry_after_observed _ ->
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Retry_after_observed
-     | Keeper_runtime_failure_route.Rotate_now _ ->
-       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-     | Keeper_runtime_failure_route.Escalate_judgment
-         { judgment; provenance; detail } ->
-       Keeper_registry_event_queue.Escalate
-         { reason = Keeper_registry_event_queue.Failure_judgment_requested
-         ; successor =
-             Some
-               (failure_judgment_successor
-                  ~arrived_at:settled_at
-                  failure
-                  judgment
-                  provenance
-                  detail)
-         })
+  | Keeper_unified_turn.Requeue_after_context_compaction
+      (Keeper_unified_turn.Compaction_attempt_failed _) ->
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      escalate_exhausted
+        "in-lane provider-overflow compaction failed on consecutive attempts; \
+         retry suspended pending operator inspection"
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Context_compaction_retry
+  | Keeper_unified_turn.Follow_failure_route_after_no_compaction { reason } ->
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      escalate_exhausted
+        (Printf.sprintf
+           "in-lane provider-overflow compaction terminally declined (%s) on \
+            consecutive attempts; retry suspended pending operator inspection"
+           (Keeper_event_queue_state.no_compaction_reason_label reason))
+    else follow_route ()
+  | Keeper_unified_turn.Follow_failure_route -> follow_route ()
 ;;
 
 let single_approved_resolution lease =
@@ -303,13 +339,15 @@ let single_approved_resolution lease =
   | [] | [ _ ] | _ :: _ :: _ -> None
 ;;
 
-(* RFC-0351 S0 / #25461: consecutive manual-compaction failures tolerated before
-   the settlement escalates instead of requeuing. A requeue is not an ack, so
+(* RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
+   settlement escalates instead of requeuing. A requeue is not an ack, so
    without a ceiling the same stimulus re-enters on every heartbeat cycle —
    measured at 102 failures / 104 compaction LLM calls in 74 minutes after the
-   #25413 build went live. Three attempts keeps a transient CAS/source race
-   recoverable while bounding a structurally-stuck compaction. *)
-let compaction_retry_escalation_threshold = 3
+   #25413 build went live. The constant lives in [Keeper_meta_contract] next to
+   the [consecutive_failures] field it interprets, shared with the
+   status/dashboard projections. *)
+let compaction_retry_escalation_threshold =
+  Keeper_meta_contract.compaction_retry_escalation_threshold
 
 let settlement_of_cycle_outcome
       ~base_path
@@ -374,7 +412,7 @@ let settlement_of_cycle_outcome
   | Some (Cycle.Busy _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cycle_busy
   | Some (Cycle.Failed { failure; _ }) ->
-    settlement_of_failure ~settled_at failure
+    settlement_of_failure ~settled_at ~compaction_consecutive_failures failure
   | Some (Cycle.Judgment_settled { outcome; _ }) ->
     (match outcome with
      | Cycle.Judgment_boundary_failed { detail } ->
@@ -420,6 +458,40 @@ let settlement_of_cycle_outcome
       Keeper_registry_event_queue.Requeue
         Keeper_registry_event_queue.Turn_not_scheduled
     )
+;;
+
+(* RFC-0351 S0 / #25461: pure mapping from a settled cycle outcome to the
+   compaction-streak stamp on [keeper_meta.runtime.compaction_rt]. The manual
+   lane counts [Manual_compaction_applied]/[Manual_compaction_failed]; the
+   in-lane provider-overflow recovery joins the same streak through the
+   failure's disposition so the settlement can bound its retries too. A
+   terminal in-lane no-compaction counts as a failure — unlike the manual
+   lane, where the terminal reason acks and consumes the compaction stimulus,
+   the in-lane source lease carries a product event that requeues, so the same
+   terminal reason re-fires on every retry. Dispositions with no in-lane
+   compaction involvement leave the streak untouched: a generic turn failure
+   proves nothing about compaction progress in either direction. *)
+let compaction_outcome_of_cycle_outcome = function
+  | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
+  | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failure.Keeper_unified_turn.source_lease_disposition with
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         Keeper_unified_turn.Compaction_committed -> Some `Committed
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         (Keeper_unified_turn.Compaction_attempt_failed _)
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
+       Some `Failed
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> None)
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _
+      | Cycle.Busy _
+      | Cycle.Judgment_settled _
+      | Cycle.Manual_compaction_not_applied _ )
+  | None -> None
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
@@ -841,9 +913,10 @@ let run_keepalive_unified_turn
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.source_lease_disposition with
-             | Keeper_unified_turn.Requeue_after_context_compaction
+             | Keeper_unified_turn.Requeue_after_context_compaction _
              | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
-             | Keeper_unified_turn.Follow_failure_route ->
+             | Keeper_unified_turn.Follow_failure_route
+             | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
                (match failure.Keeper_unified_turn.route with
                 | Keeper_runtime_failure_route.Escalate_judgment
                     { judgment; provenance; detail } ->
@@ -907,18 +980,7 @@ let run_keepalive_unified_turn
             requeue-vs-escalate from the streak *before* this failure, and this
             stamp records the failure for the next cycle. *)
          (let compaction_outcome =
-            match !cycle_outcome_ref with
-            | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
-            | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
-            | Some
-                ( Cycle.Completed _
-                | Cycle.Cancelled _
-                | Cycle.Skipped _
-                | Cycle.Busy _
-                | Cycle.Failed _
-                | Cycle.Judgment_settled _
-                | Cycle.Manual_compaction_not_applied _ )
-            | None -> None
+            compaction_outcome_of_cycle_outcome !cycle_outcome_ref
           in
           match compaction_outcome with
           | None -> ()

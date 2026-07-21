@@ -64,10 +64,24 @@ type compaction_runtime = {
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
   consecutive_failures : int;
-      (** RFC-0351 S0 / #25461: consecutive manual-compaction failures.  Reset to
-          0 on a committed compaction; the heartbeat settlement escalates instead
-          of requeuing once it reaches the escalation threshold. *)
+      (** RFC-0351 S0 / #25461: consecutive compaction failures across the
+          manual lane and the in-lane provider-overflow recovery.  Reset to 0
+          on a committed compaction from either lane; the heartbeat settlement
+          escalates instead of requeuing once it reaches
+          {!compaction_retry_escalation_threshold}. *)
 }
+
+val compaction_retry_escalation_threshold : int
+(** RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
+    settlement escalates ([Compaction_retry_exhausted]) instead of retrying.
+    Single definition shared by the heartbeat settlement and the
+    status/dashboard projections. *)
+
+val compaction_retry_suspended : compaction_runtime -> bool
+(** [true] once the persisted failure streak has reached
+    {!compaction_retry_escalation_threshold} — the settlement has stopped
+    retrying compaction for this keeper and each further stimulus escalates
+    after a single bounded attempt, pending operator inspection. *)
 
 type proactive_runtime = {
   count_total : int;

@@ -3089,7 +3089,6 @@ module For_testing = struct
   let chat_speaker_of_request = chat_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
-  let modalities_for_request = modalities_for_request
   let defer_dashboard_payload_if_busy_evidence
         ~base_path
         ~clock
@@ -3121,8 +3120,6 @@ module For_testing = struct
   let committed_delivery_outcome = committed_delivery_outcome
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
-  let empty_stream_bridge_state = empty_keeper_stream_bridge_state
-  let translate_oas_stream_event = translate_oas_stream_event
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers
   let worker_settlement_terminal_body ~staged_body settlement =

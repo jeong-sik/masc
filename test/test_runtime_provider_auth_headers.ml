@@ -1030,7 +1030,7 @@ let assert_dashboard_runtime_probe_reachable runtime =
            , [ "content-type", "application/json" ]
            , {|{"data":[{"id":"qwen"}]}|} ))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let reachable_provider = first_provider_probe reachable_json in
@@ -1059,7 +1059,7 @@ let assert_dashboard_runtime_probe_missing_auth runtime =
       ~finally:(fun () ->
         Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -1088,7 +1088,7 @@ let assert_dashboard_runtime_probe_redacts_url_credentials () =
     with_dashboard_probe_http_get
       (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in

@@ -402,6 +402,83 @@ let test_board_attention_batch_schema_uses_contract_ssot () =
     (allows_additional_properties schema)
 ;;
 
+
+(* Regression guard for #25494. The deterministic subcall shape used to be
+   hand-copied at each site; the second site's comment read "Mirror the
+   librarian tuning". Thinking suppression is the load-bearing part —
+   reasoning-capable providers otherwise spend the whole output budget on
+   thinking and return empty visible text (consolidation logged 256
+   consecutive Empty_response outcomes that way on 2026-07-20). These pin
+   the fields so removing the suppression from the shared helper fails here
+   instead of silently at one call site. *)
+
+let base_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Anthropic
+    ~model_id:"fake"
+    ~base_url:"http://localhost"
+    ()
+;;
+
+let test_deterministic_subcall_suppresses_thinking () =
+  let cfg =
+    Keeper_structured_output_schema.for_deterministic_subcall
+      ~max_tokens:(Some 512)
+      (base_provider_cfg ())
+  in
+  check
+    (option bool)
+    "enable_thinking must be explicitly false"
+    (Some false)
+    cfg.Llm_provider.Provider_config.enable_thinking;
+  check
+    (option bool)
+    "preserve_thinking must be explicitly false"
+    (Some false)
+    cfg.Llm_provider.Provider_config.preserve_thinking;
+  check
+    (option bool)
+    "clear_thinking must be explicitly true"
+    (Some true)
+    cfg.Llm_provider.Provider_config.clear_thinking;
+  check
+    bool
+    "thinking_budget must be cleared"
+    true
+    (cfg.Llm_provider.Provider_config.thinking_budget = None)
+;;
+
+let test_deterministic_subcall_disables_tool_surface () =
+  let cfg =
+    Keeper_structured_output_schema.for_deterministic_subcall
+      ~max_tokens:None
+      (base_provider_cfg ())
+  in
+  check
+    bool
+    "tool_choice must be cleared"
+    true
+    (cfg.Llm_provider.Provider_config.tool_choice = None);
+  check
+    bool
+    "parallel tool use must be disabled"
+    true
+    cfg.Llm_provider.Provider_config.disable_parallel_tool_use
+;;
+
+let test_deterministic_subcall_passes_max_tokens_through () =
+  let cfg =
+    Keeper_structured_output_schema.for_deterministic_subcall
+      ~max_tokens:(Some 8192)
+      (base_provider_cfg ())
+  in
+  check
+    (option int)
+    "max_tokens is the caller's, not the helper's"
+    (Some 8192)
+    cfg.Llm_provider.Provider_config.max_tokens
+;;
+
 let () =
   run
     "keeper-structured-output-schema"
@@ -462,6 +539,20 @@ let () =
             "Board attention batch schema uses contract SSOT"
             `Quick
             test_board_attention_batch_schema_uses_contract_ssot
+        ] )
+    ; ( "deterministic_subcall_shape"
+      , [ test_case
+            "thinking is suppressed"
+            `Quick
+            test_deterministic_subcall_suppresses_thinking
+        ; test_case
+            "tool surface is disabled"
+            `Quick
+            test_deterministic_subcall_disables_tool_surface
+        ; test_case
+            "max_tokens passes through"
+            `Quick
+            test_deterministic_subcall_passes_max_tokens_through
         ] )
     ]
 ;;

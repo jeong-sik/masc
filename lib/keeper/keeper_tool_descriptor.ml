@@ -2048,13 +2048,6 @@ let keeper_safe_inline_names () =
   |> List.sort_uniq String.compare
 ;;
 
-let polling_read_internal_names () =
-  all_descriptors ()
-  |> List.concat_map (fun d ->
-       if d.policy.polling_read then internal_names d else [])
-  |> List.sort_uniq String.compare
-;;
-
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
@@ -2150,8 +2143,4 @@ let discovery_fields d =
      [ "transport_alias_of", `String projected_by ]
    | Preferred_public_name | Internal_name -> [])
   @ examples_field
-;;
-
-let discovery_json d =
-  `Assoc (discovery_fields d)
 ;;

@@ -204,14 +204,6 @@ let handle_read_file_with_outcome
          (error_json ~fields:[ "path", `String target ] msg))
 ;;
 
-let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
-  (handle_read_file_with_outcome
-     ~turn_sandbox_factory
-     ~config
-     ~meta
-     ~args).raw_output
-;;
-
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
    multi-edits are rejected (mirrors Edit semantics). *)
@@ -521,7 +513,6 @@ type append_write_outcome = Fs_compat.capability_append_outcome =
   }
 
 type content_write_error =
-  | Content_write_message of string
   | Content_write_capability of
       { error : Fs_compat.capability_write_error
       ; created_parents : created_directory_commit list
@@ -1687,15 +1678,6 @@ let content_write_observation = function
             , `String (append_target_effect_to_string target_effect) )
           ]
     }
-  | Error (Content_write_message _) ->
-    { execution = Publication_write_indeterminate
-    ; publication_result =
-        `Assoc
-          [ "outcome", `String "failure"
-          ; "failure_class", `String "runtime_failure"
-          ; "filesystem_target_effect", `String "not_observed"
-          ]
-    }
 ;;
 
 let handle_file_write_with_outcome
@@ -1848,7 +1830,6 @@ let handle_file_write_with_outcome
     @@ fun () ->
     let finish_write_result result =
       match result with
-    | Error (Content_write_message message) -> Error message
     | Error (Content_write_capability { error; created_parents }) ->
       List.iter
         (observe_created_directory_commit
@@ -2184,7 +2165,6 @@ let handle_file_write_with_outcome
                 @@ fun () ->
                 let finish_write_result result =
                   match result with
-                | Error (Content_write_message message) -> Error message
                 | Error (Content_write_capability { error; created_parents }) ->
                   List.iter
                     (observe_created_directory_commit
@@ -2407,29 +2387,6 @@ let handle_file_write_with_outcome
         ~make_effect:Keeper_alerting_path.atomic_replace_effect
     | Some Append -> handle_append ()
   )
-;;
-
-let handle_file_write
-      ~turn_sandbox_factory
-      ~config
-      ~meta
-      ~publication_recovery
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~args
-      ()
-  =
-  (handle_file_write_with_outcome
-     ~turn_sandbox_factory
-     ~config
-     ~meta
-     ~publication_recovery
-     ?continuation_channel
-     ?gate_context
-     ?gate_grant
-     ~args
-     ()).raw_output
 ;;
 
 module For_testing = struct

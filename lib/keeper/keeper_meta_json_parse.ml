@@ -160,6 +160,8 @@ let parse_compaction_runtime (json : Yojson.Safe.t) : compaction_runtime =
   ; last_decision =
       Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
       |> compaction_runtime_decision_of_string
+  ; consecutive_failures =
+      Safe_ops.json_int ~default:0 "compaction_consecutive_failures" json
   }
 ;;
 

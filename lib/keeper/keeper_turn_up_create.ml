@@ -243,6 +243,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_after_tokens = 0;
             last_check_ts = now_ts;
             last_decision = compaction_runtime_decision_of_string "initialized";
+            consecutive_failures = 0;
           };
           proactive_rt = {
             count_total = 0;

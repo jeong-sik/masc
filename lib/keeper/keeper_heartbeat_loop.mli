@@ -134,11 +134,20 @@ val settlement_of_cycle_outcome :
   base_path:string ->
   settled_at:float ->
   stop_requested:bool ->
+  compaction_consecutive_failures:int ->
   lease:Keeper_registry_event_queue.lease ->
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   Keeper_registry_event_queue.settlement
 (** Pure lease settlement boundary. Completed work acknowledges; typed
-    cancellation and non-executable-phase skips requeue. *)
+    cancellation and non-executable-phase skips requeue.
+
+    [compaction_consecutive_failures] is the keeper's current failure streak
+    from [keeper_meta.runtime.compaction_rt]. A manual-compaction failure
+    settles as [Escalate Compaction_retry_exhausted] once this failure would
+    reach the escalation threshold, and as
+    [Requeue Context_compaction_retry] below it — a requeue is not an ack, so
+    without the ceiling the same stimulus re-enters every cycle (RFC-0351 S0,
+    #25461). *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result

@@ -250,3 +250,17 @@ val persist_compaction_decision :
   keeper_name:string ->
   decision:Keeper_meta_contract.compaction_runtime_decision ->
   ([ `Persisted | `No_durable_meta ], string) result
+
+val persist_compaction_outcome :
+  Workspace.config ->
+  keeper_name:string ->
+  outcome:[ `Committed | `Failed ] ->
+  ([ `Persisted | `No_durable_meta ], string) result
+(** Advance the compaction outcome counters on [compaction_rt] using the same
+    read/stamp/merge shape as {!persist_compaction_decision}.
+
+    [`Committed] increments [count] and resets [consecutive_failures] to 0;
+    [`Failed] increments [consecutive_failures]. The streak is what
+    {!settlement_of_cycle_outcome} reads to escalate instead of requeuing a
+    failing compaction (RFC-0351 S0, #25461); [count] had no writer before this
+    despite being serialized and rendered. *)

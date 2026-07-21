@@ -22,6 +22,17 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+    (* RFC-0351 S0 / #25461: a failing manual compaction previously settled as
+       [Requeue Context_compaction_retry] with no attempt counter, so the same
+       stimulus re-entered on every heartbeat cycle (measured: 102 failures /
+       104 compaction LLM calls in 74 minutes). After
+       [compaction_retry_escalation_threshold] consecutive failures the
+       settlement escalates instead, surfacing the blocker rather than
+       re-firing. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -54,7 +65,8 @@ type accepted_transfer =
 let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
-  | Failure_judgment_boundary_failed _ -> false
+  | Failure_judgment_boundary_failed _
+  | Compaction_retry_exhausted _ -> false
 ;;
 
 type settlement =
@@ -298,6 +310,7 @@ let escalation_reason_label = function
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
+  | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -309,6 +322,8 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
+  | Compaction_retry_exhausted { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
 ;;
 
 let required_nonempty_reason_string ~context name fields =
@@ -353,6 +368,28 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Failure_judgment_boundary_failed { detail })
+  | "compaction_retry_exhausted", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"compaction_retry_exhausted"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "compaction_retry_exhausted.attempts must be positive"
+      | Some _ -> Error "compaction_retry_exhausted.attempts must be an int"
+      | None -> Error "compaction_retry_exhausted.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"compaction_retry_exhausted"
+        "detail"
+        fields
+    in
+    Ok (Compaction_retry_exhausted { attempts; detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -517,6 +554,9 @@ let validate_settlement = function
       { reason = Failure_judgment_external_input_requested _; successor = Some _ }
     ->
     Error "external-input failure judgment must not enqueue a successor"
+  | Escalate { reason = Compaction_retry_exhausted _; successor = None } -> Ok ()
+  | Escalate { reason = Compaction_retry_exhausted _; successor = Some _ } ->
+    Error "compaction retry exhaustion must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle

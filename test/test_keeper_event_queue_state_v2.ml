@@ -1058,6 +1058,7 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
        ~base_path:"/tmp/no-compaction-manual"
        ~settled_at:2.0
        ~stop_requested:false
+       ~compaction_consecutive_failures:0
        ~lease
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
@@ -1099,6 +1100,7 @@ let test_applied_compaction_settles_followup_atomically () =
       ~base_path:(Sys.getcwd ())
       ~settled_at:8.0
       ~stop_requested:false
+      ~compaction_consecutive_failures:0
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
@@ -1134,6 +1136,54 @@ let test_applied_compaction_settles_followup_atomically () =
   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
 ;;
 
+(* RFC-0351 S0 / #25461: a manual-compaction failure requeues while the streak
+   is under the ceiling and settles terminally at it. Without the ceiling the
+   stimulus re-enters on every heartbeat cycle, because [Requeue] is not an ack
+   (measured: 102 failures / 104 compaction LLM calls in 74 minutes). *)
+let test_compaction_retry_escalates_after_threshold () =
+  let lease = lease_for (stimulus "compaction-retry" 1.0) in
+  let meta = cycle_meta () in
+  let failed =
+    Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_failed
+      { meta
+      ; failure =
+          Masc.Keeper_manual_compaction.Recovery
+            ( Masc.Keeper_post_turn.Checkpoint_candidate_failed
+                "test-induced candidate failure"
+            , Ok () )
+      }
+  in
+  let settlement ~streak =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path:"/tmp/compaction-retry-ceiling"
+      ~settled_at:2.0
+      ~stop_requested:false
+      ~compaction_consecutive_failures:streak
+      ~lease
+      (Some failed)
+  in
+  let expect_requeue ~streak label =
+    match settlement ~streak with
+    | Masc.Keeper_registry_event_queue.Requeue
+        Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      ()
+    | _ -> Alcotest.fail label
+  in
+  expect_requeue ~streak:0 "first compaction failure did not requeue";
+  expect_requeue ~streak:1 "second compaction failure did not requeue";
+  match settlement ~streak:2 with
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason =
+          Masc.Keeper_registry_event_queue.Compaction_retry_exhausted
+            { attempts; _ }
+      ; successor = None
+      } ->
+    Alcotest.(check int) "escalation reports the attempt count" 3 attempts
+  | _ ->
+    Alcotest.fail
+      "third consecutive compaction failure requeued instead of escalating"
+;;
+
 let test_cancelled_and_skipped_cycles_requeue () =
   let lease = lease_for (stimulus "phase-gated" 1.0) in
   let meta = cycle_meta () in
@@ -1142,6 +1192,7 @@ let test_cancelled_and_skipped_cycles_requeue () =
       ~base_path:"/tmp/non-approval-cycle"
       ~settled_at:2.0
       ~stop_requested:false
+      ~compaction_consecutive_failures:0
       ~lease
       (Some outcome)
   in
@@ -1973,6 +2024,10 @@ let () =
             "cancelled and skipped cycles requeue"
             `Quick
             test_cancelled_and_skipped_cycles_requeue
+        ; Alcotest.test_case
+            "compaction retry escalates after threshold"
+            `Quick
+            test_compaction_retry_escalates_after_threshold
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick

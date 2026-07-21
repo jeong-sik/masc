@@ -7,7 +7,9 @@
     {!Keeper_dead_revival_transaction}; this module deliberately contains no
     MASC/OAS runtime policy. *)
 
-type purpose = Keeper_registry_types.lifecycle_transaction_purpose = Dead_revival
+type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
+  | Dead_revival
+  | Paused_work_disposition
 
 type token
 

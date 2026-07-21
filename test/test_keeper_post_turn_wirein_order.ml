@@ -188,8 +188,8 @@ let test_manual_compaction_serializes_owner_lane () =
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
       Admission.For_testing.reset ();
-      Masc.Keeper_registry.unregister ~base_path meta.name;
-      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path meta.name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path peer.name;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
@@ -201,8 +201,8 @@ let test_manual_compaction_serializes_owner_lane () =
        | Ok () -> ()
        | Error detail -> failf "runtime fixture initialization failed: %s" detail);
       Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
-      let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
-      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      let owner_entry = Masc.Keeper_registry.For_testing.register ~base_path meta.name meta in
+      let peer_entry = Masc.Keeper_registry.For_testing.register ~base_path peer.name peer in
       Atomic.set owner_entry.fiber_wakeup false;
       Atomic.set peer_entry.fiber_wakeup false;
       let checkpoint =

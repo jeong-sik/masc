@@ -1488,19 +1488,23 @@ let test_librarian_runtime_appends_episode_bundle () =
              "thinking preservation disabled"
              (Some false)
              provider_cfg.Llm_provider.Provider_config.preserve_thinking;
-           let expected_schema = Structured_schema.librarian_episode_output_schema in
+           (* The contract lives in the prompt and in
+              [Keeper_librarian.episode_of_json_result], not in a wire format.
+              Reattaching the schema here would resurrect a concrete failure:
+              it marks every claim field required with nullable types, so a
+              conforming provider emits ["claim_id": null], which
+              [optional_string_field_strict] rejects — dropping the whole
+              episode — while the prompt tells the model to omit the key. *)
            Alcotest.(check bool)
-             "librarian json schema response format"
+             "librarian requests no response format"
              true
              (match provider_cfg.response_format with
-              | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
-              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-           Alcotest.(check (option bool))
-             "librarian output schema mirrors response format"
-             (Some true)
-             (Option.map
-                (Yojson.Safe.equal expected_schema)
-                provider_cfg.Llm_provider.Provider_config.output_schema);
+              | Agent_sdk.Types.Off -> true
+              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+           Alcotest.(check bool)
+             "librarian attaches no output schema"
+             true
+             (Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema);
            Alcotest.(check int) "system+user prompt" 2 (List.length messages);
            let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
            Alcotest.(check bool)
@@ -2275,6 +2279,179 @@ let test_gc_waits_for_fact_writer_lock () =
       (List.exists
          (fun f -> String.equal f.Types.claim "fresh writer fact committed under lock")
          survivors))))
+;;
+
+(* Episode-store retention sweep: the per-file episode store
+   ([keeper_id/episodes/*.json]) expires only episodes whose explicit
+   [valid_until] has passed — the same exact producer boundary the facts sweep
+   uses. Survivors stay byte-identical; a corrupt store aborts the sweep with
+   every file (even expired ones) left on disk. *)
+let episode_file_snapshot ~keeper_id =
+  let dir = Memory_io.episodes_dir ~keeper_id in
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter (fun name -> Filename.check_suffix name ".json")
+  |> List.sort String.compare
+  |> List.map (fun name ->
+    name, In_channel.with_open_bin (Filename.concat dir name) In_channel.input_all)
+;;
+
+let snapshot_entry_with_summary snapshot summary =
+  match List.find_opt (fun (_name, bytes) -> contains summary bytes) snapshot with
+  | Some entry -> entry
+  | None -> Alcotest.fail ("missing episode file containing summary: " ^ summary)
+;;
+
+let episode_retention_metric_value keeper_id =
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string MemoryOsEpisodeRetentionPruned)
+    ~labels:[ "keeper", keeper_id ]
+    ()
+;;
+
+let test_episode_gc_deletes_only_expired () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-gc-keeper" in
+    let now = 1_000_000.0 in
+    let expired_a =
+      { (episode_fixture
+           ~now
+           ~trace_id:"trace-expired-a"
+           ~generation:0
+           ~summary:"expired episode a")
+        with
+        Types.valid_until = Some (now -. 1.0)
+      }
+    in
+    let expired_b =
+      { (episode_fixture
+           ~now
+           ~trace_id:"trace-expired-b"
+           ~generation:0
+           ~summary:"expired episode b")
+        with
+        Types.valid_until = Some (now -. 2.0)
+      }
+    in
+    let current =
+      { (episode_fixture ~now ~trace_id:"trace-current" ~generation:0 ~summary:"current episode") with
+        Types.valid_until = Some (now +. 60.0)
+      }
+    in
+    let boundary =
+      { (episode_fixture ~now ~trace_id:"trace-boundary" ~generation:0 ~summary:"boundary episode") with
+        Types.valid_until = Some now
+      }
+    in
+    let indefinite =
+      episode_fixture ~now ~trace_id:"trace-indefinite" ~generation:0 ~summary:"indefinite episode"
+    in
+    List.iter
+      (Memory_io.append_episode ~keeper_id)
+      [ expired_a; expired_b; current; boundary; indefinite ];
+    let before = episode_file_snapshot ~keeper_id in
+    Alcotest.(check int) "five episode files on disk" 5 (List.length before);
+    let report = GC.run_episode_gc ~keeper_id ~now () in
+    Alcotest.(check int) "episodes total" 5 report.GC.episodes_total;
+    Alcotest.(check int) "episodes expired" 2 report.GC.episodes_expired;
+    Alcotest.(check int) "episodes deleted" 2 report.GC.episodes_deleted;
+    Alcotest.(check bool) "real sweep, not dry-run" false report.GC.dry_run;
+    let after = episode_file_snapshot ~keeper_id in
+    Alcotest.(check int) "three episode files survive" 3 (List.length after);
+    List.iter
+      (fun summary ->
+         let survivor = snapshot_entry_with_summary before summary in
+         Alcotest.(check bool)
+           (summary ^ " survives byte-identical")
+           true
+           (List.mem survivor after))
+      [ "current episode"; "boundary episode"; "indefinite episode" ];
+    Alcotest.(check (float 0.001))
+      "pruned metric counts exactly the deleted files"
+      2.0
+      (episode_retention_metric_value keeper_id)))
+;;
+
+let test_episode_gc_dry_run_reports_without_deleting () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-gc-dry-run-keeper" in
+    let now = 1_000_000.0 in
+    let expired =
+      { (episode_fixture
+           ~now
+           ~trace_id:"trace-expired"
+           ~generation:0
+           ~summary:"dry-run expired episode")
+        with
+        Types.valid_until = Some (now -. 1.0)
+      }
+    in
+    let live =
+      episode_fixture ~now ~trace_id:"trace-live" ~generation:0 ~summary:"dry-run live episode"
+    in
+    List.iter (Memory_io.append_episode ~keeper_id) [ expired; live ];
+    let before = episode_file_snapshot ~keeper_id in
+    let report = GC.run_episode_gc ~dry_run:true ~keeper_id ~now () in
+    Alcotest.(check bool) "dry-run flag" true report.GC.dry_run;
+    Alcotest.(check int) "episodes total" 2 report.GC.episodes_total;
+    Alcotest.(check int) "episodes expired reported" 1 report.GC.episodes_expired;
+    Alcotest.(check int) "dry-run deletes nothing" 0 report.GC.episodes_deleted;
+    Alcotest.(check (list (pair string string)))
+      "dry-run leaves every file byte-identical"
+      before
+      (episode_file_snapshot ~keeper_id);
+    Alcotest.(check (float 0.001))
+      "dry-run does not count prunes"
+      0.0
+      (episode_retention_metric_value keeper_id)))
+;;
+
+(* Preserve over delete, same rule as the facts sweep: one malformed episode
+   file aborts the sweep and even expired files stay on disk — the error
+   surfaces instead of a corrupt store being silently pruned around. *)
+let test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-gc-corrupt-keeper" in
+    let now = 1_000_000.0 in
+    let expired =
+      { (episode_fixture
+           ~now
+           ~trace_id:"trace-expired"
+           ~generation:0
+           ~summary:"corrupt-store expired episode")
+        with
+        Types.valid_until = Some (now -. 1.0)
+      }
+    in
+    let live =
+      episode_fixture
+        ~now
+        ~trace_id:"trace-live"
+        ~generation:0
+        ~summary:"corrupt-store live episode"
+    in
+    List.iter (Memory_io.append_episode ~keeper_id) [ expired; live ];
+    (* A torn write, as a crash mid-publish or disk corruption would leave
+       behind. *)
+    write_text_file
+      (Filename.concat (Memory_io.episodes_dir ~keeper_id) "torn-g0000-t0000000000001.json")
+      "{ broken json";
+    let before = episode_file_snapshot ~keeper_id in
+    Alcotest.(check int) "three episode files on disk" 3 (List.length before);
+    (match GC.run_episode_gc ~keeper_id ~now () with
+     | _report -> Alcotest.fail "expected run_episode_gc to raise on a corrupt store"
+     | exception GC.Episode_store_corrupt _ -> ());
+    Alcotest.(check (list (pair string string)))
+      "corrupt store left untouched — even expired episodes survive"
+      before
+      (episode_file_snapshot ~keeper_id);
+    Alcotest.(check (float 0.001))
+      "no prune counted for the aborted sweep"
+      0.0
+      (episode_retention_metric_value keeper_id)))
 ;;
 
 let test_recall_context_empty_without_memory () =
@@ -4759,6 +4936,18 @@ let () =
             "gc waits for fact writer lock"
             `Quick
             test_gc_waits_for_fact_writer_lock
+        ; Alcotest.test_case
+            "episode gc deletes only expired episodes"
+            `Quick
+            test_episode_gc_deletes_only_expired
+        ; Alcotest.test_case
+            "episode gc dry-run reports without deleting"
+            `Quick
+            test_episode_gc_dry_run_reports_without_deleting
+        ; Alcotest.test_case
+            "episode gc fails loud on a corrupt store"
+            `Quick
+            test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing
         ] )
     ; ( "recall"
       , [ Alcotest.test_case

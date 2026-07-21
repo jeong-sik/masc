@@ -193,5 +193,5 @@ Current problems:
 
 Proposed changes:
 - dm-keeper -> on-demand (start when game needed)
-- Agent idle time + interests -> participation probability (Thompson sampling)
+- Agent idle time + interests -> participation probability (the Thompson selection engine was removed 2026-07-21; a revival needs its own RFC)
 - TRPG experience feeds back into agent interests/traits

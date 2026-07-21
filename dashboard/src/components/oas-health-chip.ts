@@ -21,9 +21,6 @@ function formatLastTick(tick: number | null): string {
 }
 
 const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
-  selected: '선택',
-  decision: '결정',
-  action_executed: '실행',
   keeper_lifecycle: '생명주기',
   trust_updated: '신뢰도',
   reputation_changed: '평판',
@@ -34,14 +31,6 @@ const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
 function describeAgentEvent(evt: OasAgentEvent): string {
   const label = EVENT_TYPE_LABELS[evt.type]
   switch (evt.type) {
-    case 'selected':
-      return `${label}${evt.trigger ? ` · ${evt.trigger}` : ''}`
-    case 'decision': {
-      const detail = evt.action ?? evt.trigger_reason
-      return `${label}${detail ? ` · ${detail}` : ''}`
-    }
-    case 'action_executed':
-      return `${label}${evt.action ? ` · ${evt.action}` : ''}`
     case 'keeper_lifecycle': {
       const detail = evt.event ?? evt.phase ?? evt.detail
       return `${label}${detail ? ` · ${detail}` : ''}`

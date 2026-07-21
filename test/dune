@@ -668,6 +668,11 @@
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
+ (name test_keeper_paused_work_cancellation_transaction)
+ (modules test_keeper_paused_work_cancellation_transaction)
+ (libraries alcotest masc_test_deps eio_main))
+
+(test
  (name test_keeper_current_operations)
  (modules test_keeper_current_operations)
  (libraries alcotest masc_test_deps))
@@ -1031,7 +1036,6 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1051,6 +1055,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (modules
   test_keeper_busy_connector_deferred
@@ -1194,7 +1201,6 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_economy
   test_lifecycle
   test_grpc_workspace
   test_grpc_client
@@ -1214,6 +1220,9 @@
   test_set_util
   test_board_core_payload
   test_board_attachment_meta
+  test_board_render
+  test_board_render_discord
+  test_board_render_slack
   test_board_moderation)
  (libraries masc_test_deps masc.embedded_config bigstringaf)
  (deps ../bin/main_eio.exe))
@@ -1274,14 +1283,6 @@
   digestif
   eio_main
   unix))
-
-; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
-; one event; unchanged / generated_at-only change emits none).
-
-(test
- (name test_goal_loop_broadcast)
- (modules test_goal_loop_broadcast)
- (libraries alcotest masc masc_server masc_test_deps eio_main))
 
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
@@ -1625,6 +1626,8 @@
 ; sorted alphabetically.
 
 (include stanzas/test_anti_rationalization_empty_reject.inc)
+(include stanzas/test_keeper_registry_admission_no_suspend.inc)
+(include stanzas/test_keeper_compaction_persist_gate.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
@@ -1902,6 +1905,7 @@
 (include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
+(include stanzas/test_keeper_supervisor_persona_drift_order.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 

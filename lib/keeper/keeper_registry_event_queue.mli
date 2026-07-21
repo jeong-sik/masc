@@ -98,6 +98,17 @@ val settle_result :
   settlement:settlement ->
   (settle_result, string) result
 
+val cancel_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  lease:lease ->
+  cancellation:accepted_cancellation ->
+  (settle_result, string) result
+(** Commit an owner-fenced accepted cancellation and publish the resulting
+    pending projection to the exact live registry lane after durable commit. *)
+
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later
     registration can replay it instead of dropping the wake at the

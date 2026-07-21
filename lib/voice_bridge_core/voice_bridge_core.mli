@@ -4,7 +4,7 @@
     Internal helpers ([log_prefix], [split_path_env],
     [find_executable_in_path], [local_playback_argvs],
     [record_playback], the dedup [last_playback] state, the playback
-    mutex, [trim_opt],
+    mutex,
     [resolved_base_path_opt], [strip_provider_metadata], and
     [provider_metadata_keys]) are hidden — callers consume the
     public configuration / URI / playback / metadata-projection

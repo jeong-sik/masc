@@ -51,6 +51,7 @@ type persisted_delivery =
   ; decision : decision
   ; source : decision_source
   ; remember_rule : bool
+  ; rule_expires_at : float option
   ; created_by : string option
   ; grant_consumed : bool
   }
@@ -173,6 +174,7 @@ let persisted_delivery_to_yojson delivery =
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
     ; "remember_rule", `Bool delivery.remember_rule
+    ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
     ]
@@ -300,6 +302,14 @@ let optional_nonnegative_int ~surface field fields =
   | Some (`Int value) when value >= 0 -> Ok (Some value)
   | Some _ ->
     Error (Printf.sprintf "%s.%s must be a non-negative integer or null" surface field)
+;;
+
+let optional_float ~surface field fields =
+  match List.assoc_opt field fields with
+  | None | Some `Null -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (Float.of_int value))
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a number or null" surface field)
 ;;
 
 let required_positive_int ~surface field fields =
@@ -480,6 +490,7 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "decision"
           ; "source"
           ; "remember_rule"
+          ; "rule_expires_at"
           ; "created_by"
           ; "grant_consumed"
           ]
@@ -501,6 +512,7 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
       | None -> Error (surface ^ ".remember_rule is required")
     in
+    let* rule_expires_at = optional_float ~surface "rule_expires_at" fields in
     let* created_by = optional_string ~surface "created_by" fields in
     let* grant_consumed =
       match List.assoc_opt "grant_consumed" fields with
@@ -515,7 +527,15 @@ let persisted_delivery_of_yojson ~base_path json =
       | (Decision.Reject _ | Decision.Edit _), true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
-    Ok { entry; decision; source; remember_rule; created_by; grant_consumed }
+    Ok
+      { entry
+      ; decision
+      ; source
+      ; remember_rule
+      ; rule_expires_at
+      ; created_by
+      ; grant_consumed
+      }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
 
@@ -1903,7 +1923,7 @@ type journal_error =
   | Journal_not_found
   | Journal_storage of storage_error
 
-let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
+let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~created_by =
   with_pending_store_lock (fun () ->
     let pending_map = Atomic.get pending in
     match SMap.find_opt id pending_map with
@@ -1914,6 +1934,7 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~created_by =
         ; decision
         ; source
         ; remember_rule
+        ; rule_expires_at
         ; created_by
         ; grant_consumed = false
         }
@@ -1959,7 +1980,7 @@ let approval_decision_equal left right =
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
+let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
   try
     match
       upsert_rule
@@ -1969,6 +1990,7 @@ let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
         ~input:entry.input
         ?created_by
         ~source_approval_id:entry.id
+        ?expires_at:rule_expires_at
         ()
     with
     | Ok (rule, created) ->
@@ -2004,6 +2026,7 @@ let remember_rule_for_delivery delivery =
        remember_rule_for_entry
          ~base_path:delivery.entry.audit_base_path
          ?created_by:delivery.created_by
+         ?rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
      | Ok rule -> Ok (Some rule)
@@ -2203,6 +2226,7 @@ let resolve_with_policy
       ~(decision : decision)
       ?(source = Human_operator)
       ?(remember_rule = false)
+      ?rule_expires_at
       ?created_by
       ()
   : (resolution_result, resolve_error) result
@@ -2232,12 +2256,16 @@ let resolve_with_policy
              | Decision.Approve -> remember_rule
              | Decision.Reject _ | Decision.Edit _ -> false
            in
+           let rule_expires_at =
+             if remember_rule then rule_expires_at else None
+           in
            (match
               journal_resolution
                 ~id
                 ~decision
                 ~source
                 ~remember_rule
+                ~rule_expires_at
                 ~created_by
             with
             | Error Journal_not_found -> Error (Not_found id)
@@ -2252,6 +2280,7 @@ let resolve_with_policy
                 approval_decision_equal decision delivery.decision
                 && source = delivery.source
                 && remember_rule = delivery.remember_rule
+                && rule_expires_at = delivery.rule_expires_at
                 && created_by = delivery.created_by
               in
               if same_request

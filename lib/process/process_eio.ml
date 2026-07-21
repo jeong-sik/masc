@@ -172,7 +172,6 @@ let process_error_output = Process_eio_stderr.process_error_output
 let reason_of_exn_for_output = Process_eio_stderr.reason_of_exn_for_output
 let create_stderr_tempfile = Process_eio_stderr.create_stderr_tempfile
 let remove_temp_file_quietly = Process_eio_stderr.remove_temp_file_quietly
-let read_stderr_capture = Process_eio_stderr.read_stderr_capture
 let captured_stderr_or_empty = Process_eio_stderr.captured_stderr_or_empty
 
 let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)

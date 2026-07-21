@@ -493,7 +493,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
           return html`
             <div key=${id} class="v2-workspace-row flex items-center gap-2 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] px-3 py-2">
               <span class="text-xs text-text-body">${goal?.title ?? id}</span>
-              ${goal?.status ? html`<${StatusBadge} status=${goal.status} />` : null}
+              ${goal?.phase ? html`<${StatusBadge} status=${goal.phase} />` : null}
             </div>
           `
         })}

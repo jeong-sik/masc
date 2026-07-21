@@ -633,18 +633,7 @@ let create_post
       match board_result with
       | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () ->
-           (match
-              Board_effect_hooks.earn
-                ~base_path:(board_base_path ())
-                ~agent_name:author
-                ~kind:Board_post
-                ~reason:"board post"
-                ()
-            with
-            | Ok () -> ()
-            | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-           Ok post
+         | Ok () -> Ok post
          | Error e ->
            rollback_fresh_post store post;
            Error e)

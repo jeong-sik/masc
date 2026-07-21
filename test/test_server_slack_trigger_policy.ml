@@ -273,11 +273,14 @@ let test_bound_message_queues_exact_slack_ts () =
                  }
            ; conversation_id
            ; external_message_id
+           ; workspace_id
            } ->
          check string "Slack delivery channel" "C123" channel_id;
          check string "Slack delivery actor" "U123" user_id;
          check string "Slack delivery actor name" "operator" user_name;
          check (option string) "Slack delivery team" (Some "T123") team_id;
+         check (option string) "Slack delivery workspace identity"
+           (Some "T123") workspace_id;
          check (option string) "Slack reply thread"
            (Some "1710000000.123456") thread_ts;
          check string "Slack surface channel" "C123" surface_channel_id;

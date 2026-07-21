@@ -157,6 +157,15 @@ val cancel_accepted :
     owner-fenced boundary. Replaying the same committed cancellation is
     idempotent; a different operation is a conflict. *)
 
+val accepted_cancellation_replay :
+  lease ->
+  accepted_cancellation ->
+  t ->
+  (transition_receipt option, string) result
+(** Return the canonical receipt for an already committed exact cancellation
+    without applying current owner-generation or queue-revision fences. A
+    different terminal settlement for the same lease is an explicit conflict. *)
+
 val replay_transition_receipt : transition_receipt -> t -> (t, string) result
 (** Apply one canonical durable receipt to its exact active lease. Replaying
     the same retained receipt is idempotent; a different receipt or a missing

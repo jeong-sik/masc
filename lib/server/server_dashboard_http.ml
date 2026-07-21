@@ -372,6 +372,7 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
     let remember_rule =
       Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
     in
+    let rule_expires_at = Safe_ops.json_float_opt "rule_expires_at" args in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
@@ -389,6 +390,7 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
             ~id
             ~decision
             ~remember_rule
+            ?rule_expires_at
             ~created_by
             ()
         with
@@ -598,14 +600,9 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
 ;;
 
 let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  (* RFC-0284: carry the goal-loop OODA status alongside planning/tree so the
-     WS "goals" slice's initial snapshot (and the /goals HTTP pull) paint the
-     goal-loop panel without a separate fetch. Live updates arrive via the
-     [goal_loop_status] delta (Server_dashboard_http_goal_loop_broadcast). *)
   `Assoc
     [ "planning", dashboard_planning_http_json ~config
     ; "tree", dashboard_goals_tree_http_json ~config
-    ; "loop", Dashboard_goal_loop.status_json ~base_path:config.base_path ()
     ]
 
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
@@ -867,10 +864,6 @@ let dashboard_bootstrap_http_json
       Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in
-  let goal_loop_status =
-    slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json ~base_path:(Mcp_server.workspace_config state).base_path ())
-  in
   `Assoc
     [ "served_at", `String (Masc_domain.now_iso ())
     ; "milestone", `Int 1
@@ -878,6 +871,5 @@ let dashboard_bootstrap_http_json
     ; execution
     ; planning
     ; namespace_truth
-    ; goal_loop_status
     ]
 ;;

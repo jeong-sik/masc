@@ -805,7 +805,6 @@ function makeGoal(partial: Partial<Goal>): Goal {
     id: 'g-1',
     title: 'goal',
     priority: 5,
-    status: 'active',
     phase: 'observe',
     created_at: localIsoAt(1),
     updated_at: localIsoAt(1),

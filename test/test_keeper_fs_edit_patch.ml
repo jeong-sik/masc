@@ -74,12 +74,12 @@ let setup ?(sandbox = Keeper_types_profile_sandbox.Local) f =
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let config = Workspace.default_config base in
   let meta = make_meta ~sandbox "tester" in
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
-  ignore (Keeper_registry.register ~base_path:base meta.name meta);
+  ignore (Keeper_registry.For_testing.register ~base_path:base meta.name meta);
   Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs

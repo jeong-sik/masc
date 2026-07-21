@@ -128,11 +128,11 @@ describe('navigate', () => {
     expect(route.value.params.view).toBeUndefined()
   })
 
-  it('redirects retired goal-loop links into planning goal-loop view', () => {
+  it('drops retired goal-loop deep links to the default monitoring mapping', () => {
+    // RFC-0352: the goal-loop OODA surface is retired; its deep-link entry is
+    // gone, so the generic monitoring fallback applies and no view is forced.
     navigate('monitoring', { section: 'goal-loop', goal: 'goal-1' })
-    expect(route.value.tab).toBe('workspace')
-    expect(route.value.params.section).toBe('planning')
-    expect(route.value.params.view).toBe('goal-loop')
+    expect(route.value.params.view).not.toBe('goal-loop')
     expect(route.value.params.goal).toBe('goal-1')
   })
 

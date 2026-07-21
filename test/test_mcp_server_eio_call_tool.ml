@@ -533,7 +533,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
@@ -595,7 +595,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
@@ -631,7 +631,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Sse.unsubscribe_external subscriber_id;
-      Masc.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
       Masc.Keeper_tool_call_log.reset_for_testing ();
       cleanup_dir base_path)
     (fun () ->

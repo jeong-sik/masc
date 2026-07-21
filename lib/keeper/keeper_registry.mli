@@ -27,10 +27,6 @@ val validate_turn_phase_transition
   -> unit
 
 
-(** Register a keeper with an already-live fiber. Primarily used by tests and
-    direct fixtures that want a keeper to begin in [Running]. *)
-val register : base_path:string -> string -> keeper_meta -> registry_entry
-
 (** Register a fresh keeper before its first keepalive fiber launch.
     The entry starts in [Offline] and must receive [Fiber_started] when the
     runtime actually launches the fiber. *)
@@ -88,9 +84,6 @@ val prepare_fiber_launch_for_lifecycle :
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
-
-(** Unregister a keeper (removes from registry). *)
-val unregister : base_path:string -> string -> unit
 
 type unregister_exact_result =
   | Exact_unregistered
@@ -195,17 +188,8 @@ val update_entry_if_registered :
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
-(** Reload a registered keeper's meta from disk and replace the in-memory
-    registry copy. Returns [Ok None] when the keeper is not registered or has
-    no persisted meta. *)
-val reload_meta_from_disk :
-  base_path:string -> string -> (registry_entry option, string) result
-
 (* Runtime-attempt persistence + enrichment moved to
    Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)
-
-(** Record a restart. Increments restart_count and updates last_restart_ts. *)
-val record_restart : base_path:string -> string -> unit
 
 (* [record_error] moved to [Keeper_registry_error_recording.record]. *)
 
@@ -421,10 +405,6 @@ val mark_dead : base_path:string -> string -> at:float -> unit
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
 
-(** Test-only: override [started_at] for registry fixtures that need to
-    model a long-running fiber without waiting for wall-clock time. *)
-val set_started_at_for_test : base_path:string -> string -> float -> unit
-
 (** Count keepers in Running state. *)
 val count_running : ?base_path:string -> unit -> int
 
@@ -433,6 +413,40 @@ module For_testing : sig
       corrupted registry state. *)
   val unsafe_put_entry :
     base_path:string -> string -> registry_entry -> unit
+
+  (** Register a keeper with an already-live fiber. Primarily used by tests and
+      direct fixtures that want a keeper to begin in [Running]. *)
+  val register : base_path:string -> string -> keeper_meta -> registry_entry
+
+  (** Unregister a keeper (removes from registry). *)
+  val unregister : base_path:string -> string -> unit
+
+  (** Clear the registry. For testing only. *)
+  val clear : unit -> unit
+
+  (** Reload a registered keeper's meta from disk and replace the in-memory
+      registry copy. Returns [Ok None] when the keeper is not registered or has
+      no persisted meta. *)
+  val reload_meta_from_disk :
+    base_path:string -> string -> (registry_entry option, string) result
+
+  (** Record a restart. Increments restart_count and updates last_restart_ts. *)
+  val record_restart : base_path:string -> string -> unit
+
+  (** Test-only: override [started_at] for registry fixtures that need to
+      model a long-running fiber without waiting for wall-clock time. *)
+  val set_started_at_for_test : base_path:string -> string -> float -> unit
+
+  (** Recent crash entries (up to 5) for a keeper. *)
+  val crash_log_of : base_path:string -> string -> (float * string) list
+
+  (** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
+      key under which the wake is deduped — RFC-0239 R4 passes a content
+      fingerprint rather than the raw post_id, so identical re-posts with fresh
+      post_ids collapse. Records timestamp if allowed. Returns true for
+      unregistered keepers. *)
+  val board_wakeup_allowed :
+    base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
 
 end
 
@@ -485,31 +499,17 @@ val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
     Returns Fiber_unknown if the keeper is not registered. *)
 val fiber_health_of : base_path:string -> string -> fiber_health
 
-(** Recent crash entries (up to 5) for a keeper. *)
-val crash_log_of : base_path:string -> string -> (float * string) list
-
 (** Restore supervisor state on a freshly registered entry (used by restart). *)
 val restore_supervisor_state :
   base_path:string -> string ->
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
-    key under which the wake is deduped — RFC-0239 R4 passes a content
-    fingerprint rather than the raw post_id, so identical re-posts with fresh
-    post_ids collapse. Records timestamp if allowed. Returns true for
-    unregistered keepers. *)
-val board_wakeup_allowed :
-  base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
-
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
 (** Reset tracking only if [entry]'s lane still owns its registry key. *)
 val cleanup_tracking_exact : registry_entry -> exact_update_result
-
-(** Clear the registry. For testing only. *)
-val clear : unit -> unit
 
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option

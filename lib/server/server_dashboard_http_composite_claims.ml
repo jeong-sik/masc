@@ -286,13 +286,6 @@ let composite_execution_config_blocked execution =
     [ "preflight_config_error" ]
 ;;
 
-let composite_execution_saturated execution =
-  string_opt_is_any (json_string "terminal_reason_code" execution) [ "ollama_saturated" ]
-  || string_opt_is_any
-       (json_string "operator_disposition_reason" execution)
-       [ "ollama_saturated" ]
-;;
-
 let composite_execution_claim_no_eligible execution =
   match json_member "claim_scope" execution with
   | `Assoc _ as claim_scope ->

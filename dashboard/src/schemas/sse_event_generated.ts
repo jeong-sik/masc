@@ -66,13 +66,6 @@ export type ContextCompactedPayload = {
   phase: string;
 }
 
-export type ContextOverflowImminentPayload = {
-  agent_name: string;
-  estimated_tokens: number /*int*/;
-  limit_tokens: number /*int*/;
-  ratio: number;
-}
-
 export type ContextCompactStartedPayload = {
   agent_name: string;
   trigger: string;
@@ -254,24 +247,6 @@ export function readContextCompactedPayload(x: any, context: any = x): ContextCo
     before_tokens: _atd_read_required_field('ContextCompactedPayload', 'before_tokens', _atd_read_int, x['before_tokens'], x),
     after_tokens: _atd_read_required_field('ContextCompactedPayload', 'after_tokens', _atd_read_int, x['after_tokens'], x),
     phase: _atd_read_required_field('ContextCompactedPayload', 'phase', _atd_read_string, x['phase'], x),
-  };
-}
-
-export function writeContextOverflowImminentPayload(x: ContextOverflowImminentPayload, context: any = x): any {
-  return {
-    'agent_name': _atd_write_required_field('ContextOverflowImminentPayload', 'agent_name', _atd_write_string, x.agent_name, x),
-    'estimated_tokens': _atd_write_required_field('ContextOverflowImminentPayload', 'estimated_tokens', _atd_write_int, x.estimated_tokens, x),
-    'limit_tokens': _atd_write_required_field('ContextOverflowImminentPayload', 'limit_tokens', _atd_write_int, x.limit_tokens, x),
-    'ratio': _atd_write_required_field('ContextOverflowImminentPayload', 'ratio', _atd_write_float, x.ratio, x),
-  };
-}
-
-export function readContextOverflowImminentPayload(x: any, context: any = x): ContextOverflowImminentPayload {
-  return {
-    agent_name: _atd_read_required_field('ContextOverflowImminentPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
-    estimated_tokens: _atd_read_required_field('ContextOverflowImminentPayload', 'estimated_tokens', _atd_read_int, x['estimated_tokens'], x),
-    limit_tokens: _atd_read_required_field('ContextOverflowImminentPayload', 'limit_tokens', _atd_read_int, x['limit_tokens'], x),
-    ratio: _atd_read_required_field('ContextOverflowImminentPayload', 'ratio', _atd_read_float, x['ratio'], x),
   };
 }
 

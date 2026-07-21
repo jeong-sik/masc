@@ -252,8 +252,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
   const title = asString(raw.title)
-  const status = asString(raw.status)
-  if (!id || !title || !status) return null
+  const phase = asString(raw.phase)
+  if (!id || !title || !phase) return null
   const tasks = asRecordArray(raw.tasks)
     .map(decodeGoalTreeTask)
     .filter((task): task is GoalTreeTask => task !== null)
@@ -273,11 +273,9 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   return {
     id,
     title,
-    status,
-    status_color: asString(raw.status_color, ''),
-    phase: asString(raw.phase, 'unknown'),
+    phase,
     phase_color: asString(raw.phase_color, ''),
-    goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, asString(raw.phase, 'unknown')),
+    goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, phase),
     priority: asInt(raw.priority) ?? 0,
     metric,
     target_value: targetValue,

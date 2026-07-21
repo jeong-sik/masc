@@ -606,7 +606,7 @@ let transition_task_outcome_r
                  ?duration_ms
                  ?configured_llm_verdict
                  ());
-          (* RFC-0323 G-3: done hooks (economy earn, relation/hebbian) fire for
+          (* RFC-0323 G-3: done hooks (relation/hebbian) fire for
              every transition that PRODUCES Done — Done via
              Approve_verification included. The completer is the Done record's
              assignee: on approve the acting [agent_name] is the verifier. *)
@@ -614,10 +614,7 @@ let transition_task_outcome_r
            | Masc_domain.Done { assignee; _ } ->
              if completes_task
              then
-               Workspace_task_cleanup.run_done_hooks
-                 config
-                 ~agent_name:assignee
-                 ~task_id
+               Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee
            | Masc_domain.Todo
            | Masc_domain.Claimed _
            | Masc_domain.InProgress _

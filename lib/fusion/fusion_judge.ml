@@ -146,32 +146,24 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
-(* 심판 출력 계약은 typed 2-tier다. tier는 OAS capability facts(
-   [validate_output_schema_request])로만 결정하며 provider-name 특례는 없다:
+(* 심판 출력 계약은 프롬프트와 파서가 진다. 요청은 wire response format을 싣지
+   않는다: 계약은 프롬프트가 항상 싣고 다니는
+   [Fusion_judge_parse.expected_json_doc]이 전달하고(객체 형태, 닫힌
+   [decision.kind] 합, 빈 배열 허용 규칙까지 전부 명시), 위반은
+   [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
+   프롬프트가 쓰는 필드명 상수는 schema builder가 쓰던 것과 동일한
+   [Fusion_judge_parse.wire_field_*]이므로 계약이 갈라질 수 없다.
 
-   - Native tier: 모델/엔드포인트가 native structured output을 선언하면 JsonSchema를
-     provider config에 싣는다 (와이어 레벨 강제).
-   - JSON-mode tier (#25324): native 선언은 없지만 json_object response format을
-     선언한 provider(GLM/DeepSeek/Kimi)는 [JsonMode]를 싣는다 — 문법 레벨 JSON은
-     와이어에서 강제되고, 스키마 준수는 아래 prompt 계약 + strict 파싱이 담당한다.
-   - Prompt tier: 둘 다 없으면 schema를 싣지 않는다. 계약은 프롬프트가 이미 항상
-     싣고 다니는 [Fusion_judge_parse.expected_json_doc]이 전달하고, 위반은
-     [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
-
-   #22768("native schema or fail before HTTP")은 native 미선언을 빌드 실패로
-   만들었는데, 이는 두 가지 이유로 뒤집는다: (1) capability 사실이 거짓일 수 있음이
-   실측됨(ollama.com cloud는 declared인데 json_schema를 조용히 무시 — 2026-07-02
-   probe), (2) 사실이 참(미지원)일 때 빌드 실패는 해당 preset의 fusion 자체를
-   영구 불능으로 만든다(2026-06-17~06-30 prompt 계약만으로 성공한 run 다수).
-   Prompt tier는 silent downgrade가 아니다 — 결정 시점에 로그로 관측되고, 파싱은
-   여전히 strict다. *)
+   tier 선택을 걷어내는 근거는 이 파일이 이미 기록해둔 두 사실이다:
+   (1) capability 사실이 거짓일 수 있다 — ollama.com cloud는 declared인데
+   json_schema를 조용히 무시한다(2026-07-02 probe). 현재 심판 런타임이 가리키는
+   엔드포인트가 정확히 그것이므로, native tier가 선택되어도 와이어 강제는 실제로
+   일어나지 않는다. 계약을 지켜온 것은 내내 프롬프트와 파서다.
+   (2) #22768("native schema or fail before HTTP")이 native 미선언을 빌드 실패로
+   만들었다가 뒤집힌 이력이 있다 — 미지원 preset의 fusion을 영구 불능으로 만들기
+   때문이며, 2026-06-17~06-30 prompt 계약만으로 성공한 run이 다수다. *)
 let apply_fusion_judge_output_contract provider_cfg =
-  let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
-  Ok
-    (Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-       ~log_label:"fusion judge output contract"
-       schema
-       provider_cfg)
+  Ok (Keeper_structured_output_schema.without_response_format provider_cfg)
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고

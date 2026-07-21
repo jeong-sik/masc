@@ -871,17 +871,17 @@ let test_wake_fail_closed_preserves_route () =
 
 let test_completion_wake_does_not_signal_replacement_lane () =
   with_isolated_base_path "fusion-wake-exact-owner" (fun base_dir ->
-    Keeper_registry.clear ();
+    Keeper_registry.For_testing.clear ();
     Fun.protect
-      ~finally:Keeper_registry.clear
+      ~finally:Keeper_registry.For_testing.clear
       (fun () ->
          let keeper = Printf.sprintf "fusion-exact-%d" (Random.bits ()) in
          let run_id = Printf.sprintf "fus-exact-%d" (Random.bits ()) in
          let meta = make_meta ~name:keeper () in
-         let captured = Keeper_registry.register ~base_path:base_dir keeper meta in
+         let captured = Keeper_registry.For_testing.register ~base_path:base_dir keeper meta in
          Atomic.set captured.fiber_wakeup false;
          Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id None;
-         let replacement = Keeper_registry.register ~base_path:base_dir keeper meta in
+         let replacement = Keeper_registry.For_testing.register ~base_path:base_dir keeper meta in
          Atomic.set replacement.fiber_wakeup false;
          let result =
            Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true

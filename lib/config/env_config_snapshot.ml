@@ -141,12 +141,6 @@ let autonomy_entries =
   [
     entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
     entry ~default:"7" "MASC_AUTONOMY_QUIET_END" "Quiet hours end (0-23)";
-    entry ~default:"12" "MASC_AUTONOMY_MAX_STARVATION_TICKS"
-      "Max agent starvation ticks";
-    entry ~default:"0.15" "MASC_AUTONOMY_STARVATION_BONUS_COEF"
-      "Starvation bonus coefficient for agent selection";
-    entry ~default:"0.7" "MASC_AUTONOMY_THOMPSON_WEIGHT"
-      "Thompson sampling weight";
     entry ~default:"0.95" "MASC_AUTONOMY_VOTE_DECAY_FACTOR"
       "Vote decay factor";
   ]
@@ -270,26 +264,6 @@ let keeper_sandbox_entries =
       "Best-effort cleanup for stale MASC keeper sandbox containers";
     entry ~default:"300" "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
       "Minimum seconds between automatic keeper sandbox cleanup sweeps";
-  ]
-
-let economy_entries =
-  [
-    entry ~default:"false" "MASC_ECONOMY_ENABLED"
-      "Agent economy feature flag";
-    entry ~default:"5.0" "MASC_ECONOMY_FRUGAL_THRESHOLD"
-      "Frugal behavior threshold";
-    entry ~default:"0.0" "MASC_ECONOMY_HUSTLE_THRESHOLD"
-      "Hustle behavior threshold";
-    entry ~default:"5.0" "MASC_ECONOMY_INITIAL_BALANCE"
-      "Initial agent balance";
-    entry ~default:"1.0" "MASC_ECONOMY_REWARD_BOARD_POST"
-      "Reward for a board post";
-    entry ~default:"0.5" "MASC_ECONOMY_REWARD_MENTION_RESPONSE"
-      "Reward for responding to a mention";
-    entry ~default:"10.0" "MASC_ECONOMY_REWARD_TASK_DONE"
-      "Reward for completing a task";
-    entry ~default:"0.5" "MASC_ECONOMY_REWARD_UPVOTE"
-      "Reward for receiving an upvote";
   ]
 
 let internal_timer_entries =
@@ -613,7 +587,6 @@ let all_categories () =
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
     category "dashboard" dashboard_entries;
-    category "economy" economy_entries;
     category "operations"
       (operator_entries @ orchestrator_entries);
     category "channel" channel_gate_entries;

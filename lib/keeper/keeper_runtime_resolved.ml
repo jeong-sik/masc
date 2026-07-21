@@ -2,6 +2,7 @@ type source =
   | Env
   | Toml
   | Default
+  | Failsafe_floor
 
 type 'a field = {
   value : 'a;
@@ -30,6 +31,7 @@ let source_to_string = function
   | Env -> "env"
   | Toml -> "toml"
   | Default -> "default"
+  | Failsafe_floor -> "failsafe_floor"
 
 (* Per-call CLI subprocess idle timeout. Read fresh each turn rather than
    frozen at server boot — the value sits outside the keepalive budget
@@ -60,14 +62,36 @@ let body_timeout_override_sec_live () =
        | None -> None)
   | None -> None
 
+(* Fail-safe liveness floor for the streaming inter-line idle timeout
+   (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
+   [turn.stream_idle_timeout_sec] is set, the resolved value would be [None] and
+   OAS would apply no inter-line idle bound, letting a hung provider stream
+   freeze the keeper chat lane indefinitely (#25128, measured 30+ min). This is a
+   single universal liveness ceiling — NOT a per-provider tuned default
+   (RFC-0345 §3.1) — an order of magnitude above any legitimate inter-token gap
+   (sub-second to low-seconds), so it fires only on genuine hangs. An explicit
+   env/toml value still overrides it verbatim. RFC-0345 §3.2 (Option A) / §3.4;
+   revisitable (a floor, not a tuning). *)
+let stream_idle_failsafe_floor_sec = 600.0
+
 let freeze_from_current () =
-  let source_field name value =
-    { value; source = source_of_env_name name }
-  in
   let stream_idle_timeout_sec =
-    source_field
-      "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
-      (Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec ())
+    match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
+    | Some seconds ->
+      (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
+      {
+        value = Some seconds;
+        source = source_of_env_name "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
+      }
+    | None ->
+      (* Unset: substitute the fail-safe liveness floor so a hung provider stream
+         cannot freeze the keeper chat lane forever (RFC-0345, #25128). Sourced
+         as [Failsafe_floor] so telemetry and the boot log distinguish it from an
+         operator-supplied value. *)
+      {
+        value = Some stream_idle_failsafe_floor_sec;
+        source = Failsafe_floor;
+      }
   in
   let body_timeout_override_sec =
     {

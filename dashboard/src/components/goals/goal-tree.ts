@@ -698,7 +698,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           </div>
 
           <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
-            <${StatusBadge} status=${node.status} />
             ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             <${GoalCompletionStrip} node=${node} compact />
             <${GoalTaskRelationStrip} node=${node} compact />
@@ -1025,7 +1024,6 @@ function GoalDetailPanel({
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 상세</div>
           <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
           <div class="mt-2 flex flex-wrap items-center gap-2">
-            <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
             ${selectedNode.metric ? html`

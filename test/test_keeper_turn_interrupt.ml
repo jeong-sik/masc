@@ -56,7 +56,7 @@ let with_env body =
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree base)
     (fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_turn_admission.For_testing.reset ();
       body ~base)
 ;;
@@ -70,7 +70,7 @@ let test_interrupt_cancels_turn () =
   @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   let clock = Eio.Stdenv.clock env in
-  ignore (Keeper_registry.register ~base_path:base name (make_meta name));
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
   Keeper_registry.mark_turn_started
     ~base_path:base
     ~wake:Keeper_registry.Proactive_tick
@@ -116,7 +116,7 @@ let test_interrupt_no_turn_is_noop () =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.init_eio_clock env;
-  ignore (Keeper_registry.register ~base_path:base name (make_meta name));
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
   check
     "no in-flight turn"
     (match Keeper_registry.interrupt_current_turn ~base_path:base name with

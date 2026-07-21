@@ -1097,12 +1097,14 @@ let build_singleton_prompt candidate =
     [ "batch_request_json", Yojson.Safe.to_string json ]
 ;;
 
+(* Batch integrity does not come from the wire format. Verdicts are matched by
+   [candidate_id], and a reply is accepted only when its id set equals the
+   requested set exactly ([validate_batch_coverage]); unknown or duplicated ids
+   fail the whole batch back to Pending. A provider honouring the schema
+   perfectly can still answer for the wrong ids, so the schema never covered
+   the failure mode that matters here. *)
 let apply_batch_output_schema provider_config =
-  Ok
-    (Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-       ~log_label:"keeper Board attention batch judgment output contract"
-       Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
-       provider_config)
+  Ok (Keeper_structured_output_schema.without_response_format provider_config)
 ;;
 
 let judge_singleton ~sw ~net ~base_path candidate =

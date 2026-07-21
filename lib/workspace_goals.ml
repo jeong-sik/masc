@@ -98,14 +98,17 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
    policy, not a hand-written substring guard. *)
 
 let parse_optional_goal_status args field =
+  (* The typed goal_status is gone (RFC-0352 slice 1); the arg survives only
+     so an explicit "status" input keeps its two-stage rejection: enum
+     validation first, then the lifecycle-arg rejection in the handler. *)
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
   | Some (`String raw) when String.trim raw = "" -> Ok None
   | Some (`String raw) ->
-    (match Goal_store.parse_goal_status (Some raw) with
-     | Some status -> Ok (Some status)
-     | None ->
-       Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw))
+    let normalized = String.lowercase_ascii (String.trim raw) in
+    if List.mem normalized goal_status_strings
+    then Ok (Some normalized)
+    else Error (make_enum_field_error ~field ~allowed:goal_status_strings ~received:raw)
   | Some json ->
     Error
       (make_type_field_error
@@ -212,7 +215,6 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () =
   Goal_store.update_goal ctx.config ~goal_id:goal.id (fun current ->
     { current with
       phase
-    ; status = Goal_store.goal_status_of_phase phase
     ; last_review_note
     ; last_review_at
     })
@@ -279,7 +281,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
-            ?status
             ?phase
             ?parent_goal_id
             ()

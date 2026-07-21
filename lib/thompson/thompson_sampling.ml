@@ -1,12 +1,10 @@
-(** Thompson Sampling — Agent Selection with Fairness Guarantees
+(** Thompson Sampling — per-agent Beta-prior bookkeeping.
 
-    Implements agent selection using Thompson Sampling
-    for quality-based selection with starvation prevention.
-
-    Algorithm based on:
-    - Devroye, "Non-Uniform Random Variate Generation" (Springer, 1986), Ch.9
-    - [A Tutorial on Thompson Sampling](https://web.stanford.edu/~bvr/pubs/TS_Tutorial.pdf)
-    - [Thompson Sampling with Fairness Constraints](https://arxiv.org/abs/2005.06725) *)
+    Maintains per-agent Beta(alpha, beta) priors fed by vote and quality
+    feedback, persisted across restarts.  The selection engine that once
+    consumed these priors was removed as production-unreachable
+    (2026-07-21 dead-surface audit); the priors themselves stay live as
+    the reputation/confidence source for dashboard and board surfaces. *)
 
 type quality_verdict =
   | Pass
@@ -14,12 +12,6 @@ type quality_verdict =
   | Fail of string
 
 (** {1 Types} *)
-
-(* #9919 audit follow-up: Otel_metric_store counter for priority-trigger
-   selections. Replaces a degenerate metric emit
-   ([threshold=0.0, triggered=true] tautology). *)
-let priority_trigger_selected_metric =
-  "masc_thompson_priority_trigger_selected_total"
 
 type agent_stats = {
   name : string;
@@ -37,22 +29,6 @@ type agent_stats = {
   mutable skips : int;
   (* Timestamp *)
   mutable updated_at : float;
-}
-
-type selection_trigger =
-  | Mentioned of string
-  | ContentAlert of string
-  | Scheduled
-  | Starved
-  | Thompson
-
-type selection_result = {
-  agent_name : string;
-  trigger : selection_trigger;
-  thompson_score : float;
-  starvation_bonus : float;
-  final_score : float;
-  ticks_since_selection : int;
 }
 
 (** {1 Internal State} *)
@@ -99,98 +75,8 @@ let stats_path () =
   Fs_compat.mkdir_p masc_dir;
   Filename.concat masc_dir "autonomy_stats.jsonl"
 
-(** {1 Beta Distribution Sampling} *)
-
-(** Sample from Gamma distribution using Marsaglia & Tsang's method.
-    Reference: Devroye (1986), Ch.9 *)
-let rec sample_gamma shape =
-  if shape < 1.0 then
-    (* For shape < 1, use shape+1 then adjust *)
-    let g = sample_gamma (shape +. 1.0) in
-    g *. (Random.float 1.0 ** (1.0 /. shape))
-  else begin
-    let d = shape -. (1.0 /. 3.0) in
-    let c = 1.0 /. Float.sqrt (9.0 *. d) in
-    let rec loop () =
-      (* Generate standard normal using Box-Muller *)
-      let u1 = Random.float 1.0 in
-      let u2 = Random.float 1.0 in
-      let z = Float.sqrt (-2.0 *. Float.log u1) *. Float.cos (2.0 *. Float.pi *. u2) in
-      let v = (1.0 +. c *. z) in
-      if v <= 0.0 then loop ()
-      else begin
-        let v = v *. v *. v in
-        let u = Random.float 1.0 in
-        (* Acceptance condition *)
-        if Float.log u < 0.5 *. z *. z +. d -. d *. v +. d *. Float.log v then
-          d *. v
-        else
-          loop ()
-      end
-    in
-    loop ()
-  end
-
 (** Minimum prior value for numerical stability in Beta distribution sampling. *)
 let min_prior = 0.1
-
-(** Sample from Beta(alpha, beta) distribution using Gamma decomposition.
-    Beta(a,b) = Gamma(a,1) / (Gamma(a,1) + Gamma(b,1)) *)
-let sample_beta ~alpha ~beta =
-  (* Clamp to minimum for numerical stability *)
-  let alpha = Float.max min_prior alpha in
-  let beta = Float.max min_prior beta in
-  let x = sample_gamma alpha in
-  let y = sample_gamma beta in
-  if x +. y = 0.0 then 0.5  (* Degenerate case *)
-  else x /. (x +. y)
-
-(** {1 Starvation Bonus} *)
-
-(** Logarithmic starvation bonus to prevent agent neglect.
-    Uses ln(1+ticks) to avoid dominating Thompson score. *)
-let starvation_bonus ~ticks =
-  let coefficient = Env_config.AgentSelection.starvation_bonus_coefficient in
-  coefficient *. Float.log (1.0 +. float_of_int ticks)
-
-(** Calculate ticks since last selection based on timestamp *)
-let ticks_since_selection ~stats ~tick_interval_s =
-  let now = Time_compat.now () in
-  let elapsed = now -. stats.last_selected_at in
-  int_of_float (elapsed /. tick_interval_s)
-
-let trigger_priority = function
-  | Mentioned _ -> 3
-  | ContentAlert _ -> 2
-  | Starved -> 1
-  | Scheduled | Thompson -> 0
-
-let normalized_subscore value =
-  Float.max 0.0 (Float.min 0.999 value)
-
-let priority_score ~trigger ~signal =
-  float_of_int (trigger_priority trigger) +. normalized_subscore signal
-
-let best_pending_triggers pending_triggers =
-  let table = Hashtbl.create (List.length pending_triggers) in
-  List.iteri
-    (fun idx (name, trigger) ->
-       match Hashtbl.find_opt table name with
-       | Some (_, existing)
-         when trigger_priority existing >= trigger_priority trigger ->
-           ()
-       | Some _ | None ->
-           Hashtbl.replace table name (idx, trigger))
-    pending_triggers;
-  Hashtbl.fold
-    (fun name (selected_idx, trigger) acc -> (selected_idx, name, trigger) :: acc)
-    table []
-  |> List.sort (fun (idx1, _, trigger1) (idx2, _, trigger2) ->
-    match Int.compare (trigger_priority trigger2) (trigger_priority trigger1) with
-    | 0 -> Int.compare idx1 idx2
-    | n -> n
-  )
-  |> List.map (fun (_, name, trigger) -> (name, trigger))
 
 (** {1 Statistics Management} *)
 
@@ -223,13 +109,6 @@ let get_stats name =
 let get_all_stats () =
   with_ts_ro (fun () ->
     Hashtbl.fold (fun _ v acc -> v :: acc) stats_table [])
-
-let init_agent name =
-  with_ts_rw (fun () ->
-    if not (Hashtbl.mem stats_table name) then begin
-      let s = make_default_stats name in
-      Hashtbl.add stats_table name s
-    end)
 
 (** {1 JSON Serialization} *)
 
@@ -383,9 +262,9 @@ let save_stats () =
   let path = stats_path () in
   try
     (* Snapshot under the lock, then serialise the copies outside the
-       critical section. Pending votes are overlaid on the snapshot so a
-       graceful shutdown cannot lose batched feedback that has not reached
-       [flush_pending_votes] yet. *)
+       critical section. Pending votes are overlaid on the snapshot so
+       batched feedback reaches disk even though nothing drains
+       [pending_votes] into the live table mid-process. *)
     let snapshot = stats_snapshot_for_persistence () in
     let buf = Buffer.create 4096 in
     List.iter
@@ -425,51 +304,13 @@ let record_vote ~agent_name ~direction =
     Hashtbl.replace pending_votes agent_name (up', down'));
   save_stats_if_configured ()
 
-let flush_pending_votes () =
-  (* [ts_mu] is documented as protecting [pending_votes], but this
-     function was the only access path that ignored the lock: callers
-     of [record_vote] held it and could mutate [pending_votes] between
-     [Hashtbl.iter] and [Hashtbl.clear], silently dropping those votes.
-     Snapshot+clear the table atomically, release the lock, then apply
-     the accumulated stat updates individually under the lock.  The
-     two-step structure is required because [get_stats] re-acquires
-     [ts_mu], and doing that inside a [Hashtbl.iter] held under the
-     lock would either deadlock or skip the outer critical section. *)
-  let decay = Env_config.AgentSelection.vote_decay_factor in
-  let snapshot =
-    with_ts_rw (fun () ->
-      let xs =
-        Hashtbl.fold (fun name counts acc -> (name, counts) :: acc)
-          pending_votes []
-      in
-      Hashtbl.clear pending_votes;
-      xs)
-  in
-  List.iter (fun (agent_name, (votes_up, votes_down)) ->
-    let total = votes_up + votes_down in
-    if total > 0 then begin
-      let s = get_stats agent_name in
-      with_ts_rw (fun () ->
-        apply_vote_counts ~decay s ~votes_up ~votes_down)
-    end
-  ) snapshot;
-  if snapshot <> [] then save_stats_if_configured ()
-
 (* The record_* helpers below all mutate an [agent_stats] returned by
    [get_stats].  [get_stats] re-acquires [ts_mu] around the lookup, but
-   returns the record to the caller which then mutated fields lock-free —
-   so two fibers racing [record_selection ~agent_name:"X"] could both
-   read [s.selections] at the same value and both write the same +1,
-   silently dropping a selection.  Wrap each mutation sequence in
-   [with_ts_rw] so the read-modify-write stays atomic. *)
-let record_selection ~agent_name =
-  let s = get_stats agent_name in
-  with_ts_rw (fun () ->
-    s.selections <- s.selections + 1;
-    s.last_selected_at <- Time_compat.now ();
-    s.updated_at <- Time_compat.now ());
-  save_stats_if_configured ()
-
+   returns the record to the caller which would then mutate fields
+   lock-free — two racing fibers could read the same counter value and
+   both write the same +1, silently dropping an update.  Wrap each
+   mutation sequence in [with_ts_rw] so the read-modify-write stays
+   atomic. *)
 let record_action ~agent_name ~action =
   let s = get_stats agent_name in
   with_ts_rw (fun () ->
@@ -513,179 +354,3 @@ let record_quality_signal ~agent_name ~(verdict : quality_verdict) =
     s.beta <- Float.max min_prior s.beta;
     s.updated_at <- Time_compat.now ());
   save_stats_if_configured ()
-
-(** {1 Selection Algorithm} *)
-
-(* [on_priority_selected] is an injected observability hook for the
-   priority-trigger selection path. Previously this site called
-   [Otel_metric_store.inc_counter] directly, coupling this module to the masc
-   mega-library root. Defaulted to a no-op (observability, not behavior) so
-   non-instrumented callers stay simple; an instrumented caller supplies the
-   real Otel_metric_store increment. *)
-let select_with_feedback
-    ?(on_priority_selected = fun ~agent_name:_ ~trigger_label:_ -> ())
-    ~agents ~max_n ~pending_triggers ~tick_interval_s () =
-  (* Drain any pending votes so Beta posteriors reflect recorded feedback
-     before sampling. [record_vote] batches into [pending_votes], and
-     without this flush the batched evidence never reaches [stats_table] —
-     the sampler would read only the initial priors and votes are silently
-     discarded over time. This sampling entry point is the natural "tick
-     end" the .mli refers to. Safe to call under no lock: [flush] acquires
-     [ts_mu] itself. *)
-  flush_pending_votes ();
-  (* Initialize stats for all agents *)
-  List.iter init_agent agents;
-
-  let selected = ref [] in
-  (* Side-channel set for O(1) "already selected?" checks across the
-     multi-phase selection loop.  [selected] (list) is still used for
-     ordering and length checks; the Hashtbl mirrors only the names.
-
-     Clamp the initial size: a negative [max_n] would raise
-     [Invalid_argument] from [Hashtbl.create], and a pathologically
-     large value would preallocate proportional buckets up-front.
-     Bound by [List.length agents] since the loop cannot select more
-     than that many names regardless of [max_n]. *)
-  let initial_size = max 0 (min max_n (List.length agents)) in
-  let selected_names : (string, unit) Hashtbl.t = Hashtbl.create initial_size in
-  let is_selected name = Hashtbl.mem selected_names name in
-  let mark_selected name = Hashtbl.replace selected_names name () in
-  let add_selected result =
-    selected := !selected @ [result];
-    mark_selected result.agent_name
-  in
-  let priority_triggers = best_pending_triggers pending_triggers in
-
-  (* 1. Priority triggers: Mentioned > ContentAlert *)
-  List.iter (fun (name, trigger) ->
-    match trigger with
-    | Mentioned _ | ContentAlert _
-      when List.length !selected < max_n
-           && not (is_selected name) ->
-        let s = get_stats name in
-        let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
-        let signal = starvation_bonus ~ticks in
-        (* #9919 audit follow-up: the prior metric at this site was
-           semi-degenerate — [threshold=0.0] and
-           [triggered=true] were tautological (caller already filtered
-           by eligibility).  The real useful observation is "a priority
-           trigger was selected with [signal=X]"; expose it as a
-           Otel_metric_store counter labelled by the trigger kind so operators
-           can split mention-driven vs content-alert-driven selection
-           rates. *)
-        let trigger_label =
-          match trigger with
-          | Mentioned _ -> "mentioned"
-          | ContentAlert _ -> "content_alert"
-          | Scheduled | Starved | Thompson -> "other"
-        in
-        on_priority_selected ~agent_name:name ~trigger_label;
-        add_selected {
-          agent_name = name;
-          trigger;
-          thompson_score = 0.0;
-          starvation_bonus = signal;
-          final_score = priority_score ~trigger ~signal;
-          ticks_since_selection = ticks;
-        }
-    | Mentioned _ | ContentAlert _ -> ()
-    | Scheduled | Starved | Thompson -> ()
-  ) priority_triggers;
-
-  (* 2. Starvation rescue: force include agents who haven't been selected too long *)
-  let max_starvation = Env_config.AgentSelection.max_starvation_ticks in
-  let starved = List.filter_map (fun name ->
-    if is_selected name then None
-    else begin
-      let s = get_stats name in
-      let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
-      if ticks >= max_starvation then
-        Some (name, ticks)
-      else
-        None
-    end
-  ) agents in
-  (* Sort by most starved first *)
-  let starved_sorted = List.sort (fun (_, t1) (_, t2) -> Int.compare t2 t1) starved in
-  List.iter (fun (name, ticks) ->
-    if List.length !selected < max_n && not (is_selected name) then begin
-      let signal = starvation_bonus ~ticks in
-      add_selected {
-        agent_name = name;
-        trigger = Starved;
-        thompson_score = 0.0;
-        starvation_bonus = signal;
-        final_score = priority_score ~trigger:Starved ~signal;
-        ticks_since_selection = ticks;
-      }
-    end
-  ) starved_sorted;
-
-  (* 3. Thompson Sampling for remaining slots *)
-  if List.length !selected < max_n then begin
-    let thompson_weight = Env_config.AgentSelection.thompson_weight in
-    let starvation_weight = 1.0 -. thompson_weight in
-
-    let candidates = List.filter_map (fun name ->
-      if is_selected name then None
-      else begin
-        let s = get_stats name in
-        let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
-        let ts = sample_beta ~alpha:s.alpha ~beta:s.beta in
-        let sb = starvation_bonus ~ticks in
-        let final = priority_score ~trigger:Thompson
-          ~signal:(thompson_weight *. ts +. starvation_weight *. sb) in
-        Some {
-          agent_name = name;
-          trigger = Thompson;
-          thompson_score = ts;
-          starvation_bonus = sb;
-          final_score = final;
-          ticks_since_selection = ticks;
-        }
-      end
-    ) agents in
-
-    (* Sort by final score descending *)
-    let sorted = List.sort (fun r1 r2 ->
-      Float.compare r2.final_score r1.final_score
-    ) candidates in
-
-    (* Take remaining slots *)
-    let remaining = max_n - List.length !selected in
-    let rec take n = function
-      | [] -> ()
-      | _ when n <= 0 -> ()
-      | r :: rest ->
-          selected := r :: !selected;
-          mark_selected r.agent_name;
-          take (n - 1) rest
-    in
-    take remaining sorted
-  end;
-
-  (* Return sorted by final score *)
-  List.stable_sort (fun r1 r2 -> Float.compare r2.final_score r1.final_score) !selected
-
-(** {1 Monitoring} *)
-
-(** Calculate selection entropy for balance monitoring.
-    Higher entropy = more balanced selection across agents.
-    Max = ln(n_agents) for uniform selection. *)
-let selection_entropy () =
-  let stats = get_all_stats () in
-  if stats = [] then 0.0
-  else begin
-    let total_selections = List.fold_left (fun acc s -> acc + s.selections) 0 stats in
-    if total_selections = 0 then 0.0
-    else begin
-      let total_f = float_of_int total_selections in
-      List.fold_left (fun acc s ->
-        if s.selections = 0 then acc
-        else begin
-          let p = float_of_int s.selections /. total_f in
-          acc -. p *. Float.log p
-        end
-      ) 0.0 stats
-    end
-  end

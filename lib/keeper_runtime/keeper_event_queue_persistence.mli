@@ -172,6 +172,21 @@ val settle_result :
     WAL-compaction or pending-projection failure is returned as a committed
     outcome, never relabelled as an uncommitted error. *)
 
+val cancel_accepted_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  lease:lease ->
+  cancellation:accepted_cancellation ->
+  unit ->
+  (settle_result, string) result
+(** Commit one terminal accepted cancellation under the same durable owner lock
+    that reads the current queue revision. The pure state boundary checks the
+    supplied owner generation and observed source revision before the receipt
+    WAL is appended, so callers cannot split fence validation from commit. *)
+
 val prepare_registration_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

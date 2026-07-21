@@ -71,7 +71,7 @@ import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
-import { showSpawnPanel } from './keeper-spawn/keeper-spawn-state'
+import { navigate } from '../router'
 import { operatorSnapshot } from '../operator-store'
 
 type RosterStateNote = { label: string; text: string; kind?: string }
@@ -1264,8 +1264,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         <button
           type="button"
           class="fl-create"
-          data-testid="keeper-spawn-panel"
-          onClick=${() => { showSpawnPanel.value = true }}
+          data-testid="keeper-create-entry"
+          title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
+          onClick=${() => navigate('registry', {})}
         >＋ 새 Keeper</button>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
         <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 오프라인 rows ${healthOffline}</span>

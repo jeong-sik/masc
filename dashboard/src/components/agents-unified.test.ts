@@ -30,12 +30,8 @@ vi.mock('./agent-roster', () => ({
     'AgentRoster',
     keeperFilter === 'agent-only'
       ? null
-      : h('button', { 'data-testid': 'keeper-spawn-panel' }, '+ 새 Keeper'),
+      : h('button', { 'data-testid': 'keeper-create-entry' }, '+ 새 Keeper'),
   ),
-}))
-
-vi.mock('./keeper-spawn/keeper-spawn-panel', () => ({
-  KeeperSpawnPanel: () => h('div', { 'data-testid': 'keeper-spawn-panel' }, 'KeeperSpawnPanel'),
 }))
 
 vi.mock('../router', () => ({
@@ -81,7 +77,7 @@ describe('AgentsUnified', () => {
     expect(roster!.getAttribute('data-filter')).toBe('all')
     expect(container.querySelector('[data-testid="filter-chips"]')).toBeNull()
     // Keeper creation lives at the top of the fleet roster (all / keepers views).
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="keeper-create-entry"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
   })
@@ -93,13 +89,13 @@ describe('AgentsUnified', () => {
     expect(roster!.getAttribute('data-filter')).toBe('agent-only')
     expect(container.querySelector('[data-testid="filter-chips"]')).toBeNull()
     // Agents view lists workspace agents, not keepers — no keeper-create entry here.
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-create-entry"]')).toBeNull()
   })
 
   it('renders keepers view as a narrowed roster without multi-select stats', () => {
     mockRoute.value = { tab: 'monitoring', params: { view: 'keepers' }, postId: null }
     render(h(AgentsUnified, null), container)
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="keeper-create-entry"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="keeper-multi-select"]')).toBeNull()
     expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
     const roster = container.querySelector('[data-testid="agent-roster"]')
@@ -114,7 +110,7 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
     expect(container.querySelector('h1')?.textContent).toBe('Keeper Fleet FSM')
     // FSM view is a structural drill-down, not a fleet roster — no keeper-create entry here.
-    expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-create-entry"]')).toBeNull()
   })
 
   it('marks the FSM hub panel with the v2 monitoring panel class', () => {

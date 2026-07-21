@@ -168,12 +168,39 @@ let test_cycle_overlapping_protected_tail_is_untouched () =
   let _purged, report = run ~config messages in
   Alcotest.(check int) "overlapping cycle not cleared" 0 report.tool_results_cleared
 
+let test_strip_revealed_duplicates_collapse_in_one_pass () =
+  (* Three assistant replies that differ only in their reasoning become
+     byte-identical once R2 strips them; R1 must see the stripped form in the
+     same pass (measured on the sangsu checkpoint: the reverse ordering left
+     229 duplicates for a second run to find). *)
+  let reply thinking =
+    block_message Types.Assistant [ unsigned_thinking thinking; Types.Text "same answer" ]
+  in
+  let messages =
+    [ reply "t1"
+    ; text_message Types.User "q1"
+    ; reply "t2"
+    ; text_message Types.User "q2"
+    ; reply "t3"
+    ]
+  in
+  let purged, report = run messages in
+  Alcotest.(check int) "three blocks stripped" 3 report.reasoning_blocks_stripped;
+  Alcotest.(check int) "middle stripped duplicate dropped" 1 report.duplicates_dropped;
+  Alcotest.(check (list string))
+    "first and last stripped occurrence survive"
+    [ "same answer"; "q1"; "q2"; "same answer" ]
+    (message_texts purged)
+
 let test_purge_is_idempotent () =
   let wake = text_message Types.User "(autonomous wake)" in
+  let reply thinking =
+    block_message Types.Assistant [ unsigned_thinking thinking; Types.Text "same answer" ]
+  in
   let messages =
     [ wake; wake; wake ]
     @ cycle "a"
-    @ [ block_message Types.Assistant [ unsigned_thinking "t"; Types.Text "x" ] ]
+    @ [ reply "t1"; reply "t2"; reply "t3" ]
     @ [ wake ]
   in
   let once, _ = run messages in
@@ -288,6 +315,10 @@ let () =
             "tool result clear preserves pairing"
             `Quick
             test_tool_result_clear_preserves_pairing
+        ; Alcotest.test_case
+            "strip-revealed duplicates collapse in one pass"
+            `Quick
+            test_strip_revealed_duplicates_collapse_in_one_pass
         ] )
     ; ( "boundaries"
       , [ Alcotest.test_case

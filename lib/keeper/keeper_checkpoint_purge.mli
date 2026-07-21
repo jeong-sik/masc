@@ -12,6 +12,10 @@
       their content replaced by {!cleared_tool_result_content}, preserving the
       [tool_use_id]/[ToolUse] pairing (the cycle stays a valid closed unit).
 
+    R2 and R3 run before R1: stripping reasoning can make previously distinct
+    assistant messages byte-identical, and duplicate grouping sees only the
+    stripped form — this ordering is what makes a single pass a fixpoint.
+
     Tool protocol cycles are never split, reordered, or dropped. The last
     [keep_recent_messages] messages — and the structurally protected suffix
     from {!Keeper_compaction_unit.partition} — are returned byte-exact.

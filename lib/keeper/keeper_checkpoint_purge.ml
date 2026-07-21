@@ -114,22 +114,28 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
   { message with Agent_sdk.Types.content }, !cleared_count
 ;;
 
-(* R1 bookkeeping: positions (item indices) of every unprotected text-only
-   ordinary message, grouped by the message's full derived representation. *)
-let duplicate_positions_to_drop ~dup_threshold ~protected items =
+(* An item after R2/R3: its surviving messages ([] when R2 emptied and
+   dropped it) and, when it is an unprotected text-only ordinary message, the
+   R1 grouping key over its full derived representation. *)
+type transformed_item =
+  { messages : Agent_sdk.Types.message list
+  ; dedup_key : string option
+  }
+
+(* R1 bookkeeping: positions (item indices) of duplicate-eligible items,
+   grouped by their transformed representation. *)
+let duplicate_positions_to_drop ~dup_threshold transformed_items =
   let groups : (string, int list) Hashtbl.t = Hashtbl.create 64 in
   List.iteri
-    (fun position item ->
-       match item.unit_ with
-       | Keeper_compaction_unit.Ordinary_message message
-         when (not (protected item)) && is_text_only message ->
-         let key = Agent_sdk.Types.show_message message in
+    (fun position transformed ->
+       match transformed.dedup_key with
+       | Some key ->
          let positions =
            Option.value ~default:[] (Hashtbl.find_opt groups key)
          in
          Hashtbl.replace groups key (position :: positions)
-       | _ -> ())
-    items;
+       | None -> ())
+    transformed_items;
   let dropped = Hashtbl.create 64 in
   Hashtbl.iter
     (fun _key positions ->
@@ -182,19 +188,23 @@ let purge_messages ~config messages =
       in
       let protected_from = messages_before - config.keep_recent_messages in
       let protected item = item.flat_last >= protected_from in
-      let dropped_positions =
-        duplicate_positions_to_drop
-          ~dup_threshold:config.dup_threshold
-          ~protected
-          items
-      in
-      let duplicates_dropped = Hashtbl.length dropped_positions in
       let reasoning_blocks_stripped = ref 0 in
       let reasoning_messages_dropped = ref 0 in
       let tool_results_cleared = ref 0 in
+      (* R2/R3 run before R1: stripping reasoning can turn previously
+         distinct assistant messages byte-identical, and only the stripped
+         form participates in duplicate grouping. This ordering is what makes
+         a single pass a fixpoint (verified by the idempotence test; measured
+         on the sangsu checkpoint, R1-first left 229 duplicates for a second
+         pass to find). *)
+      let dedup_key_of message =
+        if is_text_only message
+        then Some (Agent_sdk.Types.show_message message)
+        else None
+      in
       let purge_item item =
         if protected item
-        then messages_of_unit item.unit_
+        then { messages = messages_of_unit item.unit_; dedup_key = None }
         else (
           match item.unit_ with
           | Keeper_compaction_unit.Ordinary_message message ->
@@ -211,28 +221,41 @@ let purge_messages ~config messages =
               match stripped_message.Agent_sdk.Types.content with
               | [] ->
                 incr reasoning_messages_dropped;
-                []
-              | _ :: _ -> [ stripped_message ])
-            else [ message ]
+                { messages = []; dedup_key = None }
+              | _ :: _ ->
+                { messages = [ stripped_message ]
+                ; dedup_key = dedup_key_of stripped_message
+                })
+            else { messages = [ message ]; dedup_key = dedup_key_of message }
           | Keeper_compaction_unit.Closed_tool_cycle cycle_messages ->
-            if config.clear_tool_results
-            then
-              List.map
-                (fun message ->
-                   let cleared_message, cleared =
-                     clear_tool_result_blocks message
-                   in
-                   tool_results_cleared := !tool_results_cleared + cleared;
-                   cleared_message)
-                cycle_messages
-            else cycle_messages)
+            let cycle_messages =
+              if config.clear_tool_results
+              then
+                List.map
+                  (fun message ->
+                     let cleared_message, cleared =
+                       clear_tool_result_blocks message
+                     in
+                     tool_results_cleared := !tool_results_cleared + cleared;
+                     cleared_message)
+                  cycle_messages
+              else cycle_messages
+            in
+            { messages = cycle_messages; dedup_key = None })
       in
+      let transformed_items = List.map purge_item items in
+      let dropped_positions =
+        duplicate_positions_to_drop
+          ~dup_threshold:config.dup_threshold
+          transformed_items
+      in
+      let duplicates_dropped = Hashtbl.length dropped_positions in
       let purged_prefix =
         List.concat
           (List.filteri
              (fun position _item -> not (Hashtbl.mem dropped_positions position))
-             items
-           |> List.map purge_item)
+             transformed_items
+           |> List.map (fun transformed -> transformed.messages))
       in
       let purged = purged_prefix @ protected_suffix in
       (match Keeper_compaction_unit.validate purged with

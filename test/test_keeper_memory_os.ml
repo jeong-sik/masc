@@ -2454,7 +2454,11 @@ let test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing () =
       (episode_retention_metric_value keeper_id)))
 ;;
 
-let test_recall_context_empty_without_memory () =
+(* Cold-start contract (RFC-0351 L1): an empty store still renders the
+   wrapper so the keeper sees the gauge and the "belongs in a fact" advisory
+   from its very first turn. Short-circuiting to "" hid the L1 nudge from
+   exactly the keepers that had never written anything. *)
+let test_recall_context_empty_store_renders_gauge () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
       Recall.render_context
@@ -2462,7 +2466,16 @@ let test_recall_context_empty_without_memory () =
         ~now:1_000_000.0
         ()
     in
-    Alcotest.(check string) "empty recall context" "" ctx)
+    let contains ~needle haystack =
+      let nlen = String.length needle in
+      let hlen = String.length haystack in
+      let rec scan i = i + nlen <= hlen && (String.sub haystack i nlen = needle || scan (i + 1)) in
+      scan 0
+    in
+    Alcotest.(check bool)
+      "empty-store recall context carries the zero gauge"
+      true
+      (contains ~needle:"facts 0/0 injected, episodes 0/0 injected" ctx))
 ;;
 
 (* render_if_enabled — the extra_system_context gate wired into
@@ -2494,7 +2507,7 @@ let test_render_if_enabled_explicit_off () =
       | Some block -> Alcotest.failf "expected None with kill switch set, got %S" block))
 ;;
 
-let test_render_if_enabled_empty_store_yields_none () =
+let test_render_if_enabled_empty_store_still_injects_gauge () =
   with_recall_env "true" (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       match
@@ -2504,8 +2517,18 @@ let test_render_if_enabled_empty_store_yields_none () =
           ~masc_root:keepers_dir
           ()
       with
-      | None -> ()
-      | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
+      | None -> Alcotest.fail "expected the cold-start gauge block, got None"
+      | Some block ->
+        Alcotest.(check bool)
+          "cold-start block names the zero store"
+          true
+          (let needle = "facts 0/0 injected" in
+           let nlen = String.length needle in
+           let hlen = String.length block in
+           let rec scan i =
+             i + nlen <= hlen && (String.sub block i nlen = needle || scan (i + 1))
+           in
+           scan 0)))
 ;;
 
 let test_render_if_enabled_surfaces_prompt_render_failure () =
@@ -5005,9 +5028,9 @@ let () =
         ] )
     ; ( "recall"
       , [ Alcotest.test_case
-            "empty without memory"
+            "empty store renders the cold-start gauge"
             `Quick
-            test_recall_context_empty_without_memory
+            test_recall_context_empty_store_renders_gauge
         ; Alcotest.test_case
             "renders sanitized memory"
             `Quick
@@ -5025,9 +5048,9 @@ let () =
             `Quick
             test_render_if_enabled_explicit_off
         ; Alcotest.test_case
-            "render_if_enabled empty store yields none"
+            "render_if_enabled empty store still injects the gauge"
             `Quick
-            test_render_if_enabled_empty_store_yields_none
+            test_render_if_enabled_empty_store_still_injects_gauge
         ; Alcotest.test_case
             "render_if_enabled surfaces prompt render failure"
             `Quick

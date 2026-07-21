@@ -35,6 +35,10 @@ let fact
 
 let claims facts = List.map (fun f -> f.Types.claim) facts |> List.sort String.compare
 
+(* Most cases assert only the surviving facts; stats-focused cases call
+   [Consolidation.apply_plan] directly. *)
+let apply_plan_facts ~now ~facts plan = fst (Consolidation.apply_plan ~now ~facts plan)
+
 (* A two-member group collapses into one consolidated claim; provenance is the
    earliest member's, first_seen is the min, observed_by is the union, and
    verification age is preserved from the newest member verification. *)
@@ -54,7 +58,7 @@ let test_apply_merges_group () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
+  match apply_plan_facts ~now ~facts plan with
   | [ merged ] ->
     Alcotest.(check string) "consolidated claim" "deploys via blue-green" merged.Types.claim;
     Alcotest.(check (float 1e-9)) "earliest first_seen preserved" 100.0 merged.Types.first_seen;
@@ -85,7 +89,7 @@ let test_apply_keeps_unreferenced () =
   Alcotest.(check (list string))
     "C survives, A+B merged"
     [ "A and B merged"; "claim C" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 (* A single-member group is a no-op: the LLM cannot silently reword one fact. *)
@@ -104,7 +108,7 @@ let test_apply_single_member_group_is_noop () =
   Alcotest.(check (list string))
     "single-member group leaves the fact unchanged"
     [ "original wording" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 (* Out-of-range and duplicate indices are skipped; a group that drops below two
@@ -124,7 +128,7 @@ let test_apply_skips_bad_indices () =
   Alcotest.(check (list string))
     "no merge from one valid index; bad drop ignored"
     [ "only fact" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 (* Explicitly dropped indices are forgotten; everything else survives. *)
@@ -134,7 +138,7 @@ let test_apply_drops_listed () =
   Alcotest.(check (list string))
     "only the listed index is dropped"
     [ "keep me"; "keep me too" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 (* A fact contested by a group and a drop goes to the group (first claim wins);
@@ -154,7 +158,7 @@ let test_apply_first_group_wins_contested () =
   Alcotest.(check (list string))
     "first group wins index 1; index 2 survives"
     [ "xy"; "z" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_accepts_model_category_change () =
@@ -176,7 +180,7 @@ let test_apply_accepts_model_category_change () =
   Alcotest.(check (list string))
     "model-selected category is applied"
     [ "Retry loops can time out under load" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_accepts_model_category_selection () =
@@ -198,7 +202,7 @@ let test_apply_accepts_model_category_selection () =
   Alcotest.(check (list string))
     "model-selected category is applied"
     [ "Retry timeout failures imply a durable lesson" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 (* RFC-0285 §3.1: [group_preserves_category] is orthogonal to [claim_kind], so the
@@ -236,7 +240,7 @@ let test_apply_rejects_mixed_claim_kind () =
     [ "Bounded retries prevent loop starvation"
     ; "the agent is stuck in a retry loop this turn"
     ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_rejects_different_explicit_validity () =
@@ -268,7 +272,7 @@ let test_apply_rejects_different_explicit_validity () =
   Alcotest.(check (list string))
     "different explicit bounds preserve both rows"
     [ "the agent is looping"; "the agent remains in a loop" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_rejects_absent_vs_explicit_validity () =
@@ -299,7 +303,7 @@ let test_apply_rejects_absent_vs_explicit_validity () =
   Alcotest.(check (list string))
     "absent and explicit bounds preserve both rows"
     [ "task-1578 is blocked by missing mapping"; "task-1578 still has missing mapping" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_preserves_rows_with_different_validity () =
@@ -329,7 +333,7 @@ let test_apply_preserves_rows_with_different_validity () =
   Alcotest.(check (list string))
     "different bounds preserve both rows"
     [ "checkpoint saved"; "continuation checkpoint saved" ]
-    (claims (Consolidation.apply_plan ~now ~facts plan))
+    (claims (apply_plan_facts ~now ~facts plan))
 ;;
 
 let test_apply_preserves_shared_claim_id () =
@@ -348,7 +352,7 @@ let test_apply_preserves_shared_claim_id () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
+  match apply_plan_facts ~now ~facts plan with
   | [ merged ] ->
     Alcotest.(check (option string))
       "shared claim_id preserved exactly"
@@ -377,7 +381,7 @@ let test_apply_drops_conflicting_claim_ids () =
     ; drop_indices = []
     }
   in
-  match Consolidation.apply_plan ~now ~facts plan with
+  match apply_plan_facts ~now ~facts plan with
   | [ merged ] ->
     Alcotest.(check (option string))
       "conflicting claim_ids are not invented into a new id"
@@ -393,8 +397,84 @@ let test_render_numbered_facts_keeps_one_fact_per_line () =
   in
   Alcotest.(check (list string))
     "one numbered fact per line"
-    [ "0: [fact] line one line two"; "1: [fact] carriage return" ]
+    [ "0: [fact] (kind=untagged) line one line two"
+    ; "1: [fact] (kind=untagged) carriage return"
+    ]
     (String.split_on_char '\n' rendered)
+;;
+
+(* The judge must see every field the apply gate compares (claim_kind and
+   valid_until) — hiding them made every gate rejection a blind coin flip. *)
+let test_render_numbered_facts_shows_gate_fields () =
+  let rendered =
+    Consolidation.render_numbered_facts
+      [ fact ~claim_kind:(Some Types.External_state) ~valid_until:1_800_000.0 "PR open"
+      ; fact "untagged claim"
+      ]
+  in
+  let lines = String.split_on_char '\n' rendered in
+  (match lines with
+   | [ first; second ] ->
+     Alcotest.(check bool)
+       "tagged line carries kind and until"
+       true
+       (let has needle hay =
+          let nlen = String.length needle in
+          let hlen = String.length hay in
+          let rec scan i = i + nlen <= hlen && (String.sub hay i nlen = needle || scan (i + 1)) in
+          scan 0
+        in
+        has "kind=external_state" first && has "until=" first);
+     Alcotest.(check string)
+       "untagged line names the absence"
+       "1: [fact] (kind=untagged) untagged claim"
+       second
+   | other -> Alcotest.failf "expected 2 lines, got %d" (List.length other))
+;;
+
+(* Structural rejection is typed and counted: 'the judge proposed no merges'
+   and 'every merge was rejected' must not collapse into one silent outcome. *)
+let test_apply_stats_count_gate_rejections () =
+  let facts =
+    [ fact ~claim_kind:(Some Types.Durable_knowledge) "durable rule"
+    ; fact ~claim_kind:(Some Types.Self_observation) "transient state"
+    ; fact "dup A"
+    ; fact "dup A reworded"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "mixed kinds"
+          ; category = Types.Fact
+          }
+        ; { Consolidation.member_indices = [ 2; 3 ]
+          ; consolidated_claim = "dup A"
+          ; category = Types.Fact
+          }
+        ; { Consolidation.member_indices = [ 2 ]
+          ; consolidated_claim = "already consumed"
+          ; category = Types.Fact
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  let _survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+  Alcotest.(check int) "one merged group" 1 stats.Consolidation.merged_groups;
+  Alcotest.(check int)
+    "one kind-mismatch rejection"
+    1
+    stats.Consolidation.rejected_kind_mismatch;
+  Alcotest.(check int)
+    "no valid_until rejection"
+    0
+    stats.Consolidation.rejected_valid_until_mismatch;
+  Alcotest.(check int)
+    "consumed/short group counted as too few members"
+    1
+    stats.Consolidation.rejected_too_few_members;
+  Alcotest.(check int) "no drops" 0 stats.Consolidation.dropped
 ;;
 
 let test_parse_plan_json () =
@@ -526,6 +606,14 @@ let () =
             "keeps one fact per prompt line"
             `Quick
             test_render_numbered_facts_keeps_one_fact_per_line
+        ; Alcotest.test_case
+            "shows the apply-gate fields to the judge"
+            `Quick
+            test_render_numbered_facts_shows_gate_fields
+        ; Alcotest.test_case
+            "apply stats count gate rejections"
+            `Quick
+            test_apply_stats_count_gate_rejections
         ] )
     ; ( "explicit_validity"
       , [ Alcotest.test_case "old unbounded fact remains eligible" `Quick

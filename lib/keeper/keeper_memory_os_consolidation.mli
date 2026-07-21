@@ -58,11 +58,29 @@ val plan_result_of_string :
     empty_plan]-equivalent. *)
 val plan_of_string : string -> consolidation_plan option
 
-(** Apply a plan to a keeper's facts, returning the new fact list. Each group of
-    >= 2 in-range, not-yet-consumed members collapses into one consolidated fact
-    (claim/category from the plan; provenance — earliest source/first_seen, union
-    of [observed_by], [last_verified_at] = [now] — reconstructed from the
-    members). A merge whose members disagree on [claim_kind] or exact
-    [valid_until] is rejected so metadata is not collapsed by a heuristic.
-    Explicitly dropped indices are removed; every other fact survives unchanged. *)
-val apply_plan : now:float -> facts:fact list -> consolidation_plan -> fact list
+(** Typed apply outcome breakdown. [rejected_*] counts distinguish "the judge
+    proposed no merges" from "every proposed merge was structurally rejected" —
+    previously both collapsed into a silent before = after. *)
+type apply_stats =
+  { merged_groups : int
+  ; rejected_kind_mismatch : int
+  ; rejected_valid_until_mismatch : int
+  ; rejected_too_few_members : int
+  ; dropped : int
+  }
+
+(** Apply a plan to a keeper's facts, returning the new fact list and the typed
+    apply statistics. Each group of >= 2 in-range, not-yet-consumed members
+    collapses into one consolidated fact (claim/category from the plan;
+    provenance — earliest source/first_seen, union of [observed_by],
+    [last_verified_at] = [now] — reconstructed from the members). A merge whose
+    members disagree on [claim_kind] or exact [valid_until] is rejected so
+    metadata is not collapsed by a heuristic; the rejection is counted, and
+    [render_numbered_facts] shows the judge both fields so such groups are not
+    proposed blind. Explicitly dropped indices are removed; every other fact
+    survives unchanged. *)
+val apply_plan
+  :  now:float
+  -> facts:fact list
+  -> consolidation_plan
+  -> fact list * apply_stats

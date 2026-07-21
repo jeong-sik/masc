@@ -1301,6 +1301,14 @@ let resolve_assignment (assigned_id : string) =
      | None -> `Missing)
 ;;
 
+let resolve_max_context_of_runtime_id (id : string)
+  : (int * max_context_source) option
+  =
+  match get_runtime_by_id id with
+  | Some rt -> resolve_max_context_of_runtime rt
+  | None -> None
+;;
+
 let max_context_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> Some (max_context_of_runtime rt)

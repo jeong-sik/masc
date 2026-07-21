@@ -83,6 +83,10 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
+  ; runtime_budget_source : Runtime.max_context_source option
+    (** Where [runtime_budget] came from (capability catalog, runtime.toml
+        override, or override clamped by capability). [None] only when the
+        legacy ordered-label path fell back to the precomputed default. *)
   ; requested_context_window : int
   ; effective_budget : int
   }

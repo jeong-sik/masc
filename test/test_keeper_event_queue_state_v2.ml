@@ -958,6 +958,7 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
+       ~compaction_consecutive_failures:0
        retry_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -975,6 +976,7 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
+       ~compaction_consecutive_failures:0
        judgment_failure
    with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -995,6 +997,7 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
+       ~compaction_consecutive_failures:0
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
@@ -1003,11 +1006,13 @@ let test_failed_cycle_route_mapping () =
     { judgment_failure with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          Masc.Keeper_unified_turn.Compaction_committed
     }
   in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:7.0
+      ~compaction_consecutive_failures:0
       compacted_failure
   with
   | Masc.Keeper_registry_event_queue.Requeue
@@ -1076,6 +1081,7 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:3.0
+      ~compaction_consecutive_failures:0
       overflow_failure
   with
   | Masc.Keeper_registry_event_queue.Escalate
@@ -1182,6 +1188,158 @@ let test_compaction_retry_escalates_after_threshold () =
   | _ ->
     Alcotest.fail
       "third consecutive compaction failure requeued instead of escalating"
+;;
+
+(* RFC-0351 S0 / #25461: the in-lane provider-overflow recovery joins the same
+   ceiling. In the 2026-07-21 storm 284 of 285 rejections carried
+   trigger=provider_overflow and escalation never fired, because this lane
+   requeued unconditionally; the storm ran ~10h and ended only when the
+   operator issued keeper_down. *)
+let test_in_lane_compaction_streak_bounds_retries () =
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Context_overflow
+      ; provenance = Keeper_runtime_failure_route.Oas_api_error
+      ; detail = "typed provider context overflow"
+      }
+  in
+  let failure disposition =
+    { (turn_failure judgment_route) with source_lease_disposition = disposition }
+  in
+  let settlement ~streak disposition =
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:4.0
+      ~compaction_consecutive_failures:streak
+      (failure disposition)
+  in
+  let attempt_failed =
+    Masc.Keeper_unified_turn.Requeue_after_context_compaction
+      (Masc.Keeper_unified_turn.Compaction_attempt_failed
+         { reason = "test-induced recovery failure" })
+  in
+  let committed =
+    Masc.Keeper_unified_turn.Requeue_after_context_compaction
+      Masc.Keeper_unified_turn.Compaction_committed
+  in
+  let terminal_no_compaction =
+    Masc.Keeper_unified_turn.Follow_failure_route_after_no_compaction
+      { reason = State.Checkpoint_not_reduced }
+  in
+  let expect_compaction_requeue label = function
+    | Masc.Keeper_registry_event_queue.Requeue
+        Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      ()
+    | _ -> Alcotest.fail label
+  in
+  let expect_exhausted ~attempts label = function
+    | Masc.Keeper_registry_event_queue.Escalate
+        { reason =
+            Masc.Keeper_registry_event_queue.Compaction_retry_exhausted
+              { attempts = reported; _ }
+        ; successor = None
+        } ->
+      Alcotest.(check int) (label ^ ": attempt count") attempts reported
+    | _ -> Alcotest.fail label
+  in
+  expect_compaction_requeue
+    "first in-lane recovery failure did not requeue"
+    (settlement ~streak:0 attempt_failed);
+  expect_compaction_requeue
+    "second in-lane recovery failure did not requeue"
+    (settlement ~streak:1 attempt_failed);
+  expect_exhausted
+    ~attempts:3
+    "third in-lane recovery failure requeued instead of escalating"
+    (settlement ~streak:2 attempt_failed);
+  (* A committed compaction is progress: the retry reloads a durably smaller
+     checkpoint and must never be replaced by exhaustion, whatever the prior
+     streak. *)
+  expect_compaction_requeue
+    "committed in-lane compaction was escalated despite durable progress"
+    (settlement ~streak:2 committed);
+  (* A terminal no-compaction below the ceiling keeps today's route (the
+     judgment successor); at the ceiling the settlement replaces the route,
+     because a context that cannot shrink re-overflows deterministically. *)
+  (match settlement ~streak:0 terminal_no_compaction with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
+       ; successor = Some { Queue.payload = Queue.Failure_judgment _; _ }
+       } ->
+     ()
+   | _ ->
+     Alcotest.fail
+       "terminal no-compaction below the ceiling lost its typed failure route");
+  expect_exhausted
+    ~attempts:3
+    "terminal no-compaction at the ceiling followed the route instead of \
+     escalating"
+    (settlement ~streak:2 terminal_no_compaction)
+;;
+
+(* RFC-0351 S0 / #25461: the settlement decides from the streak; this mapping
+   is what advances it. In-lane dispositions must join the manual lane's
+   counter, and outcomes with no compaction involvement must leave it
+   untouched. *)
+let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
+  let meta = cycle_meta () in
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Context_overflow
+      ; provenance = Keeper_runtime_failure_route.Oas_api_error
+      ; detail = "typed provider context overflow"
+      }
+  in
+  let failed disposition =
+    Some
+      (Masc.Keeper_heartbeat_loop_cycle.Failed
+         { meta
+         ; failure =
+             { (turn_failure judgment_route) with
+               source_lease_disposition = disposition
+             }
+         })
+  in
+  let check label expected outcome =
+    let actual =
+      match Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome outcome with
+      | Some `Committed -> "committed"
+      | Some `Failed -> "failed"
+      | None -> "none"
+    in
+    Alcotest.(check string) label expected actual
+  in
+  check
+    "in-lane committed compaction resets the streak"
+    "committed"
+    (failed
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          Masc.Keeper_unified_turn.Compaction_committed));
+  check
+    "in-lane failed recovery advances the streak"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          (Masc.Keeper_unified_turn.Compaction_attempt_failed
+             { reason = "test-induced recovery failure" })));
+  check
+    "in-lane terminal no-compaction advances the streak"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.Follow_failure_route_after_no_compaction
+          { reason = State.Checkpoint_not_reduced }));
+  check
+    "a generic turn failure leaves the streak untouched"
+    "none"
+    (failed Masc.Keeper_unified_turn.Follow_failure_route);
+  check
+    "an in-turn handled failure leaves the streak untouched"
+    "none"
+    (failed Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling);
+  check
+    "a completed cycle leaves the streak untouched"
+    "none"
+    (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
+  check "no outcome leaves the streak untouched" "none" None
 ;;
 
 let test_cancelled_and_skipped_cycles_requeue () =
@@ -2069,6 +2227,14 @@ let () =
             "compaction retry escalates after threshold"
             `Quick
             test_compaction_retry_escalates_after_threshold
+        ; Alcotest.test_case
+            "in-lane compaction streak bounds retries"
+            `Quick
+            test_in_lane_compaction_streak_bounds_retries
+        ; Alcotest.test_case
+            "compaction outcome mapping covers in-lane dispositions"
+            `Quick
+            test_compaction_outcome_mapping_covers_in_lane_dispositions
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick

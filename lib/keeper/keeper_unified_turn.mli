@@ -137,11 +137,33 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
+type in_lane_compaction =
+  | Compaction_committed
+  | Compaction_attempt_failed of { reason : string }
+(** Typed outcome of the in-lane provider-overflow compaction behind a
+    [Requeue_after_context_compaction] disposition. [Compaction_committed]
+    proves the checkpoint durably shrank before the requeue, so the settlement
+    resets the keeper's compaction-failure streak and the retry reloads real
+    progress. [Compaction_attempt_failed] means the recovery made no durable
+    progress; the settlement advances the streak and escalates once it reaches
+    [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
+    #25461 — without the ceiling this lane requeued forever: 284 of 285
+    rejections in the 2026-07-21 storm carried trigger=provider_overflow and
+    only the operator's keeper_down ended it). *)
+
 type source_lease_disposition =
   | Follow_failure_route
-  | Requeue_after_context_compaction
+  | Follow_failure_route_after_no_compaction of
+      { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Requeue_after_context_compaction of in_lane_compaction
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
+    [Follow_failure_route_after_no_compaction] follows the same route but
+    records that the in-lane provider-overflow compaction terminally declined
+    to act ([no_compaction_reason]); the settlement advances the
+    compaction-failure streak and replaces the route with
+    [Escalate Compaction_retry_exhausted] at the threshold, because a turn
+    whose context cannot shrink re-overflows deterministically on every retry.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.

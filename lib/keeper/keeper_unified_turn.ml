@@ -19,9 +19,15 @@ include Keeper_unified_turn_types
 
 include Keeper_unified_turn_phase_plan
 
+type in_lane_compaction =
+  | Compaction_committed
+  | Compaction_attempt_failed of { reason : string }
+
 type source_lease_disposition =
   | Follow_failure_route
-  | Requeue_after_context_compaction
+  | Follow_failure_route_after_no_compaction of
+      { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Requeue_after_context_compaction of in_lane_compaction
   | Acknowledge_after_in_turn_handling
 
 type turn_failure =
@@ -321,8 +327,13 @@ let append_provider_overflow_manifest
     (* [No_compaction] is terminal evidence for an explicit manual-compaction
        operation, not successful handling of the product event whose provider
        turn overflowed. Preserve the typed context-overflow route so the
-       owning source lease is escalated instead of silently consumed. *)
-    Follow_failure_route, turn_state
+       owning source lease is escalated instead of silently consumed — but
+       carry the terminal reason so the settlement can advance the
+       compaction-failure streak: a context that cannot shrink re-overflows
+       deterministically, so unbounded route retries burn one summarizer LLM
+       call per cycle (RFC-0351 S0, #25461). *)
+    Follow_failure_route_after_no_compaction { reason = no_compaction.reason },
+    turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
       append_recovery
@@ -331,7 +342,7 @@ let append_provider_overflow_manifest
         ~recovery
         turn_state
     in
-    Requeue_after_context_compaction, turn_state
+    Requeue_after_context_compaction Compaction_committed, turn_state
   | Provider_overflow_retry_with_checkpoint { reason; recovery } ->
     let turn_state =
       append_recovery
@@ -340,7 +351,10 @@ let append_provider_overflow_manifest
         ~recovery
         turn_state
     in
-    Requeue_after_context_compaction, turn_state
+    (* The checkpoint commit succeeded ([recovery] exists); only the lifecycle
+       completion dispatch failed. The retry reloads a durably smaller
+       checkpoint, so this counts as compaction progress for the streak. *)
+    Requeue_after_context_compaction Compaction_committed, turn_state
   | Provider_overflow_retry_without_checkpoint { trigger; reason } ->
     let turn_state =
       Keeper_unified_turn_manifest.append_manifest
@@ -362,7 +376,8 @@ let append_provider_overflow_manifest
                ]))
         Keeper_runtime_manifest.Context_compacted
     in
-    Requeue_after_context_compaction, turn_state
+    Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
+    turn_state
 ;;
 
 let run_keeper_cycle

@@ -29,6 +29,15 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+      (** RFC-0351 S0 / #25461: settled instead of
+          [Requeue Context_compaction_retry] once consecutive manual-compaction
+          failures reach the escalation threshold.  A requeue is not an ack, so
+          without this ceiling the same stimulus re-enters every heartbeat
+          cycle. *)
 
 type no_compaction_reason =
   | No_eligible_history

@@ -63,6 +63,10 @@ type compaction_runtime = {
   last_after_tokens : int;
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
+  consecutive_failures : int;
+      (** RFC-0351 S0 / #25461: consecutive manual-compaction failures.  Reset to
+          0 on a committed compaction; the heartbeat settlement escalates instead
+          of requeuing once it reaches the escalation threshold. *)
 }
 
 type proactive_runtime = {

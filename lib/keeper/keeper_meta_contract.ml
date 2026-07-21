@@ -46,6 +46,13 @@ type compaction_runtime =
   ; last_after_tokens : int
   ; last_check_ts : float
   ; last_decision : compaction_runtime_decision
+  ; consecutive_failures : int
+    (* RFC-0351 S0 / #25461: consecutive [Manual_compaction_failed] settlements
+       for this keeper. Incremented on failure, reset to 0 on a committed
+       compaction. The heartbeat settlement path escalates instead of requeuing
+       once this reaches [compaction_retry_escalation_threshold]; without it a
+       failing compaction requeues forever (measured: 102 failures / 104
+       compaction LLM calls in 74 minutes). *)
   }
 
 type proactive_runtime =

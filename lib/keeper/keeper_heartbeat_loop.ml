@@ -303,7 +303,22 @@ let single_approved_resolution lease =
   | [] | [ _ ] | _ :: _ :: _ -> None
 ;;
 
-let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease outcome =
+(* RFC-0351 S0 / #25461: consecutive manual-compaction failures tolerated before
+   the settlement escalates instead of requeuing. A requeue is not an ack, so
+   without a ceiling the same stimulus re-enters on every heartbeat cycle —
+   measured at 102 failures / 104 compaction LLM calls in 74 minutes after the
+   #25413 build went live. Three attempts keeps a transient CAS/source race
+   recoverable while bounding a structurally-stuck compaction. *)
+let compaction_retry_escalation_threshold = 3
+
+let settlement_of_cycle_outcome
+      ~base_path
+      ~settled_at
+      ~stop_requested
+      ~compaction_consecutive_failures
+      ~lease
+      outcome
+  =
   match single_approved_resolution lease with
   | Some resolution ->
     (match
@@ -377,8 +392,25 @@ let settlement_of_cycle_outcome ~base_path ~settled_at ~stop_requested ~lease ou
          ; successor = None
          })
   | Some (Cycle.Manual_compaction_failed _) ->
-    Keeper_registry_event_queue.Requeue
-      Keeper_registry_event_queue.Context_compaction_retry
+    (* This failure is the [compaction_consecutive_failures + 1]-th in a row for
+       this keeper; the counter itself is advanced by the compaction commit path
+       on [keeper_meta.runtime.compaction_rt]. *)
+    let attempts = compaction_consecutive_failures + 1 in
+    if attempts >= compaction_retry_escalation_threshold
+    then
+      Keeper_registry_event_queue.Escalate
+        { reason =
+            Keeper_registry_event_queue.Compaction_retry_exhausted
+              { attempts
+              ; detail =
+                  "manual compaction failed on consecutive attempts; retry \
+                   suspended pending operator inspection"
+              }
+        ; successor = None
+        }
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Context_compaction_retry
   | Some (Cycle.Manual_compaction_not_applied { no_compaction = { source; reason }; _ }) ->
     Keeper_registry_event_queue.No_compaction { source; reason }
   | None ->
@@ -863,9 +895,44 @@ let run_keepalive_unified_turn
              ~base_path:ctx.config.base_path
              ~settled_at
              ~stop_requested:(Atomic.get stop)
+             ~compaction_consecutive_failures:
+               meta_after_triage.runtime.compaction_rt.consecutive_failures
              ~lease
              !cycle_outcome_ref
          in
+         (* RFC-0351 S0 / #25461: advance the compaction streak the settlement
+            above just read. Ordering matters — the settlement decides
+            requeue-vs-escalate from the streak *before* this failure, and this
+            stamp records the failure for the next cycle. *)
+         (let compaction_outcome =
+            match !cycle_outcome_ref with
+            | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
+            | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
+            | Some
+                ( Cycle.Completed _
+                | Cycle.Cancelled _
+                | Cycle.Skipped _
+                | Cycle.Busy _
+                | Cycle.Failed _
+                | Cycle.Judgment_settled _
+                | Cycle.Manual_compaction_not_applied _ )
+            | None -> None
+          in
+          match compaction_outcome with
+          | None -> ()
+          | Some outcome ->
+            (match
+               Keeper_meta_store.persist_compaction_outcome
+                 ctx.config
+                 ~keeper_name:meta_after_triage.name
+                 ~outcome
+             with
+             | Ok (`Persisted | `No_durable_meta) -> ()
+             | Error message ->
+               Log.Keeper.warn
+                 "compaction outcome counter not persisted keeper=%s: %s"
+                 meta_after_triage.name
+                 message));
          (match
             settle_claimed_lease
               ~base_path:ctx.config.base_path

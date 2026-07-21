@@ -554,6 +554,38 @@ let persist_compaction_decision config ~keeper_name ~decision
     |> Result.map (fun () -> `Persisted)
 ;;
 
+(* RFC-0351 S0 / #25461: advance the consecutive-failure streak that the
+   heartbeat settlement reads to choose requeue-vs-escalate.  Same
+   read/stamp/merge shape as [persist_compaction_decision] so a concurrent CAS
+   re-applies the stamp instead of dropping it.
+
+   [`Committed] also advances [count].  That field had no writer: it was
+   serialized to meta and rendered by the dashboard while nothing incremented
+   it, so a keeper whose compaction pipeline was committing normally still
+   reported compaction_count=0 — one keeper carried 88 committed
+   [context_compacted] runtime-manifest records against a meta reading 0. *)
+let persist_compaction_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    Keeper_meta_contract.map_compaction_rt
+      (fun rt ->
+        match outcome with
+        | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
+        | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 })
+      m
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed

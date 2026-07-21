@@ -1146,10 +1146,6 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
     ]
 ;;
 
-let dashboard_runtime_probe_payload_json_for_tests ?default_id runtimes =
-  dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
-;;
-
 let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
   | Some hook -> hook ()

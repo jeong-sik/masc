@@ -57,12 +57,12 @@ type board_backend =
   | Jsonl of Board.store
 
 (** Lifecycle state carried inside [Active] for each long-lived Board actor.
-    Keeping the immutable record in the backend state makes backend publication
-    and both independent actor owners one atomic fact. *)
+    A live transition retains its exact owner switch, so backend publication,
+    actor liveness, and cleanup authority remain one immutable atomic fact. *)
 type actor_status =
   | Actor_stopped
-  | Actor_starting
-  | Actor_started
+  | Actor_starting of Eio.Switch.t
+  | Actor_started of Eio.Switch.t
 
 type runtime_actor_state = {
   flusher : actor_status;
@@ -383,8 +383,9 @@ let spawn_runtime_actor_on_switch ~sw ~clock store actor =
 
 (** Claim and start the Board runtime actors against the caller-owned root
     switch.  A losing caller yields and re-reads the typed backend state until
-    another caller publishes [Actor_started] or it can claim the transition.
-    There is no retry budget or timing policy. *)
+    another caller publishes a live owner or it can claim the transition.  An
+    unavailable prior owner is retired by exact switch identity.  There is no
+    retry budget or timing policy. *)
 let actor_status actors = function
   | Flusher -> actors.flusher
   | Routing_retry -> actors.routing_retry
@@ -396,63 +397,164 @@ let with_actor_status actors actor status =
   | Routing_retry -> { actors with routing_retry = status }
 ;;
 
+let switch_is_available sw = Option.is_none (Eio.Switch.get_error sw)
+
+(** Switches are opaque allocated capabilities.  Physical equality expresses
+    exact capability identity; structural comparison is neither available nor
+    meaningful for this ownership check. *)
+let actor_status_owned_by sw = function
+  | Actor_starting owner
+  | Actor_started owner -> owner == sw
+  | Actor_stopped -> false
+;;
+
+let rec stop_runtime_actor_owned_by ~sw actor =
+  let current = Atomic.get backend_state in
+  match current with
+  | Uninitialized -> false
+  | Active (backend, actors) ->
+    let status = actor_status actors actor in
+    if not (actor_status_owned_by sw status)
+    then false
+    else
+      let stopped_state =
+        Active (backend, with_actor_status actors actor Actor_stopped)
+      in
+      if Atomic.compare_and_set backend_state current stopped_state
+      then true
+      else stop_runtime_actor_owned_by ~sw actor
+;;
+
+(* Publish [Actor_started] for the actor this switch already claimed.
+   [backend_state] holds every actor's status in one record, so a whole-record
+   CAS also loses when an unrelated actor's [on_release] runs between our claim
+   and this publish. Losing that race must not abandon our own transition: the
+   actor is still [Actor_starting sw] and nobody else will advance it, so the
+   caller would leave it starting forever and every later call would spin on a
+   live owner.
+
+   Re-read and retry on a fresh record — the same shape as
+   {!stop_runtime_actor_owned_by} — so peer updates are preserved instead of
+   overwritten. [false] means the claim genuinely no longer belongs to this
+   switch, which is a real replacement rather than a lost race. *)
+let rec publish_runtime_actor_started ~sw actor =
+  let current = Atomic.get backend_state in
+  match current with
+  | Uninitialized -> false
+  | Active (backend, actors) ->
+    if not (actor_status_owned_by sw (actor_status actors actor))
+    then false
+    else
+      let started_state =
+        Active (backend, with_actor_status actors actor (Actor_started sw))
+      in
+      if Atomic.compare_and_set backend_state current started_state
+      then true
+      else publish_runtime_actor_started ~sw actor
+;;
+
+(* A replacement actor starts on an inbox the cancelled owner may have already
+   drained: [routing_retry_loop] takes the wake token and clears
+   [routing_retry_requested] BEFORE running its callback, so cancelling it
+   mid-callback (or mid-backoff) leaves a committed outbox entry with no token
+   and no pending request. Forking alone would then block on [Stream.take]
+   until some later Board mutation happened to request a retry, and the durable
+   signal would sit unretried in the meantime.
+
+   Re-arm the signal so startup is itself a recovery point.
+   [request_routing_retry] is a no-op when a request is already pending, so an
+   unnecessary re-arm costs one extra sweep, never a duplicate token. The match
+   is exhaustive: a new actor kind must state its own startup recovery rather
+   than silently inherit "none". *)
+let rearm_runtime_actor_signal = function
+  | Routing_retry -> request_routing_retry ()
+  | Flusher ->
+    (* The flusher's wake token is level-triggered off the durable obligation
+       record, which a replacement re-reads on its first loop, so there is
+       nothing to re-arm here. *)
+    ()
+;;
+
+let retire_unavailable_actor_owner actor owner =
+  if switch_is_available owner
+  then false
+  else begin
+    let _retired = stop_runtime_actor_owned_by ~sw:owner actor in
+    true
+  end
+;;
+
 let start_runtime_actor ~sw ~clock actor =
   let rec loop () =
     let current = Atomic.get backend_state in
     match current with
     | Uninitialized -> Error Backend_uninitialized
-    | Active (_, actors) when actor_status actors actor = Actor_started -> Ok ()
-    | Active (_, actors) when actor_status actors actor = Actor_starting ->
-      Eio.Fiber.yield ();
-      loop ()
     | Active (Jsonl store as backend, actors) ->
-      let starting_actors = with_actor_status actors actor Actor_starting in
-      let starting_state = Active (backend, starting_actors) in
-      if Atomic.compare_and_set backend_state current starting_state
-      then begin
-        let rollback () =
-          let stopped_state =
-            Active (backend, with_actor_status starting_actors actor Actor_stopped)
-          in
-          Atomic.compare_and_set backend_state starting_state stopped_state
-        in
-        let record outcome =
-          Board_metrics_hooks.inc_runtime_actor_start_outcome ~actor ~outcome
-        in
-        match Eio.Switch.get_error sw with
-        | Some exn ->
-          let rolled_back = rollback () in
-          record Start_failed;
-          if rolled_back
-          then Error (Switch_unavailable (actor, exn))
-          else Error (Backend_replaced_during_start actor)
-        | None ->
-          (try
-             spawn_runtime_actor_on_switch ~sw ~clock store actor;
-             let started_state =
-               Active (backend, with_actor_status starting_actors actor Actor_started)
-             in
-             if Atomic.compare_and_set backend_state starting_state started_state
-             then begin
-               record Started;
-               Ok ()
-             end
-             else begin
-               record Start_failed;
-               Error (Backend_replaced_during_start actor)
-             end
-           with
-           | exn ->
-             let _rolled_back = rollback () in
+      (match actor_status actors actor with
+       | Actor_started owner ->
+         if retire_unavailable_actor_owner actor owner then loop () else Ok ()
+       | Actor_starting owner ->
+         if retire_unavailable_actor_owner actor owner
+         then loop ()
+         else begin
+           Eio.Fiber.yield ();
+           loop ()
+         end
+       | Actor_stopped ->
+         let starting_actors =
+           with_actor_status actors actor (Actor_starting sw)
+         in
+         let starting_state = Active (backend, starting_actors) in
+         if Atomic.compare_and_set backend_state current starting_state
+         then begin
+           let rollback () =
+             stop_runtime_actor_owned_by ~sw actor
+           in
+           let record outcome =
+             Board_metrics_hooks.inc_runtime_actor_start_outcome ~actor ~outcome
+           in
+           match Eio.Switch.get_error sw with
+           | Some exn ->
+             let rolled_back = rollback () in
              record Start_failed;
-             (match exn with
-              | Eio.Cancel.Cancelled _ -> raise exn
-              | _ -> Error (Actor_spawn_failed (actor, exn))))
-      end
-      else begin
-        Eio.Fiber.yield ();
-        loop ()
-      end
+             if rolled_back
+             then Error (Switch_unavailable (actor, exn))
+             else Error (Backend_replaced_during_start actor)
+           | None ->
+             (try
+                Eio.Switch.on_release sw (fun () ->
+                  if stop_runtime_actor_owned_by ~sw actor
+                  then
+                    Log.BoardLog.info
+                      "Board runtime actor stopped with owner switch: actor=%s"
+                      (runtime_actor_to_string actor));
+                spawn_runtime_actor_on_switch ~sw ~clock store actor;
+                if publish_runtime_actor_started ~sw actor
+                then begin
+                  record Started;
+                  rearm_runtime_actor_signal actor;
+                  Ok ()
+                end
+                else begin
+                  record Start_failed;
+                  Error (Backend_replaced_during_start actor)
+                end
+              with
+              | exn ->
+                let _rolled_back = rollback () in
+                record Start_failed;
+                (match exn with
+                 | Eio.Cancel.Cancelled _ -> raise exn
+                 | _ ->
+                   (match Eio.Switch.get_error sw with
+                    | Some owner_error ->
+                      Error (Switch_unavailable (actor, owner_error))
+                    | None -> Error (Actor_spawn_failed (actor, exn)))))
+         end
+         else begin
+           Eio.Fiber.yield ();
+           loop ()
+         end)
   in
   loop ()
 
@@ -502,8 +604,8 @@ let admit_routing_mutation mutation =
 let set_board_signal_hook hook =
   Atomic.set board_signal_hook (Some hook);
   match Atomic.get backend_state with
-  | Active (_, { routing_retry = Actor_started; _ }) -> request_routing_retry ()
-  | Active (_, { routing_retry = (Actor_stopped | Actor_starting); _ })
+  | Active (_, { routing_retry = Actor_started _; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = (Actor_stopped | Actor_starting _); _ })
   | Uninitialized ->
     (match
        run_routing_callback
@@ -610,8 +712,8 @@ let commit_routing_event ~event_id value =
 
 let drain_after_mutation () =
   match Atomic.get backend_state with
-  | Active (_, { routing_retry = Actor_started; _ }) -> request_routing_retry ()
-  | Active (_, { routing_retry = (Actor_stopped | Actor_starting); _ })
+  | Active (_, { routing_retry = Actor_started _; _ }) -> request_routing_retry ()
+  | Active (_, { routing_retry = (Actor_stopped | Actor_starting _); _ })
   | Uninitialized ->
     (match
        run_routing_callback

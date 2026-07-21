@@ -2185,6 +2185,42 @@ let test_runtime_actors_reject_finished_switch_and_allow_retry () =
   with Exit -> ()
 ;;
 
+let test_runtime_actors_restart_after_owner_switch_release () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  ignore (fresh_test_base_path ());
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Eio.Switch.run (fun first_owner ->
+    match Board_dispatch.start_runtime_actors ~sw:first_owner ~clock with
+    | Ok () -> ()
+    | Error failures ->
+      Alcotest.fail
+        (Board_dispatch.runtime_actor_start_failures_to_string failures));
+  let delivered, resolve_delivered = Eio.Promise.create () in
+  let delivery_resolved = Atomic.make false in
+  Board_dispatch.set_board_signal_hook (fun _event ->
+    if Atomic.compare_and_set delivery_resolved false true
+    then Eio.Promise.resolve resolve_delivered ();
+    Ok Board_dispatch.Atomic_sink_accepted);
+  Eio.Switch.run (fun replacement_owner ->
+    (match Board_dispatch.start_runtime_actors ~sw:replacement_owner ~clock with
+     | Ok () -> ()
+     | Error failures ->
+       Alcotest.fail
+         (Board_dispatch.runtime_actor_start_failures_to_string failures));
+    (match
+       Board_dispatch.create_post ~author:"replacement-owner-test"
+         ~content:"replacement switch owns a live routing actor"
+         ~post_kind:Board.Human_post ()
+     with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Board.show_board_error error));
+    Eio.Time.with_timeout_exn clock 1.0 (fun () -> Eio.Promise.await delivered))
+;;
+
 (** {1 Reaction Operations} *)
 
 let test_reaction_toggle_and_summary () =
@@ -3419,6 +3455,8 @@ let () =
         test_vote_persisted_by_flusher_actor;
       Alcotest.test_case "runtime actors reject finished switch and allow retry" `Quick
         test_runtime_actors_reject_finished_switch_and_allow_retry;
+      Alcotest.test_case "runtime actors restart after owner switch release" `Quick
+        test_runtime_actors_restart_after_owner_switch_release;
     ];
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick

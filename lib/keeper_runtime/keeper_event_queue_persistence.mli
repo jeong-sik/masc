@@ -338,4 +338,16 @@ val drop_by_post_id :
   unit ->
   (Keeper_event_queue.stimulus list, string) result
 
-val fleet_summary_json : now:float -> base_path:string -> Yojson.Safe.t
+type owner_lifecycle =
+  | Runnable
+  | Paused_retained
+  | Lifecycle_unknown of string
+
+(** Fleet projection split by the caller's canonical durable owner-lifecycle
+    read.  Queue persistence deliberately does not infer pause state from
+    registry presence, event contents, or elapsed time. *)
+val fleet_summary_json :
+  now:float ->
+  base_path:string ->
+  owner_lifecycle:(keeper_name:string -> owner_lifecycle) ->
+  Yojson.Safe.t

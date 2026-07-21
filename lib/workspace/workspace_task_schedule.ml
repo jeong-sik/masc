@@ -194,6 +194,7 @@ let claim_next_r
       ~agent_name
       ?(exclude_task_ids = [])
       ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
+      ?(hard_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(allow_scope_fallback = false)
       ()
   =
@@ -298,6 +299,13 @@ let claim_next_r
           sorted
           |> List.filter Masc_domain.task_claim_next_action_is_claimable
           |> List.filter resolves_claimable
+          (* [hard_filter] is a hard exclusion (e.g. self-author ownership): unlike
+             [task_filter] it survives the [allow_scope_fallback] widening below,
+             because it expresses an invariant the scheduler must never relax, not
+             a goal scope that may be dropped to avoid starvation. Applying it here
+             at the base makes both [scoped_eligible] and the widened set respect
+             it. *)
+          |> List.filter hard_filter
         in
         let all_excluded = exclude_task_ids in
         let task_filter_excluded =

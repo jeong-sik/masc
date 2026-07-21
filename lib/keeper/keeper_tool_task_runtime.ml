@@ -555,11 +555,16 @@ let handle_keeper_task_tool_with_outcome
           (* Auto-claim (no explicit task_id) must not select the keeper's own
              authored tasks: that closes the routing/report feedback loop
              (#25429) the claimable count already excludes. Explicit claim by
-             task_id above is intentional and left unfiltered. *)
+             task_id above is intentional and left unfiltered. The self-author
+             exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
+             must survive the [allow_scope_fallback] widening below, otherwise a
+             keeper whose backlog holds only its own routing/report tasks falls
+             into the fallback, drops the goal-scope filter, and claims its own
+             task right back — exactly the case this is meant to prevent. *)
           Workspace.claim_next_r config ~agent_name:meta.agent_name
-            ~task_filter:(fun task ->
-              claim_goal_scope.task_filter task
-              && not (Keeper_world_observation_inputs.task_is_self_authored ~meta task))
+            ~task_filter:claim_goal_scope.task_filter
+            ~hard_filter:(fun task ->
+              not (Keeper_world_observation_inputs.task_is_self_authored ~meta task))
             ~allow_scope_fallback:true
             ()
       in

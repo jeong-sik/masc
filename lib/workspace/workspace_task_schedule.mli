@@ -63,6 +63,13 @@ val claim_next_r
   -> agent_name:string
   -> ?exclude_task_ids:string list
   -> ?task_filter:(Masc_domain.task -> bool)
+  -> ?hard_filter:(Masc_domain.task -> bool)
+       (** A hard exclusion applied to the claim pool before both the goal-scope
+           [task_filter] and the [allow_scope_fallback] widening. Unlike
+           [task_filter] it is NOT dropped on widening: use it for invariants the
+           scheduler must never relax (e.g. self-author ownership), reserving
+           [task_filter] for the goal scope that widening exists to relax.
+           Default [fun _ -> true]. *)
   -> ?allow_scope_fallback:bool
        (** When [true] and no goal-scoped task passes [task_filter], widen the
            claim pool to all_tasks. Result carries [scope_widened = true].

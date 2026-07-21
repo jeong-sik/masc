@@ -763,6 +763,92 @@ let test_malformed_structure_preserves_checkpoint () =
          | Ok _ -> fail "stale prepared value committed past the source CAS"))
 ;;
 
+(* RFC-0351 S0 / #25461: once the persisted failure streak suspends
+   compaction retries, a reactive prepare must be refused before any
+   checkpoint I/O — each new stimulus used to pay one full prepare
+   (checkpoint load + summarizer LLM call) before its escalation settled.
+   The fixture base_dir holds no checkpoint, so any prepare that passes the
+   gate deterministically fails with [Checkpoint_ref_load_failed Ref_not_found];
+   returning [Retry_suspended] instead proves the refusal fired first. *)
+let test_suspended_streak_refuses_reactive_prepare () =
+  Eio_main.run @@ fun _env ->
+  let meta_with_streak streak =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "prepare-admission"
+          ; "trace_id", `String "trace-prepare-admission"
+          ; "compaction_consecutive_failures", `Int streak
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> failf "prepare-admission meta fixture: %s" detail
+  in
+  let base_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-prepare-admission-%d" (Unix.getpid ()))
+  in
+  let projection_request =
+    Projection_target.request
+      ~assignment_id:""
+      ~resolve_context_window:(fun _ ->
+        Projection_target.Resolved_context_window 1)
+  in
+  let prepare ~streak ~trigger =
+    Post_turn.prepare_compaction
+      ~base_dir
+      ~meta:(meta_with_streak streak)
+      ~trigger
+      ~projection_request
+  in
+  let suspended = meta_with_streak 3 in
+  check bool
+    "fixture streak reaches the suspension threshold"
+    true
+    (Masc.Keeper_meta_contract.compaction_retry_suspended
+       suspended.runtime.compaction_rt);
+  (match
+     prepare
+       ~streak:3
+       ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+   with
+   | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
+     check int "refusal reports the persisted streak" 3 consecutive_failures
+   | Error error ->
+     failf
+       "suspended reactive prepare reached I/O instead of the admission gate: \
+        %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "suspended reactive prepare produced a prepared compaction");
+  (match prepare ~streak:3 ~trigger:Compaction_trigger.Manual with
+   | Error
+       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+     ->
+     (* Reached the checkpoint load: the operator lever bypasses the gate. *)
+     ()
+   | Error error ->
+     failf
+       "suspended manual prepare did not reach the checkpoint load: %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "manual prepare on an empty store produced a compaction");
+  match
+    prepare
+      ~streak:2
+      ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+  with
+  | Error
+      (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+    ->
+    (* Below the threshold the reactive path is admitted unchanged. *)
+    ()
+  | Error error ->
+    failf
+      "below-threshold reactive prepare did not reach the checkpoint load: %s"
+      (Post_turn.compaction_recovery_error_to_string error)
+  | Ok _ -> fail "reactive prepare on an empty store produced a compaction"
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -778,5 +864,7 @@ let () =
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
+      test_case "suspended streak refuses reactive prepare"
+        `Quick test_suspended_streak_refuses_reactive_prepare;
     ];
   ]

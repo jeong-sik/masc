@@ -113,7 +113,11 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Checkpoint_cas_failed _
     | Checkpoint_candidate_failed _
     | Compaction_rejected _
-    | No_compaction _ ->
+    | No_compaction _
+    (* Manual prepares bypass the suspension gate, so this surface cannot
+       observe [Retry_suspended] today; the arm keeps the classification
+       total if that routing ever changes. *)
+    | Retry_suspended _ ->
       Not_installed, `Bool false
   in
   let recovery_code =
@@ -127,6 +131,7 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Compaction_rejected Checkpoint_not_reduced
     | No_compaction _ ->
       Precondition_failed
+    | Retry_suspended _ -> Precondition_failed
     | Compaction_rejected Summarizer_unavailable
     | Compaction_rejected Plan_provider_unavailable
     | Compaction_rejected Invalid_compaction_plan

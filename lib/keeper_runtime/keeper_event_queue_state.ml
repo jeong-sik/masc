@@ -438,7 +438,7 @@ let transition_receipt_equal left right =
   && left.settlement = right.settlement
 ;;
 
-let validate_accepted_cancellation cancellation =
+let validate_accepted_cancellation (cancellation : accepted_cancellation) =
   if String.equal (String.trim cancellation.source.post_id) ""
   then Error "accepted cancellation source post id must not be empty"
   else if Int64.compare cancellation.source_revision 0L < 0

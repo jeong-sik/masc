@@ -60,7 +60,7 @@ let with_transfer_lane f =
   let base_path = Filename.temp_dir "keeper-paused-transfer-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       remove_tree base_path)
     (fun () ->
        let config = Workspace.default_config base_path in
@@ -232,13 +232,15 @@ let test_replay_after_source_settlement_projects_target () =
       ; to_keeper
       }
     in
-    Keeper_registry_event_queue.transfer_pending_accepted_result
-      ~base_path:config.Workspace.base_path
-      from_keeper
-      ~current_owner_generation:request.owner_generation
-      ~settled_at:request.settled_at
-      ~transfer:causal
-    |> require_ok "simulate committed source settlement";
+    (* fire-and-forget: the settlement value is only a fixture precondition here. *)
+    ignore
+      (Keeper_registry_event_queue.transfer_pending_accepted_result
+         ~base_path:config.Workspace.base_path
+         from_keeper
+         ~current_owner_generation:request.owner_generation
+         ~settled_at:request.settled_at
+         ~transfer:causal
+       |> require_ok "simulate committed source settlement");
     let replay =
       Transaction.transfer_pending config ~from_keeper ~to_keeper request
       |> Result.map_error Transaction.error_to_string

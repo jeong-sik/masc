@@ -363,7 +363,7 @@ let project_receipt config receipt =
   let* transfer = transfer_of_receipt receipt in
   let* source_settlement = source_settlement config receipt transfer in
   let* target_projection = target_enqueue config transfer in
-  Ok { source_settlement; target_projection }
+  Ok (Applied { source_settlement; target_projection })
 ;;
 
 let run_owned receipt_lock config ~from_keeper ~to_keeper request =
@@ -399,7 +399,7 @@ let run_owned receipt_lock config ~from_keeper ~to_keeper request =
   in
   let projection =
     match project_receipt config receipt with
-    | Ok applied -> Applied applied
+    | Ok projection -> projection
     | Error failure -> Committed_followup_failed failure
   in
   Ok (receipt, commit_status, projection)

@@ -190,6 +190,7 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsExplicitFactWrite
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
@@ -413,6 +414,8 @@ let to_string = function
       "masc_keeper_memory_os_recall_unavailable_total"
   | MemoryOsReobserveEchoSuppressed ->
       "masc_keeper_memory_os_reobserve_echo_suppressed_total"
+  | MemoryOsExplicitFactWrite ->
+      "masc_keeper_memory_os_explicit_fact_write_total"
   | MemoryOsRecallFactsTruncated ->
       "masc_keeper_memory_os_recall_facts_truncated_total"
   | MemoryOsRecallEpisodesTruncated ->

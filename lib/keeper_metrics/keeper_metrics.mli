@@ -181,6 +181,7 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsExplicitFactWrite
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget

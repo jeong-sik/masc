@@ -385,6 +385,119 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
         (persisted.messages = canonical_history @ [ current_assistant ]))
 ;;
 
+(* RFC-0351 S1 / #25462: a completed bare-wake turn must not persist the
+   autonomous wake marker the OAS run received as its goal — that was the
+   last accumulation path after #25515 (343 byte-identical markers measured
+   in one checkpoint). The typed [Skip_uninformative_wake] record gates the
+   drop; an identical-looking user message under [Record_user_turn] must
+   survive. *)
+let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
+
+let wake_persistence ~user_turn_record ~response_text messages =
+  Finalize.checkpoint_for_replay_persistence
+    ~history_messages:
+      Agent_sdk.Types.
+        [ { role = User
+          ; content = [ Text "seed" ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata = []
+          }
+        ]
+    ~pre_turn_working_context:None
+    ~completion_contract_result:Receipt.Completion_no_visible_output
+    ~session_id:"new-session"
+    ~response_text
+    ~user_turn_record
+    (checkpoint messages)
+;;
+
+let history_seed = [ message Agent_sdk.Types.User [ Agent_sdk.Types.Text "seed" ] ]
+
+let test_skipped_wake_marker_is_not_persisted () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant [ Text "observed, nothing to do" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:"observed, nothing to do"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "marker dropped, assistant reply retained"
+    2
+    (List.length patched.messages);
+  Alcotest.(check bool)
+    "no message carries the wake marker"
+    false
+    (List.exists
+       (fun (m : message) -> m.content = [ Text wake_marker_text ])
+       patched.messages)
+;;
+
+let test_recorded_turn_keeps_identical_marker_text () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant [ Text "reply" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+      ~response_text:"reply"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "recorded turn persists the user message even with marker text"
+    3
+    (List.length patched.messages)
+;;
+
+let test_skipped_wake_leaves_non_marker_suffix_untouched () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text "an actual user question" ]
+    ; message Assistant [ Text "reply" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:"reply"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "a non-marker leading user message survives the skip record"
+    3
+    (List.length patched.messages)
+;;
+
+let test_skipped_wake_blank_response_still_drops_whole_suffix () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]; message Assistant [ Text "" ] ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:""
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "blank canonicalization keeps only the pre-turn history"
+    1
+    (List.length patched.messages)
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -421,6 +534,22 @@ let () =
             "media-degraded projection persists canonical checkpoint"
             `Quick
             test_media_degraded_projection_persists_canonical_checkpoint
+        ; Alcotest.test_case
+            "skipped wake marker is not persisted"
+            `Quick
+            test_skipped_wake_marker_is_not_persisted
+        ; Alcotest.test_case
+            "recorded turn keeps identical marker text"
+            `Quick
+            test_recorded_turn_keeps_identical_marker_text
+        ; Alcotest.test_case
+            "skipped wake leaves non-marker suffix untouched"
+            `Quick
+            test_skipped_wake_leaves_non_marker_suffix_untouched
+        ; Alcotest.test_case
+            "skipped wake blank response still drops whole suffix"
+            `Quick
+            test_skipped_wake_blank_response_still_drops_whole_suffix
         ] )
     ]
 ;;

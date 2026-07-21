@@ -14,6 +14,15 @@ type request =
   ; settled_at : float
   }
 
+type pending_request =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  ; settled_at : float
+  }
+
 type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
@@ -28,6 +37,7 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Lease_source_invalid
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
@@ -56,3 +66,12 @@ val cancel :
     revision is checked inside the durable owner lock. A committed settlement
     remains a success even if reservation release reports an anomaly; callers
     can inspect [reservation_release] without retrying a committed operation. *)
+
+val cancel_pending :
+  Workspace.config ->
+  keeper_name:string ->
+  pending_request ->
+  (success, error) result
+(** Cancel the exact pending source under the same paused lifecycle reservation.
+    The source-bearing receipt WAL is durable before pending removal is
+    checkpointed, and committed replay bypasses current owner fences. *)

@@ -40,7 +40,8 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
   }
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -108,6 +109,16 @@ val cancel_accepted_result :
   (settle_result, string) result
 (** Commit an owner-fenced accepted cancellation and publish the resulting
     pending projection to the exact live registry lane after durable commit. *)
+
+val cancel_pending_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  cancellation:accepted_cancellation ->
+  (settle_result, string) result
+(** Commit an exact pending accepted cancellation and publish the post-commit
+    pending projection when the owner currently has a live registry lane. *)
 
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later

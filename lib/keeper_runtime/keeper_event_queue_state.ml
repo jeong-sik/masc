@@ -35,7 +35,8 @@ type no_compaction =
   }
 
 type accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -425,7 +426,9 @@ let transition_receipt_equal left right =
 ;;
 
 let validate_accepted_cancellation cancellation =
-  if Int64.compare cancellation.source_revision 0L < 0
+  if String.equal (String.trim cancellation.source.post_id) ""
+  then Error "accepted cancellation source post id must not be empty"
+  else if Int64.compare cancellation.source_revision 0L < 0
   then Error "accepted cancellation source revision must not be negative"
   else if cancellation.owner_generation < 0
   then Error "accepted cancellation owner generation must not be negative"
@@ -499,7 +502,10 @@ let validate_settlement_for_stimuli settlement stimuli =
   | No_compaction _, _ ->
     Error
       "no-compaction settlement requires one manual-compaction request stimulus"
-  | Cancel_accepted _, [ _ ] -> Ok ()
+  | Cancel_accepted cancellation, [ source ] when cancellation.source = source ->
+    Ok ()
+  | Cancel_accepted _, [ _ ] ->
+    Error "accepted cancellation source does not match its exact event stimulus"
   | Cancel_accepted _, _ ->
     Error "accepted cancellation requires exactly one accepted event stimulus"
   | (Ack | Requeue _ | Escalate _), _ -> Ok ()
@@ -649,6 +655,103 @@ let cancel_accepted
     settle_committed ~settled_at ~lease ~settlement state
 ;;
 
+let prior_cancellation_by_operation_id operation_id state =
+  let is_same_operation receipt =
+    match receipt.settlement with
+    | Cancel_accepted cancellation ->
+      String.equal cancellation.operator_operation_id operation_id
+    | Ack | No_compaction _ | Requeue _ | Escalate _ -> false
+  in
+  match state.transition_outbox with
+  | [ entry ] when is_same_operation entry.receipt -> Some entry.receipt
+  | [] | [ _ ] ->
+    (match state.last_settlement with
+     | Some receipt when is_same_operation receipt -> Some receipt
+     | Some _ | None -> None)
+  | _ :: _ :: _ -> None
+;;
+
+let accepted_pending_cancellation_replay cancellation state =
+  let requested = Cancel_accepted cancellation in
+  match
+    prior_cancellation_by_operation_id cancellation.operator_operation_id state
+  with
+  | None -> Ok None
+  | Some receipt when settlement_equal receipt.settlement requested ->
+    Ok (Some receipt)
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "accepted cancellation operation conflict: %s"
+         cancellation.operator_operation_id)
+;;
+
+let cancel_pending_accepted
+      ~current_owner_generation
+      ~settled_at
+      ~cancellation
+      state
+  =
+  let settlement = Cancel_accepted cancellation in
+  match accepted_pending_cancellation_replay cancellation state with
+  | Error _ as error -> error
+  | Ok (Some receipt) ->
+    Ok (state, Already_settled receipt)
+  | Ok None ->
+    let* () = validate_accepted_cancellation cancellation in
+    let* () =
+      if Int.equal current_owner_generation cancellation.owner_generation
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "accepted cancellation owner generation changed: expected %d, current %d"
+             cancellation.owner_generation
+             current_owner_generation)
+    in
+    let* () =
+      if Int64.equal state.revision cancellation.source_revision
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "accepted cancellation source revision changed: expected %Ld, current %Ld"
+             cancellation.source_revision
+             state.revision)
+    in
+    let* () =
+      if lease_admission_blocked state
+      then Error "event queue cannot cancel pending work while a lease or outbox exists"
+      else Ok ()
+    in
+    let matching, retained =
+      Keeper_event_queue.to_list state.pending
+      |> List.partition (fun source ->
+        Keeper_event_queue.stimulus_identity_equal cancellation.source source)
+    in
+    (match matching with
+     | [] -> Error "accepted cancellation source is not pending"
+     | _ :: _ :: _ -> Error "accepted cancellation source identity is duplicated"
+     | [ source ] when source <> cancellation.source ->
+       Error "accepted cancellation source snapshot changed"
+     | [ source ] ->
+       let pending =
+         List.fold_left
+           Keeper_event_queue.enqueue
+           Keeper_event_queue.empty
+           retained
+       in
+       let* claimed, lease =
+         make_lease ~kind:Single ~claimed_at:None [ source ] { state with pending }
+       in
+       let* lease =
+         match lease with
+         | Some lease -> Ok lease
+         | None -> Error "accepted cancellation did not create its synthetic lease"
+       in
+       settle_committed ~settled_at ~lease ~settlement claimed)
+;;
+
 let accepted_cancellation_replay (lease : lease) cancellation state =
   let requested = Cancel_accepted cancellation in
   match find_prior_receipt lease.lease_id state with
@@ -691,10 +794,86 @@ let replay_transition_receipt receipt state =
      | Some _ ->
        Error (Printf.sprintf "event queue receipt replay conflict: %s" receipt.lease_id)
      | None ->
+         Error
+           (Printf.sprintf
+              "event queue receipt has no matching active lease: %s"
+              receipt.lease_id))
+;;
+
+let replay_transition_outbox_entry entry state =
+  match state.transition_outbox with
+  | [ current ] ->
+    if not (String.equal current.receipt.lease_id entry.receipt.lease_id)
+    then
+      Error
+        (Printf.sprintf
+           "event queue WAL conflicts with another checkpointed outbox: %s"
+           current.receipt.transition_id)
+    else if current <> entry
+    then
+      Error
+        (Printf.sprintf
+           "event queue WAL conflicts with checkpointed outbox: %s"
+           entry.receipt.transition_id)
+    else replay_transition_receipt entry.receipt state
+  | _ :: _ :: _ -> Error "event queue checkpoint contains multiple outbox entries"
+  | [] ->
+    (match
+       List.find_opt
+         (fun (lease : lease) -> String.equal lease.lease_id entry.receipt.lease_id)
+         state.leases
+     with
+     | Some lease when lease.stimuli <> entry.stimuli ->
        Error
          (Printf.sprintf
-            "event queue receipt has no matching active lease: %s"
-            receipt.lease_id))
+            "event queue WAL source conflicts with active lease: %s"
+            entry.receipt.lease_id)
+     | Some _ -> replay_transition_receipt entry.receipt state
+     | None ->
+       (match find_prior_receipt entry.receipt.lease_id state with
+        | Some _ -> replay_transition_receipt entry.receipt state
+        | None ->
+          (match entry.receipt.settlement, entry.stimuli with
+           | Cancel_accepted cancellation, [ source ]
+             when source = cancellation.source ->
+             if not (Int64.equal state.next_lease_sequence entry.receipt.lease_sequence)
+             then
+               Error
+                 (Printf.sprintf
+                    "pending cancellation WAL lease sequence changed: expected %Ld, current %Ld"
+                    entry.receipt.lease_sequence
+                    state.next_lease_sequence)
+             else
+               let* replayed, result =
+                 cancel_pending_accepted
+                   ~current_owner_generation:cancellation.owner_generation
+                   ~settled_at:entry.receipt.settled_at
+                   ~cancellation
+                   state
+               in
+               let actual_receipt =
+                 match result with
+                 | Settled receipt | Already_settled receipt -> receipt
+               in
+               (match replayed.transition_outbox with
+                | [ actual ]
+                  when transition_receipt_equal entry.receipt actual_receipt
+                       && actual = entry ->
+                  Ok replayed
+                | [] | [ _ ] | _ :: _ :: _ ->
+                  Error
+                    (Printf.sprintf
+                       "pending cancellation WAL replay conflict: %s"
+                       entry.receipt.transition_id))
+           | Cancel_accepted _, [ _ ] ->
+             Error "pending cancellation WAL source conflicts with its receipt"
+           | Cancel_accepted _, ([] | _ :: _ :: _) ->
+             Error "pending cancellation WAL must carry exactly one source"
+           | (Ack | No_compaction _ | Requeue _ | Escalate _), _ ->
+             Error
+               (Printf.sprintf
+                  "event queue WAL receipt has no matching active lease: %s"
+                  entry.receipt.lease_id))))
 ;;
 
 let recover_leases ~settled_at state =
@@ -938,6 +1117,7 @@ let settlement_to_yojson = function
   | Cancel_accepted cancellation ->
     `Assoc
       [ "kind", `String "cancel_accepted"
+      ; "source", Keeper_event_queue.stimulus_to_yojson cancellation.source
       ; "source_revision", int64_json cancellation.source_revision
       ; "owner_generation", `Int cancellation.owner_generation
       ; "operator_operation_id", `String cancellation.operator_operation_id
@@ -983,6 +1163,7 @@ let settlement_of_yojson json =
         ~context
         ~expected:
           [ "kind"
+          ; "source"
           ; "source_revision"
           ; "owner_generation"
           ; "operator_operation_id"
@@ -990,6 +1171,8 @@ let settlement_of_yojson json =
           ]
         fields
     in
+    let* source_json = required_field ~context "source" fields in
+    let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
     let* owner_generation = int_field ~context "owner_generation" fields in
     let* operator_operation_id =
@@ -997,7 +1180,7 @@ let settlement_of_yojson json =
     in
     let* reason = string_field ~context "reason" fields in
     let cancellation =
-      { source_revision; owner_generation; operator_operation_id; reason }
+      { source; source_revision; owner_generation; operator_operation_id; reason }
     in
     let* () = validate_accepted_cancellation cancellation in
     Ok (Cancel_accepted cancellation)

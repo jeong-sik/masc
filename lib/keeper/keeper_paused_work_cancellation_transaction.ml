@@ -7,6 +7,15 @@ type request =
   ; settled_at : float
   }
 
+type pending_request =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  ; settled_at : float
+  }
+
 type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
@@ -21,6 +30,7 @@ type failure =
       { expected : int
       ; actual : int
       }
+  | Lease_source_invalid
   | Queue_replay_failed of string
   | Queue_commit_failed of string
 
@@ -55,6 +65,8 @@ let failure_to_string = function
       "live Keeper owner generation changed: expected %d, actual %d"
       expected
       actual
+  | Lease_source_invalid ->
+    "accepted cancellation lease must carry exactly one source stimulus"
   | Queue_replay_failed detail -> "accepted cancellation replay failed: " ^ detail
   | Queue_commit_failed detail -> "accepted cancellation commit failed: " ^ detail
 ;;
@@ -80,24 +92,36 @@ let error_to_string = function
          (release_outcome_to_string release))
 ;;
 
-let cancellation_of_request (request : request) :
+let cancellation_of_request (request : request) =
+  match Keeper_registry_event_queue.lease_stimuli request.lease with
+  | [ source ] ->
+    Ok
+      ({ source
+       ; source_revision = request.source_revision
+       ; owner_generation = request.owner_generation
+       ; operator_operation_id = request.operator_operation_id
+       ; reason = request.reason
+       }
+       : Keeper_registry_event_queue.accepted_cancellation)
+  | [] | _ :: _ :: _ -> Error Lease_source_invalid
+;;
+
+let cancellation_of_pending_request (request : pending_request) :
   Keeper_registry_event_queue.accepted_cancellation
   =
-  { source_revision = request.source_revision
+  { source = request.source
+  ; source_revision = request.source_revision
   ; owner_generation = request.owner_generation
   ; operator_operation_id = request.operator_operation_id
   ; reason = request.reason
   }
 ;;
 
-let replay_committed ~base_path ~keeper_name request =
+let replay_committed ~base_path ~keeper_name replay =
   match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
   | Error detail -> Error (Queue_replay_failed detail)
   | Ok state ->
-    Keeper_event_queue_state.accepted_cancellation_replay
-      request.lease
-      (cancellation_of_request request)
-      state
+    replay state
     |> Result.map_error (fun detail -> Queue_replay_failed detail)
 ;;
 
@@ -138,13 +162,13 @@ let validate_registry_owner ~base_path ~keeper_name ~expected_generation =
   | Some _ -> Ok ()
 ;;
 
-let run config ~keeper_name request =
+let run config ~keeper_name ~owner_generation commit =
   let base_path = config.Workspace.base_path in
   match
     validate_durable_owner
       config
       ~keeper_name
-      ~expected_generation:request.owner_generation
+      ~expected_generation:owner_generation
   with
   | Error _ as error -> error
   | Ok durable_meta ->
@@ -152,22 +176,21 @@ let run config ~keeper_name request =
        validate_registry_owner
          ~base_path
          ~keeper_name
-         ~expected_generation:request.owner_generation
+         ~expected_generation:owner_generation
      with
      | Error _ as error -> error
      | Ok () ->
-       let cancellation = cancellation_of_request request in
-       Keeper_registry_event_queue.cancel_accepted_result
-         ~base_path
-         keeper_name
-         ~current_owner_generation:durable_meta.runtime.generation
-         ~settled_at:request.settled_at
-         ~lease:request.lease
-         ~cancellation
+       commit durable_meta.runtime.generation
        |> Result.map_error (fun detail -> Queue_commit_failed detail))
 ;;
 
-let cancel config ~keeper_name request =
+let cancel_with_lifecycle
+      config
+      ~keeper_name
+      ~owner_generation
+      ~replay
+      ~commit
+  =
   let base_path = config.Workspace.base_path in
   let finish token outcome =
     let reservation_release = Keeper_lifecycle_reservation.release token in
@@ -181,18 +204,21 @@ let cancel config ~keeper_name request =
       Keeper_lifecycle_reservation.acquire
         ~base_path
         ~keeper_name
-        ~expected_generation:request.owner_generation
+        ~expected_generation:owner_generation
         ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
     with
     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
       Error (Reservation_conflict owner)
     | Ok token ->
       (try
-         match replay_committed ~base_path ~keeper_name request with
+         match replay_committed ~base_path ~keeper_name replay with
          | Error cause -> finish token (Error cause)
          | Ok (Some receipt) ->
            finish token (Ok (Keeper_registry_event_queue.Already_settled receipt))
-         | Ok None -> finish token (run config ~keeper_name request)
+         | Ok None ->
+           finish
+             token
+             (run config ~keeper_name ~owner_generation commit)
        with
        | exn ->
          let release = Keeper_lifecycle_reservation.release token in
@@ -206,7 +232,7 @@ let cancel config ~keeper_name request =
               (release_outcome_to_string release));
          raise exn)
   in
-  match replay_committed ~base_path ~keeper_name request with
+  match replay_committed ~base_path ~keeper_name replay with
   | Error cause -> Error (Failed { cause; reservation_release = None })
   | Ok (Some receipt) ->
     Ok
@@ -214,4 +240,43 @@ let cancel config ~keeper_name request =
       ; reservation_release = None
       }
   | Ok None -> acquire ()
+;;
+
+let cancel config ~keeper_name request =
+  match cancellation_of_request request with
+  | Error cause -> Error (Failed { cause; reservation_release = None })
+  | Ok cancellation ->
+    cancel_with_lifecycle
+      config
+      ~keeper_name
+      ~owner_generation:request.owner_generation
+      ~replay:
+        (Keeper_event_queue_state.accepted_cancellation_replay
+           request.lease
+           cancellation)
+      ~commit:(fun current_owner_generation ->
+        Keeper_registry_event_queue.cancel_accepted_result
+          ~base_path:config.Workspace.base_path
+          keeper_name
+          ~current_owner_generation
+          ~settled_at:request.settled_at
+          ~lease:request.lease
+          ~cancellation)
+;;
+
+let cancel_pending config ~keeper_name request =
+  let cancellation = cancellation_of_pending_request request in
+  cancel_with_lifecycle
+    config
+    ~keeper_name
+    ~owner_generation:request.owner_generation
+    ~replay:
+      (Keeper_event_queue_state.accepted_pending_cancellation_replay cancellation)
+    ~commit:(fun current_owner_generation ->
+      Keeper_registry_event_queue.cancel_pending_accepted_result
+        ~base_path:config.Workspace.base_path
+        keeper_name
+        ~current_owner_generation
+        ~settled_at:request.settled_at
+        ~cancellation)
 ;;

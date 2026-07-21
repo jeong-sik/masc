@@ -25,7 +25,7 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
+let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f =
   let base_path = Filename.temp_dir "keeper-paused-cancel-transaction" "" in
   Fun.protect
     ~finally:(fun () ->
@@ -59,14 +59,15 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
          |> require_ok "read persisted Keeper metadata"
          |> require_some "persisted Keeper metadata"
        in
+       let source : Queue.stimulus =
+         { post_id = "accepted-source"
+         ; urgency = Queue.Normal
+         ; arrived_at = 1.0
+         ; payload = Queue.Bootstrap
+         }
+       in
        Persistence.update_result ~base_path ~keeper_name (fun pending ->
-         Queue.enqueue
-           pending
-           { post_id = "accepted-source"
-           ; urgency = Queue.Normal
-           ; arrived_at = 1.0
-           ; payload = Queue.Bootstrap
-           })
+         Queue.enqueue pending source)
        |> require_ok "seed accepted source";
        if registered
        then (
@@ -84,9 +85,19 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
              Alcotest.failf
                "pause live Keeper owner: %s"
                (Keeper_state_machine.transition_error_to_string error));
+       f config keeper_name source)
+;;
+
+let with_lane ?registered ?latched_reason ~paused ~generation f =
+  with_seeded_owner
+    ?registered
+    ?latched_reason
+    ~paused
+    ~generation
+    (fun config keeper_name _source ->
        let lease =
          Persistence.claim_when_result
-           ~base_path
+           ~base_path:config.Workspace.base_path
            ~keeper_name
            ~claimed_at:2.0
            ~ready:(fun _ -> true)
@@ -95,7 +106,7 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
          |> require_some "accepted source lease"
        in
        let source_revision =
-         Persistence.load_state_result ~base_path ~keeper_name
+         Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
          |> require_ok "load accepted source revision"
          |> State.revision
        in
@@ -105,6 +116,32 @@ let with_lane ?(registered = true) ?latched_reason ~paused ~generation f =
          ; lease
          ; operator_operation_id = "operator-cancel-1"
          ; reason = "operator rejected retained paused work"
+         ; settled_at = 3.0
+         }
+       in
+       f config keeper_name request)
+;;
+
+let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
+  with_seeded_owner
+    ?registered
+    ?latched_reason
+    ~paused
+    ~generation
+    (fun config keeper_name source ->
+       let source_revision =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load pending accepted source revision"
+         |> State.revision
+       in
+       let request : Transaction.pending_request =
+         { source
+         ; source_revision
+         ; owner_generation = generation
+         ; operator_operation_id = "operator-pending-cancel-1"
+         ; reason = "operator rejected exact pending paused work"
          ; settled_at = 3.0
          }
        in
@@ -266,6 +303,48 @@ let test_dead_tombstone_cannot_use_operator_cancellation () =
          (List.length (State.leases state)))
 ;;
 
+let test_pending_cancellation_replays_after_owner_transition () =
+  with_pending_lane
+    ~registered:false
+    ~paused:true
+    ~generation:16
+    (fun config keeper_name request ->
+       let first =
+         Transaction.cancel_pending config ~keeper_name request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "cancel pending paused work"
+       in
+       check_released first.reservation_release;
+       (match first.settlement with
+        | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ -> ()
+        | Registry_queue.Already_settled _ ->
+          Alcotest.fail "first pending transaction was already settled");
+       let current_meta =
+         Keeper_meta_store.read_meta config keeper_name
+         |> require_ok "read pending cancellation owner"
+         |> require_some "pending cancellation owner"
+       in
+       let resumed =
+         let resumed = Keeper_meta_contract.mark_resumed current_meta in
+         { resumed with
+           runtime =
+             { resumed.runtime with generation = resumed.runtime.generation + 1 }
+         }
+       in
+       Keeper_meta_store.write_meta config resumed
+       |> require_ok "persist replacement after pending cancellation";
+       let replay =
+         Transaction.cancel_pending config ~keeper_name request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "replay pending cancellation after owner transition"
+       in
+       check_replayed_without_reservation replay.reservation_release;
+       (match replay.settlement with
+        | Registry_queue.Already_settled _ -> ()
+        | Registry_queue.Settled _ | Registry_queue.Committed_followup_failed _ ->
+          Alcotest.fail "pending transaction replay committed twice"))
+;;
+
 let test_stale_generation_is_rejected_before_commit () =
   with_lane ~paused:true ~generation:13 (fun config keeper_name request ->
     let stale = { request with owner_generation = 12 } in
@@ -318,6 +397,10 @@ let () =
             "dead tombstone cannot use operator cancellation"
             `Quick
             test_dead_tombstone_cannot_use_operator_cancellation
+        ; Alcotest.test_case
+            "pending cancellation replays after owner transition"
+            `Quick
+            test_pending_cancellation_replays_after_owner_transition
         ] )
     ]
 ;;

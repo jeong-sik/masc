@@ -225,10 +225,11 @@ let test_no_compaction_decode_rejects_mismatched_stimulus () =
       "decode accepted a No_compaction receipt paired with a non-manual stimulus"
 ;;
 
-let accepted_cancellation ~source_revision ~owner_generation operation_id
+let accepted_cancellation ~source ~source_revision ~owner_generation operation_id
     : State.accepted_cancellation
   =
-  { source_revision
+  { source
+  ; source_revision
   ; owner_generation
   ; operator_operation_id = operation_id
   ; reason = "operator cancelled retained work"
@@ -251,7 +252,13 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
     |> require_ok "claim exact accepted event"
   in
   let lease = require_some "accepted event lease" lease in
-  let cancellation = accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1" in
+  let cancellation =
+    accepted_cancellation
+      ~source:accepted
+      ~source_revision:7L
+      ~owner_generation:4
+      "op-1"
+  in
   (match
      State.settle
        ~settled_at:4.0
@@ -261,6 +268,18 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "generic settlement bypassed the owner fence");
+  let changed_source = { accepted with arrived_at = 1.5 } in
+  let changed_cancellation = { cancellation with source = changed_source } in
+  (match
+     State.cancel_accepted
+       ~current_owner_generation:4
+       ~settled_at:4.0
+       ~lease
+       ~cancellation:changed_cancellation
+       claimed
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "accepted cancellation ignored a changed source snapshot");
   let settled, result =
     State.cancel_accepted
       ~current_owner_generation:4
@@ -339,16 +358,113 @@ let test_accepted_cancellation_rejects_stale_fences () =
       ~cancellation
       claimed
   in
-  (match cancel (accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1") 5 with
+  (match
+     cancel
+       (accepted_cancellation
+          ~source:accepted
+          ~source_revision:7L
+          ~owner_generation:4
+          "op-1")
+       5
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "stale owner generation cancelled accepted work");
-  (match cancel (accepted_cancellation ~source_revision:6L ~owner_generation:4 "op-1") 4 with
+  (match
+     cancel
+       (accepted_cancellation
+          ~source:accepted
+          ~source_revision:6L
+          ~owner_generation:4
+          "op-1")
+       4
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "stale queue revision cancelled accepted work");
   Alcotest.(check int)
     "rejected cancellation keeps the exact lease active"
     1
     (List.length (State.leases claimed))
+;;
+
+let test_pending_accepted_cancellation_is_exact_and_source_bound () =
+  let peer_before = stimulus "peer-before" 1.0 in
+  let target = stimulus "pending-target" 2.0 in
+  let peer_after = stimulus "peer-after" 3.0 in
+  let state =
+    State.empty
+    |> State.with_pending (queue [ peer_before; target; peer_after ])
+    |> State.with_revision 9L
+  in
+  let cancellation =
+    accepted_cancellation
+      ~source:target
+      ~source_revision:9L
+      ~owner_generation:6
+      "pending-operation-1"
+  in
+  let cancelled, result =
+    State.cancel_pending_accepted
+      ~current_owner_generation:6
+      ~settled_at:4.0
+      ~cancellation
+      state
+    |> require_ok "cancel exact pending source"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first pending cancellation replayed"
+  in
+  Alcotest.(check (list string))
+    "pending cancellation preserves peer FIFO"
+    [ "peer-before"; "peer-after" ]
+    (post_ids (State.pending cancelled));
+  Alcotest.(check int) "synthetic lease is terminal" 0 (List.length (State.leases cancelled));
+  Alcotest.(check int64)
+    "synthetic lease consumes one stable sequence"
+    2L
+    (State.next_lease_sequence cancelled);
+  (match State.transition_outbox cancelled with
+   | [ entry ] ->
+     Alcotest.(check bool)
+       "outbox carries the exact pending source"
+       true
+       (entry.stimuli = [ target ]);
+     Alcotest.(check bool)
+       "receipt is source-bound"
+       true
+       (match entry.receipt.settlement with
+        | State.Cancel_accepted accepted -> accepted.source = target
+        | _ -> false)
+   | _ -> Alcotest.fail "pending cancellation did not create one outbox entry");
+  (match
+     State.cancel_pending_accepted
+       ~current_owner_generation:99
+       ~settled_at:5.0
+       ~cancellation
+       cancelled
+   with
+   | Ok (_, State.Already_settled replayed) ->
+     Alcotest.(check bool)
+       "committed pending cancellation replays before current fences"
+       true
+       (State.transition_receipt_equal receipt replayed)
+   | Ok (_, State.Settled _) -> Alcotest.fail "pending replay committed twice"
+   | Error detail -> Alcotest.fail detail);
+  let changed_source =
+    { cancellation with
+      source = peer_before
+    }
+  in
+  (match
+     State.cancel_pending_accepted
+       ~current_owner_generation:6
+       ~settled_at:5.0
+       ~cancellation:changed_source
+       cancelled
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "operation ID replay accepted a different source")
 ;;
 
 let test_claim_codec_ack_idempotency () =
@@ -1221,7 +1337,11 @@ let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
       |> State.revision
     in
     let cancellation : Persistence.accepted_cancellation =
-      { source_revision
+      { source =
+          (match Persistence.lease_stimuli lease with
+           | [ source ] -> source
+           | _ -> Alcotest.fail "cancellation lease did not retain one source")
+      ; source_revision
       ; owner_generation = 7
       ; operator_operation_id = "cancel-operation-1"
       ; reason = "operator rejected paused work"
@@ -1304,6 +1424,148 @@ let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
       "stale rejection retains active lease"
       1
       (List.length (State.leases unchanged)))
+;;
+
+let test_pending_cancellation_wal_replays_before_removal () =
+  with_temp_dir "keeper-event-queue-pending-cancellation-wal" (fun base_path ->
+    let keeper_name = "pending_cancel_owner" in
+    let target = stimulus "pending-cancel-target" 1.0 in
+    let peer = stimulus "pending-cancel-peer" 2.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      List.fold_left Queue.enqueue pending [ target; peer ])
+    |> require_ok "seed pending cancellation owner";
+    let source_revision =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load pending cancellation revision"
+      |> State.revision
+    in
+    let cancellation : Persistence.accepted_cancellation =
+      { source = target
+      ; source_revision
+      ; owner_generation = 17
+      ; operator_operation_id = "pending-cancel-operation"
+      ; reason = "operator cancelled exact pending work"
+      }
+    in
+    let owner_dir = keeper_dir ~base_path ~keeper_name in
+    let wal_path = Filename.concat owner_dir "event-queue-settlements.jsonl" in
+    Fs_compat.save_file_atomic wal_path "" |> require_ok "create pending cancellation WAL";
+    Unix.chmod owner_dir 0o500;
+    let committed =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod owner_dir 0o700)
+        (fun () ->
+           Persistence.cancel_pending_accepted_result
+             ~base_path
+             ~keeper_name
+             ~current_owner_generation:17
+             ~settled_at:3.0
+             ~cancellation
+             ())
+      |> require_ok "commit pending cancellation with blocked checkpoint"
+    in
+    (match committed with
+     | Persistence.Committed_followup_failed { stage = `Checkpoint; _ } -> ()
+     | Persistence.Settled _ | Persistence.Already_settled _
+     | Persistence.Committed_followup_failed _ ->
+       Alcotest.fail "blocked checkpoint did not preserve committed WAL outcome");
+    let wal_json =
+      Fs_compat.load_file wal_path
+      |> String.trim
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check string)
+      "source-bearing WAL schema"
+      "masc.keeper_event_queue.settlement.v2"
+      Yojson.Safe.Util.(wal_json |> member "schema" |> to_string);
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay pending cancellation WAL"
+    in
+    Alcotest.(check (list string))
+      "WAL replay removes only the exact pending source"
+      [ "pending-cancel-peer" ]
+      (post_ids (State.pending replayed));
+    Alcotest.(check int) "WAL replay leaves no synthetic lease" 0 (List.length (State.leases replayed));
+    (match State.transition_outbox replayed with
+     | [ entry ] ->
+       Alcotest.(check bool) "WAL replay retains exact source" true (entry.stimuli = [ target ])
+     | _ -> Alcotest.fail "WAL replay did not restore one outbox entry");
+    Alcotest.(check string)
+      "checkpointed source-bearing WAL is compacted"
+      ""
+      (Fs_compat.load_file wal_path);
+    match
+      Persistence.cancel_pending_accepted_result
+        ~base_path
+        ~keeper_name
+        ~current_owner_generation:999
+        ~settled_at:4.0
+        ~cancellation
+        ()
+    with
+    | Ok (Persistence.Already_settled _) -> ()
+    | Ok _ -> Alcotest.fail "pending cancellation retry committed twice"
+    | Error detail -> Alcotest.failf "committed pending cancellation did not replay: %s" detail)
+;;
+
+let test_legacy_settlement_wal_v1_remains_replayable () =
+  with_temp_dir "keeper-event-queue-legacy-settlement-wal" (fun base_path ->
+    let keeper_name = "legacy_wal_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "legacy-wal-source" 1.0))
+    |> require_ok "seed legacy WAL owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim legacy WAL source"
+      |> require_some "legacy WAL lease"
+    in
+    let claimed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load legacy WAL pre-settlement state"
+    in
+    let receipt =
+      match
+        State.settle ~settled_at:3.0 ~lease ~settlement:State.Ack claimed
+        |> require_ok "construct legacy WAL receipt"
+      with
+      | _, State.Settled receipt -> receipt
+      | _, State.Already_settled _ -> Alcotest.fail "legacy WAL fixture replayed early"
+    in
+    let wal_path =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    let row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+        ; "base_path", `String (Unix.realpath base_path)
+        ; "keeper_name", `String keeper_name
+        ; "receipt", State.transition_receipt_to_yojson receipt
+        ]
+      |> Yojson.Safe.to_string
+      |> fun row -> row ^ "\n"
+    in
+    Fs_compat.save_file_atomic wal_path row |> require_ok "write legacy WAL row";
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay legacy WAL row"
+    in
+    Alcotest.(check int) "legacy WAL settles active lease" 0 (List.length (State.leases replayed));
+    Alcotest.(check int)
+      "legacy WAL recreates transition outbox"
+      1
+      (List.length (State.transition_outbox replayed));
+    Alcotest.(check string)
+      "legacy WAL is compacted after checkpoint"
+      ""
+      (Fs_compat.load_file wal_path))
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
@@ -1682,6 +1944,10 @@ let () =
             `Quick
             test_accepted_cancellation_rejects_stale_fences
         ; Alcotest.test_case
+            "pending accepted cancellation is exact and source-bound"
+            `Quick
+            test_pending_accepted_cancellation_is_exact_and_source_bound
+        ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
@@ -1725,6 +1991,14 @@ let () =
             "accepted cancellation persistence is atomic and idempotent"
             `Quick
             test_accepted_cancellation_persistence_is_atomic_and_idempotent
+        ; Alcotest.test_case
+            "pending cancellation WAL replays before removal"
+            `Quick
+            test_pending_cancellation_wal_replays_before_removal
+        ; Alcotest.test_case
+            "legacy settlement WAL v1 remains replayable"
+            `Quick
+            test_legacy_settlement_wal_v1_remains_replayable
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick

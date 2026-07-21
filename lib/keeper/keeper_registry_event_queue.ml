@@ -41,7 +41,8 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
   }
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
@@ -385,6 +386,23 @@ let cancel_accepted_result
     ~current_owner_generation
     ~settled_at
     ~lease
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let cancel_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
     ()

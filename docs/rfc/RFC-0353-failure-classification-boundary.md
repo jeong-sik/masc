@@ -16,11 +16,13 @@
 |---|---|---|---|---|
 | #25482 | `keeper_checkpoint_store` → lane | `Ref_identity_invalid Generation_missing` | 오버플로 실패와 동일 취급, 재시도 | 3일간 ERROR 1,354건. keeper 2기 wedge |
 | #25488 | `keeper_approval_queue` → `keeper_heartbeat_loop:322` | grant 5종 중 결정론 3종 | `\| Error error ->` catch-all → requeue | 45분 86건. 재부팅 5회 관통 |
-| #25443 | compaction plan | 동일 `(trace_id, generation, sha256)` 무변화 | ~50초 주기 재시도, 매회 유료 LLM 호출 | sangsu 시간당 59 거부 + 62 cycle 실패 |
+| #25443 † | compaction plan | 동일 `(trace_id, generation, sha256)` 무변화 | ~50초 주기 재시도, 매회 유료 LLM 호출 | sangsu 시간당 59 거부 + 62 cycle 실패 |
 | #24838 | provider 4xx | gateway opaque 400 | `InvalidRequest` → 비재시도 **이자 비회전** | analyst 41/41 동일 런타임, rotation 0건 |
 | (해소됨) | scheduler dispatch | `unsupported snapshot schema` | 에러 문자열이 자칭 `retryable` | 07-17 하루 98회 |
 
 **공통점**: 재시도 가능성이 타입이 아니라 (a) catch-all, (b) 문자열 관례(`"retryable …"`), (c) 다른 축과의 결합(`InvalidRequest` 하나가 재시도와 회전을 동시에 차단)으로 결정된다.
+
+† **#25443 은 형태 A 가 아니다 (2026-07-21 재분류).** 초안은 이 행을 "재시도 가능성이 타입에서 소실" 로 분류했으나, 코드 확인 결과 typed 구분이 끝까지 보존된다: `keeper_compact_policy.ml:335-343` 이 `Provider_unavailable` / `Invalid_plan` / `Structurally_unchanged` 를 분리하고, `Structurally_unchanged` 는 `keeper_event_queue_state` 까지 typed 로 round-trip 한다. `No_compaction _` settlement 은 `state.pending` 을 변경하지 않으므로 event queue 의 requeue 도 아니다. 실제 순환은 **오버플로 해소 경로가 compaction 하나뿐**이라 다음 턴이 다시 오버플로에 도달하는 것으로 보인다(미확인). 본 RFC 의 범위 밖이며 #25430(tool block 보존 invariant) 축에서 다뤄야 한다. 행을 삭제하지 않고 남기는 이유는, 같은 증상이 형태 A 로 오분류되기 쉽다는 점 자체가 §2 의 근거이기 때문이다.
 
 ### 1.2 형태 B — 실패 사유가 소실 → 진단 불가, 이어서 로그 강등으로 은폐
 

@@ -225,10 +225,8 @@ exception Recovery_store_cancelled of
 
 val owner_of_string : string -> (owner, validation_error) result
 val owner_to_string : owner -> string
-val equal_owner : owner -> owner -> bool
 
 val operation_id_to_string : operation_id -> string
-val equal_operation_id : operation_id -> operation_id -> bool
 
 (** Canonical whole registry filename. There is no prefix or suffix. *)
 val record_name : operation_id -> string
@@ -264,12 +262,10 @@ val locator_allowed_root : locator -> identity
 val locator_parent_components : locator -> string list
 val locator_parent : locator -> identity
 val locator_target_leaf : locator -> string
-val locator_initial_target : locator -> entry_observation
 
 val prepared_owner : prepared -> owner
 val prepared_operation_id : prepared -> operation_id
 val prepared_locator : prepared -> locator
-val prepared_permissions : prepared -> permissions
 
 val bound_prepared : bound -> prepared
 val bound_stage_identity : bound -> identity
@@ -280,7 +276,6 @@ type forensic_source =
   | Bound_source of bound * bound_recovery_outcome
 
 val forensic_source : forensic -> forensic_source
-val forensic_owner : forensic -> owner
 val forensic_operation_id : forensic -> operation_id
 
 (** Idempotently complete and pin the fixed registry prefix. Existing
@@ -458,25 +453,6 @@ val record_forensic_bound
   -> bound:bound
   -> outcome:bound_recovery_outcome
   -> (forensic, transition_error) result
-
-type 'a lookup =
-  | Missing
-  | Found of 'a
-
-val read_prepared
-  :  store:store
-  -> operation_id
-  -> (prepared lookup, transition_error) result
-
-val read_bound
-  :  store:store
-  -> operation_id
-  -> (bound lookup, transition_error) result
-
-val read_forensic
-  :  store:store
-  -> operation_id
-  -> (forensic lookup, transition_error) result
 
 type corrupt_record =
   { area : area

@@ -399,18 +399,9 @@ let install () =
              (Printf.sprintf "Invalid verdict format: %s" msg))
     in
     let apply_review_verdict_output_schema provider_cfg =
-      let provider_cfg =
-        Keeper_structured_output_schema.apply_to_provider_config
-          Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
-          provider_cfg
-      in
-      match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
-      | Ok () -> Ok provider_cfg
-      | Error detail ->
-        Error
-          (Agent_sdk.Error.Config
-             (Agent_sdk.Error.InvalidConfig
-                { field = "task.anti_rationalization.output_schema"; detail }))
+      Ok
+        (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+           provider_cfg)
     in
     match
       Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->

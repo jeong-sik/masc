@@ -17,6 +17,31 @@ type turn_prompt_context =
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
+(* RFC-0351 section 5 / #25462: an autonomous wake whose user turn is only the
+   [autonomous_wake_marker] constant carries nothing forward — the observation
+   frame it stands for rides [dynamic_context], rebuilt fresh every turn and
+   never persisted. Recording it anyway appends a byte-identical message per
+   wake, which is pure transcript duplication (analyst: the same 147B message
+   x359, part of a 25.7% exact-dup share). The distinction is typed here rather
+   than inferred from the message text. *)
+type user_turn_record =
+  | Record_user_turn
+      (** The user turn carries content later turns need: an operator message,
+          a HITL resolution, or chat-lane input. *)
+  | Skip_uninformative_wake
+      (** Autonomous wake marker alone. Neither appended to the working context
+          nor persisted to session history. *)
+
+(* The unified lane's user turn is the wake marker constant unless a HITL
+   resolution was appended to it, so the presence of that resolution is the
+   whole signal. Extracted from the lane call site to keep the mapping
+   unit-testable and to keep the decision out of the message text. *)
+let user_turn_record_of_hitl_resolution : _ option -> user_turn_record
+  = function
+  | None -> Skip_uninformative_wake
+  | Some _ -> Record_user_turn
+;;
+
 type extra_system_context_assembly =
   { extra_system_context : string option
   ; blocks : (Prompt_block_id.t * string) list
@@ -59,6 +84,7 @@ let build_turn_context
       ~config:(_ : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(history_user_source : string)
+      ~(user_turn_record : user_turn_record)
       ~(is_retry : bool)
       ~(start_turn_count : int)
   : turn_prompt_context
@@ -116,11 +142,18 @@ let build_turn_context
   let history_messages =
     Keeper_context_runtime.messages_of_context ctx_work
   in
-  let ctx_work = Keeper_context_runtime.append ctx_work user_msg in
-  if not is_retry
-  then
-    Keeper_context_runtime.persist_message
-      ~source:history_user_source session user_msg;
+  let ctx_work =
+    match user_turn_record with
+    | Record_user_turn -> Keeper_context_runtime.append ctx_work user_msg
+    | Skip_uninformative_wake -> ctx_work
+  in
+  (match user_turn_record, is_retry with
+   | Record_user_turn, false ->
+     Keeper_context_runtime.persist_message
+       ~source:history_user_source
+       session
+       user_msg
+   | Record_user_turn, true | Skip_uninformative_wake, _ -> ());
   { turn_system_prompt
   ; dynamic_context
   ; memory_context

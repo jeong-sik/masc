@@ -125,6 +125,7 @@ val run_turn
   -> ?world_observation:Keeper_world_observation.world_observation
   -> generation:int
   -> ?history_user_source:string
+  -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string
   -> ?temperature:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)

@@ -13,13 +13,13 @@ let role_of_string_opt role = Agent_sdk.Types.role_of_string role
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
-  `List (List.map Agent_sdk.Api.content_block_to_json blocks)
+  `List (List.map Agent_sdk.Llm_provider.Api_common.content_block_to_json blocks)
 
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   match Json_util.assoc_member_opt "content_blocks" json with
   | Some (`List blocks) ->
-      let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
+      let parsed = List.filter_map Agent_sdk.Llm_provider.Api_common.content_block_of_json blocks in
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 

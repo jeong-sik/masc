@@ -52,11 +52,11 @@ let terminal_source () =
     ; channel
     }
   in
-  ( { post_id = Queue.hitl_resolution_post_id resolution
+  ( ({ post_id = Queue.hitl_resolution_post_id resolution
     ; urgency = Queue.Immediate
     ; arrived_at = 2.0
     ; payload = Queue.Hitl_resolved resolution
-    }
+    } : Queue.stimulus)
   , channel )
 ;;
 
@@ -221,7 +221,7 @@ let test_inventory_exposes_exact_durable_fences () =
       Alcotest.(check int64)
         "inventory revision fence"
         (State.revision state)
-        (json |> member "queue" |> member "revision" |> to_int64);
+        (Int64.of_int (json |> member "queue" |> member "revision" |> to_int));
       Alcotest.(check int)
         "inventory exact pending count"
         1

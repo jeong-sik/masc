@@ -145,6 +145,17 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
+;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
+;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
+;; default; --apply backs up then saves through the locked validated store.
+
+(executable
+ (name masc_checkpoint_purge)
+ (modules masc_checkpoint_purge)
+ (public_name masc-checkpoint-purge)
+ (package masc)
+ (libraries masc masc_core masc.config_dir_resolver agent_sdk unix))
+
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
 

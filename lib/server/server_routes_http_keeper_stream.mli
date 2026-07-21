@@ -264,7 +264,6 @@ module For_testing : sig
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
-  val modalities_for_request : keeper_chat_stream_request -> string list
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
   val defer_dashboard_payload_if_busy :
     base_path:string ->
@@ -296,13 +295,6 @@ module For_testing : sig
     (queued_turn_outcome option, string) result
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
-  val empty_stream_bridge_state : keeper_stream_bridge_state
-  val translate_oas_stream_event :
-    redact_text:(string -> string) ->
-    base_dir:string ->
-    keeper_stream_bridge_state ->
-    Agent_sdk.Types.sse_event ->
-    translated_keeper_stream_event
   val keeper_tool_failure_log_details :
     tool_name:string ->
     agent_name:string ->

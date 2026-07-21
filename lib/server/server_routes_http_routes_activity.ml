@@ -10,7 +10,6 @@ module Server_activity_http = Server_activity_http
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
-module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 let activity_result_json ~ok ~message =

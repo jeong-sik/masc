@@ -9,6 +9,7 @@ module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
+module Projection_target = Masc.Keeper_compaction_projection_target
 
 let test_compaction_rejection_tag_is_stable () =
   let error =
@@ -25,6 +26,24 @@ let test_compaction_rejection_tag_is_stable () =
     "compaction rejected: invalid_structural_evidence:no_messages_compacted"
     (Post_turn.compaction_recovery_error_to_string error)
 
+let test_empty_projection_target_is_typed () =
+  let resolver_called = ref false in
+  let evidence =
+    Projection_target.request
+      ~assignment_id:""
+      ~resolve_context_window:(fun _ ->
+        resolver_called := true;
+        Projection_target.Resolved_context_window 1)
+    |> Projection_target.capture
+    |> Projection_target.captured_evidence
+  in
+  check bool "empty assignment skips runtime resolution" false !resolver_called;
+  match evidence with
+  | Projection_target.Unavailable Projection_target.Empty_assignment -> ()
+  | Projection_target.Exact _ | Projection_target.Unavailable _ ->
+    fail "empty assignment was not retained as typed unavailable evidence"
+;;
+
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -40,6 +59,25 @@ let make_meta
   with
   | Ok meta -> meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
+
+let projection_request_of_meta
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  Projection_target.request
+    ~assignment_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
+    ~resolve_context_window:(fun runtime ->
+      match
+        Masc.Keeper_context_runtime.resolve_max_context_resolution_for_runtime
+          ~requested_override:meta.max_context_override
+          runtime
+      with
+      | Ok resolution ->
+        Projection_target.Resolved_context_window resolution.effective_budget
+      | Error (Invalid_requested_context_override value) ->
+        Projection_target.Invalid_context_window value
+      | Error (Runtime_context_window_unavailable _) ->
+        Projection_target.Context_window_not_resolved)
+;;
 
 let make_checkpoint () =
   Agent_sdk.Checkpoint.
@@ -476,7 +514,8 @@ let test_manual_compaction_serializes_owner_lane () =
              Post_turn.recover_latest_checkpoint_for_compaction
                ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
                ~meta
-               ~trigger:Compaction_trigger.Manual)
+               ~trigger:Compaction_trigger.Manual
+               ~projection_request:(projection_request_of_meta meta))
       in
       (match stale_plan_result with
        | Error
@@ -697,6 +736,7 @@ let test_malformed_structure_preserves_checkpoint () =
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
            ~meta
            ~trigger:Compaction_trigger.Manual
+           ~projection_request:(projection_request_of_meta meta)
        with
        | Error error ->
          failf
@@ -728,6 +768,8 @@ let () =
     "durable compaction", [
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
+      test_case "empty projection target is typed"
+        `Quick test_empty_projection_target_is_typed;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "invalid plan is distinct from provider unavailability"

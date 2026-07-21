@@ -33,6 +33,7 @@ type compaction_recovery =
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
+  ; projection_target : Keeper_compaction_projection_target.committed
   } [@@warning "-69"]
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -100,6 +101,7 @@ val prepare_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
+  projection_request:Keeper_compaction_projection_target.request ->
   (prepared_compaction, compaction_recovery_error) result
 
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
@@ -117,4 +119,5 @@ val recover_latest_checkpoint_for_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
+  projection_request:Keeper_compaction_projection_target.request ->
   (compaction_recovery, compaction_recovery_error) result

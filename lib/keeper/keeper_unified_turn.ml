@@ -140,6 +140,7 @@ let recover_provider_context_overflow_in_lane
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
+      ~projection_request
       error
   =
   match context_overflow_event_of_error error with
@@ -203,6 +204,7 @@ let recover_provider_context_overflow_in_lane
                  ~base_dir
                  ~meta
                  ~trigger
+                 ~projection_request
              with
              | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
                let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
@@ -1116,6 +1118,12 @@ dominant source of the observed CAS race exhaustion after
                       ~config
                       ~base_dir
                       ~meta
+                      ~projection_request:
+                        (Keeper_compaction_projection_target.request
+                           ~assignment_id:final_execution.runtime_id
+                           ~resolve_context_window:(fun _ ->
+                             Keeper_compaction_projection_target.Resolved_context_window
+                               final_execution.max_context_resolution.effective_budget))
                       err
                   in
                   let source_lease_disposition, turn_state =

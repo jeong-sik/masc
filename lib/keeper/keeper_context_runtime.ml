@@ -93,6 +93,7 @@ type compaction_recovery = Keeper_post_turn.compaction_recovery = {
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
+  projection_target : Keeper_compaction_projection_target.committed;
 }
 
 type max_context_resolution = {
@@ -341,33 +342,41 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
   ; effective_budget
   }
 
-let resolve_max_context_resolution_for_runtime_id
+let resolve_max_context_resolution_for_runtime
       ~requested_override
-      ~runtime_id
+      (runtime : Runtime.t)
   =
   match requested_override with
   | Some requested when requested <= 0 ->
     Error (Invalid_requested_context_override requested)
   | Some _ | None ->
-    (match Runtime.get_runtime_by_id runtime_id with
-     | None -> Error (Runtime_context_window_unavailable { runtime_id })
-     | Some runtime ->
-       (match Runtime.resolve_max_context_of_runtime runtime with
-        | None -> Error (Runtime_context_window_unavailable { runtime_id })
-        | Some (runtime_budget, _) ->
-          let requested_context_window =
-            match requested_override with
-            | None -> runtime_budget
-            | Some requested -> requested
-          in
-          let effective_budget = min requested_context_window runtime_budget in
-          Ok
-            { requested_override
-            ; primary_budget = runtime_budget
-            ; runtime_budget
-            ; requested_context_window
-            ; effective_budget
-            }))
+    (match Runtime.resolve_max_context_of_runtime runtime with
+     | None ->
+       Error (Runtime_context_window_unavailable { runtime_id = runtime.id })
+     | Some (runtime_budget, _) ->
+       let requested_context_window =
+         match requested_override with
+         | None -> runtime_budget
+         | Some requested -> requested
+       in
+       let effective_budget = min requested_context_window runtime_budget in
+       Ok
+         { requested_override
+         ; primary_budget = runtime_budget
+         ; runtime_budget
+         ; requested_context_window
+         ; effective_budget
+         })
+;;
+
+let resolve_max_context_resolution_for_runtime_id
+      ~requested_override
+      ~runtime_id
+  =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Error (Runtime_context_window_unavailable { runtime_id })
+  | Some runtime ->
+    resolve_max_context_resolution_for_runtime ~requested_override runtime
 
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =

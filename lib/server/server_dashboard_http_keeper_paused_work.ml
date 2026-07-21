@@ -65,12 +65,20 @@ let handle_post state req reqd body =
       let config = Mcp_server.workspace_config state in
       (match Operator.execute config ~keeper_name:name request with
        | Error error ->
+         Log.Dashboard.warn
+           "paused-work operator action failed: keeper=%s error=%s"
+           name
+           (Operator.error_to_string error);
          Http.Response.json_value
            ~status:(http_status (Operator.error_class error))
            ~request:req
            (error_json (Operator.error_to_string error))
            reqd
        | Ok outcome ->
+         Log.Dashboard.info
+           "paused-work operator action committed: keeper=%s projection_complete=%b"
+           name
+           (Operator.outcome_projection_complete outcome);
          Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
            ~config
            ();

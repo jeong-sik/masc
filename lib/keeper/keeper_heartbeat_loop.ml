@@ -379,29 +379,52 @@ let settlement_of_cycle_outcome
       ~lease
       outcome
   =
-  match single_approved_resolution lease with
-  | Some resolution ->
+  match single_approved_resolution lease, outcome with
+  | Some resolution, Some (Cycle.Completed _) ->
+    (* RFC-0351 S0 / #25539: the approval wake's job is DELIVERY, not
+       consumption. The old settlement requeued a completed turn whenever the
+       grant was still unconsumed — but whether the model spends the grant is
+       its own (non-deterministic) decision, so keepers that kept doing other
+       work re-fired on every heartbeat cycle: 8,349 requeue receipts across
+       8 keepers over ~42h, one idealist grant alone spinning 657 times. A
+       completed turn settles as Ack regardless of grant state. This does not
+       lose the operator's authorization: the grant remains durably spendable
+       in the approval store ([approved_resolution_state] observes it) and
+       visible on the resolved surface; a later matching attempt still
+       consumes it. *)
     (match
        Keeper_approval_queue.approved_resolution_state
          ~base_path
          ~id:resolution.approval_id
      with
-     | Ok Keeper_approval_queue.Resolution_consumed ->
-       (* The durable authorization was spent before the external effect. The
-          wake has completed its only job even if the later tool/cycle result
-          failed; replay must never recreate the grant. *)
-       Keeper_registry_event_queue.Ack
+     | Ok Keeper_approval_queue.Resolution_consumed -> ()
      | Ok Keeper_approval_queue.Resolution_unconsumed ->
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Approval_grant_unconsumed
+       Log.Keeper.warn
+         "approval grant delivered but not consumed this turn approval=%s \
+          keeper turn completed; grant remains durably spendable"
+         resolution.approval_id
      | Error error ->
        Log.Keeper.error
-         "approval resolution state unavailable approval=%s: %s"
+         "approval resolution state unavailable approval=%s: %s (grant \
+          remains durable; settlement follows the completed turn)"
          resolution.approval_id
-         (Keeper_approval_queue.grant_error_to_string error);
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Approval_grant_state_unavailable)
-  | None ->
+         (Keeper_approval_queue.grant_error_to_string error));
+    Keeper_registry_event_queue.Ack
+  | ( Some _
+    , ( Some
+          ( Cycle.Cancelled _
+          | Cycle.Skipped _
+          | Cycle.Busy _
+          | Cycle.Failed _
+          | Cycle.Judgment_settled _
+          | Cycle.Manual_compaction_applied _
+          | Cycle.Manual_compaction_failed _
+          | Cycle.Manual_compaction_not_applied _ )
+      | None ) )
+  (* A turn that did not complete has not delivered the wake; fall through to
+     the ordinary outcome settlement below (busy/cancelled/failed requeue
+     along their usual typed routes and the stimulus re-enters). *)
+  | None, _ ->
     (match outcome with
   | Some (Cycle.Manual_compaction_applied _ as applied) ->
     (match Cycle.manual_compaction_followup_failure applied with

@@ -11,7 +11,24 @@
     volumes): within budget, nothing changes (same items, same order); over
     budget, the most-recent-[reference_time]/[created_at] items survive,
     still rendered in their original relative order, and the drop is logged
-    plus counted (never silent). *)
+    plus counted (never silent).
+
+    RFC-0351 L3: the count budgets bound how many items are injected, not how
+    large they render. A rendered byte budget
+    ([Keeper_config.keeper_memory_os_recall_max_bytes]) now also applies and is
+    enforced rather than merely logged — the oldest episodes are dropped until
+    the block fits, survivors keep their original order, and facts are never
+    dropped by it. *)
+
+val select_pairs_within_byte_budget
+  :  budget:int
+  -> ('a * string) list
+  -> ('a * string) list * int
+(** [select_pairs_within_byte_budget ~budget pairs] keeps the most recent pairs
+    whose rendered lines (the [string] of each pair, plus one byte per newline
+    joiner) fit in [budget], returning them in their ORIGINAL relative order
+    together with the number dropped. Length arithmetic only: no importance
+    score and no inspection of line content. *)
 
 val render_context
   :  keeper_id:string

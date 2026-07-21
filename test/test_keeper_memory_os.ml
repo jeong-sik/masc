@@ -4043,6 +4043,33 @@ let test_merge_keeps_distinct_conclusions () =
     Alcotest.(check int) "two rows survive (correction not dropped)" 2 (List.length rows))
 ;;
 
+(* RFC-0351 L3: the rendered byte budget drops the oldest episodes until the
+   block fits and keeps survivors in their original order. Before this the
+   budget only logged "not truncated" and let the block go out whole — one
+   keeper rendered 222,499B of recall while both count budgets (500/500) sat
+   unfired at 62 facts / 432 episodes. *)
+let test_byte_budget_keeps_newest_in_original_order () =
+  (* Pairs arrive oldest-first, the order recall renders them in. Each line is
+     4 bytes plus one newline joiner, so a 12-byte budget fits exactly two. *)
+  let pairs = [ 1, "aaaa"; 2, "bbbb"; 3, "cccc"; 4, "dddd" ] in
+  let kept, dropped =
+    Masc.Keeper_memory_os_recall.select_pairs_within_byte_budget ~budget:12 pairs
+  in
+  Alcotest.(check (list int))
+    "the newest survivors keep their original relative order"
+    [ 3; 4 ]
+    (List.map fst kept);
+  Alcotest.(check int) "the older pairs are reported as dropped" 2 dropped;
+  let all_kept, none_dropped =
+    Masc.Keeper_memory_os_recall.select_pairs_within_byte_budget ~budget:1000 pairs
+  in
+  Alcotest.(check (list int))
+    "within budget the selection is unchanged"
+    [ 1; 2; 3; 4 ]
+    (List.map fst all_kept);
+  Alcotest.(check int) "within budget nothing is dropped" 0 none_dropped
+;;
+
 (* RFC-0259 §3.7 (P6 regression): a durable claim still advances its
    [last_verified_at] on re-observe, and exact-text upsert behavior is unchanged:
    identical claims merge to one row, distinct claims stay two. *)
@@ -5174,6 +5201,10 @@ let () =
             "reobserve advances an independent claim's observation timestamp"
             `Quick
             test_reobserve_advances_durable_anchor
+        ; Alcotest.test_case
+            "recall byte budget drops oldest episodes and keeps original order"
+            `Quick
+            test_byte_budget_keeps_newest_in_original_order
         ] )
     ]
 ;;

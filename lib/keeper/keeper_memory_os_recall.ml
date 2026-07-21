@@ -140,6 +140,34 @@ let select_most_recent ~budget ~key ~recency items =
     selected, n - budget)
 ;;
 
+(* RFC-0351 L3: byte budget on the rendered block.
+
+   The count budgets above bound how many items are injected, not how large
+   they render. One keeper sat at 62 facts / 432 episodes -- both under the 500
+   count budgets, so neither truncated -- and still rendered 222,499 bytes,
+   98.5% of that turn's entire extra_system_context. The byte budget existed but
+   was observability-only: it logged "not truncated" and let the block go out in
+   full.
+
+   Same selection shape as [select_most_recent]: keep the most recent items that
+   fit and return them in their ORIGINAL relative order, so a block within
+   budget renders byte-for-byte as before. Arithmetic on lengths only -- no
+   importance score, no content inspection, no threshold on meaning. Pairs carry
+   their pre-rendered line so a line is rendered once. *)
+let select_pairs_within_byte_budget ~budget pairs =
+  let rec take kept used dropped = function
+    | [] -> kept, dropped
+    | ((_, line) as pair) :: older ->
+      let cost = String.length line + 1 (* newline joiner *) in
+      if used + cost > budget
+      then kept, dropped + List.length older + 1
+      else take (pair :: kept) (used + cost) dropped older
+  in
+  (* Walk newest-first so survivors are the most recent; the accumulator
+     rebuilds the original order. *)
+  take [] 0 0 (List.rev pairs)
+;;
+
 let episode_key (e : episode) = Printf.sprintf "%s:g%d" e.trace_id e.generation
 
 let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~dropped ~budget =
@@ -204,14 +232,43 @@ let render_context_exn ~keeper_id ~now () =
       ~injected_count:(List.length episodes)
       ~dropped:episodes_dropped
       ~budget:max_episodes;
+  let max_bytes = Keeper_config.keeper_memory_os_recall_max_bytes () in
+  let fact_lines = List.map (render_fact ~now) facts in
+  let fact_bytes =
+    List.fold_left (fun acc line -> acc + String.length line + 1) 0 fact_lines
+  in
+  (* Facts render an order of magnitude smaller than episodes (14,235B vs
+     208,264B on the measured keeper), so facts keep their place and the
+     remaining budget goes to episodes. *)
+  let episode_pairs, episodes_byte_dropped =
+    let pairs = List.map (fun e -> e, render_episode e) episodes in
+    if max_bytes <= 0
+    then pairs, 0
+    else
+      select_pairs_within_byte_budget ~budget:(max 0 (max_bytes - fact_bytes)) pairs
+  in
+  let episodes = List.map fst episode_pairs in
+  let episode_lines = List.map snd episode_pairs in
+  if episodes_byte_dropped > 0
+  then (
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryOsRecallBytesOverBudget)
+      ~labels:[ "keeper", keeper_id ]
+      ();
+    log_truncation
+      ~keeper_id
+      ~kind:"episodes over byte budget"
+      ~metric:Keeper_metrics.MemoryOsRecallEpisodesTruncated
+      ~store_count:(List.length all_episodes)
+      ~injected_count:(List.length episodes)
+      ~dropped:episodes_byte_dropped
+      ~budget:max_bytes);
   let injected_fact_keys = List.map (fun f -> claim_identity f) facts in
   let injected_episode_keys = List.map episode_key episodes in
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
     match facts, episodes with
     | [], [] -> "", [], [], None
     | _ ->
-      let fact_lines = List.map (render_fact ~now) facts in
-      let episode_lines = List.map render_episode episodes in
       (match render_recall_context ~fact_lines ~episode_lines with
        | Ok context -> context, injected_fact_keys, injected_episode_keys, None
        | Error msg ->
@@ -221,19 +278,6 @@ let render_context_exn ~keeper_id ~now () =
          , []
          , Some Prompt_render_error ))
   in
-  let max_bytes = Keeper_config.keeper_memory_os_recall_max_bytes () in
-  if max_bytes > 0 && String.length block > max_bytes
-  then (
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MemoryOsRecallBytesOverBudget)
-      ~labels:[ "keeper", keeper_id ]
-      ();
-    Log.Keeper.warn
-      "memory os recall block over byte budget keeper=%s: bytes=%d budget=%d (not truncated; \
-       raise keeper.memory_os.recall.max_bytes or lower max_facts/max_episodes)"
-      keeper_id
-      (String.length block)
-      max_bytes);
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 

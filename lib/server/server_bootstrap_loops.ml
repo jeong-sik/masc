@@ -1080,7 +1080,7 @@ let start_keeper_loops_owned
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
   let masc_event_bus = Agent_sdk.Event_bus.create () in
-  Masc_event_bus.set masc_event_bus;
+  Event_bus_slots.set_masc masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;

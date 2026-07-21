@@ -116,7 +116,7 @@ let submit_keeper_msg_with_captured_event_bus
           -> Eio.Switch.t
           -> tool_result)
       () =
-  let event_bus = Keeper_event_bus.get () in
+  let event_bus = Event_bus_slots.get_keeper () in
   Keeper_invocation_contract.submit
     ~background_sw
     ~base_path
@@ -852,7 +852,7 @@ let handle_keeper_msg_stream
     (* Stream turns are synchronous today, but still pin the bus visible at the
        public surface boundary so later refactors cannot reintroduce a nested
        fallback lookup in the turn body. *)
-    let event_bus = Keeper_event_bus.get () in
+    let event_bus = Event_bus_slots.get_keeper () in
     let result =
       Turn.handle_keeper_msg
         ?on_text_delta
@@ -905,7 +905,7 @@ let handle_keeper_msg_stream_if_free
           (fun () -> tool_result_error err)
   | Ok name ->
     let resolved_args = with_keeper_name args name in
-    let event_bus = Keeper_event_bus.get () in
+    let event_bus = Event_bus_slots.get_keeper () in
     (match
        Turn.handle_keeper_msg_if_free
          ?on_text_delta

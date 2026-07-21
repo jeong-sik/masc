@@ -13,7 +13,7 @@
   masc
   masc.dashboard
   masc.fd_accountant
-  masc.masc_event_bus
+  masc.event_bus_slots
   ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
   ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it
   ;; directly (specs_json / tlc_results_json) and dune does not re-export through

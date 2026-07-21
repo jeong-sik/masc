@@ -1047,7 +1047,7 @@ let handle_keeper_invocation
   let event_bus =
     match event_bus with
     | Some _ -> event_bus
-    | None -> Keeper_event_bus.get ()
+    | None -> Event_bus_slots.get_keeper ()
   in
   let name = Keeper_invocation_contract.target_name request in
   match
@@ -1162,7 +1162,7 @@ let handle_keeper_msg_if_free
   let event_bus =
     match event_bus with
     | Some _ -> event_bus
-    | None -> Keeper_event_bus.get ()
+    | None -> Event_bus_slots.get_keeper ()
   in
   match direct_invocation_request args with
   | Error error -> `Ran (tool_result_error error)

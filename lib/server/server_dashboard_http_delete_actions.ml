@@ -438,7 +438,7 @@ let purge_dashboard_keeper_artifacts config operation =
 ;;
 
 let handle_dashboard_keeper_purge_completion config operation =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ ->
     (match operation.Keeper_shutdown_types.cleanup_intent.reason with

@@ -2435,7 +2435,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       ~purpose:"dead-tombstone-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
       Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
@@ -2689,7 +2689,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       ~purpose:"dashboard-purge-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
       Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;

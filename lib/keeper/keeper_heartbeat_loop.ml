@@ -736,7 +736,7 @@ let run_keepalive_unified_turn
             ~ctx
             ~keeper_name:meta_after_triage.name
             !consumed_stimuli;
-          let event_bus = Keeper_event_bus.get () in
+          let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an OAS approval. *)
           let hitl_resolution =

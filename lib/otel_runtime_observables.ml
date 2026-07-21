@@ -194,10 +194,10 @@ let bus_samples_of ~bus_label bus =
 
 let bus_samples () =
   List.concat
-    [ (match Masc_event_bus.get () with
+    [ (match Event_bus_slots.get_masc () with
        | Some bus -> bus_samples_of ~bus_label:"masc_domain" bus
        | None -> [])
-    ; (match Keeper_event_bus.get () with
+    ; (match Event_bus_slots.get_keeper () with
        | Some bus -> bus_samples_of ~bus_label:"oas_runtime" bus
        | None -> [])
     ]

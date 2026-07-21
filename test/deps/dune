@@ -93,7 +93,7 @@
   (re_export masc.keeper_types)
   (re_export masc.keeper_types_profile_sandbox)
   (re_export masc.keeper_usage_trust)
-  (re_export masc.keeper_event_bus)
+  (re_export masc.event_bus_slots)
   (re_export masc.keeper_toml)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
@@ -119,7 +119,6 @@
   (re_export masc.operator)
   (re_export masc.server)
   (re_export masc.runtime)
-  (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
   (re_export masc.pool_metrics)
   (re_export masc.auth)

@@ -368,6 +368,39 @@ let test_bare_autonomous_wake_is_not_recorded () =
     (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution (Some ())
      = Masc.Keeper_run_prompt.Record_user_turn)
 
+(* The transcript fix above stopped the wake marker from accumulating, but the
+   librarian reads the checkpoint window on a turn cadence, so an idle stretch
+   kept extracting and kept storing the idleness. Live: 8 of one keeper's 10
+   most recent claims were "Agent idle across N consecutive autonomous wake
+   cycles", recalled at 66KB against 3.8KB of world state reporting 122
+   claimable tasks on the same prompt. Only the bare-wake-and-no-tool pair is
+   inert; the other three carry something a later turn can use. *)
+let test_inert_turn_skips_librarian_extraction () =
+  let decide ~user_turn_record ~tool_calls_made =
+    Masc.Keeper_run_prompt.memory_extraction_record_of_turn
+      ~user_turn_record ~tool_calls_made
+  in
+  check bool "bare wake with no tool call is inert" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+       ~tool_calls_made:false
+     = Masc.Keeper_run_prompt.Skip_inert_turn);
+  check bool "bare wake that ran a tool still extracts" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+       ~tool_calls_made:true
+     = Masc.Keeper_run_prompt.Extract_turn);
+  check bool "operator/HITL input extracts even with no tool call" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+       ~tool_calls_made:false
+     = Masc.Keeper_run_prompt.Extract_turn);
+  check bool "operator/HITL input with a tool call extracts" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+       ~tool_calls_made:true
+     = Masc.Keeper_run_prompt.Extract_turn)
+
 let () =
   run "keeper_unified_verification_surface"
     [
@@ -417,5 +450,8 @@ let () =
           test_case
             "invariant: a bare autonomous wake is not recorded in the transcript"
             `Quick test_bare_autonomous_wake_is_not_recorded;
+          test_case
+            "invariant: an inert turn does not feed the librarian"
+            `Quick test_inert_turn_skips_librarian_extraction;
         ] );
     ]

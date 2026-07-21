@@ -194,6 +194,60 @@ let test_transfer_commits_and_replays_exactly_once () =
     assert_converged config ~from_keeper ~to_keeper request.source)
 ;;
 
+let test_replay_after_target_consumption_has_no_second_effect () =
+  with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
+    let base_path = config.Workspace.base_path in
+    let first =
+      Transaction.transfer_pending config ~from_keeper ~to_keeper request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit Transfer_owner before target consumption"
+    in
+    check_applied ~expected_target:Transaction.Enqueued first.projection;
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name:to_keeper
+        ~claimed_at:4.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim transferred target source"
+      |> require_some "transferred target lease"
+    in
+    (match
+       Persistence.settle_result
+         ~base_path
+         ~keeper_name:to_keeper
+         ~settled_at:5.0
+         ~lease
+         ~settlement:State.Ack
+         ()
+     with
+     | Ok (Persistence.Settled _ | Persistence.Already_settled _) -> ()
+     | Ok (Persistence.Committed_followup_failed { detail; _ })
+     | Error detail -> Alcotest.fail detail);
+    let replay =
+      Transaction.transfer_pending config ~from_keeper ~to_keeper request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "replay Transfer_owner after target consumption"
+    in
+    (match replay.commit_status with
+     | Transaction.Already_committed -> ()
+     | Transaction.Committed -> Alcotest.fail "target-consumed replay replaced receipt");
+    check_applied ~expected_target:Transaction.Already_present replay.projection;
+    let target =
+      Persistence.load_state_result ~base_path ~keeper_name:to_keeper
+      |> require_ok "load replayed consumed target"
+    in
+    Alcotest.(check int)
+      "target source was not enqueued again"
+      0
+      (Queue.length (State.pending target));
+    Alcotest.(check int)
+      "one durable target projection"
+      1
+      (List.length (State.accepted_transfer_projections target)))
+;;
+
 let test_replay_after_source_settlement_projects_target () =
   with_transfer_lane (fun config from_keeper to_keeper source_meta target_meta request ->
     let transfer : Receipt.transfer_owner =
@@ -301,6 +355,10 @@ let () =
             "replay after source settlement projects target"
             `Quick
             test_replay_after_source_settlement_projects_target
+        ; Alcotest.test_case
+            "replay after target consumption has no second effect"
+            `Quick
+            test_replay_after_target_consumption_has_no_second_effect
         ; Alcotest.test_case
             "stale source revision has no effect"
             `Quick

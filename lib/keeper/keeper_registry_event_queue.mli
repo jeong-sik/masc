@@ -218,13 +218,14 @@ val enqueue_stimulus_durable_result :
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)
 
-val enqueue_exact_stimulus_durable_result :
+val project_accepted_transfer_durable_result :
   base_path:string
   -> string
-  -> Keeper_event_queue.stimulus
+  -> transfer:accepted_transfer
   -> enqueue_stimulus_durable_result
-(** Strict transfer projection: replay succeeds only for the exact full source
-    snapshot. Same identity with changed arrival/payload is a storage conflict. *)
+(** Strict target transfer projection. The exact source and operation identity
+    are durably accounted in the target queue state before the pending
+    projection becomes visible. Accounting survives consumption. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

@@ -123,13 +123,19 @@ type t =
   ; leases : lease list
   ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
+  ; accepted_transfer_projections : accepted_transfer list
   }
 
 type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let schema = "keeper.event_queue.state.v3"
+type transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
+
+let schema = "keeper.event_queue.state.v4"
+let predecessor_schema = "keeper.event_queue.state.v3"
 
 let empty =
   { revision = 0L
@@ -138,6 +144,7 @@ let empty =
   ; leases = []
   ; last_settlement = None
   ; transition_outbox = []
+  ; accepted_transfer_projections = []
   }
 ;;
 
@@ -147,11 +154,63 @@ let pending state = state.pending
 let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
+let accepted_transfer_projections state = state.accepted_transfer_projections
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
   | [] -> None
   | lease :: _ -> Some lease
+;;
+
+let accounted_stimuli state =
+  Keeper_event_queue.to_list state.pending
+  @ List.concat_map (fun (lease : lease) -> lease.stimuli) state.leases
+  @ List.concat_map
+      (fun (entry : outbox_entry) -> entry.stimuli)
+      state.transition_outbox
+;;
+
+let project_accepted_transfer (transfer : accepted_transfer) state =
+  let same_operation (candidate : accepted_transfer) =
+    String.equal candidate.operator_operation_id transfer.operator_operation_id
+  in
+  match List.find_opt same_operation state.accepted_transfer_projections with
+  | Some existing when existing = transfer -> Ok (state, Transfer_already_projected)
+  | Some _ -> Error "target transfer operation ID conflicts with its durable projection"
+  | None ->
+    let same_source (candidate : accepted_transfer) =
+      Keeper_event_queue.stimulus_identity_equal candidate.source transfer.source
+    in
+    (match List.find_opt same_source state.accepted_transfer_projections with
+     | Some _ ->
+       Error "target transfer source identity was already projected by another operation"
+     | None ->
+       let matching =
+         accounted_stimuli state
+         |> List.filter (fun candidate ->
+           Keeper_event_queue.stimulus_identity_equal candidate transfer.source)
+       in
+       (match matching with
+        | [] ->
+          let pending = Keeper_event_queue.enqueue state.pending transfer.source in
+          Ok
+            ( { state with
+                pending
+              ; accepted_transfer_projections =
+                  state.accepted_transfer_projections @ [ transfer ]
+              }
+            , Transfer_projected )
+        | [ existing ] when existing = transfer.source ->
+          Ok
+            ( { state with
+                accepted_transfer_projections =
+                  state.accepted_transfer_projections @ [ transfer ]
+              }
+            , Transfer_already_projected )
+        | [ _ ] ->
+          Error "target transfer source identity has a different durable snapshot"
+        | _ :: _ :: _ ->
+          Error "target transfer source identity is duplicated in durable state"))
 ;;
 
 let mark_transition_projected ~transition_id state =
@@ -1695,6 +1754,22 @@ let settlement_of_yojson json =
   | kind -> Error (Printf.sprintf "unknown event queue settlement kind: %s" kind)
 ;;
 
+let accepted_transfer_projection_to_yojson (transfer : accepted_transfer) =
+  settlement_to_yojson (Transfer_accepted transfer)
+;;
+
+let accepted_transfer_projection_of_yojson json =
+  let* settlement = settlement_of_yojson json in
+  match settlement with
+  | Transfer_accepted transfer -> Ok transfer
+  | Ack
+  | No_compaction _
+  | Cancel_accepted _
+  | Settle_from_source_terminal _
+  | Requeue _
+  | Escalate _ -> Error "target transfer projection must contain transfer_accepted"
+;;
+
 let transition_receipt_to_yojson receipt =
   `Assoc
     [ "transition_id", `String receipt.transition_id
@@ -1789,6 +1864,11 @@ let to_yojson state =
         | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "accepted_transfer_projections"
+      , `List
+          (List.map
+             accepted_transfer_projection_to_yojson
+             state.accepted_transfer_projections) )
     ]
 ;;
 
@@ -1802,6 +1882,25 @@ let duplicate_by key values =
       else loop (key :: seen) rest
   in
   loop [] values
+;;
+
+let duplicate_transfer_source (transfers : accepted_transfer list) =
+  let rec loop seen (l : accepted_transfer list) =
+    match l with
+    | [] -> None
+    | transfer :: rest ->
+      (match
+         List.find_opt
+           (fun (prior : accepted_transfer) ->
+              Keeper_event_queue.stimulus_identity_equal
+                prior.source
+                transfer.source)
+           seen
+       with
+       | Some prior -> Some (prior, transfer)
+       | None -> loop (transfer :: seen) rest)
+  in
+  loop [] transfers
 ;;
 
 let validate_state state =
@@ -1833,37 +1932,66 @@ let validate_state state =
        | Some transition_id ->
          Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
        | None ->
-         let max_sequence =
-           List.fold_left
-             (fun acc (lease : lease) -> Int64.max acc lease.sequence)
-             0L
-             state.leases
-         in
-         let max_sequence =
-           List.fold_left
-             (fun acc entry -> Int64.max acc entry.receipt.lease_sequence)
-             max_sequence
-             state.transition_outbox
-         in
-         let max_sequence =
-           match state.last_settlement with
-           | None -> max_sequence
-           | Some receipt -> Int64.max max_sequence receipt.lease_sequence
-         in
-         if Int64.compare state.next_lease_sequence max_sequence <= 0
-         then
-           Error
-             "event queue next lease sequence must exceed every lease and receipt sequence"
-         else Ok state)
+         (match
+            duplicate_by
+              (fun (transfer : accepted_transfer) -> transfer.operator_operation_id)
+              state.accepted_transfer_projections
+          with
+          | Some operation_id ->
+            Error
+              (Printf.sprintf
+                 "duplicate target transfer projection operation id: %s"
+                 operation_id)
+          | None ->
+            (match duplicate_transfer_source state.accepted_transfer_projections with
+             | Some _ -> Error "duplicate target transfer projection source identity"
+             | None ->
+               let max_sequence =
+                 List.fold_left
+                   (fun acc (lease : lease) -> Int64.max acc lease.sequence)
+                   0L
+                   state.leases
+               in
+               let max_sequence =
+                 List.fold_left
+                   (fun acc entry -> Int64.max acc entry.receipt.lease_sequence)
+                   max_sequence
+                   state.transition_outbox
+               in
+               let max_sequence =
+                 match state.last_settlement with
+                 | None -> max_sequence
+                 | Some receipt -> Int64.max max_sequence receipt.lease_sequence
+               in
+               if Int64.compare state.next_lease_sequence max_sequence <= 0
+               then
+                 Error
+                   "event queue next lease sequence must exceed every lease and receipt sequence"
+               else Ok state)))
 ;;
 
 let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  if not (String.equal schema_value schema)
+  if
+    not
+      (String.equal schema_value schema
+       || String.equal schema_value predecessor_schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
+    let expected_fields =
+      [ "schema"
+      ; "revision"
+      ; "next_lease_sequence"
+      ; "pending"
+      ; "leases"
+      ; "last_settlement"
+      ; "transition_outbox"
+      ]
+      @ if String.equal schema_value schema then [ "accepted_transfer_projections" ] else []
+    in
+    let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
     let* next_lease_sequence = int64_field ~context "next_lease_sequence" fields in
     let* pending_json = required_field ~context "pending" fields in
@@ -1878,6 +2006,16 @@ let of_yojson json =
     let* transition_outbox =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
+    let* accepted_transfer_projections =
+      if String.equal schema_value predecessor_schema
+      then Ok []
+      else
+        list_field
+          ~context
+          "accepted_transfer_projections"
+          accepted_transfer_projection_of_yojson
+          fields
+    in
     validate_state
       { revision
       ; next_lease_sequence
@@ -1885,5 +2023,6 @@ let of_yojson json =
       ; leases
       ; last_settlement
       ; transition_outbox
+      ; accepted_transfer_projections
       }
 ;;

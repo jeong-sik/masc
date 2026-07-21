@@ -319,16 +319,17 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
-let enqueue_exact_stimulus_durable_result ~base_path name stimulus =
+let project_accepted_transfer_durable_result ~base_path name ~transfer =
   match
-    Keeper_event_queue_persistence.enqueue_exact_stimulus_if_absent_result
+    Keeper_event_queue_persistence.project_accepted_transfer_result
       ~base_path
       ~keeper_name:name
       ~after_commit:(publish_pending ~base_path name)
-      stimulus
+      ~transfer
   with
-  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
-  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
+    Stimulus_already_present
   | Error detail -> Stimulus_storage_error detail
 ;;
 

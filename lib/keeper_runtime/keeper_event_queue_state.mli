@@ -137,6 +137,10 @@ type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
+type transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
+
 val empty : t
 val revision : t -> int64
 val next_lease_sequence : t -> int64
@@ -144,6 +148,7 @@ val pending : t -> Keeper_event_queue.t
 val leases : t -> lease list
 val last_settlement : t -> transition_receipt option
 val transition_outbox : t -> outbox_entry list
+val accepted_transfer_projections : t -> accepted_transfer list
 val lease_kind : lease -> lease_kind
 
 val with_pending : Keeper_event_queue.t -> t -> t
@@ -251,6 +256,13 @@ val accepted_pending_transfer_replay :
 (** Look up an already committed pending transfer by its stable operator
     operation ID and exact source-bearing settlement. *)
 
+val project_accepted_transfer :
+  accepted_transfer -> t -> (t * transfer_projection_result, string) result
+(** Atomically account for one exact target-side transfer projection and
+    enqueue its source only on the first projection. The durable accounting
+    survives target consumption, so receipt replay cannot enqueue the same
+    transferred event again. *)
+
 val accepted_pending_source_terminal_replay :
   accepted_source_terminal ->
   t ->
@@ -303,4 +315,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v3"]. *)
+(** ["keeper.event_queue.state.v4"]. Strict v3 snapshots are read as the sole
+    supported predecessor and upgraded on their next durable mutation. *)

@@ -1,9 +1,10 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] keeps the v3 envelope containing pending stimuli, active
-    typed leases, the monotonic lease sequence and the transition outbox.
-    Older schemas are unsupported. [event-queue-inflight.json] is rejected
-    explicitly rather than migrated or treated as a second authority. *)
+    [event-queue.json] keeps the v4 envelope containing pending stimuli, active
+    typed leases, the monotonic lease sequence, transition outbox, and durable
+    accepted-transfer target accounting. Strict v3 is the only supported
+    predecessor. [event-queue-inflight.json] is rejected explicitly rather
+    than migrated or treated as a second authority. *)
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
@@ -99,6 +100,10 @@ type settle_result =
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
       }
+
+type transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> lease_kind
@@ -303,23 +308,23 @@ val enqueue_stimulus_if_absent_result :
 (** Atomically enqueue only when the same typed stimulus is absent from the
     full durable state: pending, active leases, and transition outbox. *)
 
-val enqueue_exact_stimulus_if_absent_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
+val project_accepted_transfer_result :
+  after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  Keeper_event_queue.stimulus ->
-  (enqueue_stimulus_result, string) result
-(** Transfer-only strict variant: an existing identity is idempotent only when
-    the full source snapshot, including [arrived_at], is structurally equal.
-    A changed snapshot or duplicate accounted identity is a conflict. *)
+  transfer:accepted_transfer ->
+  (transfer_projection_result, string) result
+(** Atomically persist target-side transfer accounting with the exact enqueue.
+    The accounting survives target consumption and makes later receipt replay
+    return [Transfer_already_projected] without a second target effect. *)
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 
 val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Legacy source/test adapter.  Writes a typed [Legacy_inflight] lease into the
-    v3 envelope; it never creates [event-queue-inflight.json]. *)
+(** Legacy source/test adapter. Writes a typed [Legacy_inflight] lease into the
+    v4 envelope; it never creates [event-queue-inflight.json]. *)
 
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit

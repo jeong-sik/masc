@@ -283,17 +283,20 @@ let create_receipt config ~from_keeper ~to_keeper request =
      : Keeper_paused_work_disposition_receipt.t)
 ;;
 
-let source_settlement config receipt
-      (transfer : Keeper_paused_work_disposition_receipt.transfer_owner) =
-  let causal : Keeper_registry_event_queue.accepted_transfer =
-    { source = transfer.Keeper_paused_work_disposition_receipt.source
-    ; source_revision = transfer.source_revision
-    ; owner_generation = receipt.Keeper_paused_work_disposition_receipt.expected_generation
-    ; operator_operation_id = receipt.operator_operation_id
-    ; from_keeper = transfer.from_keeper
-    ; to_keeper = transfer.to_keeper
-    }
-  in
+let accepted_transfer receipt
+      (transfer : Keeper_paused_work_disposition_receipt.transfer_owner)
+    : Keeper_registry_event_queue.accepted_transfer =
+  { source = transfer.Keeper_paused_work_disposition_receipt.source
+  ; source_revision = transfer.source_revision
+  ; owner_generation = receipt.Keeper_paused_work_disposition_receipt.expected_generation
+  ; operator_operation_id = receipt.operator_operation_id
+  ; from_keeper = transfer.from_keeper
+  ; to_keeper = transfer.to_keeper
+  }
+;;
+
+let source_settlement config receipt transfer =
+  let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
     Keeper_event_queue_persistence.load_state_result
@@ -348,13 +351,14 @@ let validate_committed_target config transfer =
   else Ok ()
 ;;
 
-let target_enqueue config transfer =
+let target_enqueue config receipt transfer =
   let* () = validate_committed_target config transfer in
+  let causal = accepted_transfer receipt transfer in
   match
-    Keeper_registry_event_queue.enqueue_exact_stimulus_durable_result
+    Keeper_registry_event_queue.project_accepted_transfer_durable_result
       ~base_path:config.Workspace.base_path
       transfer.Keeper_paused_work_disposition_receipt.to_keeper
-      transfer.source
+      ~transfer:causal
   with
   | Keeper_registry_event_queue.Stimulus_enqueued -> Ok Enqueued
   | Keeper_registry_event_queue.Stimulus_already_present -> Ok Already_present
@@ -365,7 +369,7 @@ let target_enqueue config transfer =
 let project_receipt config receipt =
   let* transfer = transfer_of_receipt receipt in
   let* source_settlement = source_settlement config receipt transfer in
-  let* target_projection = target_enqueue config transfer in
+  let* target_projection = target_enqueue config receipt transfer in
   Ok (Applied { source_settlement; target_projection })
 ;;
 

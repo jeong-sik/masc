@@ -132,6 +132,8 @@ let with_keeper_lock config ~keeper_name f =
     let dir = keeper_dir config keeper_name in
     let prepared =
       try
+        (* [ensure_dir] returns the created path; only its side effect matters
+           here, and any failure is caught below and surfaced as [Error]. *)
         ignore (Keeper_fs.ensure_dir dir : string);
         Ok ()
       with

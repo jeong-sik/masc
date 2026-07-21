@@ -367,6 +367,9 @@ let resume config ~keeper_name request =
            | Error cause -> Error { cause; reservation_release = Some reservation_release })
         with
         | exn ->
+          (* Best-effort release on the exception path: the original [exn] is
+             re-raised immediately, so a release failure must not replace it
+             (Fun.Finally_raised-style masking). *)
           ignore (Keeper_lifecycle_reservation.release token : _);
           raise exn))
 ;;

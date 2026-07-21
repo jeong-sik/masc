@@ -15,6 +15,13 @@ const validRuntime = {
   is_default: true,
 } as const
 
+const validLane = {
+  id: 'lane-x',
+  runtime_ids: ['rt-a', 'rt-b'],
+  preferred_candidate: 'rt-b',
+  preferred_at_ts: 1_750_000_000,
+} as const
+
 function responseWith(runtime: Record<string, unknown>) {
   return {
     config_path: '/workspace/.masc/config/runtime.toml',
@@ -37,5 +44,23 @@ describe('runtime-resolved schema', () => {
       effective_max_context: null,
       max_context_source: null,
     }))).toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('accepts a lane carrying the sticky failover preference', () => {
+    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [validLane] })
+    expect(parsed.lanes[0]).toMatchObject(validLane)
+  })
+
+  it('accepts a lane with no live sticky preference (nulls, not absent)', () => {
+    const lane = { ...validLane, preferred_candidate: null, preferred_at_ts: null }
+    const parsed = parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] })
+    expect(parsed.lanes[0]?.preferred_candidate).toBeNull()
+    expect(parsed.lanes[0]?.preferred_at_ts).toBeNull()
+  })
+
+  it('rejects a lane missing the sticky fields (schema drift guard)', () => {
+    const { preferred_candidate: _candidate, preferred_at_ts: _ts, ...lane } = validLane
+    expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
+      .toThrow(RuntimeResolvedSchemaDriftError)
   })
 })

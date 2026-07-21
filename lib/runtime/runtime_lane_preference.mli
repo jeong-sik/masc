@@ -21,6 +21,13 @@ val note_success : lane_id:string -> candidate:string -> unit
     with the current time.  Called on every successful attempt, whether the
     head candidate or a failover candidate succeeded. *)
 
+val preferred_of_lane : lane_id:string -> (string * float) option
+(** Live sticky preference for [lane_id]: [Some (candidate, noted_at)] with
+    [noted_at] a Unix epoch timestamp, [None] when nothing is remembered or
+    the entry expired (expired entries are pruned on read, same as
+    {!prefer_order}).  Read-only view for observability surfaces; callers
+    derive display age from [noted_at]. *)
+
 val ttl_s : unit -> float
 (** Sticky preference TTL in seconds ([MASC_LANE_PREFERENCE_TTL_S], default
     [3600.0]; [0] disables stickiness). *)

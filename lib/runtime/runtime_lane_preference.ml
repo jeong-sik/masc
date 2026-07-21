@@ -44,5 +44,17 @@ let note_success ~lane_id ~candidate =
   Stdlib.Mutex.protect mu (fun () ->
     Hashtbl.replace entries lane_id { candidate; noted_at = now () })
 
+let preferred_of_lane ~lane_id =
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt entries lane_id with
+    | None -> None
+    | Some entry ->
+      if Float.compare (now () -. entry.noted_at) (ttl_s ()) < 0
+      then Some (entry.candidate, entry.noted_at)
+      else begin
+        Hashtbl.remove entries lane_id;
+        None
+      end)
+
 let reset_for_testing () =
   Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset entries)

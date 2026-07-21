@@ -55,6 +55,46 @@ let test_ttl_expiry_restores_order () =
         candidates
         (Runtime_lane_preference.prefer_order ~lane_id:"lane-1" candidates))
 
+let test_preferred_of_lane_none_without_state () =
+  Runtime_lane_preference.reset_for_testing ();
+  Alcotest.(check (option (pair string (float 0.001)))) "no state -> None" None
+    (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1")
+
+let test_preferred_of_lane_returns_candidate_and_ts () =
+  Runtime_lane_preference.reset_for_testing ();
+  let before = Unix.gettimeofday () in
+  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
+  let after = Unix.gettimeofday () in
+  match Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1" with
+  | Some (candidate, noted_at) ->
+    Alcotest.(check string) "remembered candidate" "beta" candidate;
+    Alcotest.(check bool) "ts stamped at note time" true
+      (Float.compare noted_at before >= 0 && Float.compare noted_at after <= 0)
+  | None -> Alcotest.fail "expected sticky preference"
+
+let test_preferred_of_lane_isolation () =
+  Runtime_lane_preference.reset_for_testing ();
+  Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
+  Alcotest.(check (option (pair string (float 0.001)))) "other lane -> None"
+    None
+    (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-2")
+
+let test_preferred_of_lane_expires () =
+  Runtime_lane_preference.reset_for_testing ();
+  Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "0.05";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "MASC_LANE_PREFERENCE_TTL_S" "")
+    (fun () ->
+      Runtime_lane_preference.note_success ~lane_id:"lane-1" ~candidate:"beta";
+      (match Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1" with
+       | Some (candidate, _) ->
+         Alcotest.(check string) "fresh entry visible" "beta" candidate
+       | None -> Alcotest.fail "expected fresh sticky preference");
+      Unix.sleepf 0.1;
+      Alcotest.(check (option (pair string (float 0.001)))) "expired -> None"
+        None
+        (Runtime_lane_preference.preferred_of_lane ~lane_id:"lane-1"))
+
 let () =
   Alcotest.run "runtime_lane_preference"
     [
@@ -69,5 +109,15 @@ let () =
         ; Alcotest.test_case "non-member ignored" `Quick test_non_member_ignored
         ; Alcotest.test_case "ttl expiry restores order" `Quick
             test_ttl_expiry_restores_order
+        ] )
+    ; ( "preferred_of_lane"
+      , [ Alcotest.test_case "none without state" `Quick
+            test_preferred_of_lane_none_without_state
+        ; Alcotest.test_case "candidate and ts" `Quick
+            test_preferred_of_lane_returns_candidate_and_ts
+        ; Alcotest.test_case "lane isolation" `Quick
+            test_preferred_of_lane_isolation
+        ; Alcotest.test_case "ttl expiry hides entry" `Quick
+            test_preferred_of_lane_expires
         ] )
     ]

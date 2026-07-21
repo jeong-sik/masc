@@ -30,6 +30,20 @@ val select_pairs_within_byte_budget
     together with the number dropped. Length arithmetic only: no importance
     score and no inspection of line content. *)
 
+val render_gauge_line
+  :  facts_injected:int
+  -> facts_stored:int
+  -> episodes_injected:int
+  -> episodes_stored:int
+  -> rendered_bytes:int
+  -> byte_budget:int
+  -> string
+(** Render the store gauge the recall block carries (RFC-0351 L1): what reached
+    the model this turn against what is stored, plus the byte budget. Counts and
+    totals only — the surrounding wording lives in
+    [config/prompts/keeper.memory_os_recall.context.md]. A [byte_budget] of 0
+    renders as unbounded rather than as a literal zero. *)
+
 val render_context
   :  keeper_id:string
   -> now:float

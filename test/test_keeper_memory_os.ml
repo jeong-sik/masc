@@ -4070,6 +4070,33 @@ let test_byte_budget_keeps_newest_in_original_order () =
   Alcotest.(check int) "within budget nothing is dropped" 0 none_dropped
 ;;
 
+(* RFC-0351 L1: the gauge is what lets the model see its own store instead of
+   guessing at it. One keeper reported "Memory OS dumps 1500+ episodes per turn"
+   against a store of 268-500 and then persisted that misdiagnosis as a fact.
+   This pins the rendered shape because it goes into the prompt. *)
+let test_gauge_reports_injected_against_stored () =
+  Alcotest.(check string)
+    "gauge reports injected against stored plus the byte budget"
+    "facts 62/62 injected, episodes 130/432 injected, 64512B/65536B rendered"
+    (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~facts_injected:62
+       ~facts_stored:62
+       ~episodes_injected:130
+       ~episodes_stored:432
+       ~rendered_bytes:64512
+       ~byte_budget:65536);
+  Alcotest.(check string)
+    "a disabled budget reads as unbounded rather than as a literal zero"
+    "facts 1/1 injected, episodes 2/2 injected, 40B rendered (no byte budget)"
+    (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~facts_injected:1
+       ~facts_stored:1
+       ~episodes_injected:2
+       ~episodes_stored:2
+       ~rendered_bytes:40
+       ~byte_budget:0)
+;;
+
 (* RFC-0259 §3.7 (P6 regression): a durable claim still advances its
    [last_verified_at] on re-observe, and exact-text upsert behavior is unchanged:
    identical claims merge to one row, distinct claims stay two. *)
@@ -5205,6 +5232,10 @@ let () =
             "recall byte budget drops oldest episodes and keeps original order"
             `Quick
             test_byte_budget_keeps_newest_in_original_order
+        ; Alcotest.test_case
+            "recall gauge reports injected against stored"
+            `Quick
+            test_gauge_reports_injected_against_stored
         ] )
     ]
 ;;

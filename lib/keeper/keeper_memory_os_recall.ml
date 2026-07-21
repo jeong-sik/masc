@@ -77,7 +77,36 @@ let render_nonempty_section key variable lines =
   | _ -> render_prompt_template key [ variable, String.concat "\n" lines ]
 ;;
 
-let render_recall_context ~fact_lines ~episode_lines =
+(* RFC-0351 L1: the model cannot manage a store it cannot see. One keeper
+   diagnosed "Memory OS dumps 1500+ episodes per turn" when the store held
+   268-500, stored that misdiagnosis as a fact, and had it re-injected every
+   turn afterwards. The gauge reports what actually reached the model this turn
+   against what is stored; the surrounding wording lives in
+   config/prompts/keeper.memory_os_recall.context.md. Counts and byte totals
+   only — no advice, no threshold, no verdict. *)
+let render_gauge_line
+      ~facts_injected
+      ~facts_stored
+      ~episodes_injected
+      ~episodes_stored
+      ~rendered_bytes
+      ~byte_budget
+  =
+  let budget_part =
+    if byte_budget <= 0
+    then Printf.sprintf "%dB rendered (no byte budget)" rendered_bytes
+    else Printf.sprintf "%dB/%dB rendered" rendered_bytes byte_budget
+  in
+  Printf.sprintf
+    "facts %d/%d injected, episodes %d/%d injected, %s"
+    facts_injected
+    facts_stored
+    episodes_injected
+    episodes_stored
+    budget_part
+;;
+
+let render_recall_context ~gauge_line ~fact_lines ~episode_lines =
   match
     render_nonempty_section
       Keeper_prompt_names.memory_os_recall_facts_section
@@ -96,7 +125,10 @@ let render_recall_context ~fact_lines ~episode_lines =
      | Ok episodes_section ->
        render_prompt_template
          Keeper_prompt_names.memory_os_recall_context
-         [ "facts_section", facts_section; "episodes_section", episodes_section ])
+         [ "gauge_line", gauge_line
+         ; "facts_section", facts_section
+         ; "episodes_section", episodes_section
+         ])
 ;;
 
 (* RFC-0264 P2: render_context_exn returns the rendered block alongside the
@@ -265,11 +297,29 @@ let render_context_exn ~keeper_id ~now () =
       ~budget:max_bytes);
   let injected_fact_keys = List.map (fun f -> claim_identity f) facts in
   let injected_episode_keys = List.map episode_key episodes in
+  (* Content bytes, not final block size: the gauge is an input to the render,
+     so the wrapper's own fixed text is not counted. It is what the budget
+     above actually meters. *)
+  let episode_bytes =
+    List.fold_left
+      (fun acc (_, line) -> acc + String.length line + 1)
+      0
+      episode_pairs
+  in
+  let gauge_line =
+    render_gauge_line
+      ~facts_injected:(List.length facts)
+      ~facts_stored:n_facts_in_store
+      ~episodes_injected:(List.length episodes)
+      ~episodes_stored:(List.length all_episodes)
+      ~rendered_bytes:(fact_bytes + episode_bytes)
+      ~byte_budget:max_bytes
+  in
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
     match facts, episodes with
     | [], [] -> "", [], [], None
     | _ ->
-      (match render_recall_context ~fact_lines ~episode_lines with
+      (match render_recall_context ~gauge_line ~fact_lines ~episode_lines with
        | Ok context -> context, injected_fact_keys, injected_episode_keys, None
        | Error msg ->
          Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;

@@ -195,9 +195,14 @@ let test_round_trip_through_oas () =
   | Ok { content; _ } ->
       let decoded = O.decode_from_oas content in
       (match decoded with
-       | O.Inline s -> Alcotest.(check string) "inline preserved" payload s
-       | O.Stored _ ->
-           Alcotest.fail "did not expect Stored when externalize=0")
+       | O.Not_marker ->
+           (* Not a marker: the raw content is the payload itself. *)
+           Alcotest.(check string) "inline preserved" payload content
+       | O.Decoded _ ->
+           Alcotest.fail "did not expect Decoded when externalize=0"
+       | O.Invalid_marker { detail } ->
+           Alcotest.failf
+             "did not expect Invalid_marker when externalize=0: %s" detail)
   | Error _ -> Alcotest.fail "expected Ok"
 
 let test_execution_env_preserves_exact_invocation () =
@@ -248,10 +253,14 @@ let test_externalize_with_temp_base_path () =
       let result = B.maybe_externalize payload in
       Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
       match O.decode_from_oas result with
-      | O.Stored { sha256; bytes; _ } ->
+      | O.Decoded { sha256; bytes; _ } ->
         Alcotest.(check int) "byte count" (String.length payload) bytes;
         Alcotest.(check int) "sha length" 64 (String.length sha256)
-      | O.Inline _ -> Alcotest.fail "expected Stored after externalize")
+      | O.Not_marker -> Alcotest.fail "expected Decoded after externalize"
+      | O.Invalid_marker { detail } ->
+          Alcotest.failf
+            "expected Decoded after externalize, got Invalid_marker: %s"
+            detail)
 
 let test_blob_store_failure_preserves_original_bytes () =
   let path = Filename.temp_file "masc_bridge_not_a_directory" "" in

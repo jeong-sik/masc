@@ -13,6 +13,11 @@ module B = Tool_blob_store
 module O = Tool_output
 module T = Agent_sdk.Types
 
+let ref_exn ~sha256 ~bytes ~preview ~mime =
+  match O.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (O.make_error_to_string e)
+
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_hydrator_test" "" in
   Sys.remove dir;
@@ -34,12 +39,9 @@ let with_temp_dir f =
 
 let store_a_blob store payload =
   match B.put store ~bytes:payload ~mime:"text/plain" with
-  | O.Stored { sha256; bytes; preview; mime } ->
-      let marker =
-        O.encode_for_oas
-          (O.Stored { sha256; bytes; preview; mime })
-      in
-      (sha256, marker)
+  | O.Stored artifact_ref ->
+      let marker = O.encode_for_oas (O.Stored artifact_ref) in
+      (artifact_ref.sha256, marker)
   | O.Inline _ -> failwith "expected Stored"
 
 let tool_result_block ~tool_use_id ~content : T.content_block =
@@ -205,12 +207,11 @@ let test_hydration_miss_keeps_marker () =
       let phantom =
         O.encode_for_oas
           (O.Stored
-             {
-               sha256 = String.make 64 'a';
-               bytes = 9999;
-               preview = "missing";
-               mime = "text/plain";
-             })
+             (ref_exn
+                ~sha256:(String.make 64 'a')
+                ~bytes:9999
+                ~preview:"missing"
+                ~mime:"text/plain"))
       in
       let msg = make_tool_message ~tool_use_id:"t1" ~content:phantom in
       let r = H.hydrate_recent ~store ~keep_recent:3 in

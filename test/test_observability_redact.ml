@@ -2,6 +2,11 @@
 
 open Masc
 
+let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
+  match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+
 let test_api_key_redacted () =
   let input = {|{"api_key": "sk-proj-abc123xyz456def789ghi012jkl345"}|} in
   let preview = Observability_redact.redact_preview input in
@@ -110,16 +115,19 @@ let test_blob_marker_preserves_structure () =
   let marker =
     Tool_output.encode_for_oas
       (Tool_output.Stored
-         { sha256 = sha; bytes = 10523; preview = "hello"; mime = "text/plain" })
+         (artifact_ref_exn ~sha256:sha ~bytes:10523 ~preview:"hello"
+            ~mime:"text/plain"))
   in
   let redacted = Observability_redact.redact_preview marker in
   match Tool_output.decode_from_oas redacted with
-  | Tool_output.Stored { sha256; bytes; mime; _ } ->
+  | Tool_output.Decoded { sha256; bytes; mime; _ } ->
       Alcotest.(check string) "sha256 preserved" sha sha256;
       Alcotest.(check int) "bytes preserved" 10523 bytes;
       Alcotest.(check string) "mime preserved" "text/plain" mime
-  | Tool_output.Inline _ ->
+  | Tool_output.Not_marker ->
       Alcotest.fail "marker structure destroyed by redaction"
+  | Tool_output.Invalid_marker { detail } ->
+      Alcotest.failf "marker structure destroyed by redaction: %s" detail
 
 let test_blob_marker_redacts_preview_body () =
   let sha = String.make 64 'b' in
@@ -127,7 +135,8 @@ let test_blob_marker_redacts_preview_body () =
   let marker =
     Tool_output.encode_for_oas
       (Tool_output.Stored
-         { sha256 = sha; bytes = 999; preview; mime = "application/json" })
+         (artifact_ref_exn ~sha256:sha ~bytes:999 ~preview
+            ~mime:"application/json"))
   in
   let redacted = Observability_redact.redact_preview marker in
   Alcotest.(check bool) "raw key scrubbed from preview" true
@@ -146,7 +155,8 @@ let test_preview_json_strings_preserves_embedded_marker () =
   let marker =
     Tool_output.encode_for_oas
       (Tool_output.Stored
-         { sha256 = sha; bytes = 500; preview = "hi"; mime = "text/plain" })
+         (artifact_ref_exn ~sha256:sha ~bytes:500 ~preview:"hi"
+            ~mime:"text/plain"))
   in
   let json = `Assoc [("content", `String marker); ("meta", `Int 1)] in
   let out = Observability_redact.preview_json_strings json in
@@ -155,12 +165,14 @@ let test_preview_json_strings_preserves_embedded_marker () =
       (match List.assoc_opt "content" fields with
        | Some (`String s) ->
            (match Tool_output.decode_from_oas s with
-            | Tool_output.Stored { sha256; bytes; mime; _ } ->
+            | Tool_output.Decoded { sha256; bytes; mime; _ } ->
                 Alcotest.(check string) "sha256 preserved in leaf" sha sha256;
                 Alcotest.(check int) "bytes preserved in leaf" 500 bytes;
                 Alcotest.(check string) "mime preserved in leaf" "text/plain" mime
-            | Tool_output.Inline _ ->
-                Alcotest.fail "marker in JSON leaf was corrupted")
+            | Tool_output.Not_marker ->
+                Alcotest.fail "marker in JSON leaf was corrupted"
+            | Tool_output.Invalid_marker { detail } ->
+                Alcotest.failf "marker in JSON leaf was corrupted: %s" detail)
        | _ -> Alcotest.fail "content field missing or not a string")
   | _ -> Alcotest.fail "expected Assoc root"
 

@@ -14,6 +14,11 @@ type requeue_reason =
   | Context_compaction_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
+    (* The two approval arms are no longer produced: the approval-wake
+       settlement follows the completed turn since the 2026-07-21
+       delivery-not-consumption amendment (#25539, RFC
+       keeper-conversation-hitl-flow). Kept for decoding persisted
+       receipts/WAL rows written before the amendment. *)
 
 type escalation_reason =
   | Failure_judgment_requested

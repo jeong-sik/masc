@@ -1458,6 +1458,126 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
 ;;
 
+(* RFC-0351 S0 / #25539: the approval wake's job is delivery, not
+   consumption. A completed turn settles as Ack even while the grant is
+   durably unconsumed (8,349 requeue receipts measured across 8 keepers;
+   one idealist grant spun 657 times) — and the grant-store-unavailable
+   path, the second unbounded loop, also follows the completed turn. A
+   turn that did not complete keeps its ordinary typed settlement, so
+   delivery is still retried. *)
+let test_approved_wake_settles_on_delivery_not_consumption () =
+  with_temp_dir "approval-delivery-ack" @@ fun base_path ->
+  ignore (Masc.Keeper_approval_queue.install_persistence ~base_path);
+  let approval_id =
+    match
+      Masc.Keeper_approval_queue.submit_pending
+        ~keeper_name:"queue-outcome"
+        ~tool_name:"external-effect"
+        ~input:(`Assoc [ "op", `String "delivery-ack-test" ])
+        ~base_path
+        ()
+    with
+    | Ok id -> id
+    | Error error ->
+      Alcotest.failf
+        "approval fixture submit: %s"
+        (Masc.Keeper_approval_queue.storage_error_to_string error)
+  in
+  (match
+     Masc.Keeper_approval_queue.resolve
+       ~base_path
+       ~id:approval_id
+       ~decision:Masc.Keeper_approval_queue.Decision.Approve
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.failf
+       "approval fixture resolve: %s"
+       (Masc.Keeper_approval_queue.resolve_error_to_string error));
+  (match
+     Masc.Keeper_approval_queue.approved_resolution_state
+       ~base_path
+       ~id:approval_id
+   with
+   | Ok Masc.Keeper_approval_queue.Resolution_unconsumed -> ()
+   | Ok Masc.Keeper_approval_queue.Resolution_consumed ->
+     Alcotest.fail "fixture grant is unexpectedly consumed"
+   | Error error ->
+     Alcotest.failf
+       "fixture grant state: %s"
+       (Masc.Keeper_approval_queue.grant_error_to_string error));
+  let resolution : Queue.hitl_resolution =
+    { approval_id
+    ; decision = Queue.Hitl_approved
+    ; channel = Keeper_continuation_channel.unrouted "delivery ack test"
+    }
+  in
+  let lease =
+    lease_for
+      (stimulus
+         ~payload:(Queue.Hitl_resolved resolution)
+         (Queue.hitl_resolution_post_id resolution)
+         1.0)
+  in
+  let settlement ~base_path outcome =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path
+      ~settled_at:4.0
+      ~stop_requested:false
+      ~compaction_consecutive_failures:0
+      ~lease
+      outcome
+  in
+  let meta = cycle_meta () in
+  (match
+     settlement ~base_path (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta))
+   with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ ->
+     Alcotest.fail
+       "completed turn with an unconsumed grant did not settle as Ack");
+  (* Grant survives the Ack: the operator's authorization is not consumed
+     by settlement and remains durably spendable. *)
+  (match
+     Masc.Keeper_approval_queue.approved_resolution_state
+       ~base_path
+       ~id:approval_id
+   with
+   | Ok Masc.Keeper_approval_queue.Resolution_unconsumed -> ()
+   | Ok Masc.Keeper_approval_queue.Resolution_consumed ->
+     Alcotest.fail "settlement consumed the grant"
+   | Error error ->
+     Alcotest.failf
+       "grant state after ack: %s"
+       (Masc.Keeper_approval_queue.grant_error_to_string error));
+  (* The second unbounded loop: a completed turn whose grant store cannot
+     be read must also follow the completed turn instead of requeuing. *)
+  (match
+     settlement
+       ~base_path:(Filename.concat base_path "missing-grant-store")
+       (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta))
+   with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ ->
+     Alcotest.fail
+       "grant-store-unavailable completed turn did not settle as Ack");
+  (* An undelivered wake keeps re-entering: a busy cycle still requeues. *)
+  match
+    settlement
+      ~base_path
+      (Some
+         (Masc.Keeper_heartbeat_loop_cycle.Busy
+            { meta
+            ; block = Masc.Keeper_turn_admission.Turn_busy None
+            }))
+  with
+  | Masc.Keeper_registry_event_queue.Requeue
+      Masc.Keeper_registry_event_queue.Cycle_busy ->
+    ()
+  | _ -> Alcotest.fail "busy cycle released the undelivered approval wake"
+;;
+
+
 let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
 ;;
@@ -2259,6 +2379,10 @@ let () =
             "compaction outcome mapping covers in-lane dispositions"
             `Quick
             test_compaction_outcome_mapping_covers_in_lane_dispositions
+        ; Alcotest.test_case
+            "approved wake settles on delivery not consumption"
+            `Quick
+            test_approved_wake_settles_on_delivery_not_consumption
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick

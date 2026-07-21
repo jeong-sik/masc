@@ -145,12 +145,17 @@ val settlement_of_failure :
 
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
-  [ `Committed | `Failed ] option
+  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
 (** Pure mapping from a settled cycle outcome to the compaction-streak stamp
     ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
     applied/failed outcomes and in-lane provider-overflow dispositions join
-    the same per-keeper streak; outcomes with no compaction involvement return
-    [None] and leave the streak untouched. *)
+    the same per-keeper streak. The streak counts consecutive
+    provider-overflow episodes (#25538): an in-lane commit maps to
+    [`Overflow_episode_committed] (advances the streak — committed savings
+    under an incompressible floor must still reach the ceiling), a completed
+    overflow-free turn maps to [`Recovered] (resets it), and only the
+    operator's manual commit maps to [`Committed] (count + reset).
+    Outcomes with no compaction involvement return [None]. *)
 
 val settlement_of_cycle_outcome :
   base_path:string ->

@@ -29,6 +29,10 @@ type escalation_reason = State.escalation_reason =
       { attempts : int
       ; detail : string
       }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
 
 type no_compaction_reason = State.no_compaction_reason =
   | No_eligible_history

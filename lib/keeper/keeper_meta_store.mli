@@ -254,10 +254,17 @@ val persist_compaction_decision :
 val persist_compaction_outcome :
   Workspace.config ->
   keeper_name:string ->
-  outcome:[ `Committed | `Failed ] ->
+  outcome:
+    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] ->
   ([ `Persisted | `No_durable_meta ], string) result
 (** Advance the compaction outcome counters on [compaction_rt] using the same
     read/stamp/merge shape as {!persist_compaction_decision}.
+
+    [`Overflow_episode_committed] (an in-lane reactive commit) increments
+    [count] AND the streak — committed savings under an incompressible floor
+    must still count toward the ceiling (#25538). [`Recovered] (a turn
+    completed without provider overflow) resets the streak; callers skip the
+    write when the streak is already 0.
 
     [`Committed] increments [count] and resets [consecutive_failures] to 0;
     [`Failed] increments [consecutive_failures]. The streak is what

@@ -61,9 +61,13 @@ type read_line_window =
   ; max_lines : int option (* cap on returned lines; None = to EOF *)
   }
 
-let read_window_is_whole_prefix = function
-  | { start_line = 1; max_lines = None } -> true
-  | _ -> false
+(* A window that starts at line 1 can only ever return bytes from the first
+   [max_bytes] of the file (the response is byte-budgeted), so its fetch stays
+   at [max_bytes]; only a window that starts deeper needs to scan further to
+   locate its lines. *)
+let read_window_fetch_bytes ~max_bytes = function
+  | { start_line = 1; max_lines = _ } -> max_bytes
+  | _ -> read_file_max_max_bytes
 ;;
 
 (* Range violations are rejected loudly instead of being defaulted: a model
@@ -324,15 +328,7 @@ let handle_read_file_with_outcome
            let timeout_sec =
              Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
            in
-           (* A line window that starts past line 1 (or caps lines) needs
-              bytes beyond the response budget to locate its lines, so the
-              fetch runs to the scan ceiling; the response stays bounded by
-              [max_bytes] either way. *)
-           let fetch_bytes =
-             if read_window_is_whole_prefix window
-             then max_bytes
-             else read_file_max_max_bytes
-           in
+           let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
            let+ body =
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory

@@ -30,7 +30,11 @@ endpoint="repos/${repo}/branches/${branch}/protection"
 is_integration_forbidden() {
   local output="$1"
   [[ "$output" == *'"message":"Resource not accessible by integration"'* ]] ||
-    [[ "$output" == *"gh: Resource not accessible by integration (HTTP 403)"* ]]
+    [[ "$output" == *"gh: Resource not accessible by integration (HTTP 403)"* ]] ||
+    [[ "$output" == *'{"status": "401"}'* ]] ||
+    [[ "$output" == *"Requires authentication"* ]] ||
+    [[ "$output" == *"Bad credentials"* ]] ||
+    [[ "$output" == *"HTTP 401"* ]]
 }
 
 escape_workflow_command_data() {

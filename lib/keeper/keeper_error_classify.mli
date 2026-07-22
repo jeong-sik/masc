@@ -46,6 +46,7 @@ val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     failure counting, even if same-turn retry is still disabled. Typed OAS
     turn-limit and execution-time observations are included defensively so a
     boundary regression cannot promote them into Keeper lifecycle authority. *)
+val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for accept-rejected responses tagged by the built-in keeper

@@ -657,6 +657,11 @@ let degraded_rotation_after_recoverable_error
          None)
 
 (** [true] when a structured error indicates context overflow. *)
+let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest _) -> true
+  | _ -> false
+
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
@@ -710,6 +715,7 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
+  || is_invalid_request_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err

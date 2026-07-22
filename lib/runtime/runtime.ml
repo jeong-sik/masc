@@ -1752,7 +1752,7 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1770,7 +1770,7 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1795,7 +1795,7 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* () = validate_runtime_config_text ~config_path:path next in
+      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
       let* () = Fs_compat.save_file_atomic path next in
       let* () = init_default ~config_path:path in
       Ok ()
@@ -1818,7 +1818,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ())

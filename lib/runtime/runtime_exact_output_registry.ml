@@ -161,7 +161,6 @@ let replace_transactionally ~lanes ~commit =
              Atomic.set published (Some registry);
              Ok registry)))
 ;;
-
 let generation registry = registry.generation
 
 let lane_slots registry ~lane_id =

@@ -16,7 +16,13 @@ val publish
 (** Validate and atomically publish one complete resolver-and-lane registry.
     Each successful publication advances the MASC-local generation
     monotonically. Invalid declarations are rejected before the Atomic is
-    changed. *)
+    changed.
+
+    Credential presence is deliberately excluded from publication admission.
+    {!resolve_slots} performs target resolution against the same frozen resolver
+    snapshot when execution selects slots. Config-level errors — blank or
+    duplicate ids, malformed or unknown target refs — remain fatal at
+    publish. *)
 
 val replace_transactionally
   :  lanes:Runtime_schema.exact_output_lane_decl list

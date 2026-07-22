@@ -506,8 +506,9 @@ let terminal_reason_of_rejection = function
   | Invalid_compaction_plan -> Some Domain_invalid_output
   | Exact_execution_failed_after_dispatch ->
     Some Execution_may_have_dispatched
+  | Exact_lane_unconfigured ->
+    Some Keeper_event_queue_state.Exact_lane_unconfigured
   | Invalid_structural_evidence _
-  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable

@@ -29,6 +29,11 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_exact_lane_unconfigured of
+      { source : Keeper_checkpoint_ref.t
+      }
+      (** The exact-output compaction lane is absent. The durable checkpoint
+          source is retained and the event escalates without a retry successor. *)
   | Compaction_execution_may_have_dispatched
       (** Exact-output dispatch may have crossed the external-effect boundary.
           The source is escalated immediately without any retry successor. *)
@@ -61,6 +66,10 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Exact_lane_unconfigured
+      (** The configured runtime has no exact-output lane for compaction. This
+          is an operator-actionable precondition failure tied to the durable
+          checkpoint source, not a stochastic provider failure. *)
   | Execution_may_have_dispatched
       (** Exact-output execution crossed the safe pre-dispatch boundary. The
           provider may already have received the request, so automatic retry

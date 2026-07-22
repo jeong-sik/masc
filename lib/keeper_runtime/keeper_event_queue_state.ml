@@ -27,6 +27,7 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_execution_may_have_dispatched
   | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
@@ -57,6 +58,7 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Exact_lane_unconfigured
   | Execution_may_have_dispatched
   | Domain_invalid_output
 
@@ -99,6 +101,7 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
+  | Compaction_exact_lane_unconfigured _
   | Compaction_execution_may_have_dispatched
   | Compaction_domain_invalid_output
   | Compaction_retry_exhausted _
@@ -401,11 +404,22 @@ let requeue_reason_of_label = function
 
 let ( let* ) = Result.bind
 
+let checkpoint_source_reason_detail_to_yojson (source : Keeper_checkpoint_ref.t) =
+  `Assoc
+    [ "trace_id", `String (Keeper_id.Trace_id.to_string source.trace_id)
+    ; "generation", `Int source.generation
+    ; "turn_count", `Int source.turn_count
+    ; "sha256", `String source.sha256
+    ]
+;;
+
 let escalation_reason_label = function
   | Failure_judgment_requested -> "failure_judgment_requested"
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
+  | Compaction_exact_lane_unconfigured _ ->
+    "compaction_exact_lane_unconfigured"
   | Compaction_execution_may_have_dispatched ->
     "compaction_execution_may_have_dispatched"
   | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
@@ -422,6 +436,8 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
+  | Compaction_exact_lane_unconfigured { source } ->
+    checkpoint_source_reason_detail_to_yojson source
   | Compaction_execution_may_have_dispatched
   | Compaction_domain_invalid_output -> `Null
   | Compaction_retry_exhausted { attempts; detail } ->
@@ -455,6 +471,38 @@ let exact_reason_fields ~context expected fields =
          (String.concat "," actual))
 ;;
 
+let required_reason_int ~context name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
+  | None -> Error (Printf.sprintf "%s.%s is required" context name)
+;;
+
+let checkpoint_source_of_reason_fields ~context fields =
+  let* () =
+    exact_reason_fields
+      ~context
+      [ "trace_id"; "generation"; "turn_count"; "sha256" ]
+      fields
+  in
+  let* trace_id_value = required_nonempty_reason_string ~context "trace_id" fields in
+  let* trace_id =
+    Keeper_id.Trace_id.of_string trace_id_value
+    |> Result.map_error (fun detail -> Printf.sprintf "%s.trace_id: %s" context detail)
+  in
+  let* generation = required_reason_int ~context "generation" fields in
+  let* turn_count = required_reason_int ~context "turn_count" fields in
+  let* sha256 = required_nonempty_reason_string ~context "sha256" fields in
+  Keeper_checkpoint_ref.of_persisted ~trace_id ~generation ~turn_count ~sha256
+  |> Result.map_error (function
+    | Keeper_checkpoint_ref.Negative_generation value ->
+      Printf.sprintf "%s.generation must not be negative: %d" context value
+    | Negative_turn_count value ->
+      Printf.sprintf "%s.turn_count must not be negative: %d" context value
+    | Invalid_sha256 value ->
+      Printf.sprintf "%s.sha256 is invalid: %s" context value)
+;;
+
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
   | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
@@ -462,6 +510,13 @@ let escalation_reason_of_wire ~label ~detail_json =
     Ok Compaction_execution_may_have_dispatched
   | "compaction_domain_invalid_output", `Null ->
     Ok Compaction_domain_invalid_output
+  | "compaction_exact_lane_unconfigured", `Assoc fields ->
+    let* source =
+      checkpoint_source_of_reason_fields
+        ~context:"compaction_exact_lane_unconfigured"
+        fields
+    in
+    Ok (Compaction_exact_lane_unconfigured { source })
   | "failure_judgment_boundary_failed", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -546,7 +601,8 @@ let escalation_reason_of_wire ~label ~detail_json =
     | "compaction_domain_invalid_output" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
   | ( "failure_judgment_boundary_failed"
-    | "failure_judgment_external_input_requested" ), _ ->
+    | "failure_judgment_external_input_requested"
+    | "compaction_exact_lane_unconfigured" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be an object" label)
   | unknown, _ ->
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
@@ -735,14 +791,16 @@ let validate_settlement = function
     Error "compaction floor exhaustion must not enqueue a successor"
   | Escalate
       { reason =
-          ( Compaction_execution_may_have_dispatched
+          ( Compaction_exact_lane_unconfigured _
+          | Compaction_execution_may_have_dispatched
           | Compaction_domain_invalid_output )
       ; successor = None
       } ->
     Ok ()
   | Escalate
       { reason =
-          ( Compaction_execution_may_have_dispatched
+          ( Compaction_exact_lane_unconfigured _
+          | Compaction_execution_may_have_dispatched
           | Compaction_domain_invalid_output )
       ; successor = Some _
       } ->
@@ -1575,6 +1633,7 @@ let no_compaction_reason_label = function
   | Invalid_structural_source -> "invalid_structural_source"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Exact_lane_unconfigured -> "exact_lane_unconfigured"
   | Execution_may_have_dispatched -> "execution_may_have_dispatched"
   | Domain_invalid_output -> "domain_invalid_output"
 ;;
@@ -1584,6 +1643,7 @@ let no_compaction_reason_of_label = function
   | "invalid_structural_source" -> Ok Invalid_structural_source
   | "structurally_unchanged" -> Ok Structurally_unchanged
   | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
+  | "exact_lane_unconfigured" -> Ok Exact_lane_unconfigured
   | "execution_may_have_dispatched" -> Ok Execution_may_have_dispatched
   | "domain_invalid_output" -> Ok Domain_invalid_output
   | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)

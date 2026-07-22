@@ -24,6 +24,7 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
 
 type exact_output_terminal_reason =
+  | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Execution_may_have_dispatched
   | Domain_invalid_output
 
@@ -35,7 +36,12 @@ type source_lease_disposition =
   | Requeue_after_context_compaction of in_lane_compaction
   | Acknowledge_after_in_turn_handling
 
-let source_lease_disposition_after_no_compaction = function
+let source_lease_disposition_after_no_compaction
+      ({ source; reason } : Keeper_event_queue_state.no_compaction)
+  =
+  match reason with
+  | Keeper_event_queue_state.Exact_lane_unconfigured ->
+    Escalate_after_exact_output_terminal (Exact_lane_unconfigured { source })
   | Keeper_event_queue_state.Execution_may_have_dispatched ->
     Escalate_after_exact_output_terminal Execution_may_have_dispatched
   | Keeper_event_queue_state.Domain_invalid_output ->
@@ -346,7 +352,7 @@ let append_provider_overflow_manifest
        failure route. Effect-boundary and domain-invalid reasons instead become
        an immediate typed escalation: replaying the source could issue a second
        exact-output request after dispatch. *)
-    source_lease_disposition_after_no_compaction no_compaction.reason,
+    source_lease_disposition_after_no_compaction no_compaction,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =

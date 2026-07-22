@@ -28,6 +28,7 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
   | Compaction_execution_may_have_dispatched
   | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
@@ -44,6 +45,7 @@ type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason 
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Exact_lane_unconfigured
   | Execution_may_have_dispatched
   | Domain_invalid_output
 

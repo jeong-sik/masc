@@ -304,6 +304,12 @@ let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
   | Keeper_unified_turn.Escalate_after_exact_output_terminal
+      (Keeper_unified_turn.Exact_lane_unconfigured { source }) ->
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_exact_lane_unconfigured { source }
+      ; successor = None
+      }
+  | Keeper_unified_turn.Escalate_after_exact_output_terminal
       Keeper_unified_turn.Execution_may_have_dispatched ->
     Keeper_registry_event_queue.Escalate
       { reason = Keeper_registry_event_queue.Compaction_execution_may_have_dispatched

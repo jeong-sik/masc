@@ -90,7 +90,8 @@ let test_exact_output_terminal_reasons_round_trip () =
          "terminal settlement survives public receipt codec"
          true
          (State.transition_receipt_equal receipt restored))
-    [ State.Execution_may_have_dispatched, "execution_may_have_dispatched"
+    [ State.Exact_lane_unconfigured, "exact_lane_unconfigured"
+    ; State.Execution_may_have_dispatched, "execution_may_have_dispatched"
     ; State.Domain_invalid_output, "domain_invalid_output"
     ];
   (* Malformed structural evidence and planner invariant violations remain
@@ -1269,7 +1270,7 @@ let test_in_lane_compaction_streak_bounds_retries () =
   in
   let terminal_no_compaction =
     Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-      State.Checkpoint_not_reduced
+      (no_compaction ~turn_count:13 State.Checkpoint_not_reduced)
   in
   let expect_compaction_requeue label = function
     | Masc.Keeper_registry_event_queue.Requeue
@@ -1337,14 +1338,14 @@ let test_in_lane_compaction_streak_bounds_retries () =
     "terminal no-compaction at the ceiling followed the route instead of \
      escalating"
     (settlement ~streak:2 terminal_no_compaction);
-  let terminal_settlement route reason =
+  let terminal_settlement route no_compaction =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:5.0
       ~compaction_consecutive_failures:0
       { (turn_failure route) with
         source_lease_disposition =
           Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-            reason
+            no_compaction
       }
   in
   let dispatch_terminal =
@@ -1353,7 +1354,7 @@ let test_in_lane_compaction_streak_bounds_retries () =
          { retry_class = Keeper_runtime_failure_route.Rate_limited
          ; retry_after = None
          })
-      State.Execution_may_have_dispatched
+      (no_compaction ~turn_count:14 State.Execution_may_have_dispatched)
   in
   (match dispatch_terminal with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -1369,7 +1370,7 @@ let test_in_lane_compaction_streak_bounds_retries () =
     terminal_settlement
       (Keeper_runtime_failure_route.Rotate_now
          { rotate = Keeper_runtime_failure_route.Auth_failed })
-      State.Domain_invalid_output
+      (no_compaction ~turn_count:15 State.Domain_invalid_output)
   in
   (match domain_terminal with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -1380,6 +1381,29 @@ let test_in_lane_compaction_streak_bounds_retries () =
    | _ ->
      Alcotest.fail
        "domain-invalid compaction terminal entered the ordinary rotation route");
+  let exact_lane_source = checkpoint_source ~turn_count:16 in
+  let exact_lane_terminal =
+    terminal_settlement
+      (Keeper_runtime_failure_route.Retry_after_observed
+         { retry_class = Keeper_runtime_failure_route.Rate_limited
+         ; retry_after = None
+         })
+      { State.source = exact_lane_source; reason = State.Exact_lane_unconfigured }
+  in
+  (match exact_lane_terminal with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason =
+           Masc.Keeper_registry_event_queue.Compaction_exact_lane_unconfigured
+             { source }
+       ; successor = None
+       } ->
+     Alcotest.(check bool)
+       "missing-lane terminal retains the full checkpoint source"
+       true
+       (source = exact_lane_source)
+   | Masc.Keeper_registry_event_queue.Requeue _ ->
+     Alcotest.fail "missing exact lane entered a retry route"
+   | _ -> Alcotest.fail "missing exact lane lost its typed terminal escalation");
   let check_durable_terminal label expected_reason settlement =
     let state = State.with_pending (queue [ stimulus label 6.0 ]) State.empty in
     let state, lease = claim_head state in
@@ -1389,7 +1413,9 @@ let test_in_lane_compaction_streak_bounds_retries () =
       |> require_ok (label ^ " settlement")
     in
     let json = State.to_yojson state in
-    ignore (State.of_yojson json |> require_ok (label ^ " codec round-trip") : State.t);
+    let restored =
+      State.of_yojson json |> require_ok (label ^ " codec round-trip")
+    in
     let open Yojson.Safe.Util in
     let reason =
       json
@@ -1401,16 +1427,46 @@ let test_in_lane_compaction_streak_bounds_retries () =
       |> member "reason"
       |> to_string
     in
-    Alcotest.(check string) (label ^ " durable reason") expected_reason reason
+    Alcotest.(check string) (label ^ " durable reason") expected_reason reason;
+    restored
   in
-  check_durable_terminal
-    "post-dispatch-terminal"
-    "compaction_execution_may_have_dispatched"
-    dispatch_terminal;
-  check_durable_terminal
-    "domain-invalid-terminal"
-    "compaction_domain_invalid_output"
-    domain_terminal
+  ignore
+    (check_durable_terminal
+       "post-dispatch-terminal"
+       "compaction_execution_may_have_dispatched"
+       dispatch_terminal
+     : State.t);
+  ignore
+    (check_durable_terminal
+       "domain-invalid-terminal"
+       "compaction_domain_invalid_output"
+       domain_terminal
+     : State.t);
+  let exact_lane_restored =
+    check_durable_terminal
+      "exact-lane-unconfigured-terminal"
+      "compaction_exact_lane_unconfigured"
+      exact_lane_terminal
+  in
+  match State.transition_outbox exact_lane_restored with
+  | { State.receipt =
+        { State.settlement =
+            State.Escalate
+              { reason = State.Compaction_exact_lane_unconfigured { source }
+              ; successor = None
+              }
+        ; _
+        }
+    ; _
+    }
+    :: _ ->
+    Alcotest.(check bool)
+      "decoded missing-lane terminal retains the full checkpoint source"
+      true
+      (Keeper_checkpoint_ref.equal source exact_lane_source)
+  | _ ->
+    Alcotest.fail
+      "decoded missing-lane terminal lost its typed source-bound escalation"
 ;;
 
 (* RFC-0351 S0 / #25461: the settlement decides from the streak; this mapping
@@ -1470,19 +1526,19 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
     "failed"
     (failed
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          State.Checkpoint_not_reduced));
+          (no_compaction ~turn_count:17 State.Checkpoint_not_reduced)));
   check
     "post-dispatch terminal records failure without retry"
     "failed"
     (failed
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          State.Execution_may_have_dispatched));
+          (no_compaction ~turn_count:18 State.Execution_may_have_dispatched)));
   check
     "domain-invalid terminal records failure without retry"
     "failed"
     (failed
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          State.Domain_invalid_output));
+          (no_compaction ~turn_count:19 State.Domain_invalid_output)));
   check
     "a generic turn failure leaves the streak untouched"
     "none"

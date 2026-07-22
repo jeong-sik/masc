@@ -7,6 +7,7 @@
 open Masc
 module C = Keeper_compaction_llm_summarizer
 module EO = Agent_sdk.Exact_output
+module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
@@ -150,6 +151,47 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
   | Error C.Exact_lane_unconfigured -> ()
   | Error _ -> Alcotest.fail "missing compaction lane returned the wrong typed failure"
   | Ok _ -> Alcotest.fail "missing compaction lane must not be synthesized"
+;;
+
+let test_missing_credential_is_deferred_past_registry_admission () =
+  let slot_id = "credential-gated-slot" in
+  let snapshot =
+    F.resolver_snapshot
+      ~api_key_env:"MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
+      ~source:"masc credential-free admission"
+      [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  (match Registry.resolve_slots registry [ slot_id ] with
+   | [ Error _ ] -> ()
+   | [ Ok _ ] -> Alcotest.fail "missing credential must fail target selection"
+   | outcomes ->
+     Alcotest.failf "expected one credential-gated slot, got %d" (List.length outcomes));
+  match
+    C.prepare_lane
+      ~keeper_name:"keeper-missing-credential"
+      ~registry
+      ~lane_id:conformance_lane_id
+      ~units
+  with
+  | Error C.Exact_target_selection_failed -> ()
+  | Error _ -> Alcotest.fail "missing credential returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "missing credential must not produce a ready plan"
+;;
+
+let test_unknown_target_is_rejected_by_registry_publication () =
+  let unknown_target = "unknown-exact-target" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc unknown-target admission"
+      [ { id = "configured-target"; base_url = "http://127.0.0.1:9" } ]
+  in
+  let lanes : Runtime_schema.exact_output_lane_decl list =
+    [ { id = conformance_lane_id; slot_ids = [ unknown_target ] } ]
+  in
+  match Registry.publish ~lanes snapshot with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "unknown target must not publish in the MASC registry"
 ;;
 
 let check_failure label expected = function
@@ -518,6 +560,14 @@ let () =
             "published snapshot replacement cannot mix"
             `Quick
             test_published_snapshot_replacement_cannot_mix_prepared_lane
+        ; Alcotest.test_case
+            "missing credential is deferred past registry admission"
+            `Quick
+            test_missing_credential_is_deferred_past_registry_admission
+        ; Alcotest.test_case
+            "unknown target is rejected by registry publication"
+            `Quick
+            test_unknown_target_is_rejected_by_registry_publication
         ] )
     ; ( "effect boundary"
       , [ Alcotest.test_case

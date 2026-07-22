@@ -67,7 +67,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   }
 ;;
 
-let target_fixture_toml ?connect_timeout_s index fixture =
+let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout =
@@ -82,7 +82,7 @@ let target_fixture_toml ?connect_timeout_s index fixture =
      kind = \"openai_compat\"\n\
      base_url = %S\n\
      request_path = \"/v1/chat/completions\"\n\
-     api_key_env = \"\"\n\n\
+     api_key_env = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -97,6 +97,7 @@ let target_fixture_toml ?connect_timeout_s index fixture =
      %s"
     provider_id
     fixture.base_url
+    api_key_env
     model_id
     provider_id
     fixture.id
@@ -105,14 +106,18 @@ let target_fixture_toml ?connect_timeout_s index fixture =
     timeout
 ;;
 
-let resolver_snapshot ?(connect_timeouts = []) ~source fixtures =
+let resolver_snapshot ?(connect_timeouts = []) ?(api_key_env = "") ~source fixtures =
   let timeout_for id = List.assoc_opt id connect_timeouts in
   let overlay : EO.catalog_overlay =
     { source
     ; contents =
         fixtures
         |> List.mapi (fun index fixture ->
-          target_fixture_toml ?connect_timeout_s:(timeout_for fixture.id) index fixture)
+          target_fixture_toml
+            ?connect_timeout_s:(timeout_for fixture.id)
+            ~api_key_env
+            index
+            fixture)
         |> String.concat "\n"
     }
   in

@@ -77,6 +77,16 @@ let validate_lane_slots resolver_snapshot
           Error (Invalid_lane_slot { lane_id = lane.id; position; slot_id; cause })
         | Ok target_ref ->
           (match Exact_output.resolve_target resolver_snapshot target_ref with
+           | Error (Exact_output.Missing_target_credential _) ->
+             (* Credential admission is deliberately deferred to execution:
+                environment credentials are deployment state, not lane config.
+                A slot whose target credential is absent at publish time stays
+                published so optional lanes (e.g. the seed [compaction_exact]
+                lane on installs without DEEPSEEK_API_KEY) never abort server
+                startup; [resolve_slots] re-admits the credential per
+                execution and fails the slot there instead. Config-level
+                errors (unknown targets) remain fatal at publish. *)
+             loop (position + 1) (String_set.add slot_id seen) rest
            | Error cause ->
              Error
                (Unresolved_lane_slot
@@ -127,6 +137,12 @@ let current () =
   match Atomic.get published with
   | Some registry -> Ok registry
   | None -> Error Registry_not_published
+;;
+
+let republish ~lanes =
+  match Atomic.get published with
+  | None -> Error Registry_not_published
+  | Some registry -> publish ~lanes registry.resolver_snapshot
 ;;
 
 let generation registry = registry.generation

@@ -1692,13 +1692,38 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* _legacy_config = materialize_config ~config_path cfg in
-  Ok ()
+  let* _legacy_config, exact_output_lane_decls =
+    materialize_config ~config_path cfg
+  in
+  Ok exact_output_lane_decls
 ;;
 
 let save_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* () = validate_runtime_config_text ~config_path:path content in
+  let* exact_output_lane_decls = validate_runtime_config_text ~config_path:path content in
+  (* Raw config edits may rewrite [runtime.exact_output_lanes]. Validate the
+     new declarations against the live resolver snapshot and republish so the
+     active exact-output registry tracks the save instead of going stale
+     until the next restart. Republishing precedes the atomic write so an
+     invalid lane set is rejected before it reaches disk; if the write itself
+     fails, the registry still holds a valid lane set and the next successful
+     save or restart reconverges. Without a published registry (pre-bootstrap
+     or non-server contexts) there is no snapshot to validate against —
+     bootstrap publishes from the saved file. *)
+  let* () =
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> Ok ()
+    | Ok _registry ->
+      (match
+         Runtime_exact_output_registry.republish ~lanes:exact_output_lane_decls
+       with
+       | Ok _registry -> Ok ()
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "exact-output lane validation failed: %s"
+              (Runtime_exact_output_registry.error_to_string error)))
+  in
   let* () = Fs_compat.save_file_atomic path content in
   let* () = init_default ~config_path:path in
   Ok ()
@@ -1719,7 +1744,7 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1735,7 +1760,7 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1758,7 +1783,7 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* () = validate_runtime_config_text ~config_path:path next in
+      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
       let* () = Fs_compat.save_file_atomic path next in
       let* () = init_default ~config_path:path in
       Ok ()
@@ -1779,7 +1804,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ())

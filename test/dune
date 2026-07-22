@@ -723,6 +723,14 @@
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries masc_test_deps))
 
+; Exact-output registry: credential admission deferred to execution, and
+; runtime.toml saves re-validate + republish lane declarations.
+
+(test
+ (name test_runtime_exact_output_registry)
+ (modules test_runtime_exact_output_registry)
+ (libraries alcotest masc_test_deps))
+
 (test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)

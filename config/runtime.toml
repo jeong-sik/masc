@@ -982,6 +982,13 @@ candidates = [
   "deepseek.deepseek-v4-pro",
 ]
 
+# ── Exact-output lanes (compaction) ───────────────────────────────────
+# The compaction summarizer resolves the "compaction_exact" lane by name.
+# Target credentials are admitted at compaction execution time, not at
+# startup: a slot whose credential env var (e.g. DEEPSEEK_API_KEY) is unset
+# does not abort server boot — compaction fails with an actionable error only
+# when actually invoked. Bootstrap backfills this lane from the binary-embedded
+# seed config when an upgraded (legacy) runtime.toml does not declare it.
 [runtime.exact_output_lanes.compaction_exact]
 slots = [
   "deepseek.deepseek-v4-pro",

@@ -630,7 +630,7 @@ let test_manual_compaction_serializes_owner_lane () =
         match busy_after_prepare with
         | `No_compaction
             ({ reason =
-                 Masc.Keeper_event_queue_state.Execution_may_have_dispatched
+                 Keeper_event_queue_state.Execution_may_have_dispatched
              ; _
              } as no_compaction) ->
           no_compaction
@@ -665,14 +665,13 @@ let test_manual_compaction_serializes_owner_lane () =
       (match settlement with
        | Registry_queue.No_compaction
            { reason =
-               Masc.Keeper_event_queue_state.Execution_may_have_dispatched
+               Keeper_event_queue_state.Execution_may_have_dispatched
            ; _
            } ->
          ()
        | Registry_queue.Requeue _ ->
          fail "post-dispatch final admission remained replayable"
-       | Registry_queue.Ack
-       | Registry_queue.Escalate _ ->
+       | _ ->
          fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result
         ~base_path

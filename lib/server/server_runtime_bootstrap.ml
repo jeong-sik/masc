@@ -199,19 +199,163 @@ let load_exact_output_lane_declarations () =
                (List.length errors))))
 ;;
 
-let configure_exact_output_registry ?config_root () =
+(* The compaction summarizer resolves this lane by name; it must exist in
+   every published registry for manual/provider-overflow compaction to run. *)
+let compaction_exact_lane_id = "compaction_exact"
+
+(* Upgraded workspaces keep their operator-owned runtime.toml
+   ([Config_root_bootstrap] preserves existing roots), which predates
+   [runtime.exact_output_lanes]. Without a backfill the bootstrap would
+   publish a valid registry with zero lanes and every compaction would fail at
+   execution with [Exact_target_selection_failed]. The seed declaration comes
+   from the binary-embedded seed config so repo config and backfill share one
+   source; operator declarations always win. *)
+let seed_exact_output_lane_declarations () =
+  match Embedded_config.read "runtime.toml" with
+  | None ->
+    Log.Misc.warn
+      "exact_output: embedded seed runtime.toml is unavailable; cannot backfill the %S lane"
+      compaction_exact_lane_id;
+    []
+  | Some contents ->
+    (match Runtime_toml.parse_string contents with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       Log.Misc.warn
+         "exact_output: embedded seed runtime.toml parse failed (%d error(s)); cannot backfill the %S lane"
+         (List.length errors)
+         compaction_exact_lane_id;
+       [])
+
+let backfill_required_exact_output_lanes ~seed_lanes lanes =
+  let has_compaction_exact (lane : Runtime_schema.exact_output_lane_decl) =
+    String.equal lane.id compaction_exact_lane_id
+  in
+  if List.exists has_compaction_exact lanes
+  then lanes, false
+  else
+    match List.find_opt has_compaction_exact seed_lanes with
+    | None -> lanes, false
+    | Some seed_lane -> lanes @ [ seed_lane ], true
+;;
+
+(* Row identity for catalog table arrays, mirroring [Model_catalog] merge
+   keys: [[providers]]/[[targets]] rows key on [id], [[models]] rows key on
+   [id_prefix] + [provider_name]. *)
+let catalog_row_key = function
+  | Otoml.TomlTable entries ->
+    (match List.assoc_opt "id" entries with
+     | Some (Otoml.TomlString id) -> Some ("row", id)
+     | _ ->
+       (match
+          List.assoc_opt "id_prefix" entries, List.assoc_opt "provider_name" entries
+        with
+        | Some (Otoml.TomlString id_prefix), Some (Otoml.TomlString provider_name) ->
+          Some ("model", provider_name ^ "/" ^ id_prefix)
+        | _ -> None))
+  | _ -> None
+;;
+
+let rec merge_catalog_toml_values ~base ~overlay =
+  match base, overlay with
+  | Otoml.TomlTable base_entries, Otoml.TomlTable overlay_entries ->
+    let kept_base =
+      List.filter
+        (fun (key, _) -> not (List.mem_assoc key overlay_entries))
+        base_entries
+    in
+    let merged_overlay =
+      List.map
+        (fun (key, overlay_value) ->
+           let value =
+             match List.assoc_opt key base_entries with
+             | Some base_value ->
+               merge_catalog_toml_values ~base:base_value ~overlay:overlay_value
+             | None -> overlay_value
+           in
+           key, value)
+        overlay_entries
+    in
+    Otoml.TomlTable (kept_base @ merged_overlay)
+  | Otoml.TomlTableArray base_items, Otoml.TomlTableArray overlay_items ->
+    let overlay_keys = List.filter_map catalog_row_key overlay_items in
+    let kept_base =
+      List.filter
+        (fun item ->
+           match catalog_row_key item with
+           | Some key -> not (List.mem key overlay_keys)
+           | None -> true)
+        base_items
+    in
+    Otoml.TomlTableArray (kept_base @ overlay_items)
+  | _, overlay -> overlay
+;;
+
+let merge_catalog_overlay_toml ~base_contents ~overlay_contents =
+  match
+    ( Otoml.Parser.from_string_result base_contents
+    , Otoml.Parser.from_string_result overlay_contents )
+  with
+  | Error detail, _ -> Error (Printf.sprintf "base catalog: %s" detail)
+  | _, Error detail -> Error (Printf.sprintf "overlay catalog: %s" detail)
+  | Ok base, Ok overlay ->
+    Ok (Otoml.Printer.to_string (merge_catalog_toml_values ~base ~overlay))
+;;
+
+(* The exact-output resolver must route against the same catalog the runtime
+   path uses. [Exact_output.load_resolver_snapshot] only accepts
+   embedded-plus-overlay, so an operator-supplied [OAS_MODEL_CATALOG] full
+   replacement is folded into the resolver's overlay document *ahead* of the
+   config-root overlay: table rows the overlay re-declares replace the
+   replacement's rows, everything else unions. The resolver still unions the
+   result onto the OAS embedded catalog (the OAS API exposes no full-base
+   replacement), which is a superset of the runtime catalog — every target and
+   credential declaration from the replacement is visible to exact-output
+   resolution. *)
+let exact_output_resolver_overlay ?config_root ?(env = Sys.getenv_opt) () =
   let overlay_path = resolve_oas_model_catalog_overlay_path ?config_root () in
-  let overlay =
-    match overlay_path with
-    | None -> None
-    | Some path ->
-      (match read_exact_output_overlay path with
-       | Ok contents ->
-         Some ({ source = path; contents } : Exact_output.catalog_overlay)
-       | Error detail ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf "exact-output catalog overlay %s: %s" path detail)))
+  let full_catalog_path = nonempty_env env oas_model_catalog_env_var_name in
+  let read_contents label path =
+    match read_exact_output_overlay path with
+    | Ok contents -> contents
+    | Error detail ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf "exact-output %s %s: %s" label path detail))
+  in
+  match full_catalog_path, overlay_path with
+  | None, None -> None, " from OAS embedded catalog"
+  | Some full_path, None ->
+    ( Some
+        ({ source = full_path; contents = read_contents "full catalog" full_path }
+         : Exact_output.catalog_overlay)
+    , " from OAS_MODEL_CATALOG full catalog " ^ full_path )
+  | None, Some path ->
+    ( Some { source = path; contents = read_contents "catalog overlay" path }
+    , " with deployment overlay " ^ path )
+  | Some full_path, Some path ->
+    let contents =
+      match
+        merge_catalog_overlay_toml
+          ~base_contents:(read_contents "full catalog" full_path)
+          ~overlay_contents:(read_contents "catalog overlay" path)
+      with
+      | Ok contents -> contents
+      | Error detail ->
+        raise
+          (Env_config_core.Config_error
+             (Printf.sprintf "exact-output catalog merge: %s" detail))
+    in
+    ( Some { source = full_path ^ " + " ^ path; contents }
+    , Printf.sprintf
+        " from OAS_MODEL_CATALOG full catalog %s merged with deployment overlay %s"
+        full_path
+        path )
+;;
+
+let configure_exact_output_registry ?config_root ?(env = Sys.getenv_opt) () =
+  let overlay, overlay_description =
+    exact_output_resolver_overlay ?config_root ~env ()
   in
   let io : Exact_output.resolver_io =
     { getenv =
@@ -227,20 +371,50 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes = load_exact_output_lane_declarations () in
+    let operator_lanes = load_exact_output_lane_declarations () in
+    let lanes, backfilled =
+      backfill_required_exact_output_lanes
+        ~seed_lanes:(seed_exact_output_lane_declarations ())
+        operator_lanes
+    in
     (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
-     | Error error ->
-       raise
-         (Env_config_core.Config_error
-            ("exact-output resolver-and-lane registry: "
-             ^ Runtime_exact_output_registry.error_to_string error))
      | Ok registry ->
        Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
+         "exact_output: immutable resolver-and-lane registry generation %Ld published%s%s"
          (Runtime_exact_output_registry.generation registry)
-         (match overlay_path with
-          | None -> " from OAS embedded catalog"
-          | Some path -> " with deployment overlay " ^ path))
+         (if backfilled
+          then Printf.sprintf " (backfilled seed lane %S)" compaction_exact_lane_id
+          else "")
+         overlay_description
+     | Error error ->
+       (* A backfilled seed lane must never abort startup: legacy config roots
+          may predate the deployment overlay that declares the seed target.
+          Degrade to the operator-declared lanes — compaction then fails at
+          execution with an actionable lane-missing error instead of blocking
+          the whole server boot. Errors in operator-declared lanes stay
+          fatal. *)
+       if backfilled
+       then
+         (match
+            Runtime_exact_output_registry.publish ~lanes:operator_lanes resolver_snapshot
+          with
+          | Ok registry ->
+            Log.Misc.warn
+              "exact_output: seed lane %S failed validation (%s); published operator lanes only, generation %Ld%s"
+              compaction_exact_lane_id
+              (Runtime_exact_output_registry.error_to_string error)
+              (Runtime_exact_output_registry.generation registry)
+              overlay_description
+          | Error operator_error ->
+            raise
+              (Env_config_core.Config_error
+                 ("exact-output resolver-and-lane registry: "
+                  ^ Runtime_exact_output_registry.error_to_string operator_error)))
+       else
+         raise
+           (Env_config_core.Config_error
+              ("exact-output resolver-and-lane registry: "
+               ^ Runtime_exact_output_registry.error_to_string error)))
 ;;
 
 (* GC tuning for long-running server with bursty allocation.

@@ -182,6 +182,19 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
+let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
+  let err_str = Agent_sdk.Error.to_string err in
+  String.contains err_str 'e' && (
+    String.starts_with ~prefix:"empty completion" err_str
+    || String.starts_with ~prefix:"Context overflow: empty completion" err_str
+    || (try Re.execp (Re.Posix.compile_pat "empty completion|empty assistant turn") err_str with _ -> false)
+  )
+
+let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest _) -> true
+  | _ -> false
+
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
@@ -710,6 +723,8 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
+  || is_invalid_request_error err
+  || is_empty_completion_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err

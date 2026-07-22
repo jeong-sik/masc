@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- Bumped the OAS Agent SDK pin to `b25a420a` (oas#2768). Integrates provider-neutral `Agent_sdk.Exact_output` single surface and exact-output execution pipeline.
 - Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
 - Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.
 

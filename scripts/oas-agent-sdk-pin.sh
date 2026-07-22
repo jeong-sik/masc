@@ -60,7 +60,7 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
 # product operation ownership remain MASC concepts.
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
-# Pinned to main (ca7a02b7). Absorbs oas#2766: support stop_reason provider dialects and preserve empty completion stop_reason in GLM parser.
+# Pinned to main (b25a420a). Absorbs oas#2768: add provider-neutral Agent_sdk.Exact_output single surface and exact-output execution pipeline.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="ca7a02b7da5be364aeeae1f2a873cd73959aae43"
+readonly OAS_AGENT_SDK_SHA="b25a420ad0407755fe570f748a39be0c8be378fd"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"

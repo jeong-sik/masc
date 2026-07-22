@@ -111,12 +111,18 @@ val builder :
 (** [builder ~net ~config ?transport ()] builds an {!Agent_sdk.Builder.t}
     from [config]. *)
 
+val context_fit_admission : Agent_sdk.Agent.context_fit_admission
+(** Exact provider-fit policy shared by fresh and resumed agents. The OAS
+    provider capability SSOT decides whether native request measurement exists;
+    unsupported providers retain compatibility dispatch. *)
+
 (** {1 Resume preparation} *)
 
 type prepared_resume = {
   patched_checkpoint : Agent_sdk.Checkpoint.t;
   agent_config : Agent_sdk.Types.agent_config;
   options : Agent_sdk.Agent.options;
+  context_fit_admission : Agent_sdk.Agent.context_fit_admission;
 }
 (** Output of {!prepare_resume}. [patched_checkpoint] has runtime identity
     fields adjusted. *)

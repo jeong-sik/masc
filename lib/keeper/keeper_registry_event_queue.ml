@@ -39,6 +39,10 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { attempts : int
       ; detail : string
       }
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
 
 type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
   | No_eligible_history

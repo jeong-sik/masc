@@ -52,6 +52,18 @@ type escalation_reason =
        the checkpoint, reset the streak forever). Distinct from
        [Compaction_retry_exhausted] so the operator can tell "compaction keeps
        failing" from "compaction succeeds but cannot help". *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+    (* #25296: a quarantined poisoned checkpoint is preserved unmodified by
+       design, so every re-lease reloads the same incomplete transcript and
+       the admission rejects it again — an unbounded
+       [Requeue Transcript_quarantine_retry] loop. After
+       [transcript_quarantine_retry_escalation_threshold] consecutive
+       quarantine settlements the settlement escalates instead, surfacing the
+       suspended lane to the operator rather than re-firing the full turn
+       pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -103,7 +115,8 @@ let escalation_reason_requests_external_input = function
   | Compaction_execution_may_have_dispatched
   | Compaction_domain_invalid_output
   | Compaction_retry_exhausted _
-  | Compaction_floor_exceeded _ -> false
+  | Compaction_floor_exceeded _
+  | Transcript_quarantine_retry_exhausted _ -> false
 ;;
 
 type settlement =
@@ -414,6 +427,8 @@ let escalation_reason_label = function
   | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
   | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
+  | Transcript_quarantine_retry_exhausted _ ->
+    "transcript_quarantine_retry_exhausted"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -430,6 +445,8 @@ let escalation_reason_detail_to_yojson = function
   | Compaction_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
   | Compaction_floor_exceeded { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Transcript_quarantine_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
 ;;
 
@@ -523,6 +540,30 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_floor_exceeded { attempts; detail })
+  | "transcript_quarantine_retry_exhausted", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"transcript_quarantine_retry_exhausted"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be positive"
+      | Some _ ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be an int"
+      | None ->
+        Error "transcript_quarantine_retry_exhausted.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"transcript_quarantine_retry_exhausted"
+        "detail"
+        fields
+    in
+    Ok (Transcript_quarantine_retry_exhausted { attempts; detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -750,6 +791,12 @@ let validate_settlement = function
       ; successor = Some _
       } ->
     Error "terminal exact-output compaction must not enqueue a successor"
+  | Escalate { reason = Transcript_quarantine_retry_exhausted _; successor = None }
+    ->
+    Ok ()
+  | Escalate
+      { reason = Transcript_quarantine_retry_exhausted _; successor = Some _ } ->
+    Error "transcript quarantine retry exhaustion must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle

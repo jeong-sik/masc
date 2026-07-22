@@ -56,6 +56,16 @@ type escalation_reason =
           window (an incompressible floor).  Distinct from
           [Compaction_retry_exhausted] so "compaction keeps failing" and
           "compaction succeeds but cannot help" stay operator-distinguishable. *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+      (** #25296: settled instead of [Requeue Transcript_quarantine_retry]
+          once consecutive transcript-quarantine settlements reach the
+          escalation threshold.  The poisoned checkpoint is preserved
+          unmodified by design, so every re-lease rejects the same transcript
+          again — without this ceiling the source stimulus loops through the
+          full turn pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history

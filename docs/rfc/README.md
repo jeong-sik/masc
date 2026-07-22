@@ -46,7 +46,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|
-| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | 6952c01917 2026-07-21 | - |
+| 0000 | MASC × OAS Consolidated Master Design (SSOT) | Draft | 5093edd937 2026-07-22 | - |
 | 0001 | Withdraw heuristic uncertainty governance | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | 7b62a87d44 2026-07-13 | - |
 | 0003 | Withdraw composite lifecycle projection hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | - |

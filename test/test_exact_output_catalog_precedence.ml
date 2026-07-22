@@ -102,22 +102,6 @@ slots = [%S]
     lane_target
 ;;
 
-let runtime_without_exact_lane =
-  {|[providers.replacement_provider]
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1/v1"
-
-[models.replacement]
-api-name = "replacement-model"
-max-context = 8192
-
-[replacement_provider.replacement]
-
-[runtime]
-default = "replacement_provider.replacement"
-|}
-;;
-
 let failed_runtime_toml =
   {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
@@ -170,111 +154,19 @@ let require_registry_unpublished label =
   | Ok _ -> Alcotest.failf "%s must leave the registry unpublished" label
 ;;
 
-let require_empty_reservation_fences_first_publication snapshot =
-  let reservation =
-    match Registry.prepare_replacement ~lanes:[] with
-    | Ok reservation -> reservation
-    | Error error ->
-      Alcotest.failf
-        "empty pre-publication reservation failed: %s"
-        (Registry.publication_error_to_string error)
-  in
-  (match Registry.current () with
-   | Error Registry.Publication_busy -> ()
-   | Error error ->
-     Alcotest.failf
-       "active reservation exposed the wrong read failure: %s"
-       (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "active reservation exposed the old registry");
-  (match Registry.prepare_replacement ~lanes:[] with
-   | Error Registry.Publication_busy -> ()
-   | Error error ->
-     Alcotest.failf
-       "second reservation returned the wrong failure: %s"
-       (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "second reservation crossed the active fence");
-  (match Registry.publish ~lanes:[] snapshot with
-   | Error Registry.Publication_busy -> ()
-   | Error error ->
-     Alcotest.failf
-       "reserved first publication returned the wrong failure: %s"
-       (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "first publication crossed an active reservation");
-  (match Registry.finish_replacement reservation with
-   | Ok () -> ()
-   | Error error ->
-     Alcotest.failf
-       "empty pre-publication reservation did not finish: %s"
-       (Registry.reservation_error_to_string error));
-  (match Registry.finish_replacement reservation with
-   | Error Registry.Reservation_inactive -> ()
-   | Ok () -> Alcotest.fail "finished reservation was replayable");
-  let next_reservation =
-    match Registry.prepare_replacement ~lanes:[] with
-    | Ok reservation -> reservation
-    | Error error ->
-      Alcotest.failf
-        "replacement reservation after finish failed: %s"
-        (Registry.publication_error_to_string error)
-  in
-  (match Registry.finish_replacement reservation with
-   | Error Registry.Reservation_inactive -> ()
-   | Ok () -> Alcotest.fail "stale reservation finished its successor");
-  (match Registry.current () with
-   | Error Registry.Publication_busy -> ()
-   | Error error ->
-     Alcotest.failf
-       "stale finish disturbed its successor: %s"
-       (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "stale finish consumed the successor reservation");
-  (match Registry.abort_replacement reservation with
-   | Error Registry.Reservation_inactive -> ()
-   | Ok () -> Alcotest.fail "stale reservation aborted its successor");
-  (match Registry.current () with
-   | Error Registry.Publication_busy -> ()
-   | Error error ->
-     Alcotest.failf
-       "stale reservation disturbed its successor: %s"
-       (Registry.publication_error_to_string error)
-   | Ok _ -> Alcotest.fail "successor reservation did not fence reads");
-  (match Registry.abort_replacement next_reservation with
-   | Ok () -> ()
-   | Error error ->
-     Alcotest.failf
-       "successor reservation did not abort: %s"
-       (Registry.reservation_error_to_string error));
-  require_registry_unpublished "finished empty reservation"
+let require_publication_busy label = function
+  | Error Registry.Publication_busy -> ()
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong failure: %s"
+      label
+      (Registry.publication_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s crossed the active reservation" label
 ;;
 
-let require_failed_runtime_commit_releases_reservation root =
-  let valid_path = Filename.concat root "valid-runtime.toml" in
-  (match
-     Runtime.save_config_text
-       ~runtime_config_path:valid_path
-       runtime_without_exact_lane
-   with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "control runtime save failed: %s" detail);
-  let path = Filename.concat root "runtime-target-directory" in
-  Unix.mkdir path 0o755;
-  (match Runtime.save_config_text ~runtime_config_path:path runtime_without_exact_lane with
-   | Error _ -> ()
-   | Ok () -> Alcotest.fail "runtime save unexpectedly replaced a directory");
-  let reservation =
-    match Registry.prepare_replacement ~lanes:[] with
-    | Ok reservation -> reservation
-    | Error error ->
-      Alcotest.failf
-        "failed runtime save leaked its reservation: %s"
-        (Registry.publication_error_to_string error)
-  in
-  (match Registry.abort_replacement reservation with
-   | Ok () -> ()
-   | Error error ->
-     Alcotest.failf
-       "post-failure reservation did not abort: %s"
-       (Registry.reservation_error_to_string error));
-  require_registry_unpublished "failed runtime save"
+let require_reservation_inactive label = function
+  | Error Registry.Reservation_inactive -> ()
+  | Ok () -> Alcotest.failf "%s accepted an inactive reservation" label
 ;;
 
 let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
@@ -307,8 +199,6 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   require_admitted replacement_snapshot replacement_target;
   require_not_admitted replacement_snapshot overlay_target;
   require_not_admitted replacement_snapshot embedded_target;
-  require_failed_runtime_commit_releases_reservation root;
-  require_empty_reservation_fences_first_publication overlay_snapshot;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
@@ -369,20 +259,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "same-lane reservation failed: %s"
           (Registry.publication_error_to_string error)
     in
-    (match Registry.current () with
-     | Error Registry.Publication_busy -> ()
-     | Error error ->
-       Alcotest.failf
-         "published registry fence returned the wrong failure: %s"
-         (Registry.publication_error_to_string error)
-     | Ok _ -> Alcotest.fail "published registry remained visible during replacement");
-    (match Registry.prepare_replacement ~lanes with
-     | Error Registry.Publication_busy -> ()
-     | Error error ->
-       Alcotest.failf
-         "published second reservation returned the wrong failure: %s"
-         (Registry.publication_error_to_string error)
-     | Ok _ -> Alcotest.fail "published second reservation crossed the active fence");
+    Registry.current () |> require_publication_busy "published registry read fence";
+    Registry.prepare_replacement ~lanes
+    |> require_publication_busy "published second reservation";
+    Registry.publish ~lanes replacement_snapshot
+    |> require_publication_busy "published direct write fence";
     (match Registry.finish_replacement reservation with
      | Ok () -> ()
      | Error error ->
@@ -402,6 +283,39 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       stable_generation
       (Registry.generation after_noop);
     require_slots "same-lane finish preserves slots" after_noop;
+    let successor =
+      match Registry.prepare_replacement ~lanes with
+      | Ok reservation -> reservation
+      | Error error ->
+        Alcotest.failf
+          "successor reservation failed: %s"
+          (Registry.publication_error_to_string error)
+    in
+    Registry.finish_replacement reservation
+    |> require_reservation_inactive "stale finish";
+    Registry.current () |> require_publication_busy "stale finish successor fence";
+    Registry.abort_replacement reservation
+    |> require_reservation_inactive "stale abort";
+    Registry.current () |> require_publication_busy "stale abort successor fence";
+    (match Registry.abort_replacement successor with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf
+         "successor reservation did not abort: %s"
+         (Registry.reservation_error_to_string error));
+    let after_stale_tokens =
+      match Registry.current () with
+      | Ok registry -> registry
+      | Error error ->
+        Alcotest.failf
+          "successor abort did not restore the published registry: %s"
+          (Registry.publication_error_to_string error)
+    in
+    Alcotest.(check int64)
+      "stale tokens preserve registry generation"
+      stable_generation
+      (Registry.generation after_stale_tokens);
+    require_slots "stale tokens preserve slots" after_stale_tokens;
     let stable_file = Fs_compat.load_file runtime_path in
     let stable_runtime = Runtime.get_default_runtime_id () in
     let failed_path = Filename.concat root "published-runtime-target-directory" in

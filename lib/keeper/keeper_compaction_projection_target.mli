@@ -26,7 +26,10 @@ val request :
 val exact_request :
   runtime:Runtime.t -> effective_max_context:int -> request
 
-type unavailable =
+(* Private: external code may inspect but never construct these values, so
+   the encode→decode roundtrip invariants (Exact positive, invalid-window
+   non-positive) cannot be bypassed by direct construction. *)
+type unavailable = private
   | Empty_assignment
   | Assignment_ambiguous of { assignment_id : string }
   | Runtime_unavailable of { runtime_id : string }
@@ -36,7 +39,7 @@ type unavailable =
       ; effective_max_context : int
       }
 
-type exact =
+type exact = private
   { runtime_id : string
   ; provider_id : string
   ; protocol : string

@@ -253,7 +253,24 @@ let test_caps_admit_required_modalities () =
        (caps ~image:true ())
        [ "image"; "audio" ]);
   check bool "empty required is always admitted" true
-    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) [])
+    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) []);
+  (* text is a modality every runtime carries, and it is the one string in
+     [supported_modalities_of_capabilities] that no content block demands. *)
+  check bool "text is admitted by a text-only runtime" true
+    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) [ "text" ]);
+  (* An unrecognised modality reports unsupported, not supported. The producers
+     match exhaustively over content_block, so such a string can only arrive
+     through producer/consumer drift; answering "supported" there would hand a
+     block the runtime cannot process to the provider, while answering
+     "unsupported" routes it into the reroute and degrade paths. *)
+  check bool "unrecognised modality is not admitted" false
+    (Runtime_agent.For_testing.caps_admit_required_modalities
+       (caps ~image:true ~audio:true ())
+       [ "hologram" ]);
+  check bool "unrecognised modality is not masked by a supported sibling" false
+    (Runtime_agent.For_testing.caps_admit_required_modalities
+       (caps ~image:true ())
+       [ "image"; "hologram" ])
 
 (* RFC-0265 follow-up — graceful media degrade. [strip_unsupported_modality_blocks]
    drops the top-level image/audio/document blocks a text-only runtime cannot

@@ -757,19 +757,8 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
-       (match
-          List.find_opt
-            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-               String.equal lane.id "compaction_exact")
-            config.exact_output_lane_decls
-        with
-        | None -> fail "repo runtime.toml must declare compaction_exact"
-        | Some lane ->
-          check
-            (list string)
-            "compaction_exact preserves opaque declaration order"
-            [ "deepseek.deepseek-v4-pro" ]
-            lane.slot_ids));
+       check int "public seed has no provider-bound exact-output lanes" 0
+         (List.length config.exact_output_lane_decls));
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -2324,7 +2313,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        ~slot_ids:[ "slot-a" ]
        snapshot
       : Runtime_exact_output_registry.t);
-  let content slot =
+  let content ~default slot =
     Printf.sprintf
       "[providers.local]\n\
        display-name = \"Local\"\n\
@@ -2336,13 +2325,21 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        provider-model-id = \"chat\"\n\
        max-context = 1024\n\
        \n\
+       [models.libr]\n\
+       provider = \"local\"\n\
+       provider-model-id = \"libr\"\n\
+       max-context = 1024\n\
+       \n\
        [local.chat]\n\
        \n\
+       [local.libr]\n\
+       \n\
        [runtime]\n\
-       default = \"local.chat\"\n\
+       default = \"%s\"\n\
        \n\
        [runtime.exact_output_lanes.compaction_exact]\n\
        slots = [\"%s\"]\n"
+      default
       slot
   in
   let registry_exn () =
@@ -2363,7 +2360,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
         "compaction lane must exist: %s"
         (Runtime_exact_output_registry.error_to_string error)
   in
-  let baseline = content "slot-a" in
+  let baseline = content ~default:"local.chat" "slot-a" in
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path baseline with
      | Error detail -> failf "baseline exact save failed: %s" detail
@@ -2373,7 +2370,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       Runtime_exact_output_registry.generation stable_registry
     in
     let stable_file = Fs_compat.load_file path in
-    let invalid = content "missing-slot" in
+    let invalid = content ~default:"local.libr" "missing-slot" in
     (match Runtime.save_config_text ~runtime_config_path:path invalid with
      | Ok () -> fail "unknown exact target must reject raw save"
      | Error detail ->
@@ -2387,12 +2384,12 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (Runtime_exact_output_registry.generation after_invalid);
     check (list string) "invalid save preserves registry slots" [ "slot-a" ]
       (slots_exn after_invalid);
-    let replacement = content "slot-b" in
+    let replacement = content ~default:"local.libr" "slot-b" in
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
-    check string "valid save commits runtime cache" "local.chat"
+    check string "valid save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
     let replaced = registry_exn () in
     check bool "valid save advances registry generation" true

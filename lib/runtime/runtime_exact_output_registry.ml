@@ -7,13 +7,9 @@ type t =
   ; generation : int64
   }
 
-type prepared_replacement =
-  { resolver_snapshot : Exact_output.resolver_snapshot
-  ; exact_output_lanes : Runtime_schema.exact_output_lane_decl list
-  }
-
 type error =
   | Registry_not_published
+  | Generation_exhausted
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
@@ -63,7 +59,12 @@ type selected_slot =
   ; target : Exact_output.selected_target
   }
 
+type replacement_error =
+  | Replacement_rejected of error
+  | Replacement_commit_failed of string
+
 let published : t option Atomic.t = Atomic.make None
+let publication_mutex = Mutex.create ()
 
 let ( let* ) = Result.bind
 
@@ -106,38 +107,28 @@ let validate_lanes resolver_snapshot lanes =
   loop 1 String_set.empty lanes
 ;;
 
-let prepare_with_resolver ~lanes resolver_snapshot =
-  let* () = validate_lanes resolver_snapshot lanes in
-  Ok { resolver_snapshot; exact_output_lanes = lanes }
+let with_publication_lock f =
+  Mutex.lock publication_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let publish_prepared prepared =
-  let rec loop () =
-    let previous = Atomic.get published in
-    let generation =
-      match previous with
-      | None -> 1L
-      | Some registry ->
-        if Int64.equal registry.generation Int64.max_int
-        then invalid_arg "Runtime_exact_output_registry.publish: generation exhausted"
-        else Int64.succ registry.generation
-    in
-    let registry =
-      { resolver_snapshot = prepared.resolver_snapshot
-      ; exact_output_lanes = prepared.exact_output_lanes
-      ; generation
-      }
-    in
-    if Atomic.compare_and_set published previous (Some registry)
-    then registry
-    else loop ()
-  in
-  loop ()
+let next_generation = function
+  | None -> Ok 1L
+  | Some registry ->
+    if Int64.equal registry.generation Int64.max_int
+    then Error Generation_exhausted
+    else Ok (Int64.succ registry.generation)
 ;;
 
 let publish ~lanes resolver_snapshot =
-  let* prepared = prepare_with_resolver ~lanes resolver_snapshot in
-  Ok (publish_prepared prepared)
+  with_publication_lock
+  @@ fun () ->
+  let previous = Atomic.get published in
+  let* () = validate_lanes resolver_snapshot lanes in
+  let* generation = next_generation previous in
+  let registry = { resolver_snapshot; exact_output_lanes = lanes; generation } in
+  Atomic.set published (Some registry);
+  Ok registry
 ;;
 
 let current () =
@@ -146,9 +137,29 @@ let current () =
   | None -> Error Registry_not_published
 ;;
 
-let prepare_replacement ~lanes =
-  let* registry = current () in
-  prepare_with_resolver ~lanes registry.resolver_snapshot
+let replace_transactionally ~lanes ~commit =
+  with_publication_lock
+  @@ fun () ->
+  match Atomic.get published with
+  | None -> Error (Replacement_rejected Registry_not_published)
+  | Some previous ->
+    (match validate_lanes previous.resolver_snapshot lanes with
+     | Error error -> Error (Replacement_rejected error)
+     | Ok () ->
+       (match next_generation (Some previous) with
+        | Error error -> Error (Replacement_rejected error)
+        | Ok generation ->
+          (match commit () with
+           | Error detail -> Error (Replacement_commit_failed detail)
+           | Ok () ->
+             let registry =
+               { resolver_snapshot = previous.resolver_snapshot
+               ; exact_output_lanes = lanes
+               ; generation
+               }
+             in
+             Atomic.set published (Some registry);
+             Ok registry)))
 ;;
 
 let generation registry = registry.generation
@@ -194,6 +205,7 @@ let resolve_slots registry slot_ids =
 
 let error_to_string = function
   | Registry_not_published -> "exact-output registry has not been published"
+  | Generation_exhausted -> "exact-output registry generation is exhausted"
   | Blank_lane_id { position } ->
     Printf.sprintf "exact-output lane %d has a blank id" position
   | Duplicate_lane_id { position; lane_id } ->
@@ -253,4 +265,9 @@ let error_to_string = function
           environment_variable
     in
     Printf.sprintf "exact-output slot %d (%S): %s" position slot_id detail
+;;
+
+let replacement_error_to_string = function
+  | Replacement_rejected error -> error_to_string error
+  | Replacement_commit_failed detail -> detail
 ;;

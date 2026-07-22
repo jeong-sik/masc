@@ -143,31 +143,10 @@ let publish_registry ~lane_id ~slot_ids resolver_snapshot =
       (Runtime_exact_output_registry.error_to_string error)
 ;;
 
-let runtime_exact_output_lanes () =
-  let runtime_path =
-    Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
-  in
-  match Runtime_toml.parse_file runtime_path with
-  | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
-  | Error errors ->
-    Alcotest.failf
-      "exact-output runtime fixture did not parse: %d error(s)"
-      (List.length errors)
-;;
-
 let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
-  let lanes = runtime_exact_output_lanes () in
-  let slot_ids =
-    match
-      List.find_opt
-        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-           String.equal lane.id "compaction_exact")
-        lanes
-    with
-    | Some { slot_ids = _ :: _ as slot_ids; _ } -> slot_ids
-    | Some { slot_ids = []; _ } ->
-      Alcotest.fail "compaction_exact fixture lane is empty"
-    | None -> Alcotest.fail "compaction_exact fixture lane is missing"
+  let slot_ids = [ "compaction-exact-fixture" ] in
+  let lanes : Runtime_schema.exact_output_lane_decl list =
+    [ { id = "compaction_exact"; slot_ids } ]
   in
   let fixtures = List.map (fun id -> { id; base_url }) slot_ids in
   let connect_timeouts =

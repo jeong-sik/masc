@@ -2,7 +2,7 @@
 
 type t
 type error
-type prepared_replacement
+type replacement_error
 
 type selected_slot =
   { slot_id : string
@@ -18,15 +18,16 @@ val publish
     monotonically. Invalid declarations are rejected before the Atomic is
     changed. *)
 
-val prepare_replacement
+val replace_transactionally
   :  lanes:Runtime_schema.exact_output_lane_decl list
-  -> (prepared_replacement, error) result
-(** Validate a replacement against the resolver frozen in the currently
-    published registry without changing the active generation. *)
+  -> commit:(unit -> (unit, string) result)
+  -> (t, replacement_error) result
+(** Under the registry's internal writer lock, validate [lanes] against the
+    current frozen resolver, reserve the next generation, run [commit], and
+    publish the replacement. A validation, generation, or commit failure leaves
+    the active registry unchanged. *)
 
-val publish_prepared : prepared_replacement -> t
-(** Atomically publish a previously validated replacement. This operation has
-    no ordinary failure channel and advances the generation monotonically. *)
+val replacement_error_to_string : replacement_error -> string
 
 val current : unit -> (t, error) result
 (** Return the currently published registry, or a typed error before bootstrap

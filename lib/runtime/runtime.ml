@@ -1700,42 +1700,44 @@ let validate_runtime_config_text ~config_path content =
   Ok ()
 ;;
 
-let prepare_exact_output_replacement ~lanes =
+let runtime_config_write_mutex = Mutex.create ()
+
+let with_runtime_config_write_lock f =
+  Mutex.lock runtime_config_write_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
+;;
+
+let save_config_text ?runtime_config_path content =
+  with_runtime_config_write_lock
+  @@ fun () ->
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* loaded, exact_output_lanes =
+    materialize_runtime_config_text ~config_path:path content
+  in
+  let commit () =
+    let* () = Fs_compat.save_file_atomic path content in
+    set_loaded ~config_path:path loaded;
+    Ok ()
+  in
   match Runtime_exact_output_registry.current () with
-  | Error _ when lanes = [] -> Ok None
+  | Error _ when exact_output_lanes = [] -> commit ()
   | Error error ->
     Error
       ("exact-output registry replacement requires a published resolver: "
        ^ Runtime_exact_output_registry.error_to_string error)
   | Ok _ ->
-    Runtime_exact_output_registry.prepare_replacement ~lanes
-    |> Result.map
-         (fun prepared -> Some prepared)
+    Runtime_exact_output_registry.replace_transactionally
+      ~lanes:exact_output_lanes
+      ~commit
+    |> Result.map (fun (_ : Runtime_exact_output_registry.t) -> ())
     |> Result.map_error (fun error ->
       "exact-output registry replacement rejected: "
-      ^ Runtime_exact_output_registry.error_to_string error)
-;;
-
-let save_config_text ?runtime_config_path content =
-  let* path = runtime_config_path_result ?runtime_config_path () in
-  let* loaded, exact_output_lanes =
-    materialize_runtime_config_text ~config_path:path content
-  in
-  let* prepared_exact_output =
-    prepare_exact_output_replacement ~lanes:exact_output_lanes
-  in
-  let* () = Fs_compat.save_file_atomic path content in
-  set_loaded ~config_path:path loaded;
-  Option.iter
-    (fun prepared ->
-       ignore
-         (Runtime_exact_output_registry.publish_prepared prepared
-           : Runtime_exact_output_registry.t))
-    prepared_exact_output;
-  Ok ()
+      ^ Runtime_exact_output_registry.replacement_error_to_string error)
 ;;
 
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let keeper_name = String.trim keeper_name in
   let runtime_id = String.trim runtime_id in
   if String.equal keeper_name ""
@@ -1757,6 +1759,8 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
 ;;
 
 let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let keeper_name = String.trim keeper_name in
   if String.equal keeper_name ""
   then Error "keeper_name must not be empty"
@@ -1773,6 +1777,8 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
 ;;
 
 let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let key = String.trim key in
   let runtime_id = Option.map String.trim runtime_id in
   if String.equal key ""
@@ -1796,6 +1802,8 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
 ;;
 
 let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let key = String.trim key in
   let runtime_ids = List.map String.trim runtime_ids in
   if String.equal key ""

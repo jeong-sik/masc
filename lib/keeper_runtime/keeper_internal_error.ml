@@ -220,8 +220,10 @@ type masc_internal_error =
       detail : string;
       retry_after : capacity_retry_after;
       cooldown_cause : provider_cooldown_cause option;
-      (* Legacy diagnostic only. Current producers use [None]; decoded values
-         never grant retry, admission, or lifecycle authority. *)
+      causation_id : string option;
+      keeper_name : string option;
+      cascade_name : string option;
+      model_id : string option;
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -341,7 +343,17 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure
+      { runtime_id
+      ; source
+      ; detail
+      ; retry_after
+      ; cooldown_cause
+      ; causation_id
+      ; keeper_name
+      ; cascade_name
+      ; model_id
+      } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
@@ -360,6 +372,10 @@ let masc_internal_error_to_json = function
          ("runtime_id", `String runtime_id);
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
+         ("causation_id", Json_util.string_opt_to_json causation_id);
+         ("keeper_name", Json_util.string_opt_to_json keeper_name);
+         ("cascade_name", Json_util.string_opt_to_json cascade_name);
+         ("model_id", Json_util.string_opt_to_json model_id);
        ]
       @ retry_after_fields
       @ cooldown_cause_fields)
@@ -661,24 +677,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           with
           | Some runtime_id, Some source, Some detail ->
             (match capacity_backpressure_source_of_string source with
-             | Some source
-               when exact_fields
-                      [ "kind"
-                      ; "runtime_id"
-                      ; "source"
-                      ; "detail"
-                      ; "retry_after_sec"
-                      ]
-                      fields
-                    || exact_fields
-                         [ "kind"
-                         ; "runtime_id"
-                         ; "source"
-                         ; "detail"
-                         ; "retry_after_sec"
-                         ; "cooldown_cause"
-                         ]
-                         fields ->
+              | Some source ->
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
                  | None -> No_retry_hint
@@ -689,9 +688,22 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  | Some raw -> provider_cooldown_cause_of_string raw
                  | None -> None
                in
+               let causation_id = string_opt_of_assoc "causation_id" json in
+               let keeper_name = string_opt_of_assoc "keeper_name" json in
+               let cascade_name = string_opt_of_assoc "cascade_name" json in
+               let model_id = string_opt_of_assoc "model_id" json in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after; cooldown_cause })
+                    { runtime_id
+                    ; source
+                    ; detail
+                    ; retry_after
+                    ; cooldown_cause
+                    ; causation_id
+                    ; keeper_name
+                    ; cascade_name
+                    ; model_id
+                    })
              | Some _ | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (

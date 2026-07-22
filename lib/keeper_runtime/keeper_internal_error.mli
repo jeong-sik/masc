@@ -91,8 +91,10 @@ type masc_internal_error =
       detail : string;
       retry_after : capacity_retry_after;
       cooldown_cause : provider_cooldown_cause option;
-      (** Legacy diagnostic only. Current producers use [None]; decoded values
-          never grant retry, admission, or lifecycle authority. *)
+      causation_id : string option;
+      keeper_name : string option;
+      cascade_name : string option;
+      model_id : string option;
     }
   | Resumable_cli_session of {
       runtime_id : string;

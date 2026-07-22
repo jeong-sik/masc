@@ -14,6 +14,10 @@ val capacity_backpressure_source_of_http_error :
     when the error indicates capacity exhaustion. *)
 val capacity_backpressure_of_http_error :
   ?source:Keeper_internal_error.capacity_backpressure_source ->
+  ?causation_id:string ->
+  ?keeper_name:string ->
+  ?cascade_name:string ->
+  ?model_id:string ->
   runtime_id:string ->
   Llm_provider.Http_client.http_error option ->
   Keeper_internal_error.masc_internal_error option

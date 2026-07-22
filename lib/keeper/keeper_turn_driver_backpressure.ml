@@ -22,7 +22,7 @@ let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.ProviderFailure _ ->
     None
 
-let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
+let capacity_backpressure_of_http_error ?source ?causation_id ?keeper_name ?cascade_name ?model_id ~runtime_id last_err =
   match last_err with
   | Some
       (Llm_provider.Http_client.ProviderFailure
@@ -43,9 +43,11 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
              (match retry_after with
               | Some s -> Explicit s
               | None -> No_retry_hint);
-           (* Genuine upstream capacity exhaustion, not a pre-dispatch health
-              cooldown block — no arming cause to carry.  #23438. *)
            cooldown_cause = None;
+           causation_id;
+           keeper_name;
+           cascade_name;
+           model_id;
          })
   | Some
       (Llm_provider.Http_client.NetworkError
@@ -61,6 +63,10 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            detail = message;
            retry_after = No_retry_hint;
            cooldown_cause = None;
+           causation_id;
+           keeper_name;
+           cascade_name;
+           model_id;
          })
   | Some
       (Llm_provider.Http_client.HttpError _

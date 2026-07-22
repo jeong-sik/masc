@@ -771,7 +771,7 @@
 (test
  (name test_fusion_delivery_obligation)
  (modules test_fusion_delivery_obligation)
- (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
+ (libraries alcotest masc_test_deps masc.fusion_core))
 
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.

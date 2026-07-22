@@ -107,7 +107,6 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
                   ; "topology", `String "simple"
                   ]
               in
-              let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
               let raw =
                 Fusion_tool.handle
                   ~sw
@@ -115,7 +114,6 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
                   ~base_dir:config.base_path
                   ~keeper:name
                   ~now_unix
-                  ~run_id
                   ~policy
                   ~args:fusion_args
                   ()
@@ -123,16 +121,19 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
               let fusion_json = parse_fusion_result raw in
               (match Json_util.assoc_member_opt "ok" fusion_json with
                | Some (`Bool true) ->
-                 Http.Response.json_value ~compress:true ~request:req
-                   (`Assoc
-                      [ "ok", `Bool true
-                      ; "status", `String "fusion_started"
-                      ; "run_id", `String run_id
-                      ; "owner_keeper", `String name
-                      ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
-                      ; "digest", Keeper_catchup_digest.to_json digest
-                      ])
-                   reqd
+                 (match Json_util.assoc_member_opt "run_id" fusion_json with
+                  | Some (`String run_id) ->
+                    Http.Response.json_value ~compress:true ~request:req
+                      (`Assoc
+                         [ "ok", `Bool true
+                         ; "status", `String "fusion_started"
+                         ; "run_id", `String run_id
+                         ; "owner_keeper", `String name
+                         ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
+                         ; "digest", Keeper_catchup_digest.to_json digest
+                         ])
+                      reqd
+                  | _ -> respond_error reqd "fusion accepted without canonical run_id")
                | _ ->
                  let message =
                    match Json_util.assoc_member_opt "error" fusion_json with

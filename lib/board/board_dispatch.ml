@@ -400,13 +400,13 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
   match backend () with
   | Jsonl store ->
     (match
-       Board_core_persist.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
+       Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
-     | Ok (Board_core_persist.Post_created post as outcome) ->
+     | Ok (Board.Post_created post as outcome) ->
        emit_post_created post;
        Ok outcome
-     | Ok (Board_core_persist.Post_already_present _ as outcome) -> Ok outcome
+     | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =

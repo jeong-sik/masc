@@ -2,6 +2,7 @@
 
 type t
 type error
+type prepared_replacement
 
 type selected_slot =
   { slot_id : string
@@ -16,6 +17,16 @@ val publish
     Each successful publication advances the MASC-local generation
     monotonically. Invalid declarations are rejected before the Atomic is
     changed. *)
+
+val prepare_replacement
+  :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> (prepared_replacement, error) result
+(** Validate a replacement against the resolver frozen in the currently
+    published registry without changing the active generation. *)
+
+val publish_prepared : prepared_replacement -> t
+(** Atomically publish a previously validated replacement. This operation has
+    no ordinary failure channel and advances the generation monotonically. *)
 
 val current : unit -> (t, error) result
 (** Return the currently published registry, or a typed error before bootstrap

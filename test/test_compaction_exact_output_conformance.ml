@@ -126,6 +126,29 @@ let check_observation
     catalog_generation_fingerprint
 ;;
 
+let test_missing_compaction_lane_is_explicit_degraded_state () =
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc missing compaction lane"
+      [ { id = "configured-slot"; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry =
+    match Runtime_exact_output_registry.publish ~lanes:[] snapshot with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "empty exact-output registry must publish: %s"
+        (Runtime_exact_output_registry.error_to_string error)
+  in
+  match Runtime_exact_output_registry.lane_slots registry ~lane_id:"compaction_exact" with
+  | Ok _ -> Alcotest.fail "missing compaction lane must not be synthesized"
+  | Error error ->
+    Alcotest.(check string)
+      "missing lane is actionable"
+      "exact-output lane \"compaction_exact\" is not published"
+      (Runtime_exact_output_registry.error_to_string error)
+;;
+
 let check_failure label expected = function
   | Error actual when actual = expected -> ()
   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
@@ -481,6 +504,10 @@ let () =
     "compaction exact-output conformance"
     [ ( "preparation"
       , [ Alcotest.test_case
+            "missing compaction lane is explicit degraded state"
+            `Quick
+            test_missing_compaction_lane_is_explicit_degraded_state
+        ; Alcotest.test_case
             "ordered, effect-free, and one catalog generation"
             `Quick
             test_preparation_is_ordered_effect_free_and_single_generation

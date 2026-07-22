@@ -115,6 +115,7 @@ let configure_oas_model_catalog_overlay
 
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Full_replacement_catalog -> "full replacement"
   | Exact_output.Overlay_catalog -> "overlay"
 ;;
 
@@ -144,6 +145,8 @@ let exact_output_endpoint_error_to_string = function
 ;;
 
 let exact_output_snapshot_error_to_string = function
+  | Exact_output.Catalog_read_failed { path; detail } ->
+    Printf.sprintf "catalog read failed (%s): %s" path detail
   | Exact_output.Catalog_parse_failed { source; detail } ->
     Printf.sprintf
       "%s catalog parse failed: %s"
@@ -200,18 +203,21 @@ let load_exact_output_lane_declarations () =
 ;;
 
 let configure_exact_output_registry ?config_root () =
-  let overlay_path = resolve_oas_model_catalog_overlay_path ?config_root () in
-  let overlay =
-    match overlay_path with
-    | None -> None
-    | Some path ->
-      (match read_exact_output_overlay path with
-       | Ok contents ->
-         Some ({ source = path; contents } : Exact_output.catalog_overlay)
-       | Error detail ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf "exact-output catalog overlay %s: %s" path detail)))
+  let catalog, catalog_description =
+    match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
+    | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
+    | None ->
+      (match resolve_oas_model_catalog_overlay_path ?config_root () with
+       | None -> Exact_output.Embedded_default, " from OAS embedded catalog"
+       | Some path ->
+         (match read_exact_output_overlay path with
+          | Ok contents ->
+            ( Exact_output.Embedded_with_overlay { source = path; contents }
+            , " with deployment overlay " ^ path )
+          | Error detail ->
+            raise
+              (Env_config_core.Config_error
+                 (Printf.sprintf "exact-output catalog overlay %s: %s" path detail))))
   in
   let io : Exact_output.resolver_io =
     { getenv =
@@ -220,7 +226,7 @@ let configure_exact_output_registry ?config_root () =
           | Sys_error _ | Invalid_argument _ -> Error ())
     }
   in
-  match Exact_output.load_resolver_snapshot ~io ?overlay () with
+  match Exact_output.load_resolver_snapshot ~io ~catalog () with
   | Error error ->
     raise
       (Env_config_core.Config_error
@@ -238,9 +244,13 @@ let configure_exact_output_registry ?config_root () =
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
          (Runtime_exact_output_registry.generation registry)
-         (match overlay_path with
-          | None -> " from OAS embedded catalog"
-          | Some path -> " with deployment overlay " ^ path))
+         catalog_description;
+       (match Runtime_exact_output_registry.lane_slots registry ~lane_id:"compaction_exact" with
+        | Ok _ -> ()
+        | Error error ->
+          Log.Server.warn
+            "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs (%s)"
+            (Runtime_exact_output_registry.error_to_string error)))
 ;;
 
 (* GC tuning for long-running server with bursty allocation.

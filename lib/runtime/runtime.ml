@@ -1683,7 +1683,7 @@ let runtime_parse_errors_to_string errs =
   |> String.concat "; "
 ;;
 
-let validate_runtime_config_text ~config_path content =
+let materialize_runtime_config_text ~config_path content =
   let* cfg =
     Runtime_toml.parse_string content
     |> Result.map_error (fun errs ->
@@ -1692,15 +1692,46 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* _legacy_config = materialize_config ~config_path cfg in
+  materialize_config ~config_path cfg
+;;
+
+let validate_runtime_config_text ~config_path content =
+  let* _loaded = materialize_runtime_config_text ~config_path content in
   Ok ()
+;;
+
+let prepare_exact_output_replacement ~lanes =
+  match Runtime_exact_output_registry.current () with
+  | Error _ when lanes = [] -> Ok None
+  | Error error ->
+    Error
+      ("exact-output registry replacement requires a published resolver: "
+       ^ Runtime_exact_output_registry.error_to_string error)
+  | Ok _ ->
+    Runtime_exact_output_registry.prepare_replacement ~lanes
+    |> Result.map
+         (fun prepared -> Some prepared)
+    |> Result.map_error (fun error ->
+      "exact-output registry replacement rejected: "
+      ^ Runtime_exact_output_registry.error_to_string error)
 ;;
 
 let save_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* () = validate_runtime_config_text ~config_path:path content in
+  let* loaded, exact_output_lanes =
+    materialize_runtime_config_text ~config_path:path content
+  in
+  let* prepared_exact_output =
+    prepare_exact_output_replacement ~lanes:exact_output_lanes
+  in
   let* () = Fs_compat.save_file_atomic path content in
-  let* () = init_default ~config_path:path in
+  set_loaded ~config_path:path loaded;
+  Option.iter
+    (fun prepared ->
+       ignore
+         (Runtime_exact_output_registry.publish_prepared prepared
+           : Runtime_exact_output_registry.t))
+    prepared_exact_output;
   Ok ()
 ;;
 

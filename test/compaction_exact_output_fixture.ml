@@ -117,7 +117,12 @@ let resolver_snapshot ?(connect_timeouts = []) ~source fixtures =
     }
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match EO.load_resolver_snapshot ~io ~overlay () with
+  match
+    EO.load_resolver_snapshot
+      ~io
+      ~catalog:(EO.Embedded_with_overlay overlay)
+      ()
+  with
   | Ok snapshot -> snapshot
   | Error _ -> Alcotest.fail "exact-output resolver fixture did not load"
 ;;

@@ -719,7 +719,7 @@
 
 (test
  (name test_runtime_config_validity)
- (modules test_runtime_config_validity)
+ (modules test_runtime_config_validity compaction_exact_output_fixture)
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries masc_test_deps))
 

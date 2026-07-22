@@ -7,6 +7,11 @@ type t =
   ; generation : int64
   }
 
+type prepared_replacement =
+  { resolver_snapshot : Exact_output.resolver_snapshot
+  ; exact_output_lanes : Runtime_schema.exact_output_lane_decl list
+  }
+
 type error =
   | Registry_not_published
   | Blank_lane_id of { position : int }
@@ -30,11 +35,11 @@ type error =
       ; slot_id : string
       ; cause : Exact_output.target_ref_error
       }
-  | Unresolved_lane_slot of
+  | Unknown_lane_slot of
       { lane_id : string
       ; position : int
       ; slot_id : string
-      ; cause : Exact_output.target_selection_error
+      ; target_ref : string
       }
   | Exact_output_lane_missing of string
   | Blank_slot_id of { position : int }
@@ -72,16 +77,14 @@ let validate_lane_slots resolver_snapshot
       else if String_set.mem slot_id seen
       then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
       else (
-        match Exact_output.target_ref slot_id with
-        | Error cause ->
+        match Exact_output.admit_target_ref resolver_snapshot slot_id with
+        | Error (Exact_output.Target_ref_rejected cause) ->
           Error (Invalid_lane_slot { lane_id = lane.id; position; slot_id; cause })
-        | Ok target_ref ->
-          (match Exact_output.resolve_target resolver_snapshot target_ref with
-           | Error cause ->
-             Error
-               (Unresolved_lane_slot
-                  { lane_id = lane.id; position; slot_id; cause })
-           | Ok _ -> loop (position + 1) (String_set.add slot_id seen) rest))
+        | Error (Exact_output.Target_not_in_catalog target_ref) ->
+          Error
+            (Unknown_lane_slot
+               { lane_id = lane.id; position; slot_id; target_ref })
+        | Ok _ -> loop (position + 1) (String_set.add slot_id seen) rest)
   in
   match lane.slot_ids with
   | [] -> Error (Empty_lane { lane_id = lane.id })
@@ -103,8 +106,12 @@ let validate_lanes resolver_snapshot lanes =
   loop 1 String_set.empty lanes
 ;;
 
-let publish ~lanes resolver_snapshot =
+let prepare_with_resolver ~lanes resolver_snapshot =
   let* () = validate_lanes resolver_snapshot lanes in
+  Ok { resolver_snapshot; exact_output_lanes = lanes }
+;;
+
+let publish_prepared prepared =
   let rec loop () =
     let previous = Atomic.get published in
     let generation =
@@ -115,18 +122,33 @@ let publish ~lanes resolver_snapshot =
         then invalid_arg "Runtime_exact_output_registry.publish: generation exhausted"
         else Int64.succ registry.generation
     in
-    let registry = { resolver_snapshot; exact_output_lanes = lanes; generation } in
+    let registry =
+      { resolver_snapshot = prepared.resolver_snapshot
+      ; exact_output_lanes = prepared.exact_output_lanes
+      ; generation
+      }
+    in
     if Atomic.compare_and_set published previous (Some registry)
-    then Ok registry
+    then registry
     else loop ()
   in
   loop ()
+;;
+
+let publish ~lanes resolver_snapshot =
+  let* prepared = prepare_with_resolver ~lanes resolver_snapshot in
+  Ok (publish_prepared prepared)
 ;;
 
 let current () =
   match Atomic.get published with
   | Some registry -> Ok registry
   | None -> Error Registry_not_published
+;;
+
+let prepare_replacement ~lanes =
+  let* registry = current () in
+  prepare_with_resolver ~lanes registry.resolver_snapshot
 ;;
 
 let generation registry = registry.generation
@@ -198,24 +220,13 @@ let error_to_string = function
       position
       slot_id
       detail
-  | Unresolved_lane_slot { lane_id; position; slot_id; cause } ->
-    let detail =
-      match cause with
-      | Exact_output.Unknown_target target_ref ->
-        Printf.sprintf "unknown target %S" target_ref
-      | Exact_output.Missing_target_credential
-          { target_ref; environment_variable } ->
-        Printf.sprintf
-          "target %S requires environment variable %s"
-          target_ref
-          environment_variable
-    in
+  | Unknown_lane_slot { lane_id; position; slot_id; target_ref } ->
     Printf.sprintf
-      "exact-output lane %S slot %d (%S): %s"
+      "exact-output lane %S slot %d (%S): target %S is not in the frozen catalog"
       lane_id
       position
       slot_id
-      detail
+      target_ref
   | Exact_output_lane_missing lane_id ->
     Printf.sprintf "exact-output lane %S is not published" lane_id
   | Blank_slot_id { position } ->

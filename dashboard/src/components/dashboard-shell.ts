@@ -14,6 +14,7 @@ import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
+import { KEEPER_STATUS_LABEL_KO } from '../lib/keeper-operational-state'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
@@ -533,7 +534,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
       : runtimeCountSourceLabel(runtimeCounts.source)
   const pausedCountSource = runtimeCounts.source === 'runtime-health'
     ? 'runtime health'
-    : '재개 대기 lifecycle row'
+    : `${KEEPER_STATUS_LABEL_KO.paused} lifecycle row`
   const offlineCountSource = runtimeCounts.source === 'runtime-health'
     ? 'runtime health only; execution offline rows not mixed'
     : '프로세스/하트비트 없음으로 기동 필요 row'
@@ -546,7 +547,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `keeper 실행 fiber=${runningCountSource}; 일시정지 keeper=${pausedCountSource}; 오프라인 keeper=${offlineCountSource}; configured keeper=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
+      detail: `keeper 실행 fiber=${runningCountSource}; ${KEEPER_STATUS_LABEL_KO.paused} keeper=${pausedCountSource}; ${KEEPER_STATUS_LABEL_KO.offline} keeper=${offlineCountSource}; configured keeper=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -554,8 +555,8 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',
-      label: `일시정지 keeper ${pausedKeepers}`,
-      detail: '재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.',
+      label: `${KEEPER_STATUS_LABEL_KO.paused} keeper ${pausedKeepers}`,
+      detail: `${KEEPER_STATUS_LABEL_KO.paused} 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.`,
       tone: 'warn',
     })
   }

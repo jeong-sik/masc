@@ -22,14 +22,23 @@ import {
 import type { Keeper } from '../../types'
 
 /** Coarse lifecycle bucket used both for the dot tone and roster grouping.
- *  Derived from the typed `KeeperOperationalState` SSOT (flat record only —
- *  composite is unavailable at this layer) so the roster groups match the
- *  canonical 4-state vocabulary: running / paused / stuck (확인 필요) /
- *  offline (중지). */
+ *  Derived from the typed `KeeperOperationalState` SSOT so the roster groups
+ *  match the canonical 4-state vocabulary: running / paused / stuck
+ *  (확인 필요) / offline (중지).
+ *
+ *  Callers that can reach the fleet composite map MUST pass the keeper's
+ *  snapshot through: derive promotes a `synthetic_stall` blocker to stuck
+ *  only when the composite attention axis confirms it (`blocked === true`),
+ *  so a composite-less call would group that keeper under running while
+ *  registry/monitoring show `확인 필요` — the exact split this module
+ *  exists to prevent. */
 export type KeeperBucket = 'running' | 'paused' | 'stuck' | 'offline'
 
-export function keeperBucket(keeper: Keeper): KeeperBucket {
-  return deriveKeeperOperationalState({ keeper, composite: null }).kind
+export function keeperBucket(
+  keeper: Keeper,
+  composite: Parameters<typeof deriveKeeperOperationalState>[0]['composite'] = null,
+): KeeperBucket {
+  return deriveKeeperOperationalState({ keeper, composite }).kind
 }
 
 const DOT_CLASS: Readonly<Record<FleetTone, string>> = {

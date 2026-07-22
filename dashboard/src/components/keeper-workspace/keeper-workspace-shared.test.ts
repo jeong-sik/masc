@@ -13,6 +13,7 @@ import {
 } from './keeper-workspace-shared'
 import { html } from 'htm/preact'
 import type { Keeper } from '../../types'
+import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 
 function mk(partial: Partial<Keeper>): Keeper {
   return { name: 'k', status: 'running', ...partial } as Keeper
@@ -34,6 +35,16 @@ describe('keeperBucket', () => {
   })
   it('classifies a blocked keeper as stuck (typed SSOT, 확인 필요 group)', () => {
     expect(keeperBucket(mk({ status: 'running', runtime_blocker_class: 'turn_timeout' }))).toBe('stuck')
+  })
+  it('promotes synthetic_stall to stuck once the composite attention axis confirms blocked (W1)', () => {
+    const keeper = mk({ status: 'running', runtime_blocker_class: 'synthetic_stall' })
+    // Flat record only: the diagnostic synthetic marker stays running.
+    expect(keeperBucket(keeper)).toBe('running')
+    // Same keeper + composite (what registry/monitoring see) must agree.
+    const composite = {
+      runtime_attention: { blocked: true, execution_current: true },
+    } as unknown as KeeperCompositeSnapshot
+    expect(keeperBucket(keeper, composite)).toBe('stuck')
   })
 })
 

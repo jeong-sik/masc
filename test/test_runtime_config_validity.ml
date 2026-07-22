@@ -2348,7 +2348,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     | Error error ->
       failf
         "exact-output registry must be published: %s"
-        (Runtime_exact_output_registry.error_to_string error)
+        (Runtime_exact_output_registry.publication_error_to_string error)
   in
   let slots_exn registry =
     match
@@ -2358,7 +2358,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     | Error error ->
       failf
         "compaction lane must exist: %s"
-        (Runtime_exact_output_registry.error_to_string error)
+        (Runtime_exact_output_registry.lane_lookup_error_to_string error)
   in
   let baseline = content ~default:"local.chat" "slot-a" in
   with_temp_runtime_toml baseline (fun path ->

@@ -1707,10 +1707,14 @@ let with_runtime_config_write_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
 ;;
 
-let save_config_text ?runtime_config_path content =
-  with_runtime_config_write_lock
-  @@ fun () ->
-  let* path = runtime_config_path_result ?runtime_config_path () in
+let abort_exact_output_replacement reservation =
+  Runtime_exact_output_registry.abort_replacement reservation
+  |> Result.map_error (fun error ->
+    "exact-output registry reservation abort failed: "
+    ^ Runtime_exact_output_registry.reservation_error_to_string error)
+;;
+
+let commit_runtime_config_text ~path content =
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
@@ -1719,20 +1723,44 @@ let save_config_text ?runtime_config_path content =
     set_loaded ~config_path:path loaded;
     Ok ()
   in
-  match Runtime_exact_output_registry.current () with
-  | Error _ when exact_output_lanes = [] -> commit ()
-  | Error error ->
-    Error
-      ("exact-output registry replacement requires a published resolver: "
-       ^ Runtime_exact_output_registry.error_to_string error)
-  | Ok _ ->
-    Runtime_exact_output_registry.replace_transactionally
-      ~lanes:exact_output_lanes
-      ~commit
-    |> Result.map (fun (_ : Runtime_exact_output_registry.t) -> ())
+  let* reservation =
+    Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
     |> Result.map_error (fun error ->
       "exact-output registry replacement rejected: "
-      ^ Runtime_exact_output_registry.replacement_error_to_string error)
+      ^ Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  match commit () with
+  | Ok () ->
+    (match Runtime_exact_output_registry.finish_replacement reservation with
+     | Ok () -> Ok ()
+     | Error error ->
+       failwith
+         ("invariant violation: runtime config file/cache committed but the \
+           exact-output registry reservation was inactive; restart is required: "
+          ^ Runtime_exact_output_registry.reservation_error_to_string error))
+  | Error detail ->
+    (match abort_exact_output_replacement reservation with
+     | Ok () -> Error detail
+     | Error abort_detail -> Error (detail ^ "; " ^ abort_detail))
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match abort_exact_output_replacement reservation with
+     | Ok () -> Printexc.raise_with_backtrace exn backtrace
+     | Error abort_detail ->
+       Printexc.raise_with_backtrace
+         (Failure
+            (Printf.sprintf
+               "runtime config commit raised %s; %s"
+               (Printexc.to_string exn)
+               abort_detail))
+         backtrace)
+;;
+
+let save_config_text ?runtime_config_path content =
+  with_runtime_config_write_lock
+  @@ fun () ->
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  commit_runtime_config_text ~path content
 ;;
 
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
@@ -1752,10 +1780,7 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    commit_runtime_config_text ~path next
 ;;
 
 let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
@@ -1770,10 +1795,7 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    commit_runtime_config_text ~path next
 ;;
 
 let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
@@ -1795,10 +1817,7 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-      let* () = Fs_compat.save_file_atomic path next in
-      let* () = init_default ~config_path:path in
-      Ok ()
+      commit_runtime_config_text ~path next
 ;;
 
 let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
@@ -1818,10 +1837,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ())
+    commit_runtime_config_text ~path next)
 ;;
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =

@@ -145,7 +145,7 @@ let publish_registry ~lane_id ~slot_ids resolver_snapshot =
   | Error error ->
     Alcotest.failf
       "exact-output registry fixture did not publish: %s"
-      (Runtime_exact_output_registry.error_to_string error)
+      (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
 let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
@@ -166,7 +166,7 @@ let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
    | Error error ->
      Alcotest.failf
        "exact-output runtime fixture did not publish: %s"
-       (Runtime_exact_output_registry.error_to_string error));
+       (Runtime_exact_output_registry.publication_error_to_string error));
   slot_ids
 ;;
 

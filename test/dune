@@ -1288,6 +1288,13 @@
  (modules test_compaction_exact_output_conformance)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
+; Process-isolated proof that exact-output bootstrap honors full catalog
+; replacement precedence over deployment overlays and OAS embedded targets.
+(test
+ (name test_exact_output_catalog_precedence)
+ (modules test_exact_output_catalog_precedence)
+ (libraries alcotest masc_server masc_test_deps eio_main unix))
+
 ; Production entrypoint coverage for an intentionally absent Eio clock. This
 ; must remain a separate process because Eio_context clock installation is
 ; process-global and cannot be masked by the existing scoped test helper.

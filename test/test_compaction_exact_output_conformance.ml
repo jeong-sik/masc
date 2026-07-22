@@ -139,7 +139,7 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
     | Error error ->
       Alcotest.failf
         "empty exact-output registry must publish: %s"
-        (Runtime_exact_output_registry.error_to_string error)
+        (Runtime_exact_output_registry.publication_error_to_string error)
   in
   match
     C.prepare_lane
@@ -163,8 +163,16 @@ let test_missing_credential_is_deferred_past_registry_admission () =
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   (match Registry.resolve_slots registry [ slot_id ] with
-   | [ Error _ ] -> ()
+   | [ Error
+         (Registry.Slot_target_unavailable
+            { cause = EO.Missing_target_credential { environment_variable; _ }; _ }) ] ->
+     Alcotest.(check string)
+       "missing credential cause remains typed"
+       "MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
+       environment_variable
    | [ Ok _ ] -> Alcotest.fail "missing credential must fail target selection"
+   | [ Error _ ] ->
+     Alcotest.fail "missing credential returned the wrong slot-resolution failure"
    | outcomes ->
      Alcotest.failf "expected one credential-gated slot, got %d" (List.length outcomes));
   match
@@ -190,7 +198,9 @@ let test_unknown_target_is_rejected_by_registry_publication () =
     [ { id = conformance_lane_id; slot_ids = [ unknown_target ] } ]
   in
   match Registry.publish ~lanes snapshot with
-  | Error _ -> ()
+  | Error (Registry.Unknown_lane_slot { target_ref; _ }) ->
+    Alcotest.(check string) "unknown target identity" unknown_target target_ref
+  | Error _ -> Alcotest.fail "unknown target returned the wrong publication failure"
   | Ok _ -> Alcotest.fail "unknown target must not publish in the MASC registry"
 ;;
 

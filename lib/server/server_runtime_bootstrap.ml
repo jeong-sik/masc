@@ -239,7 +239,7 @@ let configure_exact_output_registry ?config_root () =
        raise
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: "
-             ^ Runtime_exact_output_registry.error_to_string error))
+             ^ Runtime_exact_output_registry.publication_error_to_string error))
      | Ok registry ->
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
@@ -247,10 +247,12 @@ let configure_exact_output_registry ?config_root () =
          catalog_description;
        (match Runtime_exact_output_registry.lane_slots registry ~lane_id:"compaction_exact" with
         | Ok _ -> ()
-        | Error error ->
+        | Error
+            (Runtime_exact_output_registry.Exact_lane_unconfigured
+               { lane_id = missing_lane_id }) ->
           Log.Server.warn
-            "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs (%s)"
-            (Runtime_exact_output_registry.error_to_string error)))
+            "exact_output: compaction is degraded until [runtime.exact_output_lanes.%s] is configured with OAS target refs"
+            missing_lane_id))
 ;;
 
 (* GC tuning for long-running server with bursty allocation.

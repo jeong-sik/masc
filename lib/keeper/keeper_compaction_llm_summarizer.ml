@@ -409,12 +409,14 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
   else
     let registry_generation = Runtime_exact_output_registry.generation registry in
     match Runtime_exact_output_registry.lane_slots registry ~lane_id with
-    | Error error ->
+    | Error
+        (Runtime_exact_output_registry.Exact_lane_unconfigured
+           { lane_id = missing_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane lookup rejected generation=%Ld: %s"
+        "compaction exact lane is unconfigured generation=%Ld lane_id=%s"
         registry_generation
-        (Runtime_exact_output_registry.error_to_string error);
+        missing_lane_id;
       Error Exact_lane_unconfigured
     | Ok slot_ids ->
       let selected_slots_result =
@@ -429,7 +431,7 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
                     ~keeper_name
                     "compaction exact registry readiness violated generation=%Ld: %s"
                     registry_generation
-                    (Runtime_exact_output_registry.error_to_string error);
+                    (Runtime_exact_output_registry.slot_resolution_error_to_string error);
                   Error Exact_target_selection_failed)
              (Ok [])
       in

@@ -7,8 +7,9 @@ type t =
   ; generation : int64
   }
 
-type error =
+type publication_error =
   | Registry_not_published
+  | Publication_busy
   | Generation_exhausted
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
@@ -37,7 +38,10 @@ type error =
       ; slot_id : string
       ; target_ref : string
       }
-  | Exact_output_lane_missing of string
+ 
+type lane_lookup_error = Exact_lane_unconfigured of { lane_id : string }
+
+type slot_resolution_error =
   | Blank_slot_id of { position : int }
   | Duplicate_slot_id of
       { position : int
@@ -59,12 +63,16 @@ type selected_slot =
   ; target : Exact_output.selected_target
   }
 
-type replacement_error =
-  | Replacement_rejected of error
-  | Replacement_commit_failed of string
+type reservation =
+  { identity : unit ref
+  ; candidate : t option
+  }
+
+type reservation_error = Reservation_inactive
 
 let published : t option Atomic.t = Atomic.make None
 let publication_mutex = Mutex.create ()
+let active_reservation : reservation option ref = ref None
 
 let ( let* ) = Result.bind
 
@@ -123,43 +131,80 @@ let next_generation = function
 let publish ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
-  let previous = Atomic.get published in
-  let* () = validate_lanes resolver_snapshot lanes in
-  let* generation = next_generation previous in
-  let registry = { resolver_snapshot; exact_output_lanes = lanes; generation } in
-  Atomic.set published (Some registry);
-  Ok registry
+  match !active_reservation with
+  | Some _ -> Error Publication_busy
+  | None ->
+    let previous = Atomic.get published in
+    let* () = validate_lanes resolver_snapshot lanes in
+    let* generation = next_generation previous in
+    let registry = { resolver_snapshot; exact_output_lanes = lanes; generation } in
+    Atomic.set published (Some registry);
+    Ok registry
 ;;
 
 let current () =
-  match Atomic.get published with
-  | Some registry -> Ok registry
-  | None -> Error Registry_not_published
-;;
-
-let replace_transactionally ~lanes ~commit =
   with_publication_lock
   @@ fun () ->
-  match Atomic.get published with
-  | None -> Error (Replacement_rejected Registry_not_published)
-  | Some previous ->
-    (match validate_lanes previous.resolver_snapshot lanes with
-     | Error error -> Error (Replacement_rejected error)
-     | Ok () ->
-       (match next_generation (Some previous) with
-        | Error error -> Error (Replacement_rejected error)
-        | Ok generation ->
-          (match commit () with
-           | Error detail -> Error (Replacement_commit_failed detail)
-           | Ok () ->
-             let registry =
-               { resolver_snapshot = previous.resolver_snapshot
-               ; exact_output_lanes = lanes
-               ; generation
-               }
-             in
-             Atomic.set published (Some registry);
-             Ok registry)))
+  match !active_reservation with
+  | Some _ -> Error Publication_busy
+  | None ->
+    (match Atomic.get published with
+     | Some registry -> Ok registry
+     | None -> Error Registry_not_published)
+;;
+
+let reserve candidate =
+  let reservation = { identity = ref (); candidate } in
+  active_reservation := Some reservation;
+  Ok reservation
+;;
+
+let prepare_replacement ~lanes =
+  with_publication_lock
+  @@ fun () ->
+  match !active_reservation with
+  | Some _ -> Error Publication_busy
+  | None ->
+    (match Atomic.get published, lanes with
+     | None, [] -> reserve None
+     | None, _ :: _ -> Error Registry_not_published
+     | Some previous, _ ->
+       let* () = validate_lanes previous.resolver_snapshot lanes in
+       if previous.exact_output_lanes = lanes
+       then reserve (Some previous)
+       else (
+         let* generation = next_generation (Some previous) in
+         reserve
+           (Some
+              { resolver_snapshot = previous.resolver_snapshot
+              ; exact_output_lanes = lanes
+              ; generation
+              })))
+;;
+
+let same_reservation left right = left.identity == right.identity
+
+let finish_replacement reservation =
+  with_publication_lock
+  @@ fun () ->
+  match !active_reservation with
+  | Some active when same_reservation active reservation ->
+    active_reservation := None;
+    Option.iter
+      (fun registry -> Atomic.set published (Some registry))
+      active.candidate;
+    Ok ()
+  | Some _ | None -> Error Reservation_inactive
+;;
+
+let abort_replacement reservation =
+  with_publication_lock
+  @@ fun () ->
+  match !active_reservation with
+  | Some active when same_reservation active reservation ->
+    active_reservation := None;
+    Ok ()
+  | Some _ | None -> Error Reservation_inactive
 ;;
 let generation registry = registry.generation
 
@@ -170,7 +215,7 @@ let lane_slots registry ~lane_id =
          String.equal lane.id lane_id)
       registry.exact_output_lanes
   with
-  | None -> Error (Exact_output_lane_missing lane_id)
+  | None -> Error (Exact_lane_unconfigured { lane_id })
   | Some lane -> Ok lane.slot_ids
 ;;
 
@@ -202,8 +247,9 @@ let resolve_slots registry slot_ids =
   loop 1 String_set.empty [] slot_ids
 ;;
 
-let error_to_string = function
+let publication_error_to_string = function
   | Registry_not_published -> "exact-output registry has not been published"
+  | Publication_busy -> "exact-output registry publication is reserved"
   | Generation_exhausted -> "exact-output registry generation is exhausted"
   | Blank_lane_id { position } ->
     Printf.sprintf "exact-output lane %d has a blank id" position
@@ -238,8 +284,14 @@ let error_to_string = function
       position
       slot_id
       target_ref
-  | Exact_output_lane_missing lane_id ->
-    Printf.sprintf "exact-output lane %S is not published" lane_id
+;;
+
+let lane_lookup_error_to_string = function
+  | Exact_lane_unconfigured { lane_id } ->
+    Printf.sprintf "exact-output lane %S is not configured" lane_id
+;;
+
+let slot_resolution_error_to_string = function
   | Blank_slot_id { position } ->
     Printf.sprintf "exact-output slot %d is blank" position
   | Duplicate_slot_id { position; slot_id } ->
@@ -266,7 +318,6 @@ let error_to_string = function
     Printf.sprintf "exact-output slot %d (%S): %s" position slot_id detail
 ;;
 
-let replacement_error_to_string = function
-  | Replacement_rejected error -> error_to_string error
-  | Replacement_commit_failed detail -> detail
+let reservation_error_to_string = function
+  | Reservation_inactive -> "exact-output registry reservation is inactive"
 ;;

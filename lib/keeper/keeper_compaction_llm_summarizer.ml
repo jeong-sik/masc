@@ -45,6 +45,7 @@ type completed_plan =
   }
 
 type summarization_failure =
+  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable
@@ -414,7 +415,7 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
         "compaction exact lane lookup rejected generation=%Ld: %s"
         registry_generation
         (Runtime_exact_output_registry.error_to_string error);
-      Error Exact_target_selection_failed
+      Error Exact_lane_unconfigured
     | Ok slot_ids ->
       let selected_slots_result =
         Runtime_exact_output_registry.resolve_slots registry slot_ids

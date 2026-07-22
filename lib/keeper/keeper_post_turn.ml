@@ -507,6 +507,7 @@ let terminal_reason_of_rejection = function
   | Exact_execution_failed_after_dispatch ->
     Some Execution_may_have_dispatched
   | Invalid_structural_evidence _
+  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable

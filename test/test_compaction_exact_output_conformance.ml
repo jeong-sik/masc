@@ -140,13 +140,16 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
         "empty exact-output registry must publish: %s"
         (Runtime_exact_output_registry.error_to_string error)
   in
-  match Runtime_exact_output_registry.lane_slots registry ~lane_id:"compaction_exact" with
+  match
+    C.prepare_lane
+      ~keeper_name:"keeper-missing-compaction-lane"
+      ~registry
+      ~lane_id:"compaction_exact"
+      ~units
+  with
+  | Error C.Exact_lane_unconfigured -> ()
+  | Error _ -> Alcotest.fail "missing compaction lane returned the wrong typed failure"
   | Ok _ -> Alcotest.fail "missing compaction lane must not be synthesized"
-  | Error error ->
-    Alcotest.(check string)
-      "missing lane is actionable"
-      "exact-output lane \"compaction_exact\" is not published"
-      (Runtime_exact_output_registry.error_to_string error)
 ;;
 
 let check_failure label expected = function

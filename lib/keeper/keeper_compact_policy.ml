@@ -66,6 +66,7 @@ let register_record_pre_compact
 ;;
 
 type compaction_rejection =
+  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable
@@ -79,6 +80,7 @@ type compaction_rejection =
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
 
 let compaction_rejection_to_tag = function
+  | Exact_lane_unconfigured -> "exact_lane_unconfigured"
   | Exact_target_selection_failed -> "exact_target_selection_failed"
   | Exact_admission_failed -> "exact_admission_failed"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
@@ -209,6 +211,8 @@ let selected_message_count units selected =
     selected
 ;;
 let summarization_rejection = function
+  | Keeper_compaction_llm_summarizer.Exact_lane_unconfigured ->
+    Exact_lane_unconfigured
   | Keeper_compaction_llm_summarizer.Exact_target_selection_failed ->
     Exact_target_selection_failed
   | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed

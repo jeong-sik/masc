@@ -18,6 +18,7 @@ type attempt_observation =
   }
 
 type summarization_failure =
+  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable

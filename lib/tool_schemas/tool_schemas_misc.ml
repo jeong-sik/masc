@@ -10,15 +10,6 @@ open Masc_domain
     test here, instead of silently dropping from the JSON Schema. *)
 let dashboard_scope_enum_strings = [ "all"; "current" ]
 
-(** Issue #8493: [masc_config] category filter strings mirror
-    [Env_config_snapshot.valid_config_category_strings]. This library
-    depends only on [masc_types], so it cannot depend on [masc_config]
-    directly without reintroducing the cycle this split avoids. The
-    sync test in [test/test_types.ml :: config_category_ssot] keeps this
-    mirror aligned with the producer-side SSOT. *)
-let config_category_enum_strings = Tool_schemas_specs_types.config_category_enum_strings
-;;
-
 type control_operation =
   | Pause
   | Resume

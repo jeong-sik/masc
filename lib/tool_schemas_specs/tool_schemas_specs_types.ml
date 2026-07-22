@@ -62,7 +62,10 @@ type tool_spec =
 
 (** Issue #15257 Phase 1: Canonical SSOT for config category enum strings.
     Shared between gen_tool_descriptors.ml and tool_schemas_misc.ml without
-    introducing circular dune dependencies. *)
+    introducing circular dune dependencies. Mirrors the producer-side
+    [Env_config_snapshot.valid_config_category_strings]; the drift guard
+    in [test/test_tool_descriptors_gen.ml :: config_category_ssot] asserts
+    they stay identical. *)
 let config_category_enum_strings =
   [ "server"
   ; "auth"
@@ -73,7 +76,6 @@ let config_category_enum_strings =
   ; "inference"
   ; "keeper"
   ; "keeper_execution"
-  ; "keeper_guardrails"
   ; "autonomy"
   ; "dashboard"
   ; "operations"

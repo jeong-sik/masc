@@ -17,7 +17,7 @@ open Tool_schemas_specs_types
 (* === Phase 1 SSOT spec data =========================================
 
    masc_config — single optional `category` filter. The enum references
-   Tool_schemas_misc.config_category_enum_strings (Issue #8493 / #15257). *)
+   Tool_schemas_specs_types.config_category_enum_strings (Issue #8493 / #15257). *)
 
 let config_category_enum_strings = Tool_schemas_specs_types.config_category_enum_strings
 ;;

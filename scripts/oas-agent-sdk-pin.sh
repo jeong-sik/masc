@@ -60,6 +60,7 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
 # product operation ownership remain MASC concepts.
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
+# Pinned to main (c1eaa88b). Absorbs oas#2764: allow empty delta id and name strings as Ok None in SSE stream parser.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="93e57a63a374a3f07325c7339b7bdefec12cea68"
+readonly OAS_AGENT_SDK_SHA="c1eaa88bf72e680a61f7f4e3eafae627d916b4c4"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"

@@ -236,7 +236,14 @@ let run_admitted_with
            | Error failure -> Error failure
            | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
      with
-     | `Busy block -> `Busy block
+     | `Busy block ->
+       (match preparation with
+        | Ok prepared ->
+          `No_compaction
+            (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
+        | Error (Keeper_post_turn.No_compaction no_compaction) ->
+          `No_compaction no_compaction
+        | Error _ -> `Busy block)
      | `Ran (Error failure) -> `Compaction_failed failure
      | `Ran (Ok (Compacted success)) ->
        observe_manifest ~keeper_name:meta.name success.manifest;

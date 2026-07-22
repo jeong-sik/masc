@@ -432,6 +432,18 @@ let test_manual_compaction_serializes_owner_lane () =
       (match busy_outcome with
        | Cycle.Busy _ -> ()
        | _ -> fail "manual compaction crossed an active owner turn slot");
+      (match
+         Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+           ~base_path
+           ~settled_at:(Time_compat.now ())
+           ~stop_requested:false
+           ~compaction_consecutive_failures:
+             meta.runtime.compaction_rt.consecutive_failures
+           ~lease
+           (Some busy_outcome)
+       with
+       | Registry_queue.Requeue Registry_queue.Cycle_busy -> ()
+       | _ -> fail "effect-free preflight Busy did not remain safely requeueable");
       check int
         "busy owner lane performs no exact dispatch"
         0
@@ -614,10 +626,19 @@ let test_manual_compaction_serializes_owner_lane () =
         "planning-admission race performs one exact dispatch"
         1
         (Exact_fixture.post_count race_server);
-      (match busy_after_prepare with
-       | `Busy _ -> ()
-       | `Applied _ | `No_compaction _ | `Compaction_failed _ ->
-         fail "compaction commit crossed a turn admitted during preparation");
+      let no_compaction =
+        match busy_after_prepare with
+        | `No_compaction
+            ({ reason =
+                 Masc.Keeper_event_queue_state.Execution_may_have_dispatched
+             ; _
+             } as no_compaction) ->
+          no_compaction
+        | `Busy _ ->
+          fail "post-dispatch final admission collapsed to replayable Busy"
+        | `Applied _ | `No_compaction _ | `Compaction_failed _ ->
+          fail "post-dispatch final admission lost its typed terminal receipt fence"
+      in
       (match Masc.Keeper_registry.get ~base_path meta.name with
        | Some entry ->
          check bool
@@ -629,14 +650,51 @@ let test_manual_compaction_serializes_owner_lane () =
       (match Eio.Promise.await commit_block_finished with
        | `Ran () -> ()
        | `Rejected _ -> fail "race fixture owner turn was rejected");
+      let settlement =
+        Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+          ~base_path
+          ~settled_at:(Time_compat.now ())
+          ~stop_requested:false
+          ~compaction_consecutive_failures:
+            meta.runtime.compaction_rt.consecutive_failures
+          ~lease
+          (Some
+             (Cycle.Manual_compaction_not_applied
+                { meta; no_compaction }))
+      in
+      (match settlement with
+       | Registry_queue.No_compaction
+           { reason =
+               Masc.Keeper_event_queue_state.Execution_may_have_dispatched
+           ; _
+           } ->
+         ()
+       | Registry_queue.Requeue _ ->
+         fail "post-dispatch final admission remained replayable"
+       | Registry_queue.Ack
+       | Registry_queue.Escalate _ ->
+         fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result
         ~base_path
         meta.name
         ~settled_at:(Time_compat.now ())
         ~lease
-        ~settlement:Ack
+        ~settlement
       |> Result.get_ok
-      |> ignore)
+      |> ignore;
+      let next_intake =
+        Masc.Keeper_heartbeat_loop.heartbeat_event_intake
+          ~ctx
+          ~meta_after_triage:meta
+          ~pending_board_events:[]
+      in
+      (match next_intake.claimed_lease, next_intake.consumed_stimuli with
+       | None, [] -> ()
+       | _ -> fail "terminal post-dispatch compaction stimulus re-entered the lane");
+      check int
+        "terminal post-dispatch settlement never repeats exact dispatch"
+        1
+        (Exact_fixture.post_count race_server))
 ;;
 
 let test_malformed_structure_preserves_checkpoint () =

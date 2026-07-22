@@ -524,6 +524,10 @@ type prepared_compaction =
   ; evidence : Keeper_compaction_evidence.t
   }
 
+let no_compaction_of_uncommitted_prepared prepared =
+  { source = prepared.source_ref; reason = Execution_may_have_dispatched }
+;;
+
 let prepare_compaction_admitted
       ~compact_for_request
       ~base_dir

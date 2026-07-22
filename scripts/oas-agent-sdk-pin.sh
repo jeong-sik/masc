@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
-# Pinned to the v0.219.0 release (tracks main). On top of 0.217.4:
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.220.0"
+# Pinned to the v0.220.0 release (tracks main). On top of 0.219.0:
+# - 0.220.0 adds the exact single-provider output admission surface: an opaque
+#   immutable plan, admit_exact_output, one-dispatch execute_once, and typed
+#   admission/normalization errors, effect receipts, and JSON-validation
+#   provenance (oas#2761). Pricing is deliberately omitted from execution and
+#   remains optional out-of-band measurement metadata. This pin does not move
+#   MASC domain validation, retry/failover, or Keeper lane policy into OAS.
+# - 0.220.0 also rejects unsupported Document input instead of emitting it as
+#   image_url on OpenAI-compatible and Ollama-native wires (oas#2755).
+# Previous pin (v0.219.0):
 # - 0.219.0 (breaking, dead-surface retirement): the legacy
 #   Api/Api_openai/Api_anthropic/Api_common/Streaming/Provider_intf dispatch
 #   island and the test-only agent_sdk re-export surface (Subagent,
@@ -61,5 +70,5 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="93e57a63a374a3f07325c7339b7bdefec12cea68"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"
+readonly OAS_AGENT_SDK_SHA="6c50638fded887a621b021573d37e17af9302e15"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.220.0"

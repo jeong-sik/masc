@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fingerprints OAS's public type surfaces (Event_bus payload variants,
-# Http_client error variants, Metrics.t record fields) and diffs against
-# the committed scripts/oas-api-surface.json.
+# Http_client error variants, Metrics.t record fields, and the exact-output
+# contract exposed by Complete) and diffs against the committed
+# scripts/oas-api-surface.json.
 #
 # Purpose: when OAS adds/removes/renames a variant or field, MASC's
 # consumer-side pattern matches break. CI catches the compile error
@@ -177,6 +178,89 @@ extract_metrics_fields() {
   | sort -u
 }
 
+# Exact-output execution is publicly exposed through Complete. The underlying
+# Exact_output_plan implementation module remains private, but its presence is
+# part of the pinned contract that backs Complete.exact_output_plan.
+extract_exact_output_contract_symbols() {
+  local src="$1"
+  local complete_file="${src}/lib/llm_provider/complete.mli"
+  local plan_file="${src}/lib/llm_provider/exact_output_plan.mli"
+  [[ -f "${complete_file}" ]] || { echo "missing ${complete_file}" >&2; return 1; }
+  [[ -f "${plan_file}" ]] || { echo "missing ${plan_file}" >&2; return 1; }
+
+  {
+    printf '%s\n' 'module:Exact_output_plan'
+    awk '
+      function emit_record_field(raw, owner, candidate, field) {
+        candidate=raw
+        sub(/^[[:space:]]*/, "", candidate)
+        sub(/^\{[[:space:]]*/, "", candidate)
+        sub(/^;[[:space:]]*/, "", candidate)
+        if (candidate ~ /^[a-z_][a-zA-Z0-9_]*[[:space:]]*:/) {
+          field=candidate
+          sub(/[[:space:]:].*$/, "", field)
+          print "field:" owner "." field
+        }
+      }
+      /^\(\*\* \{1 Exact Single-provider Output\} \*\)/ {
+        inblock=1
+        saw_start=1
+        next
+      }
+      inblock && /^\(\*\* \{1 Gemini URL Construction\} \*\)/ {
+        saw_end=1
+        inblock=0
+        next
+      }
+      inblock && /^type[[:space:]]+[a-z_][a-zA-Z0-9_]*/ {
+        original=$0
+        line=$0
+        sub(/^type[[:space:]]+/, "", line)
+        sub(/[[:space:]=].*$/, "", line)
+        current_type=line
+        in_record=0
+        print "type:" line
+        if (original ~ /=[[:space:]]*[A-Z][a-zA-Z0-9_]*/) {
+          constructor=original
+          sub(/^.*=[[:space:]]*/, "", constructor)
+          sub(/[[:space:]].*$/, "", constructor)
+          print "constructor:" constructor
+        }
+        next
+      }
+      inblock && current_type != "" && /^[[:space:]]*\{/ {
+        in_record=1
+        emit_record_field($0, current_type)
+        next
+      }
+      inblock && in_record && /^[[:space:]]*\}/ {
+        in_record=0
+        next
+      }
+      inblock && in_record {
+        emit_record_field($0, current_type)
+        next
+      }
+      inblock && /^[[:space:]]*\|[[:space:]]+[A-Z][a-zA-Z0-9_]*/ {
+        line=$0
+        sub(/^[[:space:]]*\|[[:space:]]+/, "", line)
+        sub(/[[:space:]].*$/, "", line)
+        print "constructor:" line
+        next
+      }
+      inblock && /^val[[:space:]]+[a-z_][a-zA-Z0-9_]*/ {
+        line=$0
+        sub(/^val[[:space:]]+/, "", line)
+        sub(/[[:space:]:].*$/, "", line)
+        print "val:" line
+      }
+      END {
+        if (!saw_start || !saw_end) exit 4
+      }
+    ' "${complete_file}"
+  } | sort -u
+}
+
 lines_to_json_array() {
   # stdin: one entry per line; stdout: JSON array
   jq -R . | jq -s .
@@ -184,10 +268,11 @@ lines_to_json_array() {
 
 build_fingerprint() {
   local src="$1"
-  local ebv hev mf
+  local ebv hev mf eocs
   ebv="$(extract_event_bus_variants   "${src}" | lines_to_json_array)"
   hev="$(extract_http_error_variants  "${src}" | lines_to_json_array)"
   mf="$( extract_metrics_fields       "${src}" | lines_to_json_array)"
+  eocs="$(extract_exact_output_contract_symbols "${src}" | lines_to_json_array)"
 
   jq -n \
     --arg sha "${OAS_AGENT_SDK_SHA}" \
@@ -195,13 +280,15 @@ build_fingerprint() {
     --argjson ebv "${ebv}" \
     --argjson hev "${hev}" \
     --argjson mf  "${mf}" \
+    --argjson eocs "${eocs}" \
     '{
        pinned_sha:        $sha,
        pinned_version:    $ver,
        surfaces: {
          event_bus_payload_variants: $ebv,
          http_error_variants:        $hev,
-         metrics_fields:             $mf
+         metrics_fields:             $mf,
+         exact_output_contract_symbols: $eocs
        }
      }'
 }
@@ -298,9 +385,9 @@ case "${MODE}" in
     if ! report_metadata_diff "${prev}" "${current}"; then
       drift=1
     fi
-    for section in event_bus_payload_variants http_error_variants metrics_fields; do
-      prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
-      curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"
+    for section in event_bus_payload_variants http_error_variants metrics_fields exact_output_contract_symbols; do
+      prev_arr="$(jq ".surfaces.${section} // []" <<<"${prev}")"
+      curr_arr="$(jq ".surfaces.${section} // []" <<<"${current}")"
       if ! report_diff "${section}" "${prev_arr}" "${curr_arr}"; then
         drift=1
       fi

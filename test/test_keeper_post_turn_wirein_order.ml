@@ -45,7 +45,8 @@ let init_runtime_fixture () =
   | Error detail -> failf "runtime fixture initialization failed: %s" detail
 ;;
 
-let publish_exact_fixture ?connect_timeout_s ~source server =
+let publish_exact_fixture ?connect_timeout_s ~source
+    (server : Exact_fixture.test_server) =
   Exact_fixture.publish_runtime_lane
     ?connect_timeout_s
     ~source

@@ -403,7 +403,9 @@ let test_timeout_cancellation_escapes_without_failover () =
         F.await_first_request first;
         Eio.Cancel.cancel context Cancel_after_request_arrived;
         try
-          ignore (Eio.Promise.await_exn execution : (C.completed_plan, C.failure) result);
+          ignore
+            (Eio.Promise.await_exn execution
+              : (C.completed_plan, C.summarization_failure) result);
           false
         with
         | Eio.Cancel.Cancelled Cancel_after_request_arrived -> true)

@@ -93,6 +93,139 @@ let test_provider_parse_rejection_counts_toward_crash () =
     false
     (EC.is_auto_recoverable_turn_error err)
 
+(* A 0-byte empty completion with a modeled non-overflow stop_reason (OAS
+   [Retry.Empty_attributed]) surfaces as [ProviderUnavailable] and is
+   auto-recoverable: retry/failover can make progress on a broken backend
+   model answering with an empty assistant turn. *)
+let test_attributed_empty_completion_is_auto_recoverable () =
+  let err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "ollama-cloud"
+         ; detail =
+             "empty completion (stop_reason=end_turn): provider returned an \
+              empty assistant turn"
+         })
+  in
+  Alcotest.(check bool)
+    "attributed empty completion is an empty completion error"
+    true
+    (EC.is_empty_completion_error err);
+  Alcotest.(check bool)
+    "attributed empty completion is auto-recoverable"
+    true
+    (EC.is_auto_recoverable_turn_error err);
+  Alcotest.(check bool)
+    "attributed empty completion is not a server parse rejection"
+    false
+    (EC.is_server_rejected_parse_error err)
+
+(* The backend_openai_parse fail-closed path surfaces an all-empty completion
+   as a [ParseError] whose detail embeds the empty-completion marker.  It is
+   both a server parse rejection and auto-recoverable. *)
+let test_parse_error_empty_completion_is_auto_recoverable () =
+  let err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail =
+             "openai_parse: empty completion (no thinking, text, or tool \
+              calls; model=glm-5, stop_reason=end_turn)"
+         })
+  in
+  Alcotest.(check bool)
+    "parse-error empty completion is an empty completion error"
+    true
+    (EC.is_empty_completion_error err);
+  Alcotest.(check bool)
+    "parse-error empty completion is still a server parse rejection"
+    true
+    (EC.is_server_rejected_parse_error err);
+  Alcotest.(check bool)
+    "parse-error empty completion is auto-recoverable"
+    true
+    (EC.is_auto_recoverable_turn_error err)
+
+(* OAS intentionally surfaces an empty completion with an unmodeled
+   stop_reason as a non-retryable [InvalidRequest]: retrying replays the
+   identical prompt and never terminates.  It must NOT be promoted to
+   auto-recoverable. *)
+let test_unmodeled_stop_reason_invalid_request_counts_toward_crash () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message =
+             "empty completion with unmodeled stop_reason=\"glmtoken\": \
+              provider returned an empty assistant turn"
+         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         })
+  in
+  Alcotest.(check bool)
+    "unmodeled stop_reason empty completion is not an empty completion error"
+    false
+    (EC.is_empty_completion_error err);
+  Alcotest.(check bool)
+    "unmodeled stop_reason empty completion is not auto-recoverable"
+    false
+    (EC.is_auto_recoverable_turn_error err)
+
+(* A generic 400 [InvalidRequest] recurs deterministically with the same
+   payload; it must never be exempt from the crash threshold. *)
+let test_generic_invalid_request_counts_toward_crash () =
+  let err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "invalid request body"
+         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         })
+  in
+  Alcotest.(check bool)
+    "generic InvalidRequest is not auto-recoverable"
+    false
+    (EC.is_auto_recoverable_turn_error err)
+
+(* Bounded compensating accounting: the empty-completion exemption is capped
+   per keeper; once the budget is exhausted the failure counts toward crash
+   again, and a success resets the budget. *)
+let test_empty_completion_exemption_budget_is_bounded () =
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-empty-completion-budget" in
+  KUF.note_turn_success keeper_name;
+  let empty_err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "ollama-cloud"
+         ; detail = "empty completion (stop_reason=end_turn): empty turn"
+         })
+  in
+  let transient_err =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.Timeout { message = "timeout"; phase = None })
+  in
+  for i = 1 to KUF.empty_completion_exemption_budget do
+    Alcotest.(check bool)
+      (Printf.sprintf "exempted empty completion %d does not count toward crash" i)
+      false
+      (KUF.account_failure_counting
+         ~keeper_name ~is_auto_recoverable:true empty_err)
+  done;
+  Alcotest.(check bool)
+    "a non-empty auto-recoverable failure does not consume the budget"
+    false
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true transient_err);
+  Alcotest.(check bool)
+    "empty completion past the budget counts toward crash"
+    true
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true empty_err);
+  KUF.note_turn_success keeper_name;
+  Alcotest.(check bool)
+    "success resets the exemption budget"
+    false
+    (KUF.account_failure_counting
+       ~keeper_name ~is_auto_recoverable:true empty_err);
+  KUF.note_turn_success keeper_name
+
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
@@ -124,6 +257,17 @@ let () =
           test_tls_handshake_internal_error_is_transient;
         Alcotest.test_case "provider parse rejection counts toward crash" `Quick
           test_provider_parse_rejection_counts_toward_crash;
+        Alcotest.test_case "attributed empty completion is auto-recoverable" `Quick
+          test_attributed_empty_completion_is_auto_recoverable;
+        Alcotest.test_case "parse-error empty completion is auto-recoverable" `Quick
+          test_parse_error_empty_completion_is_auto_recoverable;
+        Alcotest.test_case
+          "unmodeled stop_reason InvalidRequest counts toward crash" `Quick
+          test_unmodeled_stop_reason_invalid_request_counts_toward_crash;
+        Alcotest.test_case "generic InvalidRequest counts toward crash" `Quick
+          test_generic_invalid_request_counts_toward_crash;
+        Alcotest.test_case "empty completion exemption budget is bounded" `Quick
+          test_empty_completion_exemption_budget_is_bounded;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

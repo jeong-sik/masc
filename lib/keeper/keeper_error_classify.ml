@@ -182,18 +182,50 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
-let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
-  let err_str = Agent_sdk.Error.to_string err in
-  String.contains err_str 'e' && (
-    String.starts_with ~prefix:"empty completion" err_str
-    || String.starts_with ~prefix:"Context overflow: empty completion" err_str
-    || (try Re.execp (Re.Posix.compile_pat "empty completion|empty assistant turn") err_str with _ -> false)
-  )
+(** 0-byte empty completion: the provider ended the turn with a modeled,
+    non-overflow stop_reason but returned no thinking, text, or tool calls
+    (a broken backend model answering with an empty assistant turn).  OAS
+    surfaces exactly two shapes for this condition
+    (oas [Retry.verdict_of_empty_completion]):
 
-let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
+    - [Provider (ProviderUnavailable {detail})] with [detail] starting
+      ["empty completion (stop_reason="] — a recognized non-overflow
+      stop_reason (e.g. [end_turn]) on an empty assistant turn, routed to
+      provider-unavailability handling upstream;
+    - [Provider (ParseError {detail})] whose detail embeds the
+      backend_openai_parse fail-closed marker
+      ["empty completion (no thinking, text, or tool calls"].
+
+    Deliberately excluded:
+
+    - [Api (InvalidRequest _)] — OAS flattens only the unmodeled-stop_reason
+      and the context-overflow empty completions into [InvalidRequest].  The
+      first is intentionally non-retryable (oas
+      provider_failure_attribution.ml: retrying replays the identical prompt
+      and never terminates); the second replays the same oversized prompt.
+      Neither is recoverable by retry or failover, so no [InvalidRequest]
+      message text is matched here — free-form provider bodies are not a
+      classification source (see [is_provider_rejected_parse_error]).
+    - ["Context overflow: empty completion"] — a context-overflow diagnostic,
+      already classified by [is_context_overflow] on the typed path. *)
+let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Api (InvalidRequest _) -> true
-  | _ -> false
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
+      String.starts_with ~prefix:"empty completion (stop_reason=" detail
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
+      (* backend_openai_parse.ml renders the fail-closed empty completion as
+         "<parser>: empty completion (no thinking, text, or tool calls; ...)". *)
+      String_util.contains_substring detail "empty completion (no thinking"
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.Internal _ -> false
 
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
@@ -710,6 +742,14 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
    - context overflow: accounted at the point of detection by
      [Keeper_turn_runtime_budget.record_overflow_failure], and its in-lane
      compaction retries are bounded (#25536).
+   - 0-byte empty completion: bounded by
+     [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
+     [empty_completion_exemption_budget] consecutive exempted empty
+     completions the failure counts toward the crash threshold again, and a
+     successful turn resets the budget.  Only the modeled, non-overflow
+     shapes are exempt (see [is_empty_completion_error]); the unmodeled
+     stop_reason shape that OAS intentionally reports as non-retryable
+     [InvalidRequest] is NOT exempt and keeps counting toward crash.
 
    Provider parse rejections used to be listed here and had no such accounting.
    A provider that keeps emitting a malformed stream (for example a tool_call
@@ -723,7 +763,6 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
-  || is_invalid_request_error err
   || is_empty_completion_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =

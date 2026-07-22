@@ -42,8 +42,12 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     [InvalidRequest]. *)
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] for a 0-byte empty completion: the provider ended the turn with a
+    modeled, non-overflow stop_reason but returned no content.  Only the two
+    typed OAS shapes for this condition match (see the .ml); the unmodeled
+    stop_reason shape that OAS intentionally reports as non-retryable
+    [InvalidRequest] does not. *)
 val is_empty_completion_error : Agent_sdk.Error.sdk_error -> bool
-val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive
     failure counting, even if same-turn retry is still disabled. Typed OAS

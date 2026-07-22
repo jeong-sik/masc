@@ -769,7 +769,7 @@ let test_prepare_commit_source_cas () =
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
-     | Ok _ -> fail "stale prepared value committed past the source CAS")
+     | Ok _ -> fail "stale prepared value committed past the source CAS"))
 ;;
 
 (* RFC-0351 S0 / #25461: once the persisted failure streak suspends

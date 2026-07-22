@@ -137,7 +137,7 @@ let test_preparation_is_ordered_effect_free_and_single_generation () =
   @@ fun ~sw ~net ~clock ->
   let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let fixtures =
+  let fixtures : F.target_fixture list =
     [ { id = "prepare-first"; base_url = first.base_url }
     ; { id = "prepare-second"; base_url = second.base_url }
     ]

@@ -577,7 +577,7 @@ let prepare_compaction_admitted
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
     in
-    let preparation =
+    let preparation : Keeper_compact_policy.compaction_preparation =
       compact_for_request
         ~meta:retry_meta
         ~trigger

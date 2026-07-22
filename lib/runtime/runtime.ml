@@ -1141,7 +1141,9 @@ let set_loaded
     }
 
 let init_default ~config_path =
-  let* loaded = load_list_internal ~config_path ~validate_max_context:true in
+  let* loaded, _exact_output_lane_decls =
+    load_list_internal ~config_path ~validate_max_context:true
+  in
   set_loaded ~config_path loaded;
   Ok ()
 
@@ -1153,7 +1155,7 @@ let init_default ~config_path =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1167,7 +1169,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with

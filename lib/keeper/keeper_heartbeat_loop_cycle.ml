@@ -408,7 +408,7 @@ let run_keeper_cycle_with
          "manual compaction failed in owner lane: %s"
          (Keeper_manual_compaction.failure_to_string failure);
        Manual_compaction_failed { meta = meta_after_triage; failure }
-     | `No_compaction no_compaction ->
+     | `No_compaction (no_compaction : Keeper_post_turn.no_compaction) ->
        Log.Keeper.info
          ~keeper_name:meta_after_triage.name
          "manual compaction reached typed terminal: %s"

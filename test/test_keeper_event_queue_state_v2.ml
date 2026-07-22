@@ -59,16 +59,37 @@ let test_exact_output_terminal_reasons_round_trip () =
        let settlement =
          State.No_compaction (no_compaction ~turn_count:7 reason)
        in
-       match
-         settlement
-         |> State.settlement_to_yojson
-         |> State.settlement_of_yojson
-       with
-       | Ok restored ->
-         Alcotest.(check bool) "terminal settlement JSON round-trip" true
-           (restored = settlement)
-       | Error detail ->
-         Alcotest.failf "terminal settlement decode failed: %s" detail)
+       let claimed, lease =
+         State.with_pending
+           (queue
+              [ stimulus
+                  ~payload:Queue.Manual_compaction_requested
+                  Queue.manual_compaction_post_id
+                  1.0
+              ])
+           State.empty
+         |> claim_head
+       in
+       let lease = require_some "exact-output terminal lease" lease in
+       let _, result =
+         State.settle ~settled_at:11.0 ~lease ~settlement claimed
+         |> require_ok "settle exact-output terminal"
+       in
+       let receipt =
+         match result with
+         | State.Settled receipt -> receipt
+         | State.Already_settled _ ->
+           Alcotest.fail "exact-output terminal was already settled"
+       in
+       let restored =
+         State.transition_receipt_to_yojson receipt
+         |> State.transition_receipt_of_yojson
+         |> require_ok "exact-output terminal receipt round-trip"
+       in
+       Alcotest.(check bool)
+         "terminal settlement survives public receipt codec"
+         true
+         (State.transition_receipt_equal receipt restored))
     [ State.Execution_may_have_dispatched, "execution_may_have_dispatched"
     ; State.Domain_invalid_output, "domain_invalid_output"
     ];

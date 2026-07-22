@@ -481,7 +481,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
   execute prepared_lane.admitted_slots
 ;;
 
-let run_exact ~keeper_name ~sw:_ ~net ?clock ~units =
+let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -502,7 +502,7 @@ let make_resolved ~(keeper_name : string) () : summarizer option =
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
-    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ?clock ~units)
+    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ~clock ~units)
   | _ -> None
 ;;
 
@@ -516,7 +516,8 @@ let exact_execution_evidence_target_identity_fingerprint evidence =
   evidence.target_identity_fingerprint
 ;;
 
-let exact_execution_evidence_catalog_generation_fingerprint evidence =
+let exact_execution_evidence_catalog_generation_fingerprint
+      (evidence : exact_execution_evidence) =
   evidence.catalog_generation_fingerprint
 ;;
 

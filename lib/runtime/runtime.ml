@@ -958,15 +958,16 @@ let materialize_config
     ?(validate_max_context = true)
     ~(config_path : string)
     (cfg : config)
-  : ( t list
-      * t
-      * (string * string) list
-      * string option
-      * string option
-      * string option
-      * string option
-      * string list
-      * Runtime_lane.t list
+  : ( (t list
+       * t
+       * (string * string) list
+       * string option
+       * string option
+       * string option
+       * string option
+       * string list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -1033,19 +1034,20 @@ let materialize_config
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
   Ok
-    ( runtimes
-    , rt
-    , assignments
-    , cfg.librarian_runtime_id
-    , cfg.structured_judge_runtime_id
-    , cfg.hitl_summary_runtime_id
-    , cfg.cross_verifier_runtime_id
-    , cfg.media_failover
-    , lanes )
+    ( ( runtimes
+      , rt
+      , assignments
+      , cfg.librarian_runtime_id
+      , cfg.structured_judge_runtime_id
+      , cfg.hitl_summary_runtime_id
+      , cfg.cross_verifier_runtime_id
+      , cfg.media_failover
+      , lanes )
+    , cfg.exact_output_lane_decls )
 ;;
 
 let load_list_internal ~(config_path : string) ~validate_max_context
-  : ( t list
+  : ( (t list
        * t
        * (string * string) list
        * string option
@@ -1053,7 +1055,8 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * string option
        * string option
        * string list
-       * Runtime_lane.t list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -1070,6 +1073,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
 
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
+  |> Result.map fst
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1137,7 +1141,7 @@ let set_loaded
     }
 
 let init_default ~config_path =
-  let* loaded = load_list ~config_path in
+  let* loaded = load_list_internal ~config_path ~validate_max_context:true in
   set_loaded ~config_path loaded;
   Ok ()
 
@@ -1147,7 +1151,7 @@ let init_default ~config_path =
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
-  match load_list ~config_path with
+  match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
   | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
@@ -1178,7 +1182,10 @@ let init_default_degraded_report ~config_path =
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
-             set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
+             set_loaded
+               ~startup_degradation:degradation
+               ~config_path
+               degraded_loaded;
              Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
@@ -1683,18 +1690,7 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* (_
-         : t list
-           * t
-           * (string * string) list
-           * string option
-           * string option
-           * string option
-           * string option
-           * string list
-           * Runtime_lane.t list) =
-    materialize_config ~config_path cfg
-  in
+  let* _legacy_config = materialize_config ~config_path cfg in
   Ok ()
 ;;
 

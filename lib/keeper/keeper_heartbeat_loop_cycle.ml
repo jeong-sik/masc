@@ -314,7 +314,8 @@ let run_keeper_cycle_admitted
   | `Turn (Ok (Keeper_unified_turn.Turn_skipped meta)) -> Skipped meta
 ;;
 
-let run_keeper_cycle
+let run_keeper_cycle_with
+      ~run_manual_compaction
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -396,7 +397,7 @@ let run_keeper_cycle
        LLM turn may not. [Manual_compaction_applied (Busy _)] settles the
        stimulus as Ack, so a yielded follow-up does not replay compaction. *)
     (match
-       Keeper_manual_compaction.run_admitted
+       run_manual_compaction
          ~config:ctx.config
          ~meta:meta_after_triage
      with
@@ -414,4 +415,36 @@ let run_keeper_cycle
          (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
        Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
      | `Applied _success -> Manual_compaction_applied (run_standard_cycle ()))
+;;
+
+let run_keeper_cycle
+      ?event_bus
+      ?hitl_resolution
+      ?continuation_delivery_channel
+      ~ctx
+      ~meta_after_triage
+      ~stop
+      ~obs
+      ~turn_decision
+      ~shared_context
+      ~wake
+      ?failure_judgment
+      ?manual_compaction_requested
+      ()
+  =
+  run_keeper_cycle_with
+    ~run_manual_compaction:Keeper_manual_compaction.run_admitted
+    ?event_bus
+    ?hitl_resolution
+    ?continuation_delivery_channel
+    ~ctx
+    ~meta_after_triage
+    ~stop
+    ~obs
+    ~turn_decision
+    ~shared_context
+    ~wake
+    ?failure_judgment
+    ?manual_compaction_requested
+    ()
 ;;

@@ -5,6 +5,7 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
+module Exact_output = Agent_sdk.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
@@ -111,6 +112,136 @@ let configure_oas_model_catalog_overlay
        raise
          (Env_config_core.Config_error
             (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
+let exact_output_catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Overlay_catalog -> "overlay"
+;;
+
+let exact_output_collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+  | Exact_output.Target_identity_shadow -> "target identity shadow"
+  | Exact_output.Model_identity_shadow -> "model identity shadow"
+;;
+
+let exact_output_binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let exact_output_endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let exact_output_snapshot_error_to_string = function
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf
+      "%s catalog parse failed: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision ->
+    exact_output_collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_endpoint_error_to_string cause)
+  | Exact_output.Environment_read_failed { environment_variable } ->
+    Printf.sprintf "failed to read environment variable %s" environment_variable
+  | Exact_output.Target_credential_invalid
+      { target_ref; environment_variable } ->
+    Printf.sprintf
+      "target %S has an invalid credential in environment variable %s"
+      (Exact_output.target_ref_id target_ref)
+      environment_variable
+;;
+
+let read_exact_output_overlay path =
+  try Ok (In_channel.with_open_bin path In_channel.input_all) with
+  | Sys_error detail -> Error detail
+;;
+
+let load_exact_output_lane_declarations () =
+  match Runtime.config_path () with
+  | None ->
+    raise
+      (Env_config_core.Config_error
+         "exact-output registry: runtime.toml path is unavailable")
+  | Some config_path ->
+    (match Runtime_toml.parse_file config_path with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf
+               "exact-output registry: runtime config parse failed (%s): %d error(s)"
+               config_path
+               (List.length errors))))
+;;
+
+let configure_exact_output_registry ?config_root () =
+  let overlay_path = resolve_oas_model_catalog_overlay_path ?config_root () in
+  let overlay =
+    match overlay_path with
+    | None -> None
+    | Some path ->
+      (match read_exact_output_overlay path with
+       | Ok contents ->
+         Some ({ source = path; contents } : Exact_output.catalog_overlay)
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "exact-output catalog overlay %s: %s" path detail)))
+  in
+  let io : Exact_output.resolver_io =
+    { getenv =
+        (fun name ->
+          try Ok (Sys.getenv_opt name) with
+          | Sys_error _ | Invalid_argument _ -> Error ())
+    }
+  in
+  match Exact_output.load_resolver_snapshot ~io ?overlay () with
+  | Error error ->
+    raise
+      (Env_config_core.Config_error
+         ("exact-output resolver snapshot: "
+          ^ exact_output_snapshot_error_to_string error))
+  | Ok resolver_snapshot ->
+    let lanes = load_exact_output_lane_declarations () in
+    (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+     | Error error ->
+       raise
+         (Env_config_core.Config_error
+            ("exact-output resolver-and-lane registry: "
+             ^ Runtime_exact_output_registry.error_to_string error))
+     | Ok registry ->
+       Log.Misc.info
+         "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
+         (Runtime_exact_output_registry.generation registry)
+         (match overlay_path with
+          | None -> " from OAS embedded catalog"
+          | Some path -> " with deployment overlay " ^ path))
+;;
 
 (* GC tuning for long-running server with bursty allocation.
 
@@ -258,6 +389,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_oas_model_catalog_env () in
   let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
+  configure_exact_output_registry ~config_root ();
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing

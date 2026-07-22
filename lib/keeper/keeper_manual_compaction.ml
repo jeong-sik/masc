@@ -55,7 +55,6 @@ let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
     Keeper_runtime_manifest.make_for_context
       context
       ~event:Keeper_runtime_manifest.Context_compacted
-      ~runtime_id:recovery.evidence.selected_runtime_id
       ~status:"compacted"
       ~decision:
         (Keeper_runtime_manifest.with_clock_refs
@@ -156,7 +155,7 @@ let finish_preparation ~config ~base_dir ~meta = function
   | Ok prepared -> run_commit ~config ~base_dir ~meta prepared
 ;;
 
-let prepare ~config ~meta =
+let prepare_with ~prepare_compaction ~config ~meta =
   let base_dir = Keeper_types_profile.session_base_dir config in
   let projection_request =
     Keeper_compaction_projection_target.request
@@ -176,11 +175,15 @@ let prepare ~config ~meta =
           Keeper_compaction_projection_target.Context_window_not_resolved)
   in
   ( base_dir
-  , Keeper_context_runtime.prepare_compaction
+  , prepare_compaction
       ~base_dir
       ~meta
       ~trigger:Compaction_trigger.Manual
       ~projection_request )
+;;
+
+let prepare =
+  prepare_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
 ;;
 
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
@@ -206,7 +209,11 @@ let observe_manifest ~keeper_name = function
       ()
 ;;
 
-let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
+let run_admitted_with
+      ~prepare_compaction
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  =
   (* Reject work that is already fenced before spending a provider call. This
      preflight owns no lifecycle state and releases immediately. A turn can
      still enter while planning; the final admission and source CAS close that
@@ -219,7 +226,7 @@ let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
   with
   | `Busy block -> `Busy block
   | `Ran () ->
-    let base_dir, preparation = prepare ~config ~meta in
+    let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
     (match
        Keeper_turn_admission.run_compaction_if_free
          ~base_path:config.base_path
@@ -235,6 +242,11 @@ let run_admitted ~(config : Workspace.config) ~(meta : keeper_meta) =
        observe_manifest ~keeper_name:meta.name success.manifest;
        `Applied success
      | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
+;;
+
+
+let run_admitted =
+  run_admitted_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
 ;;
 
 let lifecycle_stage_to_string = function

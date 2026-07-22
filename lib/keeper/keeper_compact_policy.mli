@@ -4,9 +4,11 @@
     compaction on their own. *)
 
 type compaction_rejection =
-  | Runtime_identity_unavailable
-  | Summarizer_unavailable
-  | Plan_provider_unavailable
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
@@ -73,15 +75,3 @@ val register_record_pre_compact
       -> trigger:Compaction_trigger.t
       -> pre_compact_event option)
   -> unit
-
-module For_testing : sig
-  (** Priority-ordered candidate runtime ids for the compaction plan call: the
-      structured-judge lane first (schema-capable by construction, RFC-0307),
-      then the keeper's own chat runtime as a lower-priority candidate. Both
-      are seed ids into
-      {!Keeper_compaction_llm_summarizer.candidate_runtime_ids_for_assignments};
-      an id that is blank or fails to resolve (e.g. runtime state not yet
-      initialized) is omitted rather than failing the whole list. Empty only
-      when neither source resolves. *)
-  val compaction_runtime_ids : Keeper_meta_contract.keeper_meta -> string list
-end

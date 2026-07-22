@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
-# Pinned to the v0.219.0 release (tracks main). On top of 0.217.4:
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.220.5"
+# Pinned to the v0.220.5 release; history below starts at 0.219.0:
 # - 0.219.0 (breaking, dead-surface retirement): the legacy
 #   Api/Api_openai/Api_anthropic/Api_common/Streaming/Provider_intf dispatch
 #   island and the test-only agent_sdk re-export surface (Subagent,
@@ -60,7 +60,8 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
 # product operation ownership remain MASC concepts.
 # The reachability guard in check-oas-pin.sh tracks main; oas-drift-check.sh
 # reports the public-surface delta at pin-bump time.
-# Pinned to main (c8b355d2). Absorbs oas#2771 & oas#2772: release v0.220.4 with immutable resolver snapshot.
-readonly OAS_AGENT_SDK_DECLARED_VERSION="0.220.4"
-readonly OAS_AGENT_SDK_SHA="c8b355d2ed99c73f939d2771826e5197399a81af"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"
+# Pinned to the v0.220.5 release (5851df2e), including the corrected Exact_output admission, execution receipt, and provenance surface.
+readonly OAS_AGENT_SDK_DECLARED_VERSION="0.220.5"
+readonly OAS_AGENT_SDK_TRACK_REF="main"
+readonly OAS_AGENT_SDK_SHA="5851df2e276872d640769813f2000642f7bd56d3"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.220.5"

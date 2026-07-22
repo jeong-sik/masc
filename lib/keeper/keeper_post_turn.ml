@@ -503,11 +503,14 @@ let terminal_reason_of_rejection = function
   | Invalid_structure _ -> Some Invalid_structural_source
   | Structurally_unchanged -> Some Structurally_unchanged
   | Checkpoint_not_reduced -> Some Checkpoint_not_reduced
-  | Invalid_compaction_plan
+  | Invalid_compaction_plan -> Some Domain_invalid_output
+  | Exact_execution_failed_after_dispatch ->
+    Some Execution_may_have_dispatched
   | Invalid_structural_evidence _
-  | Runtime_identity_unavailable
-  | Summarizer_unavailable
-  | Plan_provider_unavailable -> None
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch -> None
 ;;
 
 type prepared_compaction =
@@ -522,6 +525,7 @@ type prepared_compaction =
   }
 
 let prepare_compaction_admitted
+      ~compact_for_request
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
@@ -574,7 +578,7 @@ let prepare_compaction_admitted
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
     in
     let preparation =
-      Keeper_compact_policy.compact_for_request_typed
+      compact_for_request
         ~meta:retry_meta
         ~trigger
         ctx
@@ -624,7 +628,8 @@ let prepare_compaction_admitted
    drops that residual burn to zero. The manual trigger passes through on
    purpose: an operator-committed compaction is the recovery lever — its
    commit resets the streak and lifts the suspension. *)
-let prepare_compaction
+let prepare_compaction_with
+      ~compact_for_request
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
@@ -641,7 +646,17 @@ let prepare_compaction
              meta.runtime.compaction_rt.consecutive_failures
          })
   | Compaction_trigger.Provider_overflow _ | Compaction_trigger.Manual ->
-    prepare_compaction_admitted ~base_dir ~meta ~trigger ~projection_request
+    prepare_compaction_admitted
+      ~compact_for_request
+      ~base_dir
+      ~meta
+      ~trigger
+      ~projection_request
+;;
+
+let prepare_compaction =
+  prepare_compaction_with
+    ~compact_for_request:Keeper_compact_policy.compact_for_request_typed
 ;;
 
 let commit_prepared_compaction (prepared : prepared_compaction)

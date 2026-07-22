@@ -982,6 +982,11 @@ candidates = [
   "deepseek.deepseek-v4-pro",
 ]
 
+[runtime.exact_output_lanes.compaction_exact]
+slots = [
+  "deepseek.deepseek-v4-pro",
+]
+
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned
 # keepers fall back to [runtime].default. Per-keeper overrides in the

@@ -129,8 +129,8 @@ sync_locked_opam_manifest() {
 
   tmp_file="$(mktemp)"
   sed -E \
-    -e "s|^([[:space:]]*)\"agent_sdk\" \\{= \"[0-9][0-9.]*\"\\}$|\\1\"agent_sdk\" {= \"${OAS_AGENT_SDK_MIN_VERSION}\"}|" \
-    -e "s|^([[:space:]]*)\"agent_sdk\\.[0-9][0-9.]*\"$|\\1\"agent_sdk.${OAS_AGENT_SDK_MIN_VERSION}\"|" \
+    -e "s|^([[:space:]]*)\"agent_sdk\" \\{= \"[0-9][0-9.]*\"\\}$|\\1\"agent_sdk\" {= \"${OAS_AGENT_SDK_DECLARED_VERSION}\"}|" \
+    -e "s|^([[:space:]]*)\"agent_sdk\\.[0-9][0-9.]*\"$|\\1\"agent_sdk.${OAS_AGENT_SDK_DECLARED_VERSION}\"|" \
     -e "s|^([[:space:]]*)\"git\\+https://github[.]com/jeong-sik/oas[.]git#[0-9a-f]+\"$|\\1\"git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}\"|" \
     "${file}" > "${tmp_file}"
   write_or_check "${file}" "${tmp_file}"

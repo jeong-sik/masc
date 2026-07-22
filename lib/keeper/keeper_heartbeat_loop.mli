@@ -141,7 +141,9 @@ val settlement_of_failure :
     cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
     rejections over ~10h, ended only by operator keeper_down). A
     [Compaction_committed] disposition always requeues: the retry reloads a
-    durably smaller checkpoint. *)
+    durably smaller checkpoint. [Escalate_after_exact_output_terminal] ignores
+    the ordinary route and immediately settles as a typed escalation with no
+    successor. *)
 
 val compaction_outcome_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->

@@ -208,11 +208,11 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 1 / 일시정지 keeper 1 / configured keeper 2')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=재개 대기 lifecycle row; 오프라인 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=shell keeper 설정.')
+      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=일시정지 lifecycle row; 중지 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=shell keeper 설정.')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
       .toBe('일시정지 keeper 1')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.detail)
-      .toBe('재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
+      .toBe('일시정지 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
   })
 
   it('does not label an intentional server/base split as data source mismatch', () => {
@@ -323,7 +323,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 2 / configured keeper 16')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=재개 대기 lifecycle row; 오프라인 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=project snapshot keeper 설정.')
+      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=일시정지 lifecycle row; 중지 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=project snapshot keeper 설정.')
   })
 
   it('uses runtime health as the paused keeper count authority when detail rows are absent', () => {
@@ -354,7 +354,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 0 / 일시정지 keeper 3 / configured keeper 13')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=runtime health; 일시정지 keeper=runtime health; 오프라인 keeper=runtime health only; execution offline rows not mixed; configured keeper=shell keeper 설정.')
+      .toBe('keeper 실행 fiber=runtime health; 일시정지 keeper=runtime health; 중지 keeper=runtime health only; execution offline rows not mixed; configured keeper=shell keeper 설정.')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
       .toBe('일시정지 keeper 3')
     expect(chips.find(chip => chip.key === 'no-keeper-rows')).toBeUndefined()

@@ -407,6 +407,12 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(redirected.session_id).toBe('s-123')
   })
 
+  it('redirects retired ?section=cognition URL to agents and preserves other params', () => {
+    const redirected = normalizeRouteParams('monitoring', { section: 'cognition', keeper: 'k-1' })
+    expect(redirected.section).toBe('agents')
+    expect(redirected.keeper).toBe('k-1')
+  })
+
   it('redirects telemetry to fleet-health with event-log view (Phase 1)', () => {
     const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
     expect(result.section).toBe('fleet-health')

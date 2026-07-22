@@ -11,12 +11,14 @@ import {
   Search,
   Settings,
 } from 'lucide-preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
+import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
+import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
 import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
@@ -127,21 +129,31 @@ function keeperContextRatio(keeper: Keeper): number {
   return max > 0 ? Math.max(0, Math.min(1, current / max)) : 0
 }
 
-function keeperStatusRank(keeper: Keeper): number {
-  const bucket = keeperBucket(keeper)
+/** Bucket resolver threaded through the roster so every grouping/sort/count
+ *  in a render pass uses the same composite-aware classification (W1: a
+ *  `synthetic_stall` keeper must land in the same bucket here as in
+ *  registry/monitoring). Defaults to the flat-record `keeperBucket`. */
+type BucketOf = (keeper: Keeper) => KeeperBucket
+
+function keeperStatusRank(keeper: Keeper, bucketOf: BucketOf): number {
+  const bucket = bucketOf(keeper)
   if (bucket === 'running') return 0
   if (bucket === 'stuck') return 1
   if (bucket === 'paused') return 2
   return 3
 }
 
-function compareFleetRows(a: Keeper, b: Keeper): number {
-  return keeperStatusRank(a) - keeperStatusRank(b)
+function compareFleetRows(bucketOf: BucketOf): (a: Keeper, b: Keeper) => number {
+  return (a, b) =>
+    keeperStatusRank(a, bucketOf) - keeperStatusRank(b, bucketOf)
     || keeperContextRatio(b) - keeperContextRatio(a)
     || a.name.localeCompare(b.name)
 }
 
-export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary {
+export function rosterFleetSummary(
+  rows: readonly Keeper[],
+  bucketOf: BucketOf = keeperBucket,
+): RosterFleetSummary {
   const summary: RosterFleetSummary = {
     total: rows.length,
     running: 0,
@@ -154,7 +166,7 @@ export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary 
   }
 
   for (const keeper of rows) {
-    const bucket = keeperBucket(keeper)
+    const bucket = bucketOf(keeper)
     if (bucket === 'running') summary.running += 1
     if (bucket === 'stuck') summary.stuck += 1
     if (bucket === 'paused') summary.paused += 1
@@ -487,14 +499,20 @@ export function KeeperWorkspaceRoster({
   }, [menu])
 
   const all = keepers.value
+  // Composite-aware bucket resolution (same map agent-roster/registry use) so
+  // a `synthetic_stall` keeper confirmed blocked by the composite attention
+  // axis groups under 확인 필요 here too — not running.
+  const fleetSnapshot = fleetCompositeSnapshot.value
+  const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
+  const bucketOf: BucketOf = k => keeperBucket(k, compositeSnapshotForKeeper(k, compositeByKeeperKey))
   const counts = {
     all: all.length,
-    run: all.filter(k => keeperBucket(k) === 'running').length,
+    run: all.filter(k => bucketOf(k) === 'running').length,
     att: all.filter(needsAttention).length,
   }
 
   const visible = all.filter(k => {
-    if (filter === 'run' && keeperBucket(k) !== 'running') return false
+    if (filter === 'run' && bucketOf(k) !== 'running') return false
     if (filter === 'att' && !needsAttention(k)) return false
     return matchesQuery(k, query)
   })
@@ -575,8 +593,8 @@ export function KeeperWorkspaceRoster({
   if (sort === 'status') {
     for (const group of GROUP_ORDER) {
       const rows = visible
-        .filter(k => keeperBucket(k) === group.bucket)
-        .sort(compareFleetRows)
+        .filter(k => bucketOf(k) === group.bucket)
+        .sort(compareFleetRows(bucketOf))
       if (rows.length === 0) continue
       items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
       for (const keeper of rows) items.push({ type: 'row', keeper })

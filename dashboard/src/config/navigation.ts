@@ -531,6 +531,10 @@ type TabSectionKey = `${TabId}:${string}`
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
+  // Keeper status SSOT pass (#25578): the hidden cognition lens section was
+  // removed; stale bookmarks redirect (with telemetry) instead of silently
+  // falling back to the default section.
+  'monitoring:cognition': { section: 'agents' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },

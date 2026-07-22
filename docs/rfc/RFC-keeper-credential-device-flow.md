@@ -71,6 +71,13 @@ type connect_prompt =
   | Device_code_prompt of { user_code : string; verification_uri : string; expires_in : float; interval : float }
   | Redirect_prompt of { authorization_url : string }
 
+type state =
+  | Pending
+  | Authorized of { identity : string; expires_at : float }
+  | Expired
+(* 종단 실패(access_denied, transport error 등)는 result의 string error 채널로
+   단일화한다 — state에 Error variant를 두지 않는다(이중 에러 채널 방지). *)
+
 module type S = sig
   val addon_id : string        (* "github" | "figma" — route, state dir, dashboard dispatch *)
   val display_name : string    (* "GitHub" | "Figma" *)
@@ -86,8 +93,8 @@ module type S = sig
       dashboard가 grant로 렌더링. *)
 
   val poll : base_path:string -> connect_id:string -> (connect_prompt option * state, string) result
-  (** state = Pending | Authorized of {identity; expires_at} | Expired | Error. Device_code만 poll;
-      Redirect는 콜백으로 갱신. *)
+  (** state = Pending | Authorized of {identity; expires_at} | Expired. 종단/전송 실패는
+      result의 string error 채널로 반환. Device_code만 poll; Redirect는 콜백으로 갱신. *)
 
   val revoke : base_path:string -> ?keeper_name:string -> scope:... -> unit -> (unit, string) result
 end

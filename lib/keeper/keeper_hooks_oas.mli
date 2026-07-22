@@ -169,4 +169,8 @@ val hook_introspection_json : unit -> Yojson.Safe.t
 module For_testing : sig
   val tool_input_shape_for_log : Yojson.Safe.t -> string
   val tool_input_keys_for_log : Yojson.Safe.t -> string
+  val cost_usd_json : float option -> Yojson.Safe.t
+  (** Exact projection used by the turn-complete SSE payload. *)
+  val usage_missing_of_usage : Agent_sdk.Types.api_usage option -> bool
+  (** Hook usage-evidence decision delegated to {!usage_has_tokens}. *)
 end

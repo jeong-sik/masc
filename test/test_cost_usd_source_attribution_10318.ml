@@ -90,6 +90,24 @@ let test_preview_runtime_without_oas_cost_is_unreported () =
     ~cost_usd:0.0
     "oas_cost_unreported"
 
+let test_oas_cost_json_preserves_omission () =
+  check bool "omitted OAS cost stays JSON null" true
+    (H.For_testing.cost_usd_json None = `Null);
+  check bool "reported zero remains numeric zero" true
+    (H.For_testing.cost_usd_json (Some 0.0) = `Float 0.0)
+
+let test_hook_usage_missing_uses_token_evidence () =
+  let cost_only : Agent_sdk.Types.api_usage =
+    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  in
+  let cache_creation_only : Agent_sdk.Types.api_usage =
+    { Agent_sdk.Types.zero_api_usage with cache_creation_input_tokens = 1 }
+  in
+  check bool "cost-only Some usage remains missing" true
+    (H.For_testing.usage_missing_of_usage (Some cost_only));
+  check bool "cache creation is genuine usage" false
+    (H.For_testing.usage_missing_of_usage (Some cache_creation_only))
+
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
 let counter_for source =
@@ -142,6 +160,10 @@ let () =
             test_oas_cost_unreported_for_zero_cost_tokens;
           test_case "preview runtime without OAS cost" `Quick
             test_preview_runtime_without_oas_cost_is_unreported;
+          test_case "OAS cost JSON preserves omission" `Quick
+            test_oas_cost_json_preserves_omission;
+          test_case "hook usage missing uses token evidence" `Quick
+            test_hook_usage_missing_uses_token_evidence;
         ] );
       ( "counter",
         [

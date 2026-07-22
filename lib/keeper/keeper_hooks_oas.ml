@@ -120,6 +120,14 @@ include Keeper_hooks_oas_cost_events
     was "reserved, unused". State now flows through [meta_ref] (mutable) and
     the explicit [on_tool_executed] callback. *)
 
+let cost_usd_json = function
+  | Some cost -> `Float cost
+  | None -> `Null
+
+let usage_missing_of_usage = function
+  | None -> true
+  | Some usage -> not (usage_has_tokens usage)
+
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
@@ -181,16 +189,21 @@ let make_hooks
           | Some u -> u.cache_creation_input_tokens, u.cache_read_input_tokens
           | None -> 0, 0
         in
-        let input_tok, output_tok, turn_cost_usd, usage_missing =
+        let input_tok, output_tok, turn_cost_usd =
           match response.usage with
           | Some u ->
               ( u.input_tokens,
                 u.output_tokens,
-                oas_reported_cost u,
-                false )
-          | None -> (0, 0, 0.0, true)
+                oas_reported_cost u )
+          | None -> (0, 0, 0.0)
         in
+        let usage_missing = usage_missing_of_usage response.usage in
         let cost_usd_for_event = turn_cost_usd in
+        let cost_usd_for_sse =
+          match response.usage with
+          | Some usage -> cost_usd_json usage.cost_usd
+          | None -> cost_usd_json None
+        in
         let total_tok = input_tok + output_tok in
         (match usage_trust with
          | Keeper_usage_trust.Usage_untrusted reasons when not usage_missing ->
@@ -351,7 +364,7 @@ let make_hooks
                  (key_model_used, `Null);
                  (key_input_tokens, `Int input_tok);
                  (key_output_tokens, `Int output_tok);
-                 (key_cost_usd, `Float turn_cost_usd);
+                 (key_cost_usd, cost_usd_for_sse);
                  (key_tool_calls_made, `Int !tool_call_count_ref);
                  (key_total_turns, `Int meta.runtime.usage.total_turns);
                  (key_ts_unix, `Float (Unix.gettimeofday ()));
@@ -659,4 +672,6 @@ let hook_introspection_json () : Yojson.Safe.t =
 module For_testing = struct
   let tool_input_shape_for_log = tool_input_shape_for_log
   let tool_input_keys_for_log = tool_input_keys_for_log
+  let cost_usd_json = cost_usd_json
+  let usage_missing_of_usage = usage_missing_of_usage
 end

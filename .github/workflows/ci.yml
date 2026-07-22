@@ -313,7 +313,7 @@ jobs:
             shell_ir=true
           fi
 
-          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|\.github/workflows/ci\.yml$)'; then
+          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|scripts/turn-path-provider-agnostic-gate\.sh$|\.github/workflows/ci\.yml$)'; then
             keeper_cwd=true
           fi
 
@@ -1071,6 +1071,15 @@ jobs:
       - name: Run keeper cwd leak gate
         if: needs.changes.outputs.keeper_cwd == 'true'
         run: scripts/keeper-cwd-leak-gate.sh
+
+      # Self-test first: a gate that cannot fail would pass silently forever.
+      - name: Run turn-path provider-agnostic gate self-test
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/turn-path-provider-agnostic-gate.sh --self-test
+
+      - name: Run turn-path provider-agnostic gate
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/turn-path-provider-agnostic-gate.sh
 
   shell-ir-ratchet:
     name: Shell IR Consumption Ratchet

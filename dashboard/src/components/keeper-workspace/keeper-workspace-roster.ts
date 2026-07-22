@@ -36,6 +36,7 @@ import {
   type KeeperBucket,
 } from './keeper-workspace-shared'
 import { phasePulse } from '../v2/keeper-fsm'
+import { KEEPER_STATUS_LABEL_KO } from '../../lib/keeper-operational-state'
 
 type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'recent' | 'name' | 'att'
@@ -45,6 +46,7 @@ type RosterHeaderBucket = KeeperBucket
 type RosterFleetSummary = {
   total: number
   running: number
+  stuck: number
   paused: number
   offline: number
   attention: number
@@ -75,18 +77,23 @@ export const rosterFilterPref = persistentSignal<RosterFilter>({
   defaultValue: 'all',
   deserialize: memberOr(ROSTER_FILTER_VALUES, 'all'),
 })
-// The standalone's default is lifecycle grouping: running, waiting, then
-// stopped. Recency remains available as an explicit operator preference.
+// The standalone's default is lifecycle grouping: 실행 중, 확인 필요,
+// 일시정지, then 중지. Recency remains available as an explicit operator
+// preference.
 export const rosterSortPref = persistentSignal<RosterSort>({
   key: 'dashboard:kw-roster:sort-v1',
   defaultValue: 'status',
   deserialize: memberOr(ROSTER_SORT_VALUES, 'status'),
 })
 
+// Group headers use the canonical KEEPER_STATUS_LABEL_KO vocabulary
+// (lib/keeper-operational-state.ts) — same words as the monitoring band
+// chip and the registry groups.
 const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
-  { bucket: 'running', label: '실행 중' },
-  { bucket: 'paused', label: '대기' },
-  { bucket: 'offline', label: '중지' },
+  { bucket: 'running', label: KEEPER_STATUS_LABEL_KO.running },
+  { bucket: 'stuck', label: KEEPER_STATUS_LABEL_KO.stuck },
+  { bucket: 'paused', label: KEEPER_STATUS_LABEL_KO.paused },
+  { bucket: 'offline', label: KEEPER_STATUS_LABEL_KO.offline },
 ]
 
 /** Flattened roster item used by the virtualized render path. */
@@ -123,8 +130,9 @@ function keeperContextRatio(keeper: Keeper): number {
 function keeperStatusRank(keeper: Keeper): number {
   const bucket = keeperBucket(keeper)
   if (bucket === 'running') return 0
-  if (bucket === 'paused') return 1
-  return 2
+  if (bucket === 'stuck') return 1
+  if (bucket === 'paused') return 2
+  return 3
 }
 
 function compareFleetRows(a: Keeper, b: Keeper): number {
@@ -137,6 +145,7 @@ export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary 
   const summary: RosterFleetSummary = {
     total: rows.length,
     running: 0,
+    stuck: 0,
     paused: 0,
     offline: 0,
     attention: 0,
@@ -147,6 +156,7 @@ export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary 
   for (const keeper of rows) {
     const bucket = keeperBucket(keeper)
     if (bucket === 'running') summary.running += 1
+    if (bucket === 'stuck') summary.stuck += 1
     if (bucket === 'paused') summary.paused += 1
     if (bucket === 'offline') summary.offline += 1
     if (needsAttention(keeper)) summary.attention += 1
@@ -353,6 +363,7 @@ function rosterActivityTitle(activity: KeeperActivityDisplay): string | undefine
 
 function groupBucketClass(bucket: RosterHeaderBucket): string {
   if (bucket === 'running') return 'run'
+  if (bucket === 'stuck') return 'attn'
   if (bucket === 'paused') return 'pause'
   return 'off'
 }
@@ -559,7 +570,7 @@ export function KeeperWorkspaceRoster({
 
   // Flatten to [{ type: 'header'|'row', ... }] for windowing. Attention is a
   // cross-cutting row badge/filter, never a lifecycle bucket; status view keeps
-  // every keeper exactly once under running, paused, or offline.
+  // every keeper exactly once under running, stuck, paused, or offline.
   const items: RosterItem[] = []
   if (sort === 'status') {
     for (const group of GROUP_ORDER) {

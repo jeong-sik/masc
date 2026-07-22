@@ -85,6 +85,26 @@ describe('RegistrySurface', () => {
     expect(container.querySelector('[data-testid="persona-browser"]')).not.toBeNull()
   })
 
+  it('puts personas first and keeps keeper instances in a collapsed details block', () => {
+    mocks.keepers.value = [keeper({ name: 'alpha' })]
+    render(h(RegistrySurface, null), container)
+
+    const details = container.querySelector<HTMLDetailsElement>('details.reg-keepers')
+    expect(details).not.toBeNull()
+    expect(details!.open).toBe(false)
+    expect(details!.textContent).toContain('Keeper 인스턴스')
+    // Persona layer precedes the keeper instance block in document order.
+    const personas = container.querySelector('.reg-personas')
+    expect(personas).not.toBeNull()
+    expect(
+      personas!.compareDocumentPosition(details!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    // Canonical group labels from KEEPER_STATUS_LABEL_KO.
+    expect(details!.textContent).toContain('실행 중')
+    expect(details!.textContent).not.toContain('차단 · 확인 필요')
+    expect(details!.textContent).not.toContain('중지 · 미기동')
+  })
+
   it('opens keeper detail from a roster row instead of reimplementing update/delete', () => {
     const target = keeper({ name: 'alpha' })
     mocks.keepers.value = [target]

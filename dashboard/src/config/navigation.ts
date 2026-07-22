@@ -57,7 +57,6 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
-  | 'cognition' // Hidden keeper cognition drill-down.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -369,13 +368,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Journey Map',
       description: 'Execution-flow drill-down.',
       params: { section: 'journey' },
-      hidden: true,
-    },
-    {
-      id: 'cognition',
-      label: 'Keeper Cognition',
-      description: 'Keeper cognition and memory drill-down.',
-      params: { section: 'cognition' },
       hidden: true,
     },
   ],

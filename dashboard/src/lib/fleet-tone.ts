@@ -112,7 +112,7 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       restarting: '재시작 중',
       failing: '오류 발생',
       overflowed: '컨텍스트 초과',
-      stopped: '중지됨',
+      stopped: '중지',
       unbooted: '미기동',
       crashed: '비정상 종료',
       dead: '종료됨',

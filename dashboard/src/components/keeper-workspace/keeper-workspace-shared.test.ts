@@ -32,6 +32,9 @@ describe('keeperBucket', () => {
   it('classifies a stopped keeper as offline', () => {
     expect(keeperBucket(mk({ status: 'stopped' }))).toBe('offline')
   })
+  it('classifies a blocked keeper as stuck (typed SSOT, 확인 필요 group)', () => {
+    expect(keeperBucket(mk({ status: 'running', runtime_blocker_class: 'turn_timeout' }))).toBe('stuck')
+  })
 })
 
 describe('keeperStatusTone', () => {

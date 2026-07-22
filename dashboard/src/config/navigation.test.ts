@@ -346,7 +346,6 @@ describe('monitoring navigation labels', () => {
       'transport-health',
       'feature-health',
       'journey',
-      'cognition',
     ])
   })
 

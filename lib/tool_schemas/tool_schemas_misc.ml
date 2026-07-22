@@ -16,23 +16,7 @@ let dashboard_scope_enum_strings = [ "all"; "current" ]
     directly without reintroducing the cycle this split avoids. The
     sync test in [test/test_types.ml :: config_category_ssot] keeps this
     mirror aligned with the producer-side SSOT. *)
-let config_category_enum_strings =
-  [ "server"
-  ; "auth"
-  ; "transport"
-  ; "storage"
-  ; "runtime"
-  ; "rate_limiting"
-  ; "inference"
-  ; "autonomy"
-  ; "dashboard"
-  ; "operations"
-  ; "channel"
-  ; "process"
-  ; "worker"
-  ; "web_search"
-  ; "session"
-  ]
+let config_category_enum_strings = Tool_schemas_specs_types.config_category_enum_strings
 ;;
 
 type control_operation =

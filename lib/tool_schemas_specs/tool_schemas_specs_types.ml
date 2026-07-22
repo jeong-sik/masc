@@ -59,3 +59,27 @@ type tool_spec =
   ; additional_properties : bool
   ; behavior_contract : behavior_rule list
   }
+
+(** Issue #15257 Phase 1: Canonical SSOT for config category enum strings.
+    Shared between gen_tool_descriptors.ml and tool_schemas_misc.ml without
+    introducing circular dune dependencies. *)
+let config_category_enum_strings =
+  [ "server"
+  ; "auth"
+  ; "transport"
+  ; "storage"
+  ; "runtime"
+  ; "rate_limiting"
+  ; "inference"
+  ; "keeper"
+  ; "keeper_execution"
+  ; "keeper_guardrails"
+  ; "autonomy"
+  ; "dashboard"
+  ; "operations"
+  ; "channel"
+  ; "process"
+  ; "worker"
+  ; "web_search"
+  ; "session"
+  ]

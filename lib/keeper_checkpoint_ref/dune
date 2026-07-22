@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_checkpoint_ref)
- (public_name masc.keeper_checkpoint_ref)
- (wrapped false)
- (modules keeper_checkpoint_ref)
- (libraries digestif masc.keeper_registry))

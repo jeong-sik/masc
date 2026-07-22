@@ -1,9 +1,0 @@
-; Standalone alcotest for the pure fusion core (deterministic gate + TOML config
-; + recursion-depth guard). Links only masc.fusion_core (yojson/otoml), not the
-; main masc library — runs in seconds.
-
-(tests
- (names test_fusion test_fusion_harness test_fusion_run_registry
-   test_fusion_config_json)
- (deps ../../config/runtime.toml)
- (libraries alcotest otoml yojson masc.fusion_core))

@@ -1,3 +1,0 @@
-(test
- (name test_sse_event)
- (libraries sse_event alcotest yojson fmt))

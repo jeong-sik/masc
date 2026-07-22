@@ -1,3 +1,0 @@
-(test
- (name test_keeper_continuation_channel)
- (libraries masc.keeper_runtime yojson))

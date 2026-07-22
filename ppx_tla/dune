@@ -1,5 +1,0 @@
-(library
- (name ppx_tla)
- (public_name masc.ppx_tla)
- (kind ppx_rewriter)
- (libraries ppxlib))

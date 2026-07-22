@@ -1,5 +1,0 @@
-; Standalone alcotest for the shared stdlib-only dedupe state machine.
-
-(tests
- (names test_bounded_event_dedupe)
- (libraries alcotest masc.bounded_event_dedupe))

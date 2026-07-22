@@ -1,7 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_attribution)
- (public_name masc.attribution)
- (wrapped false)
- (libraries yojson))

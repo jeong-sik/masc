@@ -1,9 +1,0 @@
-{
-  "_comment": "Silent-failure ratchet baseline. Regenerate with scripts/silent-failure-ratchet.sh --regenerate.",
-  "_metrics": "See scripts/silent-failure-ratchet.sh METRICS / DESCRIPTIVE_METRICS arrays.",
-  "_audit": "lib/ silent failure code-smell audit 2026-05-20",
-  "error_to_ok_silence": 6,
-  "error_result_silence": 137,
-  "exception_catchall_swallow": 4,
-  "variant_catchall_default": 1619
-}

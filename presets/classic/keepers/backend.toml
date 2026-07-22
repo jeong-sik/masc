@@ -1,6 +1,0 @@
-[keeper]
-base = "base.toml"
-autoboot_enabled = true
-persona_name = "backend"
-sandbox_profile = "local"
-network_mode = "inherit"

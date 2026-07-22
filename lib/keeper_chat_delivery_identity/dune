@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_chat_delivery_identity)
- (public_name masc.keeper_chat_delivery_identity)
- (wrapped false)
- (modules keeper_chat_delivery_identity)
- (libraries digestif masc.masc_types masc_random_id threads uuidm yojson))

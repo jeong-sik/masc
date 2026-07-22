@@ -1,3 +1,0 @@
-(test
- (name test_jsonl_writer)
- (libraries alcotest jsonl_writer yojson unix))

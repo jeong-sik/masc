@@ -1,9 +1,0 @@
-keepers/base.toml
-keepers/tech_lead.toml
-keepers/backend.toml
-keepers/frontend.toml
-keepers/qa.toml
-personas/tech_lead/profile.json
-personas/backend/profile.json
-personas/frontend/profile.json
-personas/qa/profile.json

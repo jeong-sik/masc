@@ -74,6 +74,25 @@ let test_tls_handshake_internal_error_is_transient () =
     true
     (EC.is_auto_recoverable_turn_error err)
 
+(* A provider parse rejection stays a parse rejection, but it must not be
+   exempt from the crash threshold: the exemption skips [increment_turn_failures]
+   entirely, so a provider emitting a persistently malformed stream retried
+   forever with [consecutive] pinned at 0. *)
+let test_provider_parse_rejection_counts_toward_crash () =
+  let err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail = "sse: SSE parse failed: malformed_delta_tool_call" })
+  in
+  Alcotest.(check bool)
+    "provider parse rejection is still classified as a server parse rejection"
+    true
+    (EC.is_server_rejected_parse_error err);
+  Alcotest.(check bool)
+    "provider parse rejection is not exempt from the crash threshold"
+    false
+    (EC.is_auto_recoverable_turn_error err)
+
 let test_extra_system_context_preserves_typed_blocks () =
   let blocks =
     [ Prompt_block_id.Dynamic_context, "dynamic"
@@ -103,6 +122,8 @@ let () =
           test_raw_oas_api_timeout_preserves_typed_observation;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
+        Alcotest.test_case "provider parse rejection counts toward crash" `Quick
+          test_provider_parse_rejection_counts_toward_crash;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick
           test_extra_system_context_preserves_typed_blocks;
       ] );

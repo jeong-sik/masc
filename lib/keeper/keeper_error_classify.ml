@@ -686,14 +686,29 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
+(* Invariant for this predicate: every class listed here is exempted from the
+   crash threshold ([Keeper_unified_turn_failure.record_failure_observation]
+   skips [increment_turn_failures] entirely), so each class must carry its own
+   compensating accounting. Without one, "not counted toward crash" means the
+   keeper retries the same failure forever with [consecutive] pinned at 0.
+
+   - transient network / runtime-exhausted: bounded by the runtime rotation and
+     exhaustion paths.
+   - context overflow: accounted at the point of detection by
+     [Keeper_turn_runtime_budget.record_overflow_failure], and its in-lane
+     compaction retries are bounded (#25536).
+
+   Provider parse rejections used to be listed here and had no such accounting.
+   A provider that keeps emitting a malformed stream (for example a tool_call
+   delta with a blank id, which the OAS SSE parser rejects) produced an
+   unbounded retry loop: 923 rejections across five keepers in 1h41m on
+   2026-07-21, each attempt costing up to 70s, with no escalation because the
+   counter never advanced. They are no longer exempt, so the ordinary
+   consecutive-failure threshold bounds them; an isolated malformed response
+   still costs nothing, because a later success resets the counter. *)
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
-  || is_server_rejected_parse_error err
   || is_auto_recoverable_runtime_exhausted_error err
-  (* Context overflow is handled explicitly by
-     [Keeper_turn_runtime_budget.record_overflow_failure] at the point of
-     detection rather than being duplicated in the ordinary turn-failure
-     observation stream. *)
   || is_context_overflow err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =

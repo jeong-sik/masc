@@ -62,5 +62,8 @@ readonly OAS_AGENT_SDK_BASE_VERSION="v0.219.0"
 # reports the public-surface delta at pin-bump time.
 # Pinned to main (c8b355d2). Absorbs oas#2771 & oas#2772: release v0.220.4 with immutable resolver snapshot.
 readonly OAS_AGENT_SDK_DECLARED_VERSION="0.220.4"
+# Upstream ref the pin tracks. Consumed by check-oas-pin.sh (drift +
+# reachability guard), oas-drift-check.sh, and sync-oas-pin-docs.sh.
+readonly OAS_AGENT_SDK_TRACK_REF="main"
 readonly OAS_AGENT_SDK_SHA="c8b355d2ed99c73f939d2771826e5197399a81af"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"

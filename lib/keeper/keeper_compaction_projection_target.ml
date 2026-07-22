@@ -397,6 +397,30 @@ let context_to_json (context : Fit.context) =
 
 let json_kind kind fields = `Assoc (("kind", `String kind) :: fields)
 
+(* Persisted evidence carries only a closed classification code.  The raw
+   [Llm_provider.Error.to_string] text is derived from provider response
+   bodies and network error messages: it is unbounded free text and can
+   embed endpoint addresses, so it must not reach durable evidence JSON. *)
+let provider_error_code (error : Llm_provider.Error.provider_error) =
+  match error with
+  | MissingApiKey _ -> "missing_api_key"
+  | InvalidConfig _ -> "invalid_config"
+  | ParseError _ -> "parse_error"
+  | UnknownVariant _ -> "unknown_variant"
+  | ProviderUnavailable _ -> "provider_unavailable"
+  | RateLimit _ -> "rate_limit"
+  | HardQuota _ -> "hard_quota"
+  | CapacityExhausted _ -> "capacity_exhausted"
+  | AuthError _ -> "auth_error"
+  | AuthorizationError _ -> "authorization_error"
+  | ServerError { code; _ } -> Printf.sprintf "server_error_%d" code
+  | NetworkError _ -> "network_error"
+  | Timeout _ -> "timeout"
+  | InvalidRequest _ -> "invalid_request"
+  | NotFound _ -> "not_found"
+  | ProviderTerminal _ -> "provider_terminal"
+;;
+
 let input_count_error_to_json = function
   | Llm_provider.Input_token_count.Unsupported { protocol; model_id } ->
     json_kind
@@ -407,9 +431,7 @@ let input_count_error_to_json = function
   | Transport error ->
     json_kind
       "transport"
-      [ ( "detail"
-        , `String (Llm_provider.Error.(of_http_error error |> to_string)) )
-      ]
+      [ "code", `String (provider_error_code (Llm_provider.Error.of_http_error error)) ]
   | Invalid_response { protocol; model_id; detail } ->
     json_kind
       "invalid_response"
@@ -482,29 +504,42 @@ let measure_checkpoint_fit ?connection_cache ?clock ~sw ~net = function
     }
   | Exact_committed { evidence; checkpoint_ref; prepared_request } ->
     let result =
-      match
-        Llm_provider.Complete.measure_request
-          ?connection_cache
-          ?clock
-          ~sw
-          ~net
-          prepared_request
-      with
-      | Error error -> Fit.Unavailable (unavailable_of_measurement_error error)
-      | Ok measured ->
-        (match Llm_provider.Complete.admit_request measured with
-         | Ok admitted ->
-           Fit.Fits
-             (Llm_provider.Complete.admitted_fit admitted |> context_of_oas)
-         | Error (Context_window_exceeded fit) ->
-           Fit.Exceeds (context_of_oas fit)
-         | Error (Context_limit_unknown { model_id }) ->
-           Fit.Unavailable (Context_limit_unknown { model_id })
-         | Error (Invalid_context_limit { model_id; max_context_tokens }) ->
-           Fit.Unavailable
-             (Invalid_context_limit { model_id; max_context_tokens })
-         | Error (Output_reservation_unknown { model_id }) ->
-           Fit.Unavailable (Output_reservation_unknown { model_id }))
+      (* Resolve the context limit before measurement: a pre-knowable limit
+         failure must not cost a count round-trip (agent_sdk v0.219.0+). *)
+      match Llm_provider.Complete.resolve_context_limit prepared_request with
+      | Error (Context_limit_unknown { model_id }) ->
+        Fit.Unavailable (Context_limit_unknown { model_id })
+      | Error (Invalid_context_limit { model_id; max_context_tokens }) ->
+        Fit.Unavailable (Invalid_context_limit { model_id; max_context_tokens })
+      | Error (Output_reservation_unknown { model_id }) ->
+        Fit.Unavailable (Output_reservation_unknown { model_id })
+      | Error (Context_window_exceeded fit) -> Fit.Exceeds (context_of_oas fit)
+      | Ok max_context_tokens ->
+        (match
+           Llm_provider.Complete.measure_request
+             ?connection_cache
+             ?clock
+             ~sw
+             ~net
+             prepared_request
+         with
+         | Error error -> Fit.Unavailable (unavailable_of_measurement_error error)
+         | Ok measured ->
+           (match
+              Llm_provider.Complete.admit_request ~max_context_tokens measured
+            with
+            | Ok admitted ->
+              Fit.Fits
+                (Llm_provider.Complete.admitted_fit admitted |> context_of_oas)
+            | Error (Context_window_exceeded fit) ->
+              Fit.Exceeds (context_of_oas fit)
+            | Error (Context_limit_unknown { model_id }) ->
+              Fit.Unavailable (Context_limit_unknown { model_id })
+            | Error (Invalid_context_limit { model_id; max_context_tokens }) ->
+              Fit.Unavailable
+                (Invalid_context_limit { model_id; max_context_tokens })
+            | Error (Output_reservation_unknown { model_id }) ->
+              Fit.Unavailable (Output_reservation_unknown { model_id })))
     in
     { checkpoint_ref; target = Exact evidence; result }
 ;;

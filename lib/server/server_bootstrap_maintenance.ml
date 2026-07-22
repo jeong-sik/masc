@@ -645,8 +645,36 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_recall_injections ()
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
-               + prune_dir (Filename.concat masc "trajectories")
-               + prune_dir (Filename.concat masc "execution-receipts")
+               (* transition-audit was absent from this list since its
+                  introduction (RFC-0002) — 82 MB across 3 month-dirs by
+                  2026-06-10, scanned by every store-fallback read. *)
+               + prune_dir (Filename.concat masc "transition-audit")
+               (* trajectories: flat <trace_id>.jsonl under
+                  trajectories/<keeper>/ — Dated_jsonl.prune is a no-op
+                  there, so prune by mtime, keeper-scoped. *)
+               + Server_runtime_startup_maintenance.prune_children_dirs
+                   ~prune_dir:
+                     (Server_runtime_startup_maintenance
+                      .prune_flat_jsonl_older_than ~days)
+                   (Filename.concat masc "trajectories")
+               (* execution-receipts canonical layout is
+                  keepers/<name>/execution-receipts (dated) — no top-level
+                  writer exists, so prune keeper-scoped only. *)
+               + (let keepers = Filename.concat masc "keepers" in
+                  if not (Sys.file_exists keepers)
+                  then 0
+                  else
+                    Array.fold_left
+                      (fun acc name ->
+                        let keeper_dir = Filename.concat keepers name in
+                        if Sys.is_directory keeper_dir
+                        then
+                          acc
+                          + prune_dir
+                              (Filename.concat keeper_dir "execution-receipts")
+                        else acc)
+                      0
+                      (Sys.readdir keepers))
              in
              if total > 0
              then

@@ -452,7 +452,7 @@ let test_keeper_preparations_do_not_share_attempt_state () =
       ~registry
   in
   let result_a, result_b =
-    Eio.Fiber.both
+    Eio.Fiber.pair
       (fun () ->
          C.execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
       (fun () ->

@@ -42,11 +42,15 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     [InvalidRequest]. *)
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
+    provider refused the request body itself (malformed payload, orphan
+    tool-call residues), so same-turn retry is futile. *)
+val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when the keeper should preserve liveness and skip consecutive
     failure counting, even if same-turn retry is still disabled. Typed OAS
     turn-limit and execution-time observations are included defensively so a
     boundary regression cannot promote them into Keeper lifecycle authority. *)
-val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for accept-rejected responses tagged by the built-in keeper

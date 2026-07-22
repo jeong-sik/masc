@@ -234,6 +234,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -548,6 +549,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler

@@ -55,6 +55,8 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_dir (Filename.concat masc "activity-events")
        + prune_recall_injections ()
        + prune_dir (Filename.concat masc "voice_sessions")
+       + prune_dir (Filename.concat masc "trajectories")
+       + prune_dir (Filename.concat masc "execution-receipts")
        + (let keepers = Filename.concat masc "keepers" in
           if not (Sys.file_exists keepers) then 0
           else
@@ -62,6 +64,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
               acc
               + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
               + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
+              + prune_dir (Filename.concat (Filename.concat keepers name) "execution-receipts")
             ) 0 (Sys.readdir keepers))
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in

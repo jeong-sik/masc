@@ -1451,6 +1451,7 @@ let preserve_thinking_control_format_wire
   | Chat_template_kwargs_preserve_thinking -> "chat-template-kwargs-preserve-thinking"
   | Top_level_preserve_thinking -> "top-level-preserve-thinking"
   | Always_preserved_thinking -> "always-preserved-thinking"
+  | Thinking_object_clear_thinking -> "thinking-object-clear-thinking"
 ;;
 
 let assistant_tool_content_format_wire
@@ -1539,8 +1540,17 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; ( "resolved_reasoning_effort"
       , Json_util.string_opt_to_json
           (Option.map Llm_provider.Reasoning_effort.to_string cfg.reasoning_effort) )
-    ; "glm_clear_thinking", `Bool (Llm_provider.Provider_config.glm_clear_thinking cfg)
-    ; "glm_replay_reasoning", `Bool (Llm_provider.Provider_config.glm_should_replay_reasoning cfg)
+    ; ( "glm_clear_thinking"
+      , `Bool
+          (Llm_provider.Provider_config.clear_thinking_value
+             ~clear_thinking:cfg.clear_thinking
+             ~preserve_thinking:cfg.preserve_thinking) )
+    ; ( "glm_replay_reasoning"
+      , `Bool
+          (Llm_provider.Provider_config.preserved_thinking_active
+             ~enable_thinking:cfg.enable_thinking
+             ~clear_thinking:cfg.clear_thinking
+             ~preserve_thinking:cfg.preserve_thinking) )
     ; "tool_stream", `Bool cfg.tool_stream
     ; "tool_choice", tool_choice_json cfg.tool_choice
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use

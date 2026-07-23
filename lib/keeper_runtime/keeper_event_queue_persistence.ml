@@ -245,7 +245,7 @@ let save_json_atomic_with ~strict_parent_sync path json =
 let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
 let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
 
-let save_json_atomic_strict_staged path json =
+let save_json_atomic_strict_staged_with ~save path json =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -256,7 +256,7 @@ let save_json_atomic_strict_staged path json =
     let content =
       json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
     in
-    (match Fs_compat.save_file_atomic_strict_staged path content with
+    (match save path content with
      | Ok () -> Ok Fsync_completed
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        let detail = Fs_compat.atomic_replace_failure_to_string failure in
@@ -268,6 +268,10 @@ let save_json_atomic_strict_staged path json =
            | _ -> Error detail)
         | Fs_compat.After_rename ->
           Ok (Visible_sync_unconfirmed detail)))
+;;
+
+let save_json_atomic_strict_staged =
+  save_json_atomic_strict_staged_with ~save:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 let save_state_unlocked_with ~strict_parent_sync owner state =
@@ -288,10 +292,10 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
 let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
 let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
 
-let save_state_unlocked_strict_staged owner state =
+let save_state_unlocked_strict_staged_with ~save owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
-  match save_json_atomic_strict_staged path (State.to_yojson state) with
+  match save_json_atomic_strict_staged_with ~save path (State.to_yojson state) with
   | Ok outcome -> Ok outcome
   | Error message ->
     Error
@@ -300,6 +304,11 @@ let save_state_unlocked_strict_staged owner state =
          keeper_name
          path
          message)
+;;
+
+let save_state_unlocked_strict_staged =
+  save_state_unlocked_strict_staged_with
+    ~save:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 type snapshot_read_error_kind =
@@ -787,7 +796,12 @@ let commit_transform
             (Printexc.to_string exn)))
 ;;
 
-let commit_exact_transform_unlocked owner ~after_commit transform =
+let commit_exact_transform_unlocked
+      ?(save_state = save_state_unlocked_strict_staged)
+      owner
+      ~after_commit
+      transform
+  =
   match load_state_unlocked owner with
   | Error _ as error -> error
   | Ok current ->
@@ -800,20 +814,26 @@ let commit_exact_transform_unlocked owner ~after_commit transform =
        (match next with
         | Error _ as error -> error
         | Ok next ->
-          (match save_state_unlocked_strict_staged owner next with
+          (match save_state owner next with
            | Error _ as error -> error
            | Ok outcome ->
              after_commit (State.pending next);
              Ok (value, outcome))))
 ;;
 
-let commit_exact_transform ~base_path ~keeper_name ~after_commit transform =
+let commit_exact_transform
+      ?save_state
+      ~base_path
+      ~keeper_name
+      ~after_commit
+      transform
+  =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         commit_exact_transform_unlocked owner ~after_commit transform)
+         commit_exact_transform_unlocked ?save_state owner ~after_commit transform)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -1002,7 +1022,8 @@ let quarantine_exact_execution_result
   |> Result.map snd
 ;;
 
-let prepare_exact_source_disposition_result
+let prepare_exact_source_disposition_result_with
+      ?save_state
       ~base_path
       ~keeper_name
       ~lease
@@ -1013,6 +1034,7 @@ let prepare_exact_source_disposition_result
       ()
   =
   commit_exact_transform
+    ?save_state
     ~base_path
     ~keeper_name
     ~after_commit:(fun _ -> ())
@@ -1027,7 +1049,35 @@ let prepare_exact_source_disposition_result
        |> Result.map (fun (next, disposition) -> next, disposition))
 ;;
 
-let commit_settlement_transition_unlocked owner ~after_commit transition current =
+let prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source
+      ~terminal
+      ~semantic
+      ~prepared_at
+      ()
+  =
+  prepare_exact_source_disposition_result_with
+    ~base_path
+    ~keeper_name
+    ~lease
+    ~source
+    ~terminal
+    ~semantic
+    ~prepared_at
+    ()
+;;
+
+let commit_settlement_transition_unlocked_with
+      ~save_checkpoint
+      ~compact_wal
+      owner
+      ~after_commit
+      transition
+      current
+  =
   match transition current with
   | Error _ as error -> error
   | Ok (state, State.Already_settled receipt) ->
@@ -1042,14 +1092,14 @@ let commit_settlement_transition_unlocked owner ~after_commit transition current
        let path = settlement_wal_path_of_owner owner in
        let continue_after_commit () =
          let pending = State.pending checkpoint in
-         match save_state_unlocked owner checkpoint with
+         match save_checkpoint owner checkpoint with
          | Error detail ->
            Ok
              ( Committed_followup_failed
                  { receipt; stage = `Checkpoint; detail }
              , pending )
          | Ok () ->
-           (match compact_settlement_wal_unlocked owner with
+           (match compact_wal owner with
             | Error detail ->
               Ok
                 ( Committed_followup_failed
@@ -1108,6 +1158,12 @@ let commit_settlement_transition_unlocked owner ~after_commit transition current
           continue_after_commit ()))
      | [] | [ _ ] | _ :: _ :: _ ->
        Error "settlement transition did not produce its canonical outbox entry")
+;;
+
+let commit_settlement_transition_unlocked =
+  commit_settlement_transition_unlocked_with
+    ~save_checkpoint:save_state_unlocked
+    ~compact_wal:compact_settlement_wal_unlocked
 ;;
 
 let settle_result
@@ -1187,7 +1243,9 @@ let settle_bound_exact_nonterminal_result
             (Printexc.to_string exn)))
 ;;
 
-let finalize_exact_source_disposition_result
+let finalize_exact_source_disposition_result_with
+      ~save_checkpoint
+      ~compact_wal
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1204,7 +1262,9 @@ let finalize_exact_source_disposition_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           commit_settlement_transition_unlocked
+           commit_settlement_transition_unlocked_with
+             ~save_checkpoint
+             ~compact_wal
              owner
              ~after_commit
              (State.finalize_exact_source_disposition
@@ -1222,6 +1282,88 @@ let finalize_exact_source_disposition_result
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;
+
+let finalize_exact_source_disposition_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ()
+  =
+  finalize_exact_source_disposition_result_with
+    ~save_checkpoint:save_state_unlocked
+    ~compact_wal:compact_settlement_wal_unlocked
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ~lease
+    ~disposition_id
+    ()
+;;
+
+module For_testing = struct
+  type settlement_followup_failure =
+    | Fail_checkpoint of string
+    | Fail_wal_compaction of string
+
+  let finalize_exact_source_disposition_with_followup_failure_result
+        ~failure
+        ~base_path
+        ~keeper_name
+        ~settled_at
+        ~lease
+        ~disposition_id
+        ()
+    =
+    let save_checkpoint, compact_wal =
+      match failure with
+      | Fail_checkpoint detail ->
+        ( (fun _owner _state -> Error detail)
+        , compact_settlement_wal_unlocked )
+      | Fail_wal_compaction detail ->
+        save_state_unlocked, (fun _owner -> Error detail)
+    in
+    finalize_exact_source_disposition_result_with
+      ~save_checkpoint
+      ~compact_wal
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ()
+  ;;
+
+  let prepare_exact_source_disposition_with_sync_parent_result
+        ~sync_parent
+        ~base_path
+        ~keeper_name
+        ~lease
+        ~source
+        ~terminal
+        ~semantic
+        ~prepared_at
+        ()
+    =
+    let save =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_parent
+    in
+    prepare_exact_source_disposition_result_with
+      ~save_state:(save_state_unlocked_strict_staged_with ~save)
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source
+      ~terminal
+      ~semantic
+      ~prepared_at
+      ()
+  ;;
+end
 
 let cancel_accepted_result
       ?(after_commit = fun _ -> ())

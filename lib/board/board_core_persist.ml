@@ -422,22 +422,15 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
-let save_reactions_jsonl content =
+let save_reactions_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = reactions_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_reactions" msg
+    | Ok () -> Ok ()
+    | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
-;;
-let rewrite_reactions_unlocked store =
-  save_reactions_jsonl (reactions_jsonl_unlocked store)
-;;
-let rewrite_reactions store =
-  let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_reactions_jsonl content)
+  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
 ;;
 
 (** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)

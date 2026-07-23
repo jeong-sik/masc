@@ -9,11 +9,12 @@ You are consolidating the long-term memory of an AI agent. Below is the agent's 
 Rules:
 1. Reference existing facts ONLY by their index. Do not invent new facts. A consolidated claim must be supported by the facts it merges.
 2. Merge a group only when two or more facts genuinely overlap (duplicates, rewordings, or one superseding another). Write one consolidated_claim that preserves every durable detail from its members. Keep the most specific category among the members.
-3. Leave distinct, still-true facts alone — do NOT put them in any group. A fact you do not mention survives unchanged. Conservatism is correct: when in doubt, do not merge.
-4. drop_indices is ONLY for claims that are now FALSE or have been explicitly superseded and carry no remaining value. Do not drop a fact merely because it is old. If unsure, do not drop.
-5. Preserve the meaning of validated_approach and lesson claims especially — a success worth remembering and a failure recorded as a reusable lesson must not be flattened into a generic fact.
+3. Every member of a group must carry the SAME kind= tag and the SAME until= value (both shown on each line; a line without until= has none). A group that mixes kinds or expiry values is structurally rejected and nothing in it merges — split such candidates into per-kind groups instead.
+4. Leave distinct, still-true facts alone — do NOT put them in any group. A fact you do not mention survives unchanged. Conservatism is correct: when in doubt, do not merge.
+5. drop_indices is ONLY for claims that are now FALSE or have been explicitly superseded and carry no remaining value. Do not drop a fact merely because it is old. If unsure, do not drop.
+6. Preserve the meaning of validated_approach and lesson claims especially — a success worth remembering and a failure recorded as a reusable lesson must not be flattened into a generic fact.
 
-Facts (index: [category] claim):
+Facts (index: [category] (kind=…, optional until=…) claim):
 {{numbered_facts}}
 
 Output schema (JSON only, no markdown):

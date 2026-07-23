@@ -27,6 +27,10 @@ val wire_field_last_verified_at : string
 val wire_field_observed_by : string
 val wire_field_claim_id : string
 val wire_field_claim_kind : string
+
+val wire_field_valid_for_days : string
+(** Producer-declared lifetime in whole days on the librarian claim wire —
+    same vocabulary as the explicit keeper_memory_write argument. *)
 val wire_field_schema_version : string
 val wire_field_generation : string
 val wire_field_episode_summary : string
@@ -145,6 +149,18 @@ val fact_effective_valid_until : fact -> float option
 (** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
     effective [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
+
+val seconds_per_day : float
+
+val max_valid_for_days : int
+(** Upper bound on a producer-declared lifetime in whole days (365). Shared by
+    every [valid_for_days] producer surface. *)
+
+val valid_until_of_days : now:float -> int -> float
+(** [valid_until_of_days ~now days] is the exact expiry boundary that
+    {!fact_is_current} and expiry GC honor for a producer-declared lifetime of
+    [days] whole days. The lifetime is the writing model's own judgment about
+    the claim's scope — no fixed write-side TTL infers it from text. *)
 
 (** Partition facts into [(live, expired)] at [now] using only the exact stored
     [valid_until]. Facts with [None] are always in [live]. *)

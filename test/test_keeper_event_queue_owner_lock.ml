@@ -332,7 +332,10 @@ let test_fleet_summary_serializes_with_owner_commit () =
            Eio.Fiber.fork ~sw (fun () ->
              Atomic.set summary_started true;
              let json =
-               Persistence.fleet_summary_json ~now:20.0 ~base_path
+               Persistence.fleet_summary_json
+                 ~now:20.0
+                 ~base_path
+                 ~owner_lifecycle:(fun ~keeper_name:_ -> Persistence.Runnable)
              in
              Atomic.set summary_done true;
              Eio.Promise.resolve resolve_summary json);

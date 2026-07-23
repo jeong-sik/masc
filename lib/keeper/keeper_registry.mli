@@ -492,9 +492,6 @@ val wakeup_running_exact :
     ownership check and signal are serialized with lifecycle transactions for
     this Keeper key; an unowned wake returns [Exact_wake_lifecycle_reserved]. *)
 
-(** Set fiber_wakeup for all running keepers. *)
-val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
-
 (** Fiber-level health based on Promise resolution state.
     Returns Fiber_unknown if the keeper is not registered. *)
 val fiber_health_of : base_path:string -> string -> fiber_health

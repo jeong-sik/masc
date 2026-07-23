@@ -46,7 +46,7 @@ let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
   in
   {
     dead_revival_requested;
-    clear_pause_state = paused || dead_revival_requested;
+    clear_pause_state = dead_revival_requested;
   }
 
 let update_keeper ?(preserve_prompt_defaults = false)
@@ -106,7 +106,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
       | None -> "none", ""
     in
     Log.Keeper.warn
-      "update_keeper resumed paused keeper %s; clearing \
+      "update_keeper reviving dead keeper %s; clearing \
        last_blocker.klass=%s last_blocker.detail=%S"
       old.name blocker_class blocker_detail);
   let source_meta = old in
@@ -128,11 +128,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
     autoboot_enabled;
     active_goal_ids;
     paused = if clear_pause_state then false else old.paused;
-    (* Operator-sanctioned resume clears the terminal latch (Dead_tombstone
-       included) so a sanctioned keeper_up revives a latched keeper.  Without
-       this [latched_reason] survives a paused-clearing resume and every
-       latch-keyed lifecycle admission keeps denying revival forever even after
-       [paused] is cleared. *)
+    (* The dedicated Dead-tombstone revival clears the terminal latch together
+       with [paused]. Ordinary keeper_up reconfiguration preserves both fields;
+       it cannot impersonate the receipt-first Resume_owner transaction. *)
     latched_reason =
       if clear_pause_state then None else source_meta.latched_reason;
     runtime =
@@ -238,9 +236,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                builds [updated] from a meta snapshot ([old]), so a concurrent
                keeper turn that bumped cumulative usage counters between the
                read and this write would otherwise be silently rewound
-               (total_turns 385->370, 2026-06-10). This is an explicit operator
-               lifecycle action, so it owns pause/resume fields while taking
-               cumulative counters as [max latest caller]. *)
+               (total_turns 385->370, 2026-06-10). This operator lifecycle edit
+               preserves the observed pause disposition while taking cumulative
+               counters as [max latest caller]. *)
             (match
                Keeper_shutdown_supersession.preflight
                  ~config:ctx.config

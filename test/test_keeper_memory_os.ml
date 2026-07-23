@@ -676,6 +676,117 @@ let test_librarian_does_not_infer_validity () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+(* RFC-0351 S2: the extracting model may declare a lifetime per claim; the
+   parser stamps the exact valid_until boundary the recall filter and expiry
+   GC already honor. Declaration only — categories still never infer one
+   (locked by test_librarian_does_not_infer_validity above). *)
+let test_librarian_stamps_declared_lifetime () =
+  let now = 1_000_000.0 in
+  let output =
+    `Assoc
+      [ "episode_summary", `String "declared lifetime claims"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "the agent is blocked on a sandbox limit today"
+                ; "category", `String "ephemeral"
+                ; "claim_kind", `String "self_observation"
+                ; "source_turn", `Int 0
+                ; "valid_for_days", `Int 2
+                ]
+            ; `Assoc
+                [ "claim", `String "parse boundaries own validation"
+                ; "category", `String "lesson"
+                ; "source_turn", `Int 1
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-declared-lifetime"
+    ; generation = 0
+    ; messages = [ text_message "x" ]
+    }
+  in
+  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
+  | Some episode ->
+    let find cat = List.find (fun f -> f.Types.category = cat) episode.Types.claims in
+    let declared = find Types.Ephemeral in
+    let durable = find Types.Lesson in
+    Alcotest.(check (option (float 0.001)))
+      "declared lifetime becomes the exact expiry boundary"
+      (Some (now +. (2. *. 86_400.)))
+      declared.Types.valid_until;
+    Alcotest.(check (option (float 0.001)))
+      "undeclared lifetime stays durable"
+      None
+      durable.Types.valid_until;
+    Alcotest.(check bool)
+      "declared-lifetime claim is current before its boundary"
+      true
+      (Types.fact_is_current ~now:(now +. 86_400.) declared);
+    Alcotest.(check bool)
+      "declared-lifetime claim expires after its boundary"
+      false
+      (Types.fact_is_current ~now:(now +. (3. *. 86_400.)) declared)
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
+let test_librarian_rejects_invalid_lifetime () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-invalid-lifetime"
+    ; generation = 0
+    ; messages = [ text_message "x" ]
+    }
+  in
+  List.iter
+    (fun (label, value) ->
+       let raw =
+         `Assoc
+           [ "episode_summary", `String "summary"
+           ; ( "claims"
+             , `List
+                 [ `Assoc
+                     [ "claim", `String "claim with a malformed lifetime"
+                     ; "category", `String "ephemeral"
+                     ; "source_turn", `Int 0
+                     ; "valid_for_days", value
+                     ]
+                 ] )
+           ; "open_items", `List []
+           ; "constraints", `List []
+           ; "preserved_tool_refs", `List []
+           ]
+         |> Yojson.Safe.to_string
+       in
+       match
+         Librarian.episode_of_output_result
+           ~now:1_000_000.0
+           ~generation:inp.generation
+           inp
+           raw
+       with
+       | Error Librarian.Claim_schema_mismatch -> ()
+       | Error error ->
+         Alcotest.failf
+           "%s: expected Claim_schema_mismatch, got %s"
+           label
+           (Librarian.parse_error_to_string error)
+       | Ok _ ->
+         Alcotest.failf
+           "%s: a malformed lifetime must not be stored as forever"
+           label)
+    [ "zero days", `Int 0
+    ; "negative days", `Int (-3)
+    ; "beyond the shared bound", `Int 999
+    ; "wrong JSON type", `String "7"
+    ]
+;;
+
 let test_librarian_accepts_wrapped_json_output () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-wrapped-json"
@@ -2454,7 +2565,11 @@ let test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing () =
       (episode_retention_metric_value keeper_id)))
 ;;
 
-let test_recall_context_empty_without_memory () =
+(* Cold-start contract (RFC-0351 L1): an empty store still renders the
+   wrapper so the keeper sees the gauge and the "belongs in a fact" advisory
+   from its very first turn. Short-circuiting to "" hid the L1 nudge from
+   exactly the keepers that had never written anything. *)
+let test_recall_context_empty_store_renders_gauge () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
       Recall.render_context
@@ -2462,7 +2577,16 @@ let test_recall_context_empty_without_memory () =
         ~now:1_000_000.0
         ()
     in
-    Alcotest.(check string) "empty recall context" "" ctx)
+    let contains ~needle haystack =
+      let nlen = String.length needle in
+      let hlen = String.length haystack in
+      let rec scan i = i + nlen <= hlen && (String.sub haystack i nlen = needle || scan (i + 1)) in
+      scan 0
+    in
+    Alcotest.(check bool)
+      "empty-store recall context carries the zero gauge"
+      true
+      (contains ~needle:"facts 0/0 injected, episodes 0/0 injected" ctx))
 ;;
 
 (* render_if_enabled — the extra_system_context gate wired into
@@ -2494,7 +2618,7 @@ let test_render_if_enabled_explicit_off () =
       | Some block -> Alcotest.failf "expected None with kill switch set, got %S" block))
 ;;
 
-let test_render_if_enabled_empty_store_yields_none () =
+let test_render_if_enabled_empty_store_still_injects_gauge () =
   with_recall_env "true" (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       match
@@ -2504,8 +2628,18 @@ let test_render_if_enabled_empty_store_yields_none () =
           ~masc_root:keepers_dir
           ()
       with
-      | None -> ()
-      | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
+      | None -> Alcotest.fail "expected the cold-start gauge block, got None"
+      | Some block ->
+        Alcotest.(check bool)
+          "cold-start block names the zero store"
+          true
+          (let needle = "facts 0/0 injected" in
+           let nlen = String.length needle in
+           let hlen = String.length block in
+           let rec scan i =
+             i + nlen <= hlen && (String.sub block i nlen = needle || scan (i + 1))
+           in
+           scan 0)))
 ;;
 
 let test_render_if_enabled_surfaces_prompt_render_failure () =
@@ -4043,6 +4177,60 @@ let test_merge_keeps_distinct_conclusions () =
     Alcotest.(check int) "two rows survive (correction not dropped)" 2 (List.length rows))
 ;;
 
+(* RFC-0351 L3: the rendered byte budget drops the oldest episodes until the
+   block fits and keeps survivors in their original order. Before this the
+   budget only logged "not truncated" and let the block go out whole — one
+   keeper rendered 222,499B of recall while both count budgets (500/500) sat
+   unfired at 62 facts / 432 episodes. *)
+let test_byte_budget_keeps_newest_in_original_order () =
+  (* Pairs arrive oldest-first, the order recall renders them in. Each line is
+     4 bytes plus one newline joiner, so a 12-byte budget fits exactly two. *)
+  let pairs = [ 1, "aaaa"; 2, "bbbb"; 3, "cccc"; 4, "dddd" ] in
+  let kept, dropped =
+    Masc.Keeper_memory_os_recall.select_pairs_within_byte_budget ~budget:12 pairs
+  in
+  Alcotest.(check (list int))
+    "the newest survivors keep their original relative order"
+    [ 3; 4 ]
+    (List.map fst kept);
+  Alcotest.(check int) "the older pairs are reported as dropped" 2 dropped;
+  let all_kept, none_dropped =
+    Masc.Keeper_memory_os_recall.select_pairs_within_byte_budget ~budget:1000 pairs
+  in
+  Alcotest.(check (list int))
+    "within budget the selection is unchanged"
+    [ 1; 2; 3; 4 ]
+    (List.map fst all_kept);
+  Alcotest.(check int) "within budget nothing is dropped" 0 none_dropped
+;;
+
+(* RFC-0351 L1: the gauge is what lets the model see its own store instead of
+   guessing at it. One keeper reported "Memory OS dumps 1500+ episodes per turn"
+   against a store of 268-500 and then persisted that misdiagnosis as a fact.
+   This pins the rendered shape because it goes into the prompt. *)
+let test_gauge_reports_injected_against_stored () =
+  Alcotest.(check string)
+    "gauge reports injected against stored plus the byte budget"
+    "facts 62/62 injected, episodes 130/432 injected, 64512B/65536B rendered"
+    (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~facts_injected:62
+       ~facts_stored:62
+       ~episodes_injected:130
+       ~episodes_stored:432
+       ~rendered_bytes:64512
+       ~byte_budget:65536);
+  Alcotest.(check string)
+    "a disabled budget reads as unbounded rather than as a literal zero"
+    "facts 1/1 injected, episodes 2/2 injected, 40B rendered (no byte budget)"
+    (Masc.Keeper_memory_os_recall.render_gauge_line
+       ~facts_injected:1
+       ~facts_stored:1
+       ~episodes_injected:2
+       ~episodes_stored:2
+       ~rendered_bytes:40
+       ~byte_budget:0)
+;;
+
 (* RFC-0259 §3.7 (P6 regression): a durable claim still advances its
    [last_verified_at] on re-observe, and exact-text upsert behavior is unchanged:
    identical claims merge to one row, distinct claims stay two. *)
@@ -4753,6 +4941,14 @@ let () =
             `Quick
             test_librarian_does_not_infer_validity
         ; Alcotest.test_case
+            "librarian stamps a declared lifetime"
+            `Quick
+            test_librarian_stamps_declared_lifetime
+        ; Alcotest.test_case
+            "librarian rejects a malformed lifetime"
+            `Quick
+            test_librarian_rejects_invalid_lifetime
+        ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
             test_librarian_accepts_wrapped_json_output
@@ -4951,9 +5147,9 @@ let () =
         ] )
     ; ( "recall"
       , [ Alcotest.test_case
-            "empty without memory"
+            "empty store renders the cold-start gauge"
             `Quick
-            test_recall_context_empty_without_memory
+            test_recall_context_empty_store_renders_gauge
         ; Alcotest.test_case
             "renders sanitized memory"
             `Quick
@@ -4971,9 +5167,9 @@ let () =
             `Quick
             test_render_if_enabled_explicit_off
         ; Alcotest.test_case
-            "render_if_enabled empty store yields none"
+            "render_if_enabled empty store still injects the gauge"
             `Quick
-            test_render_if_enabled_empty_store_yields_none
+            test_render_if_enabled_empty_store_still_injects_gauge
         ; Alcotest.test_case
             "render_if_enabled surfaces prompt render failure"
             `Quick
@@ -5174,6 +5370,14 @@ let () =
             "reobserve advances an independent claim's observation timestamp"
             `Quick
             test_reobserve_advances_durable_anchor
+        ; Alcotest.test_case
+            "recall byte budget drops oldest episodes and keeps original order"
+            `Quick
+            test_byte_budget_keeps_newest_in_original_order
+        ; Alcotest.test_case
+            "recall gauge reports injected against stored"
+            `Quick
+            test_gauge_reports_injected_against_stored
         ] )
     ]
 ;;

@@ -30,7 +30,6 @@ export async function loadPersonas(): Promise<void> {
 
 export const spawning = signal(false)
 export const spawnResult = signal<{ success: boolean; message: string } | null>(null)
-export const showSpawnPanel = signal(false)
 
 function formatKeeperSpawnError(message: string): string {
   const forbiddenMatch = message.match(/Forbidden:\s+([^\s]+)\s+cannot\s+masc_keeper_create_from_persona/i)

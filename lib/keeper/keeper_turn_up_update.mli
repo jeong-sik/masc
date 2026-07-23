@@ -21,8 +21,9 @@ type revival_decision = {
           {!Keeper_dead_revival_transaction.revive} instead of the normal
           CAS-merge write path. *)
   clear_pause_state : bool;
-      (** Clear [paused], [latched_reason], and [runtime.last_blocker] on
-          the updated meta before it is persisted. *)
+      (** Clear [paused], [latched_reason], and [runtime.last_blocker] only for
+          the dedicated Dead-tombstone revival transaction. Ordinary paused
+          owners remain paused. *)
 }
 
 (** Decide the dead-revival / pause-clearing outcome for an existing
@@ -49,9 +50,11 @@ type revival_decision = {
     the revival transaction; the stranded [paused = false] + [Dead_tombstone]
     split now does too.
 
-    [clear_pause_state] is [paused || dead_revival_requested]: an ordinary
-    [masc_keeper_up] call on a keeper that is merely paused resumes it, and
-    a dead-revival always clears pause/latch state as well. *)
+    [clear_pause_state] is exactly [dead_revival_requested]. An ordinary
+    [masc_keeper_up] call may reconfigure a paused Keeper but cannot resume it;
+    resume belongs to the receipt-first [Resume_owner] transaction. A
+    Dead-tombstone revival still clears pause/latch state in its separate
+    transaction. *)
 val revival_decision :
   latched_reason:Keeper_latched_reason.t option ->
   paused:bool ->

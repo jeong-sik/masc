@@ -362,46 +362,17 @@ let process_directive ~agent_name directive =
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
     set_keeper_paused_state ~agent_name true
-  | Keeper_directive.Resume ->
-    Log.Keeper.emit
-      Log.Info
-      ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "resume" ])
-      (Printf.sprintf "directive: resuming keeper %s" agent_name);
-    set_keeper_paused_state ~agent_name false
   | Keeper_directive.Wakeup ->
-    (* Dashboard "깨우기" is an explicit operator action and therefore a
-       superset of resume: a deliberately paused Keeper re-enters the run loop
-       before the wakeup signal is delivered. *)
-    let entry_opt = keeper_entry_by_identity_opt agent_name in
-    let entry_paused =
-      match entry_opt with
-      | Some e -> e.meta.paused
-      | None ->
-        (match Keeper_tool_shared_runtime.find_registry_meta
-                 ~keeper_name:agent_name
-                 ~source_layer:"keepalive"
-         with
-         | Some meta -> meta.paused
-         | None -> false)
-    in
-    let prepare_wakeup () = true in
-    if entry_paused
-    then (
-      Log.Keeper.emit
-        Log.Info
-        ~category:Log.Directive
-        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup_resume" ])
-        (Printf.sprintf "directive: waking up %s (explicitly resuming paused keeper)" agent_name);
-      set_keeper_paused_state ~agent_name false)
-    else (
-      Log.Keeper.emit
-        Log.Debug
-        ~category:Log.Directive
-        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
-        (Printf.sprintf "directive: waking up %s" agent_name);
-      if prepare_wakeup ()
-      then wakeup_keeper_by_agent_name ~agent_name)
+    (* Wakeup is only a scheduling signal. It must never clear an operator
+       pause: paused-work disposition belongs to the receipt-first
+       [Resume_owner] transaction. Lifecycle admission keeps a paused lane
+       parked until that transaction commits. *)
+    Log.Keeper.emit
+      Log.Debug
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
+      (Printf.sprintf "directive: waking up %s" agent_name);
+    wakeup_keeper_by_agent_name ~agent_name
   | Keeper_directive.Assign_task task_id ->
     let task_id_string = Keeper_id.Task_id.to_string task_id in
     Log.Keeper.emit
@@ -898,7 +869,7 @@ let start_keepalive
              m
        with
        | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-         Log.Keeper.info
+         Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);

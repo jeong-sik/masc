@@ -460,22 +460,6 @@ let wakeup_running_exact ~intent (expected : registry_entry) =
           | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
 ;;
 
-let wakeup_all ~intent ?base_path () =
-  let base_path = Option.map canonical_base_path_exn base_path in
-  StringMap.iter
-    (fun _k entry ->
-       match base_path with
-       | Some expected when not (String.equal expected entry.base_path) -> ()
-       | _ ->
-         if entry.phase = Running
-         then
-           let (_ : wakeup_outcome) =
-             wakeup_running_entry ~intent entry
-           in
-           ())
-    (Atomic.get registry)
-;;
-
 let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Fiber_unknown

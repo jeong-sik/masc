@@ -196,14 +196,14 @@ let manual_help_entry name =
           name;
           short_description = "Persist a structured keeper memory entry.";
           when_to_use =
-            "Use when an explicit decision, open question, goal, or progress note should be searchable on later turns.";
+            "Use when something from this turn must outlive it: long_term for a claim later turns should read back, the other kinds for working notes searchable within the run.";
           key_constraints =
             [
-              "kind must be one of the callable keeper memory kinds.";
+              "kind selects the store: long_term is durable, the rest are turn-scoped.";
               "Do not use for transient scratch notes.";
             ];
           details_markdown =
-            "Writes a bounded structured memory note. The long_term kind is reserved for tool-result emission and is not accepted here.";
+            "Writes a bounded structured memory note. long_term lands in the Memory OS fact store that recall renders into later turns; goal/progress/decision/open_question land in the turn-scoped memory bank.";
           doc_refs = [];
           prompt_hints = [];
           examples =

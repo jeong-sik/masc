@@ -304,6 +304,77 @@ let test_quarantine_orphan_keeps_valid_prefix () =
   check_exact "orphan protected under quarantine" [ orphan ] output.protected_suffix
 ;;
 
+let test_provider_admission_requires_closed_tool_cycle () =
+  let closed =
+    [ message T.Assistant [ use "call-a"; use "call-b" ]
+    ; message T.Tool [ result "call-b"; result "call-a" ]
+    ]
+  in
+  (match U.validate_provider_transcript closed with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.failf
+       "closed provider transcript rejected: %s"
+       (U.show_provider_transcript_error error));
+  let open_messages =
+    [ message T.Assistant [ use "call-a"; use "call-b" ]
+    ; message T.Tool [ result "call-b" ]
+    ; text T.User "next turn must not dispatch"
+    ]
+  in
+  match U.validate_provider_transcript open_messages with
+  | Error (U.Unresolved_tool_results { tool_use_ids = [ "call-a" ] }) -> ()
+  | Error error ->
+    Alcotest.failf
+      "wrong provider transcript rejection: %s"
+      (U.show_provider_transcript_error error)
+  | Ok () -> Alcotest.fail "open ToolUse suffix reached provider admission"
+;;
+
+let test_provider_admission_quarantines_malformed_overlap () =
+  let poisoned =
+    [ message T.Assistant [ use "missing" ]
+    ; text T.User "interstitial"
+    ; message T.Assistant [ use "next" ]
+    ]
+  in
+  let provider_dispatches = ref 0 in
+  let dispatch () =
+    incr provider_dispatches;
+    Ok ()
+  in
+  (match U.validate_provider_transcript poisoned with
+   | Error
+       (U.Invalid_transcript_structure
+         (U.Overlapping_tool_cycle
+           { message_index = 2; tool_use_id = "next" })) ->
+     ()
+   | Error error ->
+     Alcotest.failf
+       "wrong malformed transcript rejection: %s"
+       (U.show_provider_transcript_error error)
+   | Ok () -> Alcotest.fail "malformed overlap reached provider admission");
+  match Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
+          ~messages:poisoned
+          ~dispatch
+  with
+  | Error error ->
+    Alcotest.(check int) "poisoned provider dispatch count" 0 !provider_dispatches;
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some
+         (Keeper_internal_error.Incomplete_tool_transcript
+           { reason = Keeper_internal_error.Structurally_invalid
+           ; tool_use_ids = []
+           ; _
+           }) ->
+       Alcotest.(check string)
+         "operator receipt terminal code"
+         "incomplete_tool_transcript"
+         (Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error error)
+     | Some _ | None -> Alcotest.fail "missing typed transcript quarantine")
+  | Ok () -> Alcotest.fail "poisoned transcript passed keeper admission"
+;;
+
 let () =
   Alcotest.run "keeper_compaction_unit"
     [ ( "partition"
@@ -350,5 +421,9 @@ let () =
             test_quarantine_overlapping_keeps_valid_prefix
         ; Alcotest.test_case "quarantine orphan keeps valid prefix" `Quick
             test_quarantine_orphan_keeps_valid_prefix
+        ; Alcotest.test_case "provider admission requires closed cycle" `Quick
+            test_provider_admission_requires_closed_tool_cycle
+        ; Alcotest.test_case "provider admission quarantines overlap" `Quick
+            test_provider_admission_quarantines_malformed_overlap
         ] )
     ]

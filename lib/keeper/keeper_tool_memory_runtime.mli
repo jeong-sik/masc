@@ -78,7 +78,8 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_rejected
-  | Long_term_via_explicit_write_not_yet_supported
+  | Invalid_valid_for_days
+  | Valid_for_days_on_turn_scoped_kind
   | Persistence_failed
   | No_memory_write_error
 
@@ -88,6 +89,7 @@ type memory_write_validation =
   | Memory_write_ok of
       { kind : Keeper_memory_policy.memory_kind
       ; body : string
+      ; valid_for_days : int option
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind

@@ -117,10 +117,10 @@ let runtime_base_path_opt () =
   | None -> None
 
 let keeper_event_queue_health_json () =
-  match runtime_base_path_opt () with
+  match current_server_state_opt () with
   | None ->
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
@@ -132,19 +132,53 @@ let keeper_event_queue_health_json () =
       ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
+      ; "runnable_pending_count", `Int 0
+      ; "runnable_inflight_count", `Int 0
+      ; "runnable_backlog_count", `Int 0
+      ; "runnable_oldest_arrived_at_unix", `Null
+      ; "runnable_oldest_age_seconds", `Null
+      ; "runnable_by_keeper", `List []
+      ; "paused_retained_pending_count", `Int 0
+      ; "paused_retained_inflight_count", `Int 0
+      ; "paused_retained_count", `Int 0
+      ; "paused_retained_oldest_arrived_at_unix", `Null
+      ; "paused_retained_oldest_age_seconds", `Null
+      ; "paused_retained_by_keeper", `List []
+      ; "unclassified_pending_count", `Int 0
+      ; "unclassified_inflight_count", `Int 0
+      ; "unclassified_count", `Int 0
+      ; "unclassified_oldest_arrived_at_unix", `Null
+      ; "unclassified_oldest_age_seconds", `Null
+      ; "unclassified_by_keeper", `List []
       ; "pending_by_keeper", `List []
       ; "inflight_by_keeper", `List []
       ; "read_error_count", `Int 0
       ; "read_errors", `List []
       ; "keepers", `List []
       ]
-  | Some base_path ->
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     let now =
       Unix.gettimeofday ()
       (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
          durable queue ages; queue parsing below stays deterministic. *)
     in
-    Keeper_event_queue_persistence.fleet_summary_json ~now ~base_path
+    let owner_lifecycle ~keeper_name =
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Ok (Some meta) ->
+        (match pause_kind meta with
+         | Active -> Keeper_event_queue_persistence.Runnable
+         | Operator_paused | Unclassified_paused | Dead_tombstone ->
+           Keeper_event_queue_persistence.Paused_retained)
+      | Ok None ->
+        Keeper_event_queue_persistence.Lifecycle_unknown "durable keeper metadata missing"
+      | Error detail -> Keeper_event_queue_persistence.Lifecycle_unknown detail
+    in
+    Keeper_event_queue_persistence.fleet_summary_json
+      ~now
+      ~base_path
+      ~owner_lifecycle
 
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan

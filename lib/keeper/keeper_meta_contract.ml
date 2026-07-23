@@ -46,7 +46,37 @@ type compaction_runtime =
   ; last_after_tokens : int
   ; last_check_ts : float
   ; last_decision : compaction_runtime_decision
+  ; consecutive_failures : int
+    (* RFC-0351 S0 / #25461: consecutive compaction-failure settlements for
+       this keeper — manual-lane [Manual_compaction_failed] and in-lane
+       provider-overflow recoveries that made no durable progress. Incremented
+       on failure, reset to 0 on a committed compaction from either lane. The
+       heartbeat settlement path escalates instead of requeuing once this
+       reaches [compaction_retry_escalation_threshold]; without it a failing
+       compaction requeues forever (measured: 102 failures / 104 compaction
+       LLM calls in 74 minutes). *)
   }
+
+(* RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
+   settlement escalates instead of retrying. Defined next to
+   [consecutive_failures] so the heartbeat settlement (manual and in-lane
+   provider-overflow) and the status/dashboard projections that surface the
+   suspended state read one constant. Three attempts keeps a transient
+   CAS/source race recoverable while bounding a structurally-stuck
+   compaction. *)
+let compaction_retry_escalation_threshold = 3
+
+let compaction_retry_suspended rt =
+  rt.consecutive_failures >= compaction_retry_escalation_threshold
+
+(* #25296: consecutive transcript-quarantine requeues tolerated before the
+   settlement escalates instead of retrying. Defined next to
+   [compaction_retry_escalation_threshold] so the heartbeat settlement reads
+   one family of retry ceilings. Three attempts keeps a transient
+   checkpoint-write race recoverable while bounding a structurally poisoned
+   transcript, which the admission rejects deterministically on every
+   re-lease. *)
+let transcript_quarantine_retry_escalation_threshold = 3
 
 type proactive_runtime =
   { count_total : int
@@ -347,6 +377,16 @@ type agent_runtime_state =
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)
+  ; transcript_quarantine_consecutive_retries : int
+    (* #25296: consecutive transcript-quarantine requeue settlements for this
+       keeper. Incremented each time a failed turn settles as
+       [Requeue Transcript_quarantine_retry], reset to 0 on a completed turn.
+       The heartbeat settlement escalates
+       ([Transcript_quarantine_retry_exhausted]) instead of requeuing once
+       this reaches [transcript_quarantine_retry_escalation_threshold];
+       without it a poisoned checkpoint — preserved unmodified by design —
+       loops the same source stimulus through the full turn pipeline on every
+       heartbeat. *)
   }
 
 type keeper_meta =

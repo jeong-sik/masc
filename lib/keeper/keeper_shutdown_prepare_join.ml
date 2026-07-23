@@ -410,11 +410,31 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
             ; cleanup_error = lane_exit.cleanup_error
             }
           in
-          let phase =
-            match operation.turn_disposition with
-            | No_inflight_turn -> Joined_idle
-            | Inflight_effect_unknown turn -> Reconciliation_required turn
-          in
+          (* [operation.turn_disposition] is an admission-time snapshot: it
+             records that a turn was in flight when the shutdown fence was
+             committed. By this point that turn has terminally ended in this
+             process — [await_idle_after_shutdown] returned (turn mutex
+             released), [await_exit] returned (lane fiber exited) and
+             [done_p] resolved — so the in-flight question the snapshot
+             raised is settled by the join itself. Deriving the phase from
+             the stale snapshot parked live keepers in
+             [Reconciliation_required], a phase with no exit transition
+             (#25491): the 2026-07-20/21 fleet wedge was created here with
+             join evidence already showing [Terminal_stopped]. The snapshot
+             stays on the operation as an audit record; the phase follows
+             the join evidence. [Reconciliation_required] remains reachable
+             only from boot recovery, where the owning process died before
+             the join could observe the lane exit. *)
+          (match operation.turn_disposition with
+           | No_inflight_turn -> ()
+           | Inflight_effect_unknown turn ->
+             Log.Keeper.info
+               "%s: shutdown join settled admission-time in-flight turn %s (lane exited, terminal resolved)"
+               current.name
+               (match turn.observed_turn_id with
+                | Some turn_id -> string_of_int turn_id
+                | None -> "id-unobserved"));
+          let phase = Joined_idle in
           let joined =
             { operation with
               revision = operation.revision + 1

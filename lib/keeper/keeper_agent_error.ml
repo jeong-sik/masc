@@ -73,9 +73,30 @@ let structured_internal_error_user_message err =
   | None -> Agent_sdk.Error.to_string err
 ;;
 
+(* The raw provider diagnostic ("Context overflow: empty completion
+   (stop_reason=model_context_window_exceeded): provider returned an empty
+   assistant turn …") reached dashboard chat verbatim, repeatedly, on
+   2026-07-21. State the condition in the user's terms instead. Only the
+   typed [Api ContextOverflow] arm exists: the [Provider] path collapses the
+   overflow into [InvalidRequest] with a string reason (the module-boundary
+   classification loss RFC-0353 tracks), and matching that string here would
+   be a classifier — the fix for that path is upstream type preservation. *)
+let context_overflow_user_message ~limit =
+  let limit_part =
+    match limit with
+    | Some tokens -> Printf.sprintf " (model window ~%d tokens)" tokens
+    | None -> ""
+  in
+  "This conversation no longer fits the model's context window"
+  ^ limit_part
+  ^ ". The message was not processed; a shorter message may fit."
+;;
+
 let user_message_of_sdk_error = function
   | Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; kind }) ->
     provider_network_user_message ~kind ~detail:message ()
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
+    context_overflow_user_message ~limit
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()

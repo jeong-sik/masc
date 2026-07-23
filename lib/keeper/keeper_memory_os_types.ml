@@ -52,6 +52,8 @@ let wire_librarian_episode_fields =
   ]
 ;;
 
+let wire_field_valid_for_days = "valid_for_days"
+
 let wire_librarian_claim_fields =
   [ wire_field_claim
   ; wire_field_category
@@ -59,6 +61,7 @@ let wire_librarian_claim_fields =
   ; wire_field_source_tool_call_id
   ; wire_field_claim_id
   ; wire_field_claim_kind
+  ; wire_field_valid_for_days
   ]
 ;;
 
@@ -211,6 +214,16 @@ let fact_is_current ~now (fact : fact) =
   | None -> true
   | Some ts -> ts >= now
 ;;
+
+let seconds_per_day = 86_400.
+let max_valid_for_days = 365
+
+(* RFC-0351 S2: a producer-declared lifetime in whole days becomes the exact
+   [valid_until] boundary that [fact_is_current] and expiry GC already honor.
+   The number is the producer's own claim about the claim's scope — judged by
+   the model that wrote it, never inferred from the text by a fixed
+   write-side TTL (#24332 removed exactly those). *)
+let valid_until_of_days ~now days = now +. (float_of_int days *. seconds_per_day)
 
 (* Split facts only on the exact stored [valid_until] boundary. No category,
    claim-kind, or timestamp-derived fallback participates. *)

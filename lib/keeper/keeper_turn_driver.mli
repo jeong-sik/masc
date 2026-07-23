@@ -30,6 +30,8 @@ include
       Keeper_internal_error.accept_response_shape
      and type provider_cooldown_cause =
       Keeper_internal_error.provider_cooldown_cause
+     and type transcript_quarantine_reason =
+      Keeper_internal_error.transcript_quarantine_reason
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Turn pipeline records} *)

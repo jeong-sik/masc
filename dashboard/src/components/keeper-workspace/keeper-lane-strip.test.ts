@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardKeeperWaitingRow } from '../../api'
 import type { Keeper } from '../../types'
 import { KeeperLaneStrip } from './keeper-lane-strip'
 
@@ -59,6 +59,57 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
   }
 }
 
+/** Mirrors the live shape that produced the "레인 64" report: the server capped
+ *  external attention at `external_attention_row_limit` and said so, so every
+ *  count folded over the surviving rows is a lower bound. The cap and the
+ *  external-attention row count are the observed values (sangsu, 2026-07-21,
+ *  265 pending in the store, 64 served); the uncapped chat rows are added so
+ *  the fixture covers a mixed entry where only one source is bounded. */
+function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
+  const externalRows: DashboardKeeperWaitingRow[] = Array.from({ length: 64 }, (_, i) => ({
+    keeper_name: 'sangsu',
+    source: 'external_attention',
+    waiting_on: 'external_attention',
+    wake_producer: 'keeper_process_external_attention',
+    since_iso: '2026-06-12T03:20:00Z',
+    next_action: 'keeper_process_external_attention',
+    detail: { event_id: `evt-${i}` },
+  }))
+  const chatRows: DashboardKeeperWaitingRow[] = Array.from({ length: 5 }, (_, i) => ({
+    keeper_name: 'sangsu',
+    source: 'chat_queue_pending',
+    waiting_on: 'dashboard_chat',
+    wake_producer: 'keeper_chat_queue',
+    since_iso: '2026-07-21T07:30:00Z',
+    next_action: 'keeper_drain_chat_queue',
+    detail: { receipt_id: `chatq_${i}` },
+  }))
+  return {
+    schema: 'masc.dashboard.keeper_waiting_inventory.v2',
+    source: 'server_keeper_waiting_inventory',
+    generated_at: '2026-07-21T07:38:06Z',
+    supported_states: ['idle', 'busy', 'waiting', 'deferred'],
+    keeper_count_known: true,
+    keeper_count: 1,
+    waiting_keeper_count: 1,
+    row_count: 69,
+    row_count_truncated: true,
+    external_attention_row_limit: 64,
+    keepers: [
+      {
+        keeper_name: 'sangsu',
+        state: 'waiting',
+        waiting_count: 69,
+        waiting_count_truncated: true,
+        truncated_sources: { external_attention: true },
+        sources: { external_attention: 64, chat_queue_pending: 5 },
+        next_action: 'keeper_process_external_attention',
+        waiting_on: [...externalRows, ...chatRows],
+      },
+    ],
+  }
+}
+
 describe('KeeperLaneStrip', () => {
   let host: HTMLDivElement | null = null
 
@@ -94,6 +145,71 @@ describe('KeeperLaneStrip', () => {
     expect(text).toContain('chat_lane')
     expect(text).toContain('keeper finish in flight turn')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
+  })
+
+  it('marks a server-capped count as a lower bound instead of a total', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${truncatedInventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const text = el.textContent ?? ''
+    expect(text).toContain('≥69')
+    // the bare integer would assert a total the server never computed
+    expect(text).not.toMatch(/레인\s*69(?!\d)/)
+    expect(el.querySelector('[data-testid="keeper-lane-more"]')?.textContent ?? '')
+      .toContain('of at least 69')
+  })
+
+  it('attributes the truncation to the capped source and the server limit', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${truncatedInventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const note = el.querySelector('[data-testid="keeper-lane-truncation"]')?.textContent ?? ''
+    expect(note).toContain('external attention')
+    expect(note).toContain('64')
+    expect(note).toContain('실제 대기 건수는 더 많습니다')
+  })
+
+  it('bounds only the sources the server reported as capped', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${truncatedInventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    const sources = el.querySelector('[data-testid="keeper-lane-sources"]')?.textContent ?? ''
+    expect(sources).toContain('external attention ≥64')
+    // chat_queue_pending was not capped, so it is an exact count
+    expect(sources).toContain('chat queue pending 5')
+    expect(sources).not.toContain('chat queue pending ≥5')
+  })
+
+  it('renders an exact count and no truncation note when nothing was capped', () => {
+    const el = mount(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventoryFixture()}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `)
+    expect(el.textContent ?? '').not.toContain('≥')
+    expect(el.querySelector('[data-testid="keeper-lane-truncation"]')).toBeNull()
   })
 
   it('shows the auto-refresh cadence beside the snapshot time when polling', () => {

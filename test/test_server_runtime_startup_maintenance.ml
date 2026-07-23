@@ -41,6 +41,35 @@ let test_subdirs_pruned_and_stray_files_skipped () =
   Alcotest.(check bool)
     "return sums prune_dir results" true (n = String.length keeper_a + String.length keeper_b)
 
+let test_prune_flat_jsonl_removes_old_files () =
+  (* Regression guard for the trajectories no-op: populated
+     trajectories/<keeper>/ layout must yield pruned > 0. *)
+  let root = fresh_dir "masc_prune_flat" in
+  let keeper = Filename.concat root "keeper-a" in
+  Fs_compat.mkdir_p keeper;
+  let write path =
+    let oc = open_out path in
+    output_string oc "{}\n";
+    close_out oc
+  in
+  let old_file = Filename.concat keeper "trace-old.jsonl" in
+  let recent_file = Filename.concat keeper "trace-recent.jsonl" in
+  let stray = Filename.concat keeper "notes.txt" in
+  write old_file;
+  write recent_file;
+  write stray;
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  Unix.utimes old_file old_ts old_ts;
+  let n =
+    SM.prune_children_dirs
+      ~prune_dir:(SM.prune_flat_jsonl_older_than ~days:30)
+      root
+  in
+  Alcotest.(check int) "old trajectory pruned" 1 n;
+  Alcotest.(check bool) "old file removed" false (Sys.file_exists old_file);
+  Alcotest.(check bool) "recent file kept" true (Sys.file_exists recent_file);
+  Alcotest.(check bool) "non-jsonl file kept" true (Sys.file_exists stray)
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -50,5 +79,10 @@ let () =
             test_missing_root_counts_zero;
           Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
             test_subdirs_pruned_and_stray_files_skipped;
+        ] );
+      ( "prune_flat_jsonl_older_than",
+        [
+          Alcotest.test_case "populated trajectories dir prunes old files" `Quick
+            test_prune_flat_jsonl_removes_old_files;
         ] );
     ]

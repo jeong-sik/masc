@@ -255,6 +255,10 @@
   masc.masc_exec_command_gate
   ;; Board types (extracted sub-library — first step toward board isolation)
   masc_board
+  ;; Shared @-mention addressing grammar for Board + Keeper write
+  ;; boundaries (issue #25601). stdlib-only leaf; board_audience and
+  ;; keeper_lane_mentions both parse through it.
+  masc.board_addressing
   ;; Decoupled board handlers
   masc.board_handlers
   ;; Board MCP adapter: joins Board domain with neutral Tool substrate.

@@ -1,46 +1,10 @@
-(** Boundary mention parser — see the interface.  The tokenization is a
-    verbatim relocation of the legacy read-time tokenizer
-    ([trim_token_edges] + whitespace split); equivalence against the
-    legacy decision procedure is pinned by test_keeper_lane_mentions. *)
-
-(* Trim non-word characters from both ends of a token, keeping internal
-   ones.  Word chars are [a-z0-9@_-]; '.' is NOT a word char, so
-   "@alice." trims to "@alice" while the internal '.' in
-   "email@alice.com" is preserved (the whole token stays
-   "email@alice.com" and never equals "@alice"). *)
-let trim_token_edges s =
-  let is_word c =
-    (c >= 'a' && c <= 'z')
-    || (c >= '0' && c <= '9')
-    || c = '@'
-    || c = '_'
-    || c = '-'
-  in
-  let n = String.length s in
-  let i = ref 0 in
-  let j = ref (n - 1) in
-  while !i < n && not (is_word s.[!i]) do
-    incr i
-  done;
-  while !j >= !i && not (is_word s.[!j]) do
-    decr j
-  done;
-  if !j < !i then "" else String.sub s !i (!j - !i + 1)
-;;
-
-let normalized_tokens content =
-  let normalized =
-    String.map
-      (fun c ->
-        match c with
-        | '\t' | '\n' | '\r' -> ' '
-        | _ -> c)
-      (String.lowercase_ascii content)
-  in
-  String.split_on_char ' ' normalized
-  |> List.map trim_token_edges
-  |> List.filter (fun token -> not (String.equal token ""))
-;;
+(** Boundary mention parser — see the interface.  The tokenization grammar
+    is shared with the Board write boundary through [Board_addressing]
+    (issue #25601); this module only mints the grammar's raw, case-preserved
+    target candidates through [Keeper_identity.Keeper_id.of_string], whose
+    documented contract case-folds and canonicalizes.  Equivalence against
+    the legacy (pre-folded) decision procedure is pinned by
+    test_keeper_lane_mentions. *)
 
 type explicit_address =
   | No_explicit_address
@@ -49,45 +13,18 @@ type explicit_address =
   | Unsupported_broadcast of string list
 
 let explicit_address_of_content content =
-  let tokens = normalized_tokens content in
-  (* Broadcast selectors win over direct targets: a line that mixes valid
-     [@keeper] targets with any [@@] selector is treated as a broadcast
-     address, never as a partial direct address.  When the selector is not
-     [@@all] the result is [Unsupported_broadcast] and the caller fails
-     closed, dropping the whole signal — the otherwise-valid direct targets
-     are deliberately NOT routed, because partially routing an ambiguous
-     address would silently reinterpret the author's intent. *)
-  let broadcast_selectors =
-    tokens
-    |> List.filter_map (fun token ->
-      if String.length token >= 2 && String.starts_with ~prefix:"@@" token
-      then Some (String.sub token 2 (String.length token - 2))
-      else None)
-    |> List.sort_uniq String.compare
-  in
-  if
-    broadcast_selectors <> []
-    && List.for_all (String.equal "all") broadcast_selectors
-  then Broadcast_all
-  else if broadcast_selectors <> []
-  then Unsupported_broadcast broadcast_selectors
-  else (
-    let targets =
-      tokens
-      |> List.filter_map (fun token ->
-        if
-          String.length token >= 2
-          && token.[0] = '@'
-          && not (String.starts_with ~prefix:"@@" token)
-        then
-          Keeper_identity.Keeper_id.of_string
-            (String.sub token 1 (String.length token - 1))
-        else None)
-      |> List.sort_uniq Keeper_identity.Keeper_id.compare
-    in
-    match targets with
-    | [] -> No_explicit_address
-    | _ :: _ -> Targets targets)
+  match Board_addressing.parse content with
+  | Board_addressing.Broadcast_all -> Broadcast_all
+  | Board_addressing.Unsupported_broadcast selectors ->
+    Unsupported_broadcast selectors
+  | Board_addressing.No_explicit_address -> No_explicit_address
+  | Board_addressing.Raw_targets candidates ->
+    (match
+       List.filter_map Keeper_identity.Keeper_id.of_string candidates
+       |> List.sort_uniq Keeper_identity.Keeper_id.compare
+     with
+     | [] -> No_explicit_address
+     | _ :: _ as targets -> Targets targets)
 ;;
 
 let mention_ids_of_content content =

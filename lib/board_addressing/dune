@@ -1,0 +1,16 @@
+; Board_addressing — shared @-mention addressing grammar (issue #25601).
+; Single source of truth for the tokenization + @@-selector grammar that
+; Board (board_audience) and Keeper (keeper_lane_mentions) both parse at
+; their write boundaries.  Stdlib-only so board_handlers (which cannot
+; import keeper modules) and the flat masc umbrella can both depend on it.
+; Identity minting stays with each caller's id type — this leaf returns
+; raw, case-preserved candidate names only.
+
+(include_subdirs no)
+
+(library
+ (name masc_board_addressing)
+ (public_name masc.board_addressing)
+ (wrapped false)
+ (modules board_addressing)
+ (libraries))

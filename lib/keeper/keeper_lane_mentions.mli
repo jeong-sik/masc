@@ -12,7 +12,9 @@
     mentions [x] when some whitespace-separated token equals ["@" ^ x]
     after trimming non-word edge characters.  Token equality, not
     substring — ["@alicex"] and ["email@alice.com"] do not mention
-    ["alice"].  On top of the legacy contract, extracted names are
+    ["alice"].  The grammar itself (edge trimming, whitespace splitting,
+    [@@] selectors) is shared with the Board write boundary via
+    [Board_addressing] (issue #25601); on top of it, extracted names are
     minted through {!Keeper_identity.Keeper_id.of_string}, so
     keeper-shaped forms (["@keeper-alice"]) canonicalize to the same
     id as the bare name. *)

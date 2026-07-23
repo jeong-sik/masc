@@ -34,6 +34,11 @@ let test_parser_goldens () =
   check ids "different token" [ "alicex" ] (parse "ping @alicex now");
   check ids "email is one token" [] (parse "send to email@alice.com");
   check ids "case folded" [ "alice" ] (parse "PING @ALICE NOW");
+  (* #25601: the shared grammar preserves case; the case-fold now happens
+     only inside [Keeper_id.of_string], so duplicate casings of the same
+     mention still mint ONE canonical id. *)
+  check ids "duplicate casings mint one id" [ "alice" ]
+    (parse "@ALICE and @alice");
   check ids "trailing punctuation" [ "alice" ] (parse "ok @alice, thanks");
   check ids "no mention" [] (parse "just chatting here");
   check ids "newline separated" [ "alice" ] (parse "line one\n@alice two");

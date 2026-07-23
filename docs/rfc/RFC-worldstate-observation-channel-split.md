@@ -22,8 +22,8 @@ Every keeper turn assembles a `## Current World State` block
 block was delivered as a **conversation user message**, so each turn's snapshot
 landed in `checkpoint.messages` and accumulated for the life of the session.
 #25390 moved the whole frame to the turn-scoped `dynamic_context` channel
-(`keeper_unified_turn.ml:713-720`), which flows into OAS
-`extra_system_context` (`keeper_run_tools_hooks.ml:369-375`) and — per the
+(`keeper_unified_turn.ml:747-754`), which flows into OAS
+`extra_system_context` (`keeper_run_tools_hooks.ml:543-546`) and — per the
 non-persistence behaviour in §2.3 — never lands in `checkpoint.messages`. So
 the *persistence* half of the original problem is already fixed on main. What
 #25390 did **not** do is split the frame by layer: today the entire block —
@@ -43,8 +43,10 @@ messages) measured the composition:
 | `### Pending Messages` | 15 (mostly (1)–(2)) | ~5,900 | 2% |
 
 The three always-present sections — Claimable Work, Namespace State, Autonomous
-Trigger — are **86%** of the world-state bytes and are **recomputable-ephemeral**:
-each is regenerated from current workspace state every turn. (They are not
+Trigger — are **86%** of the world-state bytes and are **recomputable-ephemeral**
+on durability axis (a): each is regenerated from current workspace state every
+turn. (Autonomous_trigger nonetheless stays conversation-side under trust axis
+(b) until its layer boundary is typed — §2.1.1. They are not
 author-free "pure observations" — Claimable Work carries claim/report directives
 and Connected surfaces carry guidance; §2.1. The property that matters is that
 they are *recomputed*, so a persisted copy is stale duplication: turn N's
@@ -81,19 +83,19 @@ the ack watermark works. The real driver was the always-present
 recomputable-ephemeral sections (§2.1) being written to `checkpoint.messages`
 every turn. On current head that write path is gone: `build_prompt` returns the
 frame as a separate `world_state` field (`keeper_unified_prompt.ml:866`) and
-the turn delivers it via `dynamic_context` (`keeper_unified_turn.ml:720`),
+the turn delivers it via `dynamic_context` (`keeper_unified_turn.ml:754`),
 whose comment records the #25390 finding — persisting it as a user message
 "re-fed the model its own observations (943/945 identical frames in one live
 checkpoint, #25193) and starved compaction", so persisted user content is now
 utterances only (wake marker + HITL resolutions)
-(`keeper_unified_turn.ml:713-719`). The open issue is no longer *where the
+(`keeper_unified_turn.ml:747-753`). The open issue is no longer *where the
 frame is persisted* but *which layers ride the system-authority channel*:
 externally-authored layers currently do (§0, §2.1.1).
 
 ### 1.2 Turn execution does not depend on world-state being a user message
 
 Turn admission branches exclusively on the typed `world_observation` record and
-event-queue triggers (`keeper_world_observation.ml:1164`,
+event-queue triggers (`keeper_world_observation.ml:1177`,
 `keeper_heartbeat_loop_scheduling.ml:30`); it never reads the
 `## Current World State` string. Delivering the world-state content by a
 different channel does not change whether or when a turn fires. The dashboard
@@ -146,30 +148,33 @@ type channel = Recomputable_ephemeral | Conversation_history
 
 (* Exhaustive: a new layer must declare its channel at compile time.
    Axis (b) overrides durability (§2.1.1): Active_goals and Current_task
-   render operator-authored text, so they stay conversation-side even
-   though they are recomputed every turn. *)
+   render operator-authored text, and Autonomous_trigger's layer boundary
+   accepts caller-supplied strings, so all three stay conversation-side
+   even though they are recomputed every turn. *)
 let channel_of = function
-  | Connected_surfaces | Namespace_state | Autonomous_trigger
+  | Connected_surfaces | Namespace_state
   | Scheduled_automation | Claimable_work -> Recomputable_ephemeral
-  | Active_goals | Current_task
+  | Active_goals | Current_task | Autonomous_trigger
   | Pending_mentions | Scope_messages | Board_activity -> Conversation_history
 ```
 
 Per-layer rationale (durability, with authorship called out where the earlier
 axis mis-classified it):
 - **Recomputable-ephemeral**: connected surfaces (guidance included),
-  namespace counts, the autonomous trigger reason, scheduled-automation
-  readiness, claimable work (directives included). Each is fully recomputed
+  namespace counts, scheduled-automation readiness, claimable work
+  (directives included). Each is fully recomputed
   next turn from typed state — the keeper reads the *typed*
-  `world_observation`, not the string (`keeper_world_observation.ml:1164`), so
+  `world_observation`, not the string (`keeper_world_observation.ml:1177`), so
   moving the *rendered* copy off history changes nothing the keeper depends on.
 - **Conversation-history**: pending mentions, scope messages, board posts —
   authored input whose accumulation is already ack-bounded
-  (`message_scope_ack_id`) — **plus active goals and the claimed task**: both
-  are recomputable on axis (a), but they render operator-authored text (goal
-  titles; `task.title`, handoff `summary`/`next_step`), so the trust axis (b)
-  (§2.1.1) keeps them conversation-side until they are reduced to typed
-  IDs/status.
+  (`message_scope_ack_id`) — **plus active goals, the claimed task, and the
+  autonomous trigger**: all three are recomputable on axis (a), but the first
+  two render operator-authored text (goal titles; `task.title`, handoff
+  `summary`/`next_step`) and the trigger's layer boundary accepts
+  caller-supplied strings, so the trust axis (b) (§2.1.1) keeps them
+  conversation-side until they are reduced to typed IDs/status (or, for the
+  trigger, a typed reason code).
 
 A future refinement may split a single layer whose *summary* (counts) is
 recomputable-ephemeral while its *posts* are history (e.g. Board Activity); that
@@ -186,7 +191,7 @@ So anything routed to the recomputable-ephemeral channel is presented to the
 model with system authority.
 
 Today that distinction is invisible because the whole world-state is one flat
-string — `keeper_unified_turn.ml:720` passes `dynamic_context = world_state`
+string — `keeper_unified_turn.ml:754` passes `dynamic_context = world_state`
 (verified), and the layers are concatenated into a single buffer before that
 (`Keeper_context_layers.assemble` at `keeper_unified_prompt.ml:826`).
 This RFC is therefore the first design that *can* get the authority split wrong.
@@ -235,14 +240,15 @@ cannot quietly discard it.
   on axis (a) alone; the `channel_of` mapping above now classes them
   `Conversation_history`, and they may use the ephemeral channel only after
   being reduced to typed IDs/status.
-- **Needs verification before PR-1**: `Autonomous_trigger` concatenates a
-  `string list` supplied by the caller (`:772-777`). Today's sole producer
-  (`autonomous_trigger_lines`, `:449-510`) emits only system-generated text
-  (scheduler lines, snake_case verdict reason codes, integer deltas), but the
-  layer boundary accepts arbitrary strings, so the gate stands: if any producer
-  can carry external text, axis (b) forces `Conversation_history` — or the
-  trigger must be reduced to a typed reason code before it may use the
-  ephemeral channel.
+- **Fails axis (b) at the layer boundary as rendered today**:
+  `Autonomous_trigger` concatenates a `string list` supplied by the caller
+  (`:772-777`). Today's sole producer (`autonomous_trigger_lines`, `:449-510`)
+  emits only system-generated text (scheduler lines, snake_case verdict reason
+  codes, integer deltas), but the layer boundary accepts arbitrary strings, so
+  — as for `Active_goals`/`Current_task` above — the `channel_of` mapping now
+  classes it `Conversation_history`; it may use the ephemeral channel only
+  after the trigger is reduced to a typed reason code (or every producer is
+  verified system-generated).
 - `Connected_surfaces` should be re-checked the same way if its body ever grows
   beyond structural fields.
 
@@ -258,7 +264,7 @@ string rides the `dynamic_context` channel. Extend the world-state assembly so:
 - Recomputable-ephemeral layers render into an **ephemeral block** appended to
   the turn-scoped `extra_system_context` (the `dynamic_context` channel that
   flows to OAS `AdjustParams.extra_system_context`,
-  `keeper_run_tools_hooks.ml:369`). This is re-sent every turn and never
+  `keeper_run_tools_hooks.ml:543-546`). This is re-sent every turn and never
   persisted to `checkpoint.messages`.
 - Conversation-history layers render back into the **user message** (the
   pre-#25390 channel), so the keeper receives owner/board input as a user turn

@@ -18,6 +18,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
+import { SCHED_TERMINAL_NORMALIZED } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, goals, fusionRuns } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
@@ -264,8 +265,6 @@ export interface OverviewScheduledAutomationDigest {
   tone: 'ok' | 'warn' | 'bad' | 'volt'
 }
 
-const SCHEDULE_TERMINAL_STATUS_KEY = new Set(['succeeded', 'failed', 'cancelled', 'expired'])
-
 function normalizeScheduleStatus(value: string | undefined): string {
   return value?.trim().toLowerCase() ?? ''
 }
@@ -306,7 +305,7 @@ function requestCountByProjectionCount(
 
 function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {
   let sum = 0
-  for (const terminalStatus of SCHEDULE_TERMINAL_STATUS_KEY) {
+  for (const terminalStatus of SCHED_TERMINAL_NORMALIZED) {
     const n = counts?.[terminalStatus]
     if (typeof n === 'number' && Number.isFinite(n)) sum += n
   }

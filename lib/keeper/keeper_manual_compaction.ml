@@ -219,7 +219,7 @@ let no_compaction_after_prepared_cancellation prepared =
   Eio.Cancel.protect (fun () ->
     No_compaction
       (Keeper_post_turn.no_compaction_of_uncommitted_prepared
-         ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
+         ~cause:Keeper_event_queue_state.Exact_execution_cancelled
          prepared))
 ;;
 

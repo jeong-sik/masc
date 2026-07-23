@@ -4,7 +4,8 @@ type compaction_rejection =
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_failed_before_dispatch
+  | Exact_execution_guard_failed
+  | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
@@ -21,7 +22,8 @@ let compaction_rejection_to_tag = function
   | Exact_admission_failed -> "exact_admission_failed"
   | Exact_attempt_start_failed -> "exact_attempt_start_failed"
   | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
-  | Exact_execution_failed_before_dispatch -> "exact_execution_failed_before_dispatch"
+  | Exact_execution_guard_failed -> "exact_execution_guard_failed"
+  | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->
     Keeper_event_queue_state.exact_execution_terminal_cause_label terminal.cause
   | Invalid_compaction_plan -> "invalid_compaction_plan"
@@ -45,45 +47,20 @@ let compaction_rejection_to_string = function
   | reason -> compaction_rejection_to_tag reason
 ;;
 
-let exact_terminal_of_observation cause
-      (observation : Keeper_compaction_llm_summarizer.attempt_observation) =
-  Keeper_event_queue_state.
-    { cause
-    ; slot_id = observation.slot_id
-    ; call_id = observation.call_id
-    ; plan_fingerprint = observation.receipt_plan_fingerprint
-    ; request_body_sha256 = observation.receipt_request_body_sha256
-    }
-;;
-
 let summarization_rejection = function
   | Keeper_compaction_llm_summarizer.Exact_lane_unconfigured ->
     Exact_lane_unconfigured
   | Keeper_compaction_llm_summarizer.Exact_target_selection_failed ->
     Exact_target_selection_failed
   | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed
-  | Keeper_compaction_llm_summarizer.Exact_attempt_start_failed _ ->
-    Exact_attempt_start_failed
+  | Keeper_compaction_llm_summarizer.Exact_attempt_start_failed -> Exact_attempt_start_failed
   | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
     Exact_execution_context_unavailable
-  | Keeper_compaction_llm_summarizer.Exact_execution_failed_before_dispatch ->
-    Exact_execution_failed_before_dispatch
+  | Keeper_compaction_llm_summarizer.Exact_execution_guard_failed ->
+    Exact_execution_guard_failed
+  | Keeper_compaction_llm_summarizer.Exact_flow_already_started ->
+    Exact_flow_already_started
   | Keeper_compaction_llm_summarizer.Exact_execution_terminal terminal ->
     Exact_execution_terminal terminal
-  | Keeper_compaction_llm_summarizer.Exact_execution_failed_after_dispatch observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Execution_failed_after_dispatch observation)
-  | Keeper_compaction_llm_summarizer.Exact_attempt_already_started observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Attempt_already_started observation)
-  | Keeper_compaction_llm_summarizer.Exact_execution_cancelled_after_dispatch observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Execution_cancelled_after_dispatch observation)
-  | Keeper_compaction_llm_summarizer.Exact_execution_provenance_mismatch observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Execution_provenance_mismatch observation)
   | Keeper_compaction_llm_summarizer.Invalid_plan -> Invalid_compaction_plan
-  | Keeper_compaction_llm_summarizer.Invalid_plan_after_dispatch observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Domain_invalid_output observation)
 ;;

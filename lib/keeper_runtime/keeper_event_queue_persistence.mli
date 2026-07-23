@@ -22,10 +22,8 @@ type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Context_compaction_retry
 
 type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_terminal_cause =
-  | Execution_failed_after_dispatch
-  | Attempt_already_started
-  | Execution_cancelled_after_dispatch
-  | Execution_provenance_mismatch
+  | Exact_execution_failed
+  | Exact_execution_cancelled
   | Domain_invalid_output
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch

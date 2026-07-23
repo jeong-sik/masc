@@ -1,19 +1,20 @@
-(** Composition-level conformance for the MASC compaction exact-output lane.
+(** MASC-owned composition proof for the compaction OAS exact-flow boundary.
 
-    These tests use real OAS resolver snapshots, ready plans, receipts, and
-    local HTTP effects. They intentionally do not repeat provider codec or
-    resolver validation coverage owned by OAS. *)
+    OAS owns admission, affine attempts, execute-once, advancement, and receipt
+    semantics. These tests observe only MASC-owned ordered opaque slot identity,
+    durable bind/release/quarantine callbacks, domain validation, registry
+    generation, and source terminalization. *)
 
 open Masc
+
 module C = Keeper_compaction_llm_summarizer
-module EO = Agent_sdk.Exact_output
+module F = Compaction_exact_output_fixture
+module P = Keeper_event_queue_persistence
+module Q = Keeper_event_queue
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
-module F = Compaction_exact_output_fixture
-module P = Keeper_event_queue_persistence
-module Q = Keeper_event_queue
 
 exception Cancel_after_request_arrived
 
@@ -125,18 +126,11 @@ let settle_terminal_disposition_result
     ()
 ;;
 
-let permissive_exact_execution_guard : C.exact_execution_guard =
-  { before_dispatch = (fun _ -> Ok C.Fsync_completed)
-  ; release_before_dispatch = (fun _ -> Ok C.Fsync_completed)
-  ; quarantine = (fun _ _ -> Ok C.Fsync_completed)
-  }
-;;
-
 let execute_prepared_lane
       ~keeper_name
       ~net
       ?clock
-      ?(exact_execution_guard = permissive_exact_execution_guard)
+      ?(exact_execution_guard = F.permissive_exact_execution_guard)
       prepared_lane
   =
   C.execute_prepared_lane
@@ -205,12 +199,12 @@ let prepare_exn ~keeper_name ~registry =
       ~units
   with
   | Ok prepared -> prepared
-  | Error _ -> Alcotest.fail "compaction lane preparation failed"
+  | Error _ -> Alcotest.fail "compaction flow preparation failed"
 ;;
 
 let completed_exn = function
   | Ok completed -> completed
-  | Error _ -> Alcotest.fail "compaction lane execution failed"
+  | Error _ -> Alcotest.fail "compaction flow execution failed"
 ;;
 
 let observation_exn prepared slot_id =
@@ -219,44 +213,29 @@ let observation_exn prepared slot_id =
     String.equal observation.slot_id slot_id)
   |> function
   | Some observation -> observation
-  | None -> Alcotest.failf "missing retained receipt observation for %s" slot_id
+  | None -> Alcotest.failf "missing OAS flow attempt identity for %s" slot_id
 ;;
 
-let check_observation
-      ~label
-      ~phase
-      ~dispatch_count
-      ?catalog_generation_fingerprint
-      observation
-  =
+let check_identity label (observation : C.attempt_observation) =
   Alcotest.(check bool)
-    (label ^ " call id retained")
+    (label ^ " call id")
     true
-    (String.trim observation.C.call_id <> "");
+    (String.trim observation.call_id <> "");
   Alcotest.(check bool)
-    (label ^ " receipt plan fingerprint retained")
+    (label ^ " catalog generation")
+    true
+    (String.trim observation.catalog_generation_fingerprint <> "");
+  Alcotest.(check bool)
+    (label ^ " plan identity")
     true
     (String.trim observation.receipt_plan_fingerprint <> "");
   Alcotest.(check bool)
-    (label ^ " receipt request hash retained")
+    (label ^ " request identity")
     true
-    (String.trim observation.receipt_request_body_sha256 <> "");
-  Alcotest.(check bool)
-    (label ^ " phase")
-    true
-    (observation.C.phase = phase);
-  Alcotest.(check int)
-    (label ^ " dispatch count")
-    dispatch_count
-    observation.dispatch_count;
-  Option.iter
-    (fun expected ->
-      Alcotest.(check string)
-        (label ^ " catalog generation")
-        expected
-        observation.catalog_generation_fingerprint)
-    catalog_generation_fingerprint
+    (String.trim observation.receipt_request_body_sha256 <> "")
 ;;
+
+let push_event events event = events := !events @ [ event ]
 
 let test_missing_compaction_lane_is_explicit_degraded_state () =
   let snapshot =
@@ -265,12 +244,12 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
       [ { id = "configured-slot"; base_url = "http://127.0.0.1:9" } ]
   in
   let registry =
-    match Runtime_exact_output_registry.publish ~lanes:[] snapshot with
+    match Registry.publish ~lanes:[] snapshot with
     | Ok registry -> registry
     | Error error ->
       Alcotest.failf
         "empty exact-output registry must publish: %s"
-        (Runtime_exact_output_registry.publication_error_to_string error)
+        (Registry.publication_error_to_string error)
   in
   match
     C.prepare_lane
@@ -280,215 +259,48 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
       ~units
   with
   | Error C.Exact_lane_unconfigured -> ()
-  | Error _ -> Alcotest.fail "missing compaction lane returned the wrong typed failure"
-  | Ok _ -> Alcotest.fail "missing compaction lane must not be synthesized"
+  | Error _ -> Alcotest.fail "missing lane returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "missing lane must not be synthesized"
 ;;
 
-let test_missing_credential_is_deferred_past_registry_admission () =
-  let slot_id = "credential-gated-slot" in
-  let snapshot =
-    F.resolver_snapshot
-      ~api_key_env:"MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
-      ~source:"masc credential-free admission"
-      [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
-   | Error
-       (Registry.No_usable_lane_slots
-          { unavailable_slots =
-              [ { cause = EO.Missing_target_credential { environment_variable; _ }
-                ; _
-                }
-              ]
-          ; _
-          }) ->
-     Alcotest.(check string)
-       "missing credential cause remains typed"
-       "MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
-       environment_variable
-   | Ok _ -> Alcotest.fail "missing credential must fail target selection"
-   | Error _ ->
-     Alcotest.fail "missing credential returned the wrong lane-resolution failure");
-  match
-    C.prepare_lane
-      ~keeper_name:"keeper-missing-credential"
-      ~registry
-      ~lane_id:conformance_lane_id
-      ~units
-  with
-  | Error C.Exact_target_selection_failed -> ()
-  | Error _ -> Alcotest.fail "missing credential returned the wrong typed failure"
-  | Ok _ -> Alcotest.fail "missing credential must not produce a ready plan"
-;;
-
-let test_unknown_target_is_rejected_by_registry_publication () =
-  let unknown_target = "unknown-exact-target" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc unknown-target admission"
-      [ { id = "configured-target"; base_url = "http://127.0.0.1:9" } ]
-  in
-  let lanes : Runtime_schema.exact_output_lane_decl list =
-    [ { id = conformance_lane_id; slot_ids = [ unknown_target ] } ]
-  in
-  match Registry.publish ~lanes snapshot with
-  | Error (Registry.Unknown_lane_slot { target_ref; _ }) ->
-    Alcotest.(check string) "unknown target identity" unknown_target target_ref
-  | Error _ -> Alcotest.fail "unknown target returned the wrong publication failure"
-  | Ok _ -> Alcotest.fail "unknown target must not publish in the MASC registry"
-;;
-
-let check_failure label expected = function
-  | Error actual when actual = expected -> ()
-  | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
-  | Error _ -> Alcotest.failf "%s returned the wrong failure class" label
-;;
-
-let test_unavailable_slots_are_skipped_in_both_orders () =
-  let check unavailable_first =
-    run_eio
-    @@ fun ~sw ~net ~clock ->
-    let usable = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-    let unavailable_id =
-      if unavailable_first then "unavailable-first" else "unavailable-last"
-    in
-    let usable_id = if unavailable_first then "usable-last" else "usable-first" in
-    let fixtures : F.target_fixture list =
-      [ { id = unavailable_id; base_url = "http://127.0.0.1:9" }
-      ; { id = usable_id; base_url = usable.base_url }
-      ]
-    in
-    let snapshot =
-      F.resolver_snapshot
-        ~api_key_envs:
-          [ unavailable_id, "MASC_TEST_EXACT_OUTPUT_UNAVAILABLE_MIXED" ]
-        ~source:"masc mixed availability"
-        fixtures
-    in
-    let slot_ids =
-      if unavailable_first
-      then [ unavailable_id; usable_id ]
-      else [ usable_id; unavailable_id ]
-    in
-    let registry = publish_exn ~slot_ids snapshot in
-    let expected_unavailable_position = if unavailable_first then 1 else 2 in
-    (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
-     | Ok
-         { selected_slots = [ selected ]
-         ; unavailable_slots = [ unavailable ]
-         } ->
-       Alcotest.(check string) "usable slot retained" usable_id selected.slot_id;
-       Alcotest.(check string)
-         "unavailable slot retained as diagnostics"
-         unavailable_id
-         unavailable.slot_id;
-       Alcotest.(check int)
-         "unavailable declaration position"
-         expected_unavailable_position
-         unavailable.position
-     | Ok _ -> Alcotest.fail "mixed lane returned the wrong partition"
-     | Error _ -> Alcotest.fail "mixed lane must retain its usable slot");
-    let prepared = prepare_exn ~keeper_name:"keeper-mixed" ~registry in
-    Alcotest.(check (list string))
-      "only usable slot is prepared"
-      [ usable_id ]
-      (C.For_testing.admitted_slot_ids prepared);
-    ignore
-      (execute_prepared_lane
-         ~keeper_name:"keeper-mixed"
-         ~net
-         ~clock
-         prepared
-       |> completed_exn
-        : C.completed_plan);
-    Alcotest.(check int) "usable slot dispatched once" 1 (F.post_count usable)
-  in
-  check true;
-  check false
-;;
-
-let test_all_unavailable_slots_are_typed () =
-  let first_id = "all-unavailable-first" in
-  let second_id = "all-unavailable-second" in
-  let snapshot =
-    F.resolver_snapshot
-      ~api_key_envs:
-        [ first_id, "MASC_TEST_EXACT_OUTPUT_MISSING_FIRST"
-        ; second_id, "MASC_TEST_EXACT_OUTPUT_MISSING_SECOND"
-        ]
-      ~source:"masc all unavailable"
-      [ { id = first_id; base_url = "http://127.0.0.1:9" }
-      ; { id = second_id; base_url = "http://127.0.0.1:9" }
-      ]
-  in
-  let registry = publish_exn ~slot_ids:[ first_id; second_id ] snapshot in
-  (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
-   | Error
-       (Registry.No_usable_lane_slots
-          { unavailable_slots = [ first; second ]; _ }) ->
-     Alcotest.(check string) "first unavailable slot" first_id first.slot_id;
-     Alcotest.(check string) "second unavailable slot" second_id second.slot_id
-   | Error _ -> Alcotest.fail "all-unavailable lane returned the wrong typed error"
-   | Ok _ -> Alcotest.fail "all-unavailable lane must not resolve");
-  match
-    C.prepare_lane
-      ~keeper_name:"keeper-all-unavailable"
-      ~registry
-      ~lane_id:conformance_lane_id
-      ~units
-  with
-  | Error C.Exact_target_selection_failed -> ()
-  | Error _ -> Alcotest.fail "all-unavailable preparation returned the wrong error"
-  | Ok _ -> Alcotest.fail "all-unavailable preparation must fail"
-;;
-
-let test_preparation_is_ordered_effect_free_and_single_generation () =
+let test_preparation_freezes_order_generation_and_unique_call_ids () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let fixtures : F.target_fixture list =
-    [ { id = "prepare-first"; base_url = first.base_url }
-    ; { id = "prepare-second"; base_url = second.base_url }
-    ]
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc immutable preparation"
+      [ { id = "prepare-first"; base_url = first.base_url }
+      ; { id = "prepare-second"; base_url = second.base_url }
+      ]
   in
-  let snapshot = F.resolver_snapshot ~source:"masc preparation conformance" fixtures in
-  let generation = F.catalog_generation_fingerprint snapshot in
-  let registry = publish_exn ~slot_ids:[ "prepare-first"; "prepare-second" ] snapshot in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-preparation"
-      ~registry
+  let registry =
+    publish_exn ~slot_ids:[ "prepare-first"; "prepare-second" ] snapshot
   in
+  let prepared = prepare_exn ~keeper_name:"keeper-preparation" ~registry in
   Alcotest.(check (list string))
-    "declaration order is retained"
+    "MASC opaque declaration order"
     [ "prepare-first"; "prepare-second" ]
-    (C.For_testing.admitted_slot_ids prepared);
-  Alcotest.(check int) "first target has no preparation effect" 0 (F.post_count first);
-  Alcotest.(check int) "second target has no preparation effect" 0 (F.post_count second);
-  let first_observations = C.For_testing.attempt_observations prepared in
-  let second_observations = C.For_testing.attempt_observations prepared in
-  List.iter2
-    (fun first second ->
-       Alcotest.(check string)
-         "preparation retains one stable call id per slot"
-         first.C.call_id
-         second.C.call_id)
-    first_observations
-    second_observations;
-  List.iter
-    (fun slot_id ->
-      check_observation
-        ~label:slot_id
-        ~phase:EO.Not_started
-        ~dispatch_count:0
-        ~catalog_generation_fingerprint:generation
-        (observation_exn prepared slot_id))
-    [ "prepare-first"; "prepare-second" ]
+    (C.For_testing.flow_slot_ids prepared);
+  Alcotest.(check int64)
+    "one immutable MASC registry generation"
+    (Registry.generation registry)
+    (C.For_testing.registry_generation prepared);
+  (match C.For_testing.attempt_observations prepared with
+   | [ first_observation; second_observation ] ->
+     check_identity "first attempt" first_observation;
+     check_identity "second attempt" second_observation;
+     Alcotest.(check bool)
+       "candidate call ids are unique"
+       true
+       (not (String.equal first_observation.call_id second_observation.call_id))
+   | _ -> Alcotest.fail "prepared OAS flow did not retain two candidate identities");
+  Alcotest.(check int) "preparation performs no first POST" 0 (F.post_count first);
+  Alcotest.(check int) "preparation performs no second POST" 0 (F.post_count second)
 ;;
 
-let test_published_snapshot_replacement_cannot_mix_prepared_lane () =
+let test_published_replacement_cannot_mix_prepared_generation () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server_a = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
@@ -499,262 +311,293 @@ let test_published_snapshot_replacement_cannot_mix_prepared_lane () =
       [ { id = "frozen-slot"; base_url = server_a.base_url } ]
   in
   let registry_a = publish_exn ~slot_ids:[ "frozen-slot" ] snapshot_a in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-frozen-a"
-      ~registry:registry_a
-  in
+  let prepared_a = prepare_exn ~keeper_name:"keeper-frozen-a" ~registry:registry_a in
   let snapshot_b =
     F.resolver_snapshot
-      ~source:"masc frozen registry B"
+      ~source:"masc replacement registry B"
       [ { id = "replacement-slot"; base_url = server_b.base_url } ]
   in
   let registry_b = publish_exn ~slot_ids:[ "replacement-slot" ] snapshot_b in
-  let prepared_b =
-    prepare_exn ~keeper_name:"keeper-frozen-b" ~registry:registry_b
-  in
   Alcotest.(check bool)
-    "MASC publication generation advances atomically"
+    "MASC publication generation advances"
     true
-    (Int64.compare
-       (Runtime_exact_output_registry.generation registry_a)
-       (Runtime_exact_output_registry.generation registry_b)
-     < 0);
-  Alcotest.(check (list string))
-    "replacement publication carries its own lane declaration"
-    [ "replacement-slot" ]
-    (C.For_testing.admitted_slot_ids prepared_b);
+    (Int64.compare (Registry.generation registry_a) (Registry.generation registry_b) < 0);
   let completed =
     execute_prepared_lane
       ~keeper_name:"keeper-frozen-a"
       ~net
       ~clock
-      prepared
+      prepared_a
     |> completed_exn
   in
   let evidence = C.completed_exact_execution_evidence completed in
-  let generation_a = F.catalog_generation_fingerprint snapshot_a in
-  let generation_b = F.catalog_generation_fingerprint snapshot_b in
-  Alcotest.(check bool)
-    "resolver snapshots have distinct OAS generations"
-    true
-    (not (String.equal generation_a generation_b));
   Alcotest.(check string)
-    "execution retains prepared snapshot generation"
-    generation_a
+    "execution retains prepared resolver generation"
+    (F.catalog_generation_fingerprint snapshot_a)
     (C.exact_execution_evidence_catalog_generation_fingerprint evidence);
   Alcotest.(check int) "prepared A dispatches to A" 1 (F.post_count server_a);
   Alcotest.(check int) "later publication B is not observed" 0 (F.post_count server_b)
 ;;
 
-let test_before_dispatch_zero_advances_exactly_once () =
+let test_durable_release_precedes_successor_bind_and_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let events = ref [] in
+  let second =
+    F.start_server
+      ~on_request_before_reply:(fun () -> push_event events "post:second")
+      ~sw
+      ~net
+      ~clock
+      (F.Reply valid_response)
+  in
   let third = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~connect_timeouts:[ "before-dispatch", 1.0 ]
-      ~source:"masc before-dispatch failover"
-      [ { id = "before-dispatch"; base_url = first.base_url }
-      ; { id = "after-before-dispatch"; base_url = second.base_url }
-      ; { id = "must-remain-ready"; base_url = third.base_url }
+      ~source:"masc OAS advancement order"
+      [ { id = "unreachable-first"; base_url = "http://127.0.0.1:9" }
+      ; { id = "successful-second"; base_url = second.base_url }
+      ; { id = "forbidden-third"; base_url = third.base_url }
       ]
   in
   let registry =
     publish_exn
-      ~slot_ids:
-        [ "before-dispatch"; "after-before-dispatch"; "must-remain-ready" ]
+      ~slot_ids:[ "unreachable-first"; "successful-second"; "forbidden-third" ]
       snapshot
   in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-before-dispatch"
-      ~registry
+  let prepared = prepare_exn ~keeper_name:"keeper-advance-order" ~registry in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; quarantine = (fun _ _ -> Alcotest.fail "successful flow must not quarantine")
+    }
   in
   ignore
     (execute_prepared_lane
-       ~keeper_name:"keeper-before-dispatch"
+       ~keeper_name:"keeper-advance-order"
        ~net
+       ~clock
+       ~exact_execution_guard:guard
        prepared
      |> completed_exn
-     : C.completed_plan);
-  check_observation
-    ~label:"rejected transport"
-    ~phase:EO.Before_dispatch
-    ~dispatch_count:0
-    (observation_exn prepared "before-dispatch");
-  check_observation
-    ~label:"single successor"
-    ~phase:EO.Terminal
-    ~dispatch_count:1
-    (observation_exn prepared "after-before-dispatch");
-  check_observation
-    ~label:"slot after success"
-    ~phase:EO.Not_started
-    ~dispatch_count:0
-    (observation_exn prepared "must-remain-ready");
-  Alcotest.(check int) "pre-dispatch target has no POST" 0 (F.post_count first);
-  Alcotest.(check int) "one successor POST" 1 (F.post_count second);
-  Alcotest.(check int) "no POST after successor success" 0 (F.post_count third)
+      : C.completed_plan);
+  Alcotest.(check (list string))
+    "bind A, fsync release A, bind B, then POST B"
+    [ "bind:unreachable-first"
+    ; "release:unreachable-first"
+    ; "bind:successful-second"
+    ; "post:second"
+    ]
+    !events;
+  Alcotest.(check int) "successor dispatches once" 1 (F.post_count second);
+  Alcotest.(check int) "success prevents another candidate" 0 (F.post_count third)
 ;;
 
-let test_visible_release_uncertainty_is_source_bound_terminal () =
+let test_bind_failure_prevents_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let first_slot = "visible-release-original" in
-  let second_slot = "visible-release-forbidden-successor" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~connect_timeouts:[ first_slot, 1.0 ]
-      ~source:"masc visible release terminal"
-      [ { id = first_slot; base_url = first.base_url }
-      ; { id = second_slot; base_url = second.base_url }
-      ]
+      ~source:"masc bind failure"
+      [ { id = "bind-failure"; base_url = server.base_url } ]
   in
-  let registry = publish_exn ~slot_ids:[ first_slot; second_slot ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-visible-release" ~registry in
-  let release_calls = ref [] in
+  let registry = publish_exn ~slot_ids:[ "bind-failure" ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-bind-failure" ~registry in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
-    ; release_before_dispatch =
-        (fun observation ->
-           release_calls := observation :: !release_calls;
-           Ok (C.Visible_sync_unconfirmed "injected release after-rename failure"))
+    { before_dispatch = (fun _ -> Error "injected durable bind failure")
+    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
     ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
     }
   in
-  let terminal : P.exact_execution_terminal =
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-bind-failure"
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+   with
+   | Error C.Exact_execution_guard_failed -> ()
+   | Error _ -> Alcotest.fail "bind failure returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "bind failure unexpectedly executed");
+  Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
+;;
+
+let test_release_failure_blocks_successor () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let first_slot = "release-failure-first" in
+  let successor_slot = "release-failure-successor" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc release failure"
+      [ { id = first_slot; base_url = "http://127.0.0.1:9" }
+      ; { id = successor_slot; base_url = successor.base_url }
+      ]
+  in
+  let registry = publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-release-failure" ~registry in
+  let events = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           push_event events ("bind:" ^ observation.slot_id);
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun observation ->
+           push_event events ("release:" ^ observation.slot_id);
+           Error "injected durable release failure")
+    ; quarantine = (fun _ _ -> Alcotest.fail "release failure must not relabel")
+    }
+  in
+  let terminal =
     match
       execute_prepared_lane
-        ~keeper_name:"keeper-visible-release"
+        ~keeper_name:"keeper-release-failure"
         ~net
         ~clock
         ~exact_execution_guard:guard
         prepared
     with
     | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "visible release returned the wrong typed failure"
-    | Ok _ -> Alcotest.fail "visible release uncertainty incorrectly failed over"
+    | Error _ -> Alcotest.fail "release failure returned the wrong terminal"
+    | Ok _ -> Alcotest.fail "release failure incorrectly advanced"
   in
-  let original = observation_exn prepared first_slot in
   Alcotest.(check bool)
-    "visible release uses persistence terminal cause"
+    "release failure is a persistence terminal"
     true
     (terminal.cause = Keeper_event_queue_state.Terminal_persistence_failed);
-  Alcotest.(check string) "visible release retains slot" original.slot_id terminal.slot_id;
-  Alcotest.(check string) "visible release retains call" original.call_id terminal.call_id;
-  (match !release_calls with
-   | [ released ] ->
-     Alcotest.(check string) "release called for original slot" first_slot released.slot_id
-   | _ -> Alcotest.fail "visible release was not called exactly once");
-  Alcotest.(check int) "visible release original has no POST" 0 (F.post_count first);
-  Alcotest.(check int)
-    "visible release never dispatches successor"
-    0
-    (F.post_count second)
+  Alcotest.(check string) "release failure retains A" first_slot terminal.slot_id;
+  Alcotest.(check (list string))
+    "successor is never bound"
+    [ "bind:" ^ first_slot; "release:" ^ first_slot ]
+    !events;
+  Alcotest.(check int) "release failure prevents successor POST" 0 (F.post_count successor)
 ;;
 
-let test_post_dispatch_failure_is_terminal () =
+let test_domain_invalid_output_never_reenters_failover () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  let first = F.start_server ~sw ~net ~clock F.Abort_after_request in
-  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let invalid = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let first_slot = "domain-invalid" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc post-dispatch terminal"
-      [ { id = "post-dispatch"; base_url = first.base_url }
-      ; { id = "forbidden-post-dispatch-failover"; base_url = second.base_url }
+      ~source:"masc domain validation terminal"
+      [ { id = first_slot; base_url = invalid.base_url }
+      ; { id = "forbidden-domain-successor"; base_url = successor.base_url }
       ]
   in
   let registry =
     publish_exn
-      ~slot_ids:[ "post-dispatch"; "forbidden-post-dispatch-failover" ]
+      ~slot_ids:[ first_slot; "forbidden-domain-successor" ]
       snapshot
   in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-post-dispatch"
-      ~registry
+  let prepared = prepare_exn ~keeper_name:"keeper-domain-invalid" ~registry in
+  let quarantined = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun _ -> Alcotest.fail "domain validation is outside OAS advancement")
+    ; quarantine =
+        (fun cause observation ->
+           quarantined := (cause, observation.slot_id) :: !quarantined;
+           Ok C.Fsync_completed)
+    }
   in
-  (match execute_prepared_lane ~keeper_name:"keeper-post-dispatch" ~net prepared with
-   | Error (C.Exact_execution_failed_after_dispatch observation) ->
-     Alcotest.(check string)
-       "post-dispatch failure retains slot"
-       "post-dispatch"
-       observation.slot_id;
-     Alcotest.(check bool)
-       "post-dispatch failure retains call id"
-       true
-       (String.trim observation.call_id <> "")
-   | Error _ -> Alcotest.fail "post-dispatch failure returned the wrong class"
-   | Ok _ -> Alcotest.fail "post-dispatch failure unexpectedly succeeded");
-  check_observation
-    ~label:"post-dispatch failure"
-    ~phase:EO.Dispatch_started
-    ~dispatch_count:1
-    (observation_exn prepared "post-dispatch");
-  check_observation
-    ~label:"forbidden successor"
-    ~phase:EO.Not_started
-    ~dispatch_count:0
-    (observation_exn prepared "forbidden-post-dispatch-failover");
-  Alcotest.(check int) "failed request dispatched once" 1 (F.post_count first);
-  Alcotest.(check int) "post-dispatch failure does not fail over" 0 (F.post_count second)
+  let terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name:"keeper-domain-invalid"
+        ~net
+        ~clock
+        ~exact_execution_guard:guard
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "domain invalidity returned the wrong failure"
+    | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded"
+  in
+  Alcotest.(check bool)
+    "domain terminal cause"
+    true
+    (terminal.cause = Keeper_event_queue_state.Domain_invalid_output);
+  Alcotest.(check string) "domain terminal retains bound slot" first_slot terminal.slot_id;
+  Alcotest.(check int) "domain-invalid target posts once" 1 (F.post_count invalid);
+  Alcotest.(check int) "domain invalidity never fails over" 0 (F.post_count successor);
+  Alcotest.(check bool)
+    "only bound identity quarantined"
+    true
+    (List.rev !quarantined
+     = [ Keeper_event_queue_state.Domain_invalid_output, first_slot ])
 ;;
 
-let test_domain_invalid_json_is_terminal () =
+let test_final_oas_flow_failure_is_generic_source_terminal () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  let first = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
-  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let first_slot = "generic-flow-failure" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc domain-invalid terminal"
-      [ { id = "domain-invalid"; base_url = first.base_url }
-      ; { id = "forbidden-domain-failover"; base_url = second.base_url }
+      ~source:"masc generic OAS flow failure"
+      [ { id = first_slot; base_url = failed.base_url }
+      ; { id = "forbidden-failure-successor"; base_url = successor.base_url }
       ]
   in
   let registry =
     publish_exn
-      ~slot_ids:[ "domain-invalid"; "forbidden-domain-failover" ]
+      ~slot_ids:[ first_slot; "forbidden-failure-successor" ]
       snapshot
   in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-domain-invalid"
-      ~registry
+  let prepared = prepare_exn ~keeper_name:"keeper-flow-failure" ~registry in
+  let quarantined = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun _ -> Alcotest.fail "terminal OAS flow failure must not advance")
+    ; quarantine =
+        (fun cause observation ->
+           quarantined := (cause, observation.slot_id) :: !quarantined;
+           Ok C.Fsync_completed)
+    }
   in
-  (match execute_prepared_lane ~keeper_name:"keeper-domain-invalid" ~net prepared with
-   | Error (C.Invalid_plan_after_dispatch observation) ->
-     Alcotest.(check string)
-       "domain-invalid output retains slot"
-       "domain-invalid"
-       observation.slot_id;
-     Alcotest.(check bool)
-       "domain-invalid output retains call id"
-       true
-       (String.trim observation.call_id <> "")
-   | Error _ -> Alcotest.fail "domain-invalid output returned the wrong class"
-   | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded");
-  check_observation
-    ~label:"domain-invalid response"
-    ~phase:EO.Terminal
-    ~dispatch_count:1
-    (observation_exn prepared "domain-invalid");
-  check_observation
-    ~label:"domain successor"
-    ~phase:EO.Not_started
-    ~dispatch_count:0
-    (observation_exn prepared "forbidden-domain-failover");
-  Alcotest.(check int) "domain-invalid target dispatched once" 1 (F.post_count first);
-  Alcotest.(check int) "domain invalidity does not fail over" 0 (F.post_count second)
+  let terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name:"keeper-flow-failure"
+        ~net
+        ~clock
+        ~exact_execution_guard:guard
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "OAS flow failure returned the wrong failure"
+    | Ok _ -> Alcotest.fail "failed OAS flow unexpectedly succeeded"
+  in
+  Alcotest.(check bool)
+    "generic terminal does not claim receipt phase"
+    true
+    (terminal.cause = Keeper_event_queue_state.Exact_execution_failed);
+  Alcotest.(check string) "generic terminal retains bound slot" first_slot terminal.slot_id;
+  Alcotest.(check int) "failed request posts once" 1 (F.post_count failed);
+  Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor);
+  Alcotest.(check bool)
+    "generic terminal quarantines one identity"
+    true
+    (List.rev !quarantined
+     = [ Keeper_event_queue_state.Exact_execution_failed, first_slot ])
 ;;
 
-let test_post_dispatch_cancellation_is_typed_terminal () =
+let test_cancellation_quarantines_only_bound_identity () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let hold_response, _resolve_hold_response = Eio.Promise.create () in
@@ -766,23 +609,35 @@ let test_post_dispatch_cancellation_is_typed_terminal () =
       ~clock
       (F.Reply valid_response)
   in
-  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let successor = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let first_slot = "cancelled-bound-slot" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc cancellation terminal"
-      [ { id = "cancelled-dispatch"; base_url = first.base_url }
-      ; { id = "forbidden-cancel-failover"; base_url = second.base_url }
+      ~source:"masc bound cancellation"
+      [ { id = first_slot; base_url = first.base_url }
+      ; { id = "forbidden-cancel-successor"; base_url = successor.base_url }
       ]
   in
   let registry =
     publish_exn
-      ~slot_ids:[ "cancelled-dispatch"; "forbidden-cancel-failover" ]
+      ~slot_ids:[ first_slot; "forbidden-cancel-successor" ]
       snapshot
   in
-  let prepared =
-    prepare_exn
-      ~keeper_name:"keeper-cancelled"
-      ~registry
+  let prepared = prepare_exn ~keeper_name:"keeper-cancelled" ~registry in
+  let bound = ref [] in
+  let quarantined = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           bound := observation.slot_id :: !bound;
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun _ -> Alcotest.fail "cancelled bound identity must not advance")
+    ; quarantine =
+        (fun cause observation ->
+           quarantined := (cause, observation.slot_id) :: !quarantined;
+           Ok C.Fsync_completed)
+    }
   in
   let cancel_context, resolve_cancel_context = Eio.Promise.create () in
   let execution =
@@ -793,12 +648,10 @@ let test_post_dispatch_cancellation_is_typed_terminal () =
           ~keeper_name:"keeper-cancelled"
           ~net
           ~clock
+          ~exact_execution_guard:guard
           prepared))
   in
-  let retained_call_id =
-    (observation_exn prepared "cancelled-dispatch").call_id
-  in
-  let cancellation_result =
+  let result =
     try
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let context = Eio.Promise.await cancel_context in
@@ -806,279 +659,140 @@ let test_post_dispatch_cancellation_is_typed_terminal () =
         Eio.Cancel.cancel context Cancel_after_request_arrived;
         Eio.Promise.await_exn execution)
     with
-    | Eio.Time.Timeout ->
-      Alcotest.fail "request-arrival cancellation watchdog expired"
+    | Eio.Time.Timeout -> Alcotest.fail "cancellation watchdog expired"
   in
-  (match cancellation_result with
-   | Error (C.Exact_execution_cancelled_after_dispatch terminal) ->
-     Alcotest.(check string)
-       "terminal cancellation retains slot"
-       "cancelled-dispatch"
-       terminal.slot_id;
-     Alcotest.(check string)
-       "terminal cancellation retains OAS call id"
-       retained_call_id
-       terminal.call_id;
-     Alcotest.(check bool)
-       "terminal cancellation records dispatched phase"
-       true
-       (terminal.phase = EO.Dispatch_started);
-     Alcotest.(check int)
-       "terminal cancellation records one dispatch"
-       1
-       terminal.dispatch_count
-   | Error _ -> Alcotest.fail "post-dispatch cancellation returned the wrong error"
-   | Ok _ -> Alcotest.fail "post-dispatch cancellation unexpectedly succeeded");
-  check_observation
-    ~label:"cancelled real receipt"
-    ~phase:EO.Dispatch_started
-    ~dispatch_count:1
-    (observation_exn prepared "cancelled-dispatch");
-  check_observation
-    ~label:"cancel successor"
-    ~phase:EO.Not_started
-    ~dispatch_count:0
-    (observation_exn prepared "forbidden-cancel-failover");
-  Alcotest.(check int) "cancelled request dispatched once" 1 (F.post_count first);
-  Alcotest.(check int) "cancellation never fails over" 0 (F.post_count second)
+  let terminal =
+    match result with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "cancellation returned the wrong terminal"
+    | Ok _ -> Alcotest.fail "cancelled flow unexpectedly succeeded"
+  in
+  Alcotest.(check bool)
+    "cancellation terminal is phase-neutral"
+    true
+    (terminal.cause = Keeper_event_queue_state.Exact_execution_cancelled);
+  Alcotest.(check (list string)) "only first identity was bound" [ first_slot ] (List.rev !bound);
+  Alcotest.(check bool)
+    "only the bound identity was quarantined"
+    true
+    (List.rev !quarantined
+     = [ Keeper_event_queue_state.Exact_execution_cancelled, first_slot ]);
+  Alcotest.(check int) "cancelled request posts once" 1 (F.post_count first);
+  Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
 
-let test_keeper_preparations_do_not_share_attempt_state () =
+let test_independent_preparations_do_not_share_call_identity () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let slot_id = "independent-flow-slot" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc keeper ready-plan isolation"
-      [ { id = "keeper-private-ready"; base_url = server.base_url } ]
+      ~source:"masc flow non-sharing"
+      [ { id = slot_id; base_url = server.base_url } ]
   in
-  let registry = publish_exn ~slot_ids:[ "keeper-private-ready" ] snapshot in
-  let keeper_a =
-    prepare_exn
-      ~keeper_name:"keeper-a"
-      ~registry
-  in
-  let keeper_b =
-    prepare_exn
-      ~keeper_name:"keeper-b"
-      ~registry
-  in
-  let keeper_a_observation = observation_exn keeper_a "keeper-private-ready" in
-  let keeper_b_observation = observation_exn keeper_b "keeper-private-ready" in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let keeper_a = prepare_exn ~keeper_name:"keeper-a" ~registry in
+  let keeper_b = prepare_exn ~keeper_name:"keeper-b" ~registry in
+  let a = observation_exn keeper_a slot_id in
+  let b = observation_exn keeper_b slot_id in
   Alcotest.(check bool)
-    "independent preparations own distinct OAS call ids"
+    "independent flows own distinct call ids"
     true
-    (not (String.equal keeper_a_observation.call_id keeper_b_observation.call_id));
+    (not (String.equal a.call_id b.call_id));
   let result_a, result_b =
     Eio.Fiber.pair
-      (fun () ->
-         execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
-      (fun () ->
-         execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
+      (fun () -> execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
+      (fun () -> execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
   in
   ignore (completed_exn result_a : C.completed_plan);
   ignore (completed_exn result_b : C.completed_plan);
-  check_observation
-    ~label:"keeper A"
-    ~phase:EO.Terminal
-    ~dispatch_count:1
-    (observation_exn keeper_a "keeper-private-ready");
-  check_observation
-    ~label:"keeper B"
-    ~phase:EO.Terminal
-    ~dispatch_count:1
-    (observation_exn keeper_b "keeper-private-ready");
-  Alcotest.(check int)
-    "two Keeper-owned ready plans dispatch independently"
-    2
-    (F.post_count server)
+  Alcotest.(check int) "independent flows post independently" 2 (F.post_count server)
 ;;
 
-let test_prepared_lane_replay_is_terminal_without_second_post () =
+let test_same_flow_concurrent_loser_mutates_no_queue () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let slot_id = "single-use-replay" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc affine replay"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-affine-replay" ~registry in
-  let retained_call_id = (observation_exn prepared slot_id).call_id in
-  ignore
-    (execute_prepared_lane
-       ~keeper_name:"keeper-affine-replay"
-       ~net
-       ~clock
-       prepared
-     |> completed_exn
-      : C.completed_plan);
-  (match
-     execute_prepared_lane
-       ~keeper_name:"keeper-affine-replay"
-       ~net
-       ~clock
-       prepared
-   with
-   | Error (C.Exact_attempt_already_started observation) ->
-     Alcotest.(check string)
-       "replay reports retained call id"
-       retained_call_id
-       observation.call_id
-   | Error _ -> Alcotest.fail "replay returned the wrong typed terminal error"
-   | Ok _ -> Alcotest.fail "same prepared lane replay unexpectedly succeeded");
-  Alcotest.(check int) "replay cannot issue a second POST" 1 (F.post_count server)
-;;
-
-let test_prepared_lane_concurrency_is_affine () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-same-flow-affinity"
+  @@ fun base_path ->
+  let keeper_name = "keeper-same-flow-affinity" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
   let server =
     F.start_server ~sw ~net ~clock (F.Delay_then_reply (0.05, valid_response))
   in
-  let slot_id = "single-use-concurrent" in
+  let slot_id = "same-flow-slot" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc affine concurrency"
+      ~source:"masc same-flow affinity"
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-affine-concurrent" ~registry in
-  let retained_call_id = (observation_exn prepared slot_id).call_id in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let durable_guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  let bind_mutations = Atomic.make 0 in
+  let release_mutations = Atomic.make 0 in
+  let quarantine_mutations = Atomic.make 0 in
+  let guard : C.exact_execution_guard =
+    { before_dispatch =
+        (fun observation ->
+           Atomic.incr bind_mutations;
+           durable_guard.before_dispatch observation)
+    ; release_before_dispatch =
+        (fun observation ->
+           Atomic.incr release_mutations;
+           durable_guard.release_before_dispatch observation)
+    ; quarantine =
+        (fun cause observation ->
+           Atomic.incr quarantine_mutations;
+           durable_guard.quarantine cause observation)
+    }
+  in
   let first, second =
     Eio.Fiber.pair
       (fun () ->
          execute_prepared_lane
-           ~keeper_name:"keeper-affine-concurrent-a"
+           ~keeper_name
            ~net
            ~clock
+           ~exact_execution_guard:guard
            prepared)
       (fun () ->
          execute_prepared_lane
-           ~keeper_name:"keeper-affine-concurrent-b"
+           ~keeper_name
            ~net
            ~clock
+           ~exact_execution_guard:guard
            prepared)
   in
   (match first, second with
-   | Ok _, Error (C.Exact_attempt_already_started observation)
-   | Error (C.Exact_attempt_already_started observation), Ok _ ->
-     Alcotest.(check string)
-       "concurrent rejection reports retained call id"
-       retained_call_id
-       observation.call_id
-   | _ ->
-     Alcotest.fail "concurrent execution must yield one success and one affine rejection");
+   | Ok _, Error C.Exact_flow_already_started
+   | Error C.Exact_flow_already_started, Ok _ ->
+     ()
+   | _ -> Alcotest.fail "same flow must have one owner and one affine loser");
+  Alcotest.(check int) "one owner performs one durable bind" 1 (Atomic.get bind_mutations);
+  Alcotest.(check int) "loser performs no release mutation" 0 (Atomic.get release_mutations);
   Alcotest.(check int)
-    "concurrent reuse cannot issue a second POST"
-    1
-    (F.post_count server)
-;;
-
-let test_before_rename_binding_failure_prevents_post () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let slot_id = "durable-guard-failure" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc durable guard failure"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-durable-guard-failure" ~registry in
-  let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Error "injected before-rename binding failure")
-    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
-    ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
-    }
-  in
-  (match
-     execute_prepared_lane
-       ~keeper_name:"keeper-durable-guard-failure"
-       ~net
-       ~clock
-       ~exact_execution_guard:guard
-       prepared
-   with
-   | Error C.Exact_execution_failed_before_dispatch -> ()
-   | Error _ -> Alcotest.fail "guard failure returned the wrong typed failure"
-   | Ok _ -> Alcotest.fail "guard failure must prevent exact-output execution");
-  Alcotest.(check int) "before-rename binding failure prevents POST" 0 (F.post_count server)
-;;
-
-let test_missing_dispatch_guard_prevents_post () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let slot_id = "missing-dispatch-guard" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc missing durable dispatch guard"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-missing-dispatch-guard" ~registry in
-  (match
-     C.execute_prepared_lane
-       ~keeper_name:"keeper-missing-dispatch-guard"
-       ~net
-       ~clock
-       prepared
-   with
-   | Error C.Exact_execution_failed_before_dispatch -> ()
-   | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
-   | Ok _ -> Alcotest.fail "missing guard must prevent exact-output execution");
-  Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
-;;
-
-let test_quarantine_persistence_failure_preserves_original_cause () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let server = F.start_server ~sw ~net ~clock F.Abort_after_request in
-  let slot_id = "quarantine-persistence-failure" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc terminal quarantine persistence failure"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-quarantine-persistence-failure" ~registry in
-  let quarantine_calls = ref [] in
-  let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
-    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
-    ; quarantine =
-        (fun cause observation ->
-           quarantine_calls := (cause, observation) :: !quarantine_calls;
-           Error "injected terminal persistence failure")
-    }
-  in
-  (match
-     execute_prepared_lane
-       ~keeper_name:"keeper-quarantine-persistence-failure"
-       ~net
-       ~clock
-       ~exact_execution_guard:guard
-       prepared
-   with
-   | Error (C.Exact_execution_failed_after_dispatch observation) ->
-     Alcotest.(check string) "original failure slot" slot_id observation.slot_id
-   | Error _ -> Alcotest.fail "quarantine failure returned the wrong typed terminal"
-   | Ok _ -> Alcotest.fail "quarantine persistence failure unexpectedly succeeded");
-  (match !quarantine_calls with
-   | [ Keeper_event_queue_state.Execution_failed_after_dispatch, observation ] ->
-     Alcotest.(check string) "quarantine retained slot" slot_id observation.slot_id
-   | _ -> Alcotest.fail "quarantine did not receive the original terminal cause once");
-  Alcotest.(check int) "terminal persistence failure never retries" 1 (F.post_count server)
+    "loser performs no quarantine mutation"
+    0
+    (Atomic.get quarantine_mutations);
+  Alcotest.(check int) "same flow performs one POST" 1 (F.post_count server);
+  match P.exact_execution_binding_result ~base_path ~keeper_name with
+  | Ok (Some binding) ->
+    Alcotest.(check string) "durable binding retains winner slot" slot_id binding.slot_id
+  | Ok None -> Alcotest.fail "winner durable binding is missing"
+  | Error detail -> Alcotest.failf "winner binding reload failed: %s" detail
 ;;
 
 let test_heartbeat_guard_binds_before_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  with_temp_dir "masc-heartbeat-bind-before-post" @@ fun base_path ->
+  with_temp_dir "masc-heartbeat-bind-before-post"
+  @@ fun base_path ->
   let keeper_name = "keeper-heartbeat-bind-before-post" in
   let lease = claim_manual_lease ~base_path ~keeper_name in
   let slot_id = "heartbeat-bind-before-post" in
@@ -1133,218 +847,24 @@ let test_heartbeat_guard_binds_before_post () =
      |> completed_exn
       : C.completed_plan);
   Alcotest.(check bool)
-    "durable heartbeat binding exists when POST arrives"
+    "durable binding exists when POST arrives"
     true
     (Atomic.get durable_binding_seen);
-  Alcotest.(check int) "heartbeat guarded request posts once" 1 (F.post_count server)
+  Alcotest.(check int) "guarded flow posts once" 1 (F.post_count server)
 ;;
 
-let test_visible_unknown_binding_prevents_post_and_settles () =
+let test_post_success_terminalization_is_canonical_and_durable () =
   run_eio
   @@ fun ~sw ~net ~clock ->
-  with_temp_dir "masc-visible-unknown-binding" @@ fun base_path ->
-  let keeper_name = "keeper-visible-unknown-binding" in
-  let lease = claim_manual_lease ~base_path ~keeper_name in
-  let slot_id = "visible-unknown-binding" in
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc visible unknown binding"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
-  let observation = observation_exn prepared slot_id in
-  let durable_guard =
-    Keeper_heartbeat_loop.For_testing.exact_execution_guard
-      ~base_path
-      ~keeper_name
-      ~lease
-  in
-  let guard : C.exact_execution_guard =
-    { durable_guard with
-      before_dispatch =
-        (fun observation ->
-           match durable_guard.before_dispatch observation with
-           | Ok C.Fsync_completed ->
-             Ok (C.Visible_sync_unconfirmed "injected bind after-rename failure")
-           | Ok (C.Visible_sync_unconfirmed _ as outcome) -> Ok outcome
-           | Error _ as error -> error)
-    }
-  in
-  let terminal : P.exact_execution_terminal =
-    match
-      execute_prepared_lane
-        ~keeper_name
-        ~net
-        ~clock
-        ~exact_execution_guard:guard
-        prepared
-    with
-    | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "visible bind outcome returned the wrong typed terminal"
-    | Ok _ -> Alcotest.fail "visible bind outcome must prevent exact-output execution"
-  in
-  Alcotest.(check bool)
-    "visible bind outcome uses persistence terminal cause"
-    true
-    (terminal.cause = Keeper_event_queue_state.Terminal_persistence_failed);
-  Alcotest.(check int) "visible bind outcome prevents POST" 0 (F.post_count server);
-  (match P.exact_execution_binding_result ~base_path ~keeper_name with
-   | Ok
-       (Some
-         { status = P.Dispatch_uncertain
-         ; slot_id = persisted_slot_id
-         ; call_id = persisted_call_id
-         ; plan_fingerprint
-         ; request_body_sha256
-         ; _
-         }) ->
-     Alcotest.(check string)
-       "visible bind retains slot identity"
-       observation.slot_id
-       persisted_slot_id;
-     Alcotest.(check string)
-       "visible bind retains call identity"
-       observation.call_id
-       persisted_call_id;
-     Alcotest.(check string)
-       "visible bind retains plan identity"
-       observation.receipt_plan_fingerprint
-       plan_fingerprint;
-     Alcotest.(check string)
-       "visible bind retains request identity"
-       observation.receipt_request_body_sha256
-       request_body_sha256
-   | Ok (Some _) -> Alcotest.fail "visible bind retained the wrong status"
-   | Ok None -> Alcotest.fail "visible bind was relabelled as unbound"
-   | Error detail -> Alcotest.failf "visible bind reload failed: %s" detail);
-  (match
-     settle_terminal_disposition_result
-       ~base_path
-       ~keeper_name
-       ~lease
-       ~source:(persisted_checkpoint_source_exn "trace-visible-unknown-binding")
-       ~terminal
-       ~settled_at:4.0
-   with
-   | Ok (P.Settled _) -> ()
-   | Ok _ -> Alcotest.fail "visible bind settlement was not fresh"
-   | Error detail -> Alcotest.failf "visible bind settlement failed: %s" detail);
-  match P.exact_execution_binding_result ~base_path ~keeper_name with
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "visible bind settlement retained the binding"
-  | Error detail -> Alcotest.failf "visible bind settlement reload failed: %s" detail
-;;
-
-let test_visible_unknown_quarantine_preserves_cause_and_settles () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  with_temp_dir "masc-visible-unknown-quarantine" @@ fun base_path ->
-  let keeper_name = "keeper-visible-unknown-quarantine" in
-  let lease = claim_manual_lease ~base_path ~keeper_name in
-  let slot_id = "visible-unknown-quarantine" in
-  let server = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc visible unknown quarantine"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
-  let durable_guard =
-    Keeper_heartbeat_loop.For_testing.exact_execution_guard
-      ~base_path
-      ~keeper_name
-      ~lease
-  in
-  let guard : C.exact_execution_guard =
-    { durable_guard with
-      quarantine =
-        (fun cause observation ->
-           match durable_guard.quarantine cause observation with
-           | Ok C.Fsync_completed ->
-             Ok (C.Visible_sync_unconfirmed "injected quarantine after-rename failure")
-           | Ok (C.Visible_sync_unconfirmed _ as outcome) -> Ok outcome
-           | Error _ as error -> error)
-    }
-  in
-  let observation : C.attempt_observation =
-    match
-      execute_prepared_lane
-        ~keeper_name
-        ~net
-        ~clock
-        ~exact_execution_guard:guard
-        prepared
-    with
-    | Error (C.Invalid_plan_after_dispatch observation) -> observation
-    | Error _ -> Alcotest.fail "visible quarantine returned the wrong typed failure"
-    | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded"
-  in
-  let terminal : P.exact_execution_terminal =
-    { cause = Keeper_event_queue_state.Domain_invalid_output
-    ; slot_id = observation.slot_id
-    ; call_id = observation.call_id
-    ; plan_fingerprint = observation.receipt_plan_fingerprint
-    ; request_body_sha256 = observation.receipt_request_body_sha256
-    }
-  in
-  Alcotest.(check int) "visible quarantine follows one POST" 1 (F.post_count server);
-  (match P.exact_execution_binding_result ~base_path ~keeper_name with
-   | Ok
-       (Some
-         { status = P.Terminal_quarantined persisted_cause
-         ; slot_id = persisted_slot_id
-         ; call_id = persisted_call_id
-         ; _
-         }) ->
-     Alcotest.(check bool)
-       "visible quarantine preserves canonical cause"
-       true
-       (persisted_cause = terminal.cause);
-     Alcotest.(check string)
-       "visible quarantine preserves canonical slot"
-       terminal.slot_id
-       persisted_slot_id;
-     Alcotest.(check string)
-       "visible quarantine preserves canonical call"
-       terminal.call_id
-       persisted_call_id
-   | Ok (Some _) -> Alcotest.fail "visible quarantine retained the wrong status"
-   | Ok None -> Alcotest.fail "visible quarantine was relabelled as unbound"
-   | Error detail -> Alcotest.failf "visible quarantine reload failed: %s" detail);
-  (match
-     settle_terminal_disposition_result
-       ~base_path
-       ~keeper_name
-       ~lease
-       ~source:(persisted_checkpoint_source_exn "trace-visible-unknown-quarantine")
-       ~terminal
-       ~settled_at:5.0
-   with
-   | Ok (P.Settled _) -> ()
-   | Ok _ -> Alcotest.fail "visible quarantine settlement was not fresh"
-   | Error detail -> Alcotest.failf "visible quarantine settlement failed: %s" detail);
-  match P.exact_execution_binding_result ~base_path ~keeper_name with
-  | Ok None -> ()
-  | Ok (Some _) -> Alcotest.fail "visible quarantine settlement retained the binding"
-  | Error detail ->
-    Alcotest.failf "visible quarantine settlement reload failed: %s" detail
-;;
-
-let test_post_success_terminalization_is_affine () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  with_temp_dir "masc-post-success-terminal-affinity"
+  with_temp_dir "masc-post-success-terminal"
   @@ fun base_path ->
-  let keeper_name = "keeper-post-success-terminal-affinity" in
+  let keeper_name = "keeper-post-success-terminal" in
   let lease = claim_manual_lease ~base_path ~keeper_name in
-  let slot_id = "post-success-terminal-affinity" in
+  let slot_id = "post-success-terminal" in
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc post-success terminal affinity"
+      ~source:"masc post-success terminal"
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
@@ -1355,16 +875,12 @@ let test_post_success_terminalization_is_affine () =
       ~keeper_name
       ~lease
   in
-  let quarantine_entered, resolve_quarantine_entered = Eio.Promise.create () in
-  let release_quarantine, resolve_release_quarantine = Eio.Promise.create () in
   let quarantine_calls = ref 0 in
   let guard : C.exact_execution_guard =
     { durable_guard with
       quarantine =
         (fun cause observation ->
            incr quarantine_calls;
-           Eio.Promise.resolve resolve_quarantine_entered ();
-           Eio.Promise.await release_quarantine;
            durable_guard.quarantine cause observation)
     }
   in
@@ -1378,305 +894,132 @@ let test_post_success_terminalization_is_affine () =
     |> completed_exn
   in
   let terminalizer = C.completed_post_success_terminalizer completed in
-  let first_result, resolve_first_result = Eio.Promise.create () in
-  let second_started, resolve_second_started = Eio.Promise.create () in
-  let second_result, resolve_second_result = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
+  let first =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Invalid_structural_evidence
-    |> Eio.Promise.resolve resolve_first_result);
-  Eio.Promise.await quarantine_entered;
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve resolve_second_started ();
+  in
+  let replay =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Checkpoint_persistence_failed
-    |> Eio.Promise.resolve resolve_second_result);
-  Eio.Promise.await second_started;
-  Eio.Fiber.yield ();
-  Eio.Promise.resolve resolve_release_quarantine ();
-  let first = Eio.Promise.await first_result in
-  let second = Eio.Promise.await second_result in
-  Alcotest.(check int) "post-success quarantine runs once" 1 !quarantine_calls;
-  Alcotest.(check bool)
-    "different causes retain the first canonical terminal"
-    true
-    (first = second);
-  Alcotest.(check bool)
-    "first cause remains canonical"
-    true
-    (first.cause = Keeper_event_queue_state.Invalid_structural_evidence);
-  let source =
-    match Keeper_id.Trace_id.of_string "trace-post-success-terminal-affinity" with
-    | Error detail -> Alcotest.failf "terminal source trace id failed: %s" detail
-    | Ok trace_id ->
-      (match
-         Keeper_checkpoint_ref.of_persisted
-           ~trace_id
-           ~generation:1
-           ~turn_count:1
-           ~sha256:(String.make 64 'a')
-       with
-       | Ok source -> source
-       | Error _ -> Alcotest.fail "terminal source checkpoint ref failed")
   in
-  match
-    settle_terminal_disposition_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~source
-      ~terminal:second
-      ~settled_at:4.0
-  with
-  | Ok (P.Settled receipt) ->
-    (match P.exact_execution_binding_result ~base_path ~keeper_name with
-     | Ok None -> ()
-     | Ok (Some _) -> Alcotest.fail "settlement retained exact-execution binding"
-     | Error detail -> Alcotest.failf "settled binding reload failed: %s" detail);
-    (match P.active_lease_result ~base_path ~keeper_name with
-     | Ok None -> ()
-     | Ok (Some _) -> Alcotest.fail "settlement retained active lease"
-     | Error detail -> Alcotest.failf "settled lease reload failed: %s" detail);
-    let state =
-      match P.load_state_result ~base_path ~keeper_name with
-      | Ok state -> state
-      | Error detail ->
-        Alcotest.failf "reload canonical terminal state failed: %s" detail
-    in
-    Alcotest.(check int)
-      "reloaded state has no lease"
-      0
-      (List.length (Keeper_event_queue_state.leases state));
-    (match Keeper_event_queue_state.transition_outbox state with
-     | [ { receipt = durable_receipt; _ } ] ->
-       Alcotest.(check bool)
-         "canonical terminal receipt is durable"
-         true
-         (receipt = durable_receipt);
-       (match durable_receipt.settlement with
-        | P.Settle_exact
-            { outcome = P.Terminal cause
-            ; semantic = P.Exact_no_compaction
-            ; action = P.Consume_source
-            ; slot_id
-            ; call_id
-            ; _
-            } ->
-          Alcotest.(check bool)
-            "durable terminal retains canonical cause and identity"
-            true
-            (cause = first.cause
-             && String.equal slot_id first.slot_id
-             && String.equal call_id first.call_id)
-        | _ -> Alcotest.fail "durable receipt lost canonical exact terminal")
-     | _ -> Alcotest.fail "canonical terminal state has no exact durable receipt")
-  | Ok (P.Already_settled _) ->
-    Alcotest.fail "first canonical terminal settlement was already settled"
-  | Ok (P.Committed_followup_failed { detail; _ }) ->
-    Alcotest.failf "canonical terminal settlement follow-up failed: %s" detail
-  | Error detail -> Alcotest.failf "canonical terminal settlement failed: %s" detail
-;;
-
-let test_post_success_terminalization_failures_preserve_canonical () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let cases =
-    [ "error", (fun _cause _observation -> Error "injected quarantine error")
-    ; "exception", (fun _cause _observation -> failwith "injected quarantine exception")
-    ]
-  in
-  List.iteri
-    (fun index (label, quarantine) ->
-       with_temp_dir ("masc-post-success-terminal-" ^ label)
-       @@ fun base_path ->
-       let keeper_name = "keeper-post-success-terminal-" ^ label in
-       let lease = claim_manual_lease ~base_path ~keeper_name in
-       let slot_id = Printf.sprintf "post-success-terminal-%s-%d" label index in
-       let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-       let snapshot =
-         F.resolver_snapshot
-           ~source:("masc post-success terminal " ^ label)
-           [ { id = slot_id; base_url = server.base_url } ]
-       in
-       let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-       let prepared = prepare_exn ~keeper_name ~registry in
-       let durable_guard =
-         Keeper_heartbeat_loop.For_testing.exact_execution_guard
-           ~base_path
-           ~keeper_name
-           ~lease
-       in
-       let quarantine_calls = ref 0 in
-       let guard : C.exact_execution_guard =
-         { durable_guard with
-           quarantine =
-             (fun cause observation ->
-                incr quarantine_calls;
-                quarantine cause observation)
-         }
-       in
-       let completed =
-         execute_prepared_lane
-           ~keeper_name
-           ~net
-           ~clock
-           ~exact_execution_guard:guard
-           prepared
-         |> completed_exn
-       in
-       let observation = C.completed_attempt_observation completed in
-       let terminalizer = C.completed_post_success_terminalizer completed in
-       let first =
-         C.terminalize_post_success
-           terminalizer
-           Keeper_event_queue_state.Invalid_structural_evidence
-       in
-       let replay =
-         C.terminalize_post_success
-           terminalizer
-           Keeper_event_queue_state.Checkpoint_persistence_failed
-       in
-       Alcotest.(check int) (label ^ " quarantine runs once") 1 !quarantine_calls;
-       Alcotest.(check bool)
-         (label ^ " preserves canonical terminal")
-         true
-         (first = replay);
-       match P.exact_execution_binding_result ~base_path ~keeper_name with
-       | Ok
-           (Some
-             { slot_id = durable_slot_id
-             ; call_id = durable_call_id
-             ; plan_fingerprint
-             ; request_body_sha256
-             ; status = P.Dispatch_uncertain
+  Alcotest.(check int) "terminalizer quarantines once" 1 !quarantine_calls;
+  Alcotest.(check bool) "terminalizer retains first canonical cause" true (first = replay);
+  let source = persisted_checkpoint_source_exn "trace-post-success-terminal" in
+  (match
+     settle_terminal_disposition_result
+       ~base_path
+       ~keeper_name
+       ~lease
+       ~source
+       ~terminal:replay
+       ~settled_at:4.0
+   with
+   | Ok (P.Settled receipt) ->
+     (match P.exact_execution_binding_result ~base_path ~keeper_name with
+      | Ok None -> ()
+      | Ok (Some _) -> Alcotest.fail "terminal settlement retained binding"
+      | Error detail -> Alcotest.failf "settled binding reload failed: %s" detail);
+     (match P.active_lease_result ~base_path ~keeper_name with
+      | Ok None -> ()
+      | Ok (Some _) -> Alcotest.fail "terminal settlement retained lease"
+      | Error detail -> Alcotest.failf "settled lease reload failed: %s" detail);
+     let state =
+       match P.load_state_result ~base_path ~keeper_name with
+       | Ok state -> state
+       | Error detail -> Alcotest.failf "canonical state reload failed: %s" detail
+     in
+     (match Keeper_event_queue_state.transition_outbox state with
+      | [ { receipt = durable_receipt; _ } ] ->
+        Alcotest.(check bool)
+          "canonical terminal receipt is durable"
+          true
+          (receipt = durable_receipt);
+        (match durable_receipt.settlement with
+         | P.Settle_exact
+             { outcome = P.Terminal cause
+             ; slot_id = durable_slot
+             ; call_id = durable_call
              ; _
-             }) ->
-         Alcotest.(check string)
-           (label ^ " retains slot identity")
-           observation.slot_id
-           durable_slot_id;
-         Alcotest.(check string)
-           (label ^ " retains call identity")
-           observation.call_id
-           durable_call_id;
-         Alcotest.(check string)
-           (label ^ " retains plan identity")
-           observation.receipt_plan_fingerprint
-           plan_fingerprint;
-         Alcotest.(check string)
-           (label ^ " retains request identity")
-           observation.receipt_request_body_sha256
-           request_body_sha256
-       | Ok (Some _) ->
-         Alcotest.failf "%s quarantine failure did not remain dispatch-uncertain" label
-       | Ok None -> Alcotest.failf "%s quarantine failure removed the binding" label
-       | Error detail ->
-         Alcotest.failf "%s quarantine failure binding reload failed: %s" label detail)
-    cases
+             } ->
+           Alcotest.(check bool)
+             "durable settlement retains canonical terminal identity"
+             true
+             (cause = first.cause
+              && String.equal durable_slot first.slot_id
+              && String.equal durable_call first.call_id)
+         | _ -> Alcotest.fail "durable receipt lost exact terminal")
+      | _ -> Alcotest.fail "canonical terminal outbox receipt is missing")
+   | Ok (P.Already_settled _) ->
+     Alcotest.fail "first terminal settlement was already settled"
+   | Ok (P.Committed_followup_failed { detail; _ }) ->
+     Alcotest.failf "terminal settlement follow-up failed: %s" detail
+   | Error detail -> Alcotest.failf "terminal settlement failed: %s" detail)
 ;;
 
 let () =
   Alcotest.run
-    "compaction exact-output conformance"
+    "compaction exact-flow conformance"
     [ ( "preparation"
       , [ Alcotest.test_case
-            "missing compaction lane is explicit degraded state"
+            "missing lane is explicit"
             `Quick
             test_missing_compaction_lane_is_explicit_degraded_state
         ; Alcotest.test_case
-            "ordered, effect-free, and one catalog generation"
+            "order, generation, and call ids are immutable"
             `Quick
-            test_preparation_is_ordered_effect_free_and_single_generation
+            test_preparation_freezes_order_generation_and_unique_call_ids
         ; Alcotest.test_case
-            "published snapshot replacement cannot mix"
+            "replacement cannot mix prepared generation"
             `Quick
-            test_published_snapshot_replacement_cannot_mix_prepared_lane
-        ; Alcotest.test_case
-            "missing credential is deferred past registry admission"
-            `Quick
-            test_missing_credential_is_deferred_past_registry_admission
-        ; Alcotest.test_case
-            "mixed unavailable slots are skipped in both orders"
-            `Quick
-            test_unavailable_slots_are_skipped_in_both_orders
-        ; Alcotest.test_case
-            "all unavailable slots return a typed error"
-            `Quick
-            test_all_unavailable_slots_are_typed
-        ; Alcotest.test_case
-            "unknown target is rejected by registry publication"
-            `Quick
-            test_unknown_target_is_rejected_by_registry_publication
+            test_published_replacement_cannot_mix_prepared_generation
         ] )
-    ; ( "effect boundary"
+    ; ( "durable flow callbacks"
       , [ Alcotest.test_case
-            "Before_dispatch/0 advances exactly once"
+            "release precedes successor bind and POST"
             `Quick
-            test_before_dispatch_zero_advances_exactly_once
+            test_durable_release_precedes_successor_bind_and_post
         ; Alcotest.test_case
-            "visible release uncertainty is source-bound terminal"
+            "bind failure prevents POST"
             `Quick
-            test_visible_release_uncertainty_is_source_bound_terminal
+            test_bind_failure_prevents_post
         ; Alcotest.test_case
-            "post-dispatch failure is terminal"
+            "release failure blocks successor"
             `Quick
-            test_post_dispatch_failure_is_terminal
+            test_release_failure_blocks_successor
         ; Alcotest.test_case
-            "domain-invalid JSON is terminal"
-            `Quick
-            test_domain_invalid_json_is_terminal
-        ; Alcotest.test_case
-            "post-dispatch cancellation is typed and terminal"
-            `Quick
-            test_post_dispatch_cancellation_is_typed_terminal
-        ; Alcotest.test_case
-            "durable dispatch guard failure prevents POST"
-            `Quick
-            test_before_rename_binding_failure_prevents_post
-        ; Alcotest.test_case
-            "missing dispatch guard prevents POST"
-            `Quick
-            test_missing_dispatch_guard_prevents_post
-        ; Alcotest.test_case
-            "quarantine persistence failure preserves original cause"
-            `Quick
-            test_quarantine_persistence_failure_preserves_original_cause
-        ; Alcotest.test_case
-            "heartbeat durable bind precedes POST"
+            "heartbeat guard binds before POST"
             `Quick
             test_heartbeat_guard_binds_before_post
-        ; Alcotest.test_case
-            "visible binding uncertainty prevents POST and settles"
-            `Quick
-            test_visible_unknown_binding_prevents_post_and_settles
-        ; Alcotest.test_case
-            "visible quarantine uncertainty preserves cause and settles"
-            `Quick
-            test_visible_unknown_quarantine_preserves_cause_and_settles
-        ; Alcotest.test_case
-            "post-success terminalization is affine"
-            `Quick
-            test_post_success_terminalization_is_affine
-        ; Alcotest.test_case
-            "post-success terminalization failures preserve canonical identity"
-            `Quick
-            test_post_success_terminalization_failures_preserve_canonical
         ] )
-    ; ( "Keeper isolation"
+    ; ( "terminal ownership"
       , [ Alcotest.test_case
-            "prepared attempts are not shared"
+            "domain invalidity never reenters failover"
             `Quick
-            test_keeper_preparations_do_not_share_attempt_state
+            test_domain_invalid_output_never_reenters_failover
         ; Alcotest.test_case
-            "prepared lane replay is affine"
+            "final OAS failure is generic terminal"
             `Quick
-            test_prepared_lane_replay_is_terminal_without_second_post
+            test_final_oas_flow_failure_is_generic_source_terminal
         ; Alcotest.test_case
-            "prepared lane concurrency is affine"
+            "cancellation quarantines bound identity"
             `Quick
-            test_prepared_lane_concurrency_is_affine
+            test_cancellation_quarantines_only_bound_identity
+        ; Alcotest.test_case
+            "terminalization is canonical and durable"
+            `Quick
+            test_post_success_terminalization_is_canonical_and_durable
+        ] )
+    ; ( "affinity and non-sharing"
+      , [ Alcotest.test_case
+            "independent flows do not share call identity"
+            `Quick
+            test_independent_preparations_do_not_share_call_identity
+        ; Alcotest.test_case
+            "same-flow loser mutates no queue"
+            `Quick
+            test_same_flow_concurrent_loser_mutates_no_queue
         ] )
     ]
 ;;

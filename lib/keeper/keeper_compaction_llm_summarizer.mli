@@ -15,8 +15,6 @@ type prepared_lane
 type attempt_observation =
   { slot_id : string
   ; call_id : string
-  ; phase : Agent_sdk.Exact_output.effect_phase
-  ; dispatch_count : int
   ; catalog_generation_fingerprint : string
   ; receipt_plan_fingerprint : string
   ; receipt_request_body_sha256 : string
@@ -39,36 +37,33 @@ type exact_execution_guard =
     payload and parent [Unix.fsync] returned and supports process-restart
     safety, not hardware/power-loss persistence or Darwin [F_FULLFSYNC].
     Visible uncertainty returns a source-bound terminal without POST.
-    [release_before_dispatch] permits the next slot only after
-    [Fsync_completed]; visible removal returns a terminal for the original
-    slot/call and does not fail over. A visible [quarantine] preserves the
-    original post-dispatch terminal cause for source-bound settlement. None of
-    these callbacks performs POST. *)
+    [release_before_dispatch] is invoked only for the failed identity selected
+    by OAS and permits OAS to advance only after [Fsync_completed]. Visible or
+    failed removal returns a terminal for that identity and cannot dispatch its
+    successor. A visible [quarantine] preserves the original terminal cause for
+    source-bound settlement. None of these callbacks selects a successor or
+    performs POST. *)
 
 type summarization_failure =
   | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
-  | Exact_attempt_start_failed of string
+  | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_failed_before_dispatch
+  | Exact_execution_guard_failed
+  | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
-  | Exact_execution_failed_after_dispatch of attempt_observation
-  | Exact_attempt_already_started of attempt_observation
-  | Exact_execution_cancelled_after_dispatch of attempt_observation
-  | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
-  | Invalid_plan_after_dispatch of attempt_observation
 
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
   (completed_plan, summarization_failure) result
 
-(** Pure lane lookup, selection, and admission against exactly one
-    caller-supplied immutable registry. Every candidate is considered in
-    declaration order, all admitted plans and their real receipts are retained
-    before any network effect, and the returned lane is abstract so callers
-    cannot replace ready plans. *)
+(** Pure lane lookup and construction of one immutable OAS exact flow against
+    exactly one caller-supplied registry generation. MASC supplies only ordered
+    opaque slot identities and domain messages/schema. OAS performs candidate
+    admission and allocates every non-shared affine attempt before any network
+    effect. *)
 val prepare_lane
   :  keeper_name:string
   -> registry:Runtime_exact_output_registry.t
@@ -76,11 +71,12 @@ val prepare_lane
   -> units:Keeper_compaction_unit.closed_unit list
   -> (prepared_lane, summarization_failure) result
 
-(** Execute each retained OAS attempt at most once. Only a real receipt at
-    [Before_dispatch] with dispatch count zero advances to the next slot.
-    Pre-dispatch cancellation is re-raised. Post-dispatch cancellation,
-    duplicate execution, provenance mismatch, dispatched failure, and a
-    MASC-invalid domain plan are typed terminal outcomes and never fail over. *)
+(** Execute the immutable OAS flow exactly once. OAS exclusively decides
+    whether an execution failure can advance and supplies the predetermined
+    successor. MASC only durably binds the supplied identity, durably releases
+    the failed identity, and quarantines source-bound terminal identities.
+    MASC never reads receipt phase/count or provider/admission failure causes.
+    Domain-invalid output is terminal and cannot enter OAS failover. *)
 val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -89,12 +85,10 @@ val execute_prepared_lane
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
 
-(** Resolve [compaction_exact] from one published immutable registry, admit all
-    resolved slots for valid JSON syntax before dispatch, then execute each
-    admitted plan at most once. OAS guarantees JSON syntax; [plan_of_json]
-    enforces the MASC-owned compaction schema and domain rules. Invalid domain
-    output is terminal and never advances to another slot. Only a receipt still
-    at [Before_dispatch] with dispatch count zero permits advancing. *)
+(** Resolve [compaction_exact] from one published immutable registry and hand
+    its ordered opaque slots to one OAS exact flow. OAS owns admission,
+    execute-once, advancement, and provenance. [plan_of_json] alone enforces the
+    MASC-owned compaction schema and domain rules after success. *)
 val make : ?exact_execution_guard:exact_execution_guard -> keeper_name:string -> unit -> summarizer option
 
 val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
@@ -141,7 +135,8 @@ module For_testing : sig
     :  units:Keeper_compaction_unit.closed_unit list
     -> Agent_sdk.Types.message list
 
-  val admitted_slot_ids : prepared_lane -> string list
+  val flow_slot_ids : prepared_lane -> string list
+  val registry_generation : prepared_lane -> int64
 
   val attempt_observations : prepared_lane -> attempt_observation list
 end

@@ -146,7 +146,7 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
     true
     (preserves
        (Keeper_event_queue_state.Exact_execution_terminal
-          (exact_terminal Keeper_event_queue_state.Execution_failed_after_dispatch)))
+          (exact_terminal Keeper_event_queue_state.Exact_execution_failed)))
 ;;
 
 let test_empty_projection_target_is_typed () =

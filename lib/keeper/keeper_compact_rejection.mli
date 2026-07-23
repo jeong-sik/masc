@@ -4,7 +4,8 @@ type compaction_rejection =
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_failed_before_dispatch
+  | Exact_execution_guard_failed
+  | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error

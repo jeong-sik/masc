@@ -785,7 +785,7 @@ let settlement_is_exact_output_cancellation = function
       { reason =
           Keeper_event_queue_state.Exact_execution_terminal
             { cause =
-                ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                ( Keeper_event_queue_state.Exact_execution_cancelled
                 | Keeper_event_queue_state.Terminal_persistence_failed )
             ; _
             }
@@ -796,7 +796,7 @@ let settlement_is_exact_output_cancellation = function
           Keeper_registry_event_queue.Compaction_exact_output_terminal
             { terminal =
                 { cause =
-                    ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                    ( Keeper_event_queue_state.Exact_execution_cancelled
                     | Keeper_event_queue_state.Terminal_persistence_failed )
                 ; _
                 }
@@ -813,7 +813,7 @@ let settlement_is_exact_output_cancellation = function
   | Keeper_registry_event_queue.Settle_exact
       { outcome =
           Keeper_registry_event_queue.Terminal
-            ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+            ( Keeper_event_queue_state.Exact_execution_cancelled
             | Keeper_event_queue_state.Terminal_persistence_failed )
       ; _
       } ->

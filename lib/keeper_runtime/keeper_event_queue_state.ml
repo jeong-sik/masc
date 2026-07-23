@@ -13,10 +13,8 @@ type requeue_reason =
   | Context_compaction_retry
 
 type exact_execution_terminal_cause =
-  | Execution_failed_after_dispatch
-  | Attempt_already_started
-  | Execution_cancelled_after_dispatch
-  | Execution_provenance_mismatch
+  | Exact_execution_failed
+  | Exact_execution_cancelled
   | Domain_invalid_output
   | Invalid_structural_evidence
   | Invalid_structural_source_after_dispatch
@@ -440,10 +438,8 @@ let requeue_reason_of_label = function
 let ( let* ) = Result.bind
 
 let exact_execution_terminal_cause_label = function
-  | Execution_failed_after_dispatch -> "execution_failed_after_dispatch"
-  | Attempt_already_started -> "attempt_already_started"
-  | Execution_cancelled_after_dispatch -> "execution_cancelled_after_dispatch"
-  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
+  | Exact_execution_failed -> "exact_execution_failed"
+  | Exact_execution_cancelled -> "exact_execution_cancelled"
   | Domain_invalid_output -> "domain_invalid_output"
   | Invalid_structural_evidence -> "invalid_structural_evidence"
   | Invalid_structural_source_after_dispatch ->
@@ -457,11 +453,8 @@ let exact_execution_terminal_cause_label = function
 ;;
 
 let exact_execution_terminal_cause_of_label = function
-  | "execution_failed_after_dispatch" -> Ok Execution_failed_after_dispatch
-  | "attempt_already_started" -> Ok Attempt_already_started
-  | "execution_cancelled_after_dispatch" ->
-    Ok Execution_cancelled_after_dispatch
-  | "execution_provenance_mismatch" -> Ok Execution_provenance_mismatch
+  | "exact_execution_failed" -> Ok Exact_execution_failed
+  | "exact_execution_cancelled" -> Ok Exact_execution_cancelled
   | "domain_invalid_output" -> Ok Domain_invalid_output
   | "invalid_structural_evidence" -> Ok Invalid_structural_evidence
   | "invalid_structural_source_after_dispatch" ->

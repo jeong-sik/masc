@@ -926,6 +926,60 @@ let degrade_loaded_for_missing_catalog
       , degradation )
 ;;
 
+let hitl_auto_judge_lane_id = "hitl_auto_judge"
+
+let ensure_hitl_auto_judge_lane
+    ~runtimes
+    ~default_runtime
+    ~librarian_runtime_id
+    ~structured_judge_runtime_id
+    ~lanes
+    exact_output_lane_decls
+  =
+  if
+    List.exists
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id hitl_auto_judge_lane_id)
+      exact_output_lane_decls
+  then
+    Ok exact_output_lane_decls
+  else
+    let assignment_id =
+      match structured_judge_runtime_id, librarian_runtime_id with
+      | Some runtime_id, _ | None, Some runtime_id -> runtime_id
+      | None, None -> default_runtime.id
+    in
+    let slot_ids =
+      match
+        List.find_opt
+          (fun (lane : Runtime_lane.t) ->
+             String.equal lane.id assignment_id)
+          lanes
+      with
+      | Some lane -> lane.candidates
+      | None ->
+        (match
+           List.find_opt
+             (fun (runtime : t) ->
+                String.equal runtime.id assignment_id)
+             runtimes
+         with
+         | Some runtime -> [ runtime.id ]
+         | None -> [])
+    in
+    (match slot_ids with
+     | [] ->
+       Error
+         (Printf.sprintf
+            "runtime exact-output lane %S cannot derive slots from structured-judge assignment %S"
+            hitl_auto_judge_lane_id
+            assignment_id)
+     | _ ->
+       Ok
+         (exact_output_lane_decls
+          @ [ { Runtime_schema.id = hitl_auto_judge_lane_id; slot_ids } ]))
+;;
+
 let materialize_config
     ?(validate_max_context = true)
     ~(config_path : string)
@@ -1000,16 +1054,26 @@ let materialize_config
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
-  Ok
-    ( ( runtimes
-      , rt
-      , assignments
-      , cfg.librarian_runtime_id
-      , cfg.structured_judge_runtime_id
-      , cfg.cross_verifier_runtime_id
-      , cfg.media_failover
-      , lanes )
-    , cfg.exact_output_lane_decls )
+  let loaded =
+    ( runtimes
+    , rt
+    , assignments
+    , cfg.librarian_runtime_id
+    , cfg.structured_judge_runtime_id
+    , cfg.cross_verifier_runtime_id
+    , cfg.media_failover
+    , lanes )
+  in
+  let* exact_output_lane_decls =
+    ensure_hitl_auto_judge_lane
+      ~runtimes
+      ~default_runtime:rt
+      ~librarian_runtime_id:cfg.librarian_runtime_id
+      ~structured_judge_runtime_id:cfg.structured_judge_runtime_id
+      ~lanes
+      cfg.exact_output_lane_decls
+  in
+  Ok (loaded, exact_output_lane_decls)
 ;;
 
 let load_list_internal ~(config_path : string) ~validate_max_context
@@ -1041,6 +1105,13 @@ let load_list_internal ~(config_path : string) ~validate_max_context
         detail)
   in
   materialize_config ~validate_max_context ~config_path cfg
+;;
+
+let load_exact_output_lane_declarations ~config_path =
+  let* _, exact_output_lane_decls =
+    load_list_internal ~config_path ~validate_max_context:true
+  in
+  Ok exact_output_lane_decls
 ;;
 
 let load_list ~config_path =

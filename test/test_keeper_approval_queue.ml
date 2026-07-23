@@ -2072,7 +2072,7 @@ let test_all_summary_failures_accept_explicit_restart () =
        reject_and_cleanup ~base_path terminal_id)
 ;;
 
-let test_operator_recovery_reopens_all_failed_summaries () =
+let test_operator_recovery_skips_terminal_exact_failures () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
   Fun.protect
@@ -2098,9 +2098,12 @@ let test_operator_recovery_reopens_all_failed_summaries () =
        let terminal_id =
          submit ~base_path ~keeper_name ~input:(`String "terminal")
        in
+       let quarantined_id =
+         submit ~base_path ~keeper_name ~input:(`String "quarantined")
+       in
        List.iter
          (fun id -> check_update "mark pending" true (AQ.mark_summary_pending ~id))
-         [ retryable_id; terminal_id ];
+         [ retryable_id; terminal_id; quarantined_id ];
        check_update
          "retryable failure"
          true
@@ -2109,6 +2112,24 @@ let test_operator_recovery_reopens_all_failed_summaries () =
          "terminal failure"
          true
          (AQ.mark_summary_failed ~id:terminal_id ~reason:"prompt" ~retryable:false);
+       let quarantined_identity =
+         exact_identity
+           ~slot_id:"slot-quarantined"
+           ~call_id:"call-quarantined"
+           quarantined_id
+       in
+       check_exact_update
+         "bind terminal exact failure"
+         true
+         (run_exact_transition
+            AQ.bind_summary_exact_attempt
+            quarantined_identity);
+       check_exact_update
+         "quarantine terminal exact failure"
+         true
+         (quarantine_exact
+            quarantined_identity
+            AQ.Exact_flow_execution_failed);
        let reopened =
          match AQ.restart_failed_summaries ~base_path with
          | Ok ids -> List.sort String.compare ids
@@ -2116,7 +2137,7 @@ let test_operator_recovery_reopens_all_failed_summaries () =
            Alcotest.fail (AQ.summary_transition_error_to_string error)
        in
        Alcotest.(check (list string))
-         "explicit operator action reopens both classes"
+         "explicit operator action reopens only restartable failures"
          (List.sort String.compare [ retryable_id; terminal_id ])
          reopened;
        List.iter
@@ -2133,8 +2154,23 @@ let test_operator_recovery_reopens_all_failed_summaries () =
             (Some request_context)
             entry.request_context
         | None -> Alcotest.fail "reopened summary disappeared");
+       (match AQ.get_pending_entry ~id:quarantined_id with
+        | Some
+            { summary_status = AQ.Summary_failed { retryable = false; _ }
+            ; exact_attempt =
+                AQ.Exact_bound
+                  { status =
+                      AQ.Exact_quarantined AQ.Exact_flow_execution_failed
+                  ; _
+                  }
+            ; _
+            } ->
+          ()
+        | Some _ | None ->
+          Alcotest.fail "bulk recovery changed a terminal exact quarantine");
        reject_and_cleanup ~base_path retryable_id;
-       reject_and_cleanup ~base_path terminal_id)
+       reject_and_cleanup ~base_path terminal_id;
+       reject_and_cleanup ~base_path quarantined_id)
 ;;
 
 let test_dashboard_retry_rejects_cross_workspace_approval () =
@@ -2919,9 +2955,9 @@ let () =
             `Quick
             test_lane_activity_does_not_retry_failed_auto_judge
         ; Alcotest.test_case
-            "operator recovery reopens terminal failures"
+            "operator recovery skips terminal exact failures"
             `Quick
-            test_operator_recovery_reopens_all_failed_summaries
+            test_operator_recovery_skips_terminal_exact_failures
           ; Alcotest.test_case
               "decisive summary finalizes after restart"
               `Quick

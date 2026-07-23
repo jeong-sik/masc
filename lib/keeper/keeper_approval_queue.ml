@@ -2329,7 +2329,12 @@ let restart_failed_summaries ~base_path =
                    , Exact_bound
                        { status = Exact_released_recovery_required; _ } ) ->
                    true
-                 | Summary_failed _, _ -> true
+                 | Summary_failed _, Exact_unbound -> true
+                 | ( Summary_failed _
+                   , Exact_bound
+                       { status = Exact_released_before_dispatch; _ } ) ->
+                   true
+                 | Summary_failed _, Exact_bound _ -> false
                  | ( Summary_not_requested
                    | Summary_available _
                    | Summary_pending ),

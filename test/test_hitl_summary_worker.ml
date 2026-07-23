@@ -132,6 +132,27 @@ let prepare_exn entry =
   | Error detail -> fail detail
 ;;
 
+let test_readiness_rejects_lane_without_json_guarantee () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  let slot_id = "hitl-readiness-no-json" in
+  publish_lane
+    [ slot_id ]
+    (F.resolver_snapshot
+       ~supports_response_format_json:false
+       ~supports_structured_output:false
+       ~source:"hitl-readiness-no-json"
+       [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]);
+  match Worker.readiness () with
+  | Ok () -> fail "readiness admitted a lane without the HITL output guarantee"
+  | Error detail ->
+    check
+      string
+      "readiness reports OAS admission rejection"
+      "HITL exact-output flow admitted no candidates"
+      detail
+;;
+
 let visible_after_rename_writer path body =
   match Fs_compat.save_file_atomic path body with
   | Error reason -> failf "visible writer could not replace %s: %s" path reason
@@ -1065,6 +1086,10 @@ let () =
             "prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
+        ; test_case
+            "readiness requires JSON admission"
+            `Quick
+            test_readiness_rejects_lane_without_json_guarantee
         ] )
     ; ( "production exact flow"
       , [ test_case

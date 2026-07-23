@@ -75,7 +75,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   transient_runtime_retry: '일시적 런타임 재시도',
   internal_error: '내부 오류',
   cancelled: '취소됨',
-  transcript_corruption: '트랜스크립트 손상(리셋 필요)',
+  transcript_corruption: '대화 기록 손상 - 초기화 필요',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

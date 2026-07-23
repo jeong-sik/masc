@@ -586,16 +586,19 @@ let completion_receipt_of_json json =
 
 type wire_schema =
   | Current_schema
+  | Shutdown_schema_v6
   | Shutdown_schema_v5
   | Lifecycle_schema_v4
   | Shutdown_schema_v3
 
+let shutdown_schema_v6 = 6
 let shutdown_schema_v5 = 5
 let lifecycle_schema_v4 = 4
 let shutdown_schema_v3 = 3
 
 let wire_schema_of_version = function
   | version when Int.equal version schema_version -> Ok Current_schema
+  | version when Int.equal version shutdown_schema_v6 -> Ok Shutdown_schema_v6
   | version when Int.equal version shutdown_schema_v5 -> Ok Shutdown_schema_v5
   | version when Int.equal version lifecycle_schema_v4 -> Ok Lifecycle_schema_v4
   | version when Int.equal version shutdown_schema_v3 -> Ok Shutdown_schema_v3
@@ -607,7 +610,7 @@ let wire_schema_of_version = function
 
 let completion_action_supported_by_wire_schema wire_schema action =
   match wire_schema, action with
-  | (Current_schema | Shutdown_schema_v5),
+  | (Current_schema | Shutdown_schema_v6 | Shutdown_schema_v5),
     (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
     true
   | Lifecycle_schema_v4, Dead_tombstone_reaped -> true
@@ -639,6 +642,7 @@ let finalization_evidence_of_json ~wire_schema json =
   let* accumulator_dropped =
     match wire_schema with
     | Current_schema
+    | Shutdown_schema_v6
     | Shutdown_schema_v5
     | Lifecycle_schema_v4 -> bool "accumulator_dropped" json
     | Shutdown_schema_v3 ->
@@ -660,17 +664,27 @@ let finalization_evidence_of_json ~wire_schema json =
     }
 ;;
 
-let supersession_of_json json =
+let supersession_of_json ~wire_schema json =
   let* kind = string "kind" json in
   match kind with
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
   | "operator_reconciliation_accepted" ->
-    let* actor = string "actor" json in
-    let* turn_json = assoc "unreconciled_turn" json in
-    let* unreconciled_turn = active_turn_of_json turn_json in
-    Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
+    (match wire_schema with
+     | Current_schema ->
+       let* actor = string "actor" json in
+       let* turn_json = assoc "unreconciled_turn" json in
+       let* unreconciled_turn = active_turn_of_json turn_json in
+       Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
+     | Shutdown_schema_v6
+     | Shutdown_schema_v5
+     | Lifecycle_schema_v4
+     | Shutdown_schema_v3 ->
+       Error
+         (Decode_error
+            "shutdown reconciliation supersession is not valid before shutdown \
+             schema 7"))
   | value ->
     Error
       (Decode_error
@@ -705,9 +719,10 @@ let phase_of_json ~wire_schema json =
     Ok (Blocked failure)
   | "superseded" ->
     (match wire_schema with
-     | Current_schema ->
+     | Current_schema
+     | Shutdown_schema_v6 ->
        let* supersession_json = assoc "supersession" json in
-       let* supersession = supersession_of_json supersession_json in
+       let* supersession = supersession_of_json ~wire_schema supersession_json in
        Ok (Superseded supersession)
      | Shutdown_schema_v5
      | Lifecycle_schema_v4
@@ -886,6 +901,7 @@ let cleanup_reason_of_json json =
 let lane_ownership_of_versioned_json ~wire_schema json =
   match wire_schema with
   | Current_schema
+  | Shutdown_schema_v6
   | Shutdown_schema_v5
   | Lifecycle_schema_v4 ->
     let* lane_ownership_json = assoc "lane_ownership" json in
@@ -943,6 +959,7 @@ let retired_stale_paused_terminal_of_json
 let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
   match wire_schema with
   | Current_schema
+  | Shutdown_schema_v6
   | Shutdown_schema_v5 ->
     let* cleanup_reason_json = assoc "reason" cleanup_json in
     cleanup_reason_of_json cleanup_reason_json
@@ -1186,8 +1203,10 @@ let prepare_operator_metadata_supersession
     (* #25491: a [Reconciliation_required] fence had no release path at all —
        the worker and boot recovery deliberately refuse to assume the turn's
        effects landed, and the operator was refused too, which left the keeper
-       with no reachable state at all (RFC-0000 §1.2 LAW 1 "No dead-end"). The
-       operator route is reopened here; the automatic ones stay closed. *)
+       with no reachable state at all (RFC-0000 §1.2 LAW 1 "No dead-end").
+       #25522 later taught boot recovery to settle the phase automatically
+       ([settled_reconciliation_state]); this operator route remains as the
+       manual release for records whose boot-settle persist failed. *)
   | Ok
       ({ phase = Reconciliation_required turn
        ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }

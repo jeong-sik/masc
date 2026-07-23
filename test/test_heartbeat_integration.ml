@@ -248,6 +248,13 @@ let shutdown_schema5_fixture (operation : Shutdown_types.t) =
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
+let shutdown_schema6_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 6) fields)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
@@ -1334,8 +1341,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_supersession.error_to_string error)
       in
       check int
-        "schema 5 CAS write upgrades the durable record to schema 6"
-        6
+        "schema 5 CAS write upgrades the durable record to schema 7"
+        7
         superseded.schema_version;
       (match superseded.phase with
        | Shutdown_types.Superseded
@@ -1364,12 +1371,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            | _ -> fail "persisted supersession omitted schema_version")
         | _ -> fail "persisted supersession is not an object"
       in
-      check int "supersession wire schema is upgraded" 6 persisted_schema;
+      check int "supersession wire schema is upgraded" 7 persisted_schema;
       (* #25491: a [Reconciliation_required] fence previously had no release
-         path at all. The worker and boot recovery no-op on it by design —
-         boot recovery is in fact what mints the phase — and supersession
+         path at all. The worker no-ops on it by design and supersession
          accepted only [Blocked], so the keeper was unreachable in every
-         direction (RFC-0000 §1.2 LAW 1 "no dead-end"). These pin that the
+         direction (RFC-0000 §1.2 LAW 1 "no dead-end"). Since #25522 boot
+         recovery settles the phase automatically instead of minting it, so
+         this operator route is now the manual fallback. These pin that the
          operator route releases it and that the accepted turn survives in the
          durable record, since [Superseded] overwrites the phase that carried
          it. *)
@@ -1468,7 +1476,23 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        with
        | Error (Shutdown_store.Decode_error _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ -> fail "schema 5 accepted the schema 6 superseded phase");
+       | Ok _ -> fail "schema 5 accepted the superseded phase");
+      (match
+         superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         reconciling_superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ ->
+         fail "schema 6 accepted the schema 7 reconciliation supersession");
       (match
          Masc.Keeper_turn_admission.restore_shutdown
            ~base_path:config.base_path

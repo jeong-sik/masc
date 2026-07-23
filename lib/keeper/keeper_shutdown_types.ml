@@ -192,7 +192,7 @@ type invariant_error =
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
 
-let schema_version = 6
+let schema_version = 7
 
 let requires_admission_fence operation =
   match operation.phase with

@@ -11,13 +11,6 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Approval_grant_unconsumed
-  | Approval_grant_state_unavailable
-    (* The two approval arms are no longer produced: the approval-wake
-       settlement follows the completed turn since the 2026-07-21
-       delivery-not-consumption amendment (#25539, RFC
-       keeper-conversation-hitl-flow). Kept for decoding persisted
-       receipts/WAL rows written before the amendment. *)
 
 type exact_execution_terminal_cause =
   | Execution_failed_after_dispatch
@@ -430,8 +423,6 @@ let requeue_reason_label = function
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
   | Context_compaction_retry -> "context_compaction_retry"
-  | Approval_grant_unconsumed -> "approval_grant_unconsumed"
-  | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
 
 let requeue_reason_of_label = function
@@ -443,8 +434,6 @@ let requeue_reason_of_label = function
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
   | "context_compaction_retry" -> Ok Context_compaction_retry
-  | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
-  | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
 ;;
 
@@ -1563,13 +1552,9 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Settle_from_source_terminal _ -> state.pending
       | Settle_exact { action = Consume_source; _ } -> state.pending
       | Requeue
-          ( Retry_after_observed
-          | Context_compaction_retry
-          | Approval_grant_unconsumed
-          | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, context repair handoffs, and a durable
-           one-shot grant retain the exact leased stimuli without monopolizing
-           the FIFO front. *)
+          (Retry_after_observed | Context_compaction_retry) ->
+        (* Retryable provider work and context repair handoffs retain the exact
+           leased stimuli without monopolizing the FIFO front. *)
         append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending

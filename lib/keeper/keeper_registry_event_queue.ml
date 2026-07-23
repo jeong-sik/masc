@@ -18,8 +18,6 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Approval_grant_unconsumed
-  | Approval_grant_state_unavailable
 
 let publish_pending ~base_path name pending =
   match Keeper_registry.get ~base_path name with

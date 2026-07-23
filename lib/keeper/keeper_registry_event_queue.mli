@@ -17,8 +17,6 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Approval_grant_unconsumed
-  | Approval_grant_state_unavailable
 
 type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execution_terminal_cause =
   | Execution_failed_after_dispatch

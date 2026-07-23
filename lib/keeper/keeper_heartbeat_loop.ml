@@ -910,6 +910,8 @@ let run_keepalive_unified_turn
             ~stop_requested:(Atomic.get stop)
             ~compaction_consecutive_failures:
               meta_after_triage.runtime.compaction_rt.consecutive_failures
+            ~transcript_quarantine_consecutive_retries:
+              meta_after_triage.runtime.transcript_quarantine_consecutive_retries
             ~lease
             (Some outcome)
         in

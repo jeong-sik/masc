@@ -1,4 +1,4 @@
-(** Unit tests for [Server_runtime_startup_maintenance.prune_children_dirs]. *)
+(** Unit tests for [Server_runtime_startup_maintenance] prune folds. *)
 
 module SM = Server_runtime_startup_maintenance
 
@@ -70,6 +70,59 @@ let test_prune_flat_jsonl_removes_old_files () =
   Alcotest.(check bool) "recent file kept" true (Sys.file_exists recent_file);
   Alcotest.(check bool) "non-jsonl file kept" true (Sys.file_exists stray)
 
+let visited = ref []
+
+let record_visit dir =
+  visited := dir :: !visited;
+  0
+
+let test_keeper_scoped_store_list_is_ssot () =
+  (* Drift guard: the 24h periodic pass used to prune execution-receipts
+     only while startup pruned all three. Pin the shared list so neither
+     loop can silently drop a store again. *)
+  Alcotest.(check (list string))
+    "keeper-scoped stores = metrics + crash-events + execution-receipts"
+    [ "crash-events"; "execution-receipts"; "metrics" ]
+    (List.sort String.compare SM.keeper_scoped_dated_stores)
+
+let test_prune_keeper_scoped_stores_visits_all_stores () =
+  (* Regression for the 24h loop drift: both loops call this function, so
+     every keeper must see prune_dir invoked for all three stores. *)
+  visited := [];
+  let masc_root = fresh_dir "masc_keeper_scoped" in
+  let keepers = Filename.concat masc_root "keepers" in
+  List.iter
+    (fun name -> Fs_compat.mkdir_p (Filename.concat keepers name))
+    [ "keeper-a"; "keeper-b" ];
+  let stray = Filename.concat keepers "stray.txt" in
+  let oc = open_out stray in
+  output_string oc "x";
+  close_out oc;
+  let n = SM.prune_keeper_scoped_stores ~prune_dir:record_visit ~masc_root in
+  Alcotest.(check int) "returns summed prune counts" 0 n;
+  let expected =
+    List.concat_map
+      (fun keeper ->
+        List.map
+          (fun store -> Filename.concat (Filename.concat keepers keeper) store)
+          SM.keeper_scoped_dated_stores)
+      [ "keeper-a"; "keeper-b" ]
+  in
+  Alcotest.(check (list string))
+    "all three stores pruned for every keeper"
+    (List.sort String.compare expected)
+    (List.sort String.compare !visited)
+
+let test_prune_keeper_scoped_stores_missing_root () =
+  visited := [];
+  let n =
+    SM.prune_keeper_scoped_stores
+      ~prune_dir:record_visit
+      ~masc_root:"/nonexistent/masc-keeper-scoped"
+  in
+  Alcotest.(check int) "missing keepers root counts 0" 0 n;
+  Alcotest.(check int) "prune_dir never called" 0 (List.length !visited)
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -84,5 +137,14 @@ let () =
         [
           Alcotest.test_case "populated trajectories dir prunes old files" `Quick
             test_prune_flat_jsonl_removes_old_files;
+        ] );
+      ( "prune_keeper_scoped_stores",
+        [
+          Alcotest.test_case "store list is SSOT (3 stores)" `Quick
+            test_keeper_scoped_store_list_is_ssot;
+          Alcotest.test_case "visits all three stores per keeper" `Quick
+            test_prune_keeper_scoped_stores_visits_all_stores;
+          Alcotest.test_case "missing keepers root counts zero" `Quick
+            test_prune_keeper_scoped_stores_missing_root;
         ] );
     ]

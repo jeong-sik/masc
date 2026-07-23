@@ -1,6 +1,13 @@
 val prune_children_dirs : prune_dir:(string -> int) -> string -> int
 (** Fold [prune_dir] over the immediate sub-directories of the given
-    root path. Missing root counts 0; stray files are skipped.
+    root path. Missing root counts 0; stray files are skipped. A symlinked
+    root, or a symlinked child, is skipped rather than followed — [prune_dir]
+    deletes day files, so following either would delete them at the link
+    target outside the workspace. Exposed for unit tests. *)
+
+val prune_store_dir : prune_dir:(string -> int) -> string -> int
+(** Run [prune_dir] on one leaf store, skipping it when the path is not a real
+    directory (missing, a file, or a symlink). Counts 0 in that case.
     Exposed for unit tests. *)
 
 val prune_flat_jsonl_older_than : days:int -> string -> int

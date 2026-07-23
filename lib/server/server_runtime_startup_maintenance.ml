@@ -4,18 +4,77 @@
 
 (* ── Startup pruning ───────────────────────────────── *)
 
+(* [is_real_directory path] is true only when [path] is a real directory on
+   disk. Unlike [Sys.is_directory] (which [stat]s and therefore follows a
+   symlink), this [lstat]s the final component, so a symlinked entry is
+   rejected. A missing path or any [lstat] failure counts as "not a real
+   directory" (the caller skips it). This is the no-follow guard startup
+   pruning needs: [prune_dir] leads to [Dated_jsonl.prune], which deletes
+   [YYYY-MM/*.jsonl] files, so following a symlink here would let a symlinked
+   workspace entry delete files at the link target with the server's
+   permissions. *)
+let is_real_directory path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> true
+  | _ -> false
+  | exception Unix.Unix_error _ -> false
+
 (* Fold [prune_dir] over the immediate sub-directories of [root].
    A missing [root] counts 0 and stray files under [root] are skipped —
    [.masc/resilience_audit/<keeper>/] stores keep their day-files one
    level below the keeper dir, so per-keeper traversal needs the same
-   guard the keepers loop gets for free from its nested path concat. *)
+   guard the keepers loop gets for free from its nested path concat.
+   A single [lstat] classifies each entry: real directories are pruned,
+   symlinks are skipped with a warning (following one would let [prune_dir]
+   delete day-files at the link target outside the workspace), and any other
+   entry (stray file, missing, lstat error) is silently skipped as before. *)
+(* Prune one leaf store by a fixed path, refusing to follow a symlink into it.
+   [prune_children_dirs] keeps its own inline match instead of calling this,
+   because it classifies each discovered entry and reports symlink vs. stray
+   file separately — collapsing that into this helper would lose diagnostic
+   detail. A missing store counts 0, as before. *)
+let prune_store_dir ~prune_dir dir =
+  if is_real_directory dir
+  then prune_dir dir
+  else (
+    if Sys.file_exists dir
+    then
+      Log.Misc.warn
+        "startup prune: skipping store %s (not a real directory; not following \
+         link target)"
+        dir;
+    0)
+;;
+
 let prune_children_dirs ~prune_dir root =
-  if not (Sys.file_exists root) then 0
+  (* The root itself must be lstat'd, not just its children: [Sys.readdir] and
+     the per-entry [Unix.lstat root/name] both resolve a symlinked root, so a
+     [.masc/resilience_audit] pointing outside the workspace would present its
+     target's real directories as ordinary children and [prune_dir] would
+     delete day-files there. Checking only the final component leaves that
+     whole traversal reachable. *)
+  if not (is_real_directory root)
+  then (
+    if Sys.file_exists root
+    then
+      Log.Misc.warn
+        "startup prune: skipping traversal root %s (not a real directory; not \
+         following link target)"
+        root;
+    0)
   else
     Array.fold_left
       (fun acc name ->
         let dir = Filename.concat root name in
-        if Sys.is_directory dir then acc + prune_dir dir else acc)
+        match Unix.lstat dir with
+        | { Unix.st_kind = Unix.S_DIR; _ } -> acc + prune_dir dir
+        | { Unix.st_kind = Unix.S_LNK; _ } ->
+          Log.Misc.warn
+            "startup prune: skipping symlinked entry %s (not following link target)"
+            dir;
+          acc
+        | _ -> acc
+        | exception Unix.Unix_error _ -> acc)
       0
       (Sys.readdir root)
 
@@ -76,29 +135,53 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
-       prune_dir (Filename.concat masc "audit")
-       + prune_dir (Filename.concat masc "telemetry")
-       + prune_dir tool_metrics_dir
-       + prune_dir (Filename.concat masc "messages")
-       + prune_dir (Filename.concat masc "events")
-       + prune_dir (Filename.concat masc "activity-events")
+       (* Every directly pruned leaf goes through [prune_store_dir]: any of
+          these can itself be a symlink to an external dated-JSONL store, and
+          [prune_dir]'s own [Sys.file_exists] follows it before
+          [Dated_jsonl.prune] deletes day files at the target. *)
+       prune_store_dir ~prune_dir (Filename.concat masc "audit")
+       + prune_store_dir ~prune_dir (Filename.concat masc "telemetry")
+       + prune_store_dir ~prune_dir tool_metrics_dir
+       + prune_store_dir ~prune_dir (Filename.concat masc "messages")
+       + prune_store_dir ~prune_dir (Filename.concat masc "events")
+       + prune_store_dir ~prune_dir (Filename.concat masc "activity-events")
        + prune_recall_injections ()
-       + prune_dir (Filename.concat masc "voice_sessions")
+       + prune_store_dir ~prune_dir (Filename.concat masc "voice_sessions")
        (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
           Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped.
           Top-level masc/"execution-receipts" has no writer (canonical layout
-          is keepers/<name>/execution-receipts), so it is not pruned here. *)
+          is keepers/<name>/execution-receipts), so it is not pruned here.
+          [prune_children_dirs] lstat-guards the trajectories root and each
+          keeper child, so the flat prune inherits the no-follow guard. *)
        + prune_children_dirs
            ~prune_dir:(prune_flat_jsonl_older_than ~days)
            (Filename.concat masc "trajectories")
        + (let keepers = Filename.concat masc "keepers" in
-          if not (Sys.file_exists keepers) then 0
+          (* The keepers root itself may be the symlink: [Sys.readdir] resolves
+             it, so each external <name> arrives looking like a real directory
+             and both stores under it are pruned through the link. *)
+          if not (is_real_directory keepers) then 0
           else
             Array.fold_left (fun acc name ->
-              acc
-              + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "execution-receipts")
+              (* Only descend into real keeper directories. A symlinked
+                 [keepers/<name>] would otherwise let [prune_dir] delete
+                 day-files at the link target (same no-follow guard as
+                 [prune_children_dirs]). *)
+              let keeper_dir = Filename.concat keepers name in
+              if not (is_real_directory keeper_dir) then acc
+              else
+                (* A real keeper dir can still hold a symlinked [metrics],
+                   [crash-events], or [execution-receipts]; [prune_dir] resolves
+                   it and would delete day files at the external target. The
+                   keeper-level guard does not cover its children, so each store
+                   is checked too. *)
+                acc + prune_store_dir ~prune_dir (Filename.concat keeper_dir "metrics")
+                + prune_store_dir
+                    ~prune_dir
+                    (Filename.concat keeper_dir "crash-events")
+                + prune_store_dir
+                    ~prune_dir
+                    (Filename.concat keeper_dir "execution-receipts")
             ) 0 (Sys.readdir keepers))
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in

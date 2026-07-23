@@ -11,10 +11,20 @@
 (** Bundle returned by [make_tool_bundle]: the [Agent_sdk.Tool.t list]
     plus a [cleanup] thunk that releases the per-turn sandbox
     runtimes. *)
+type terminal_effect_failure =
+  { failure_class : Tool_result.tool_failure_class
+  ; diagnostic : string
+  }
+
+type terminal_effect_state =
+  | Terminal_effect_open
+  | Terminal_effect_completed
+  | Terminal_effect_failed of terminal_effect_failure
+
 type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
-  ; terminal_effect_completed : unit -> bool
+  ; terminal_effect_state : unit -> terminal_effect_state
   }
 
 (** Per-keeper tool usage view from [Keeper_registry]. *)

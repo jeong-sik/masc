@@ -24,6 +24,7 @@ let make_keeper_tool_handler
       ?gate_grant
       ?record_gate_result
       ?on_completed
+      ?on_failed
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
@@ -34,6 +35,21 @@ let make_keeper_tool_handler
     Option.iter
       (fun record -> record ~operation:name ~input result)
       record_gate_result;
+    result
+  in
+  let observe_terminal_result result =
+    (match result with
+     | Tool_result.Completed _ ->
+       Option.iter (fun completed -> completed ()) on_completed
+     | Tool_result.Failed { class_; message; _ } ->
+       Option.iter
+         (fun failed ->
+            failed
+              { Keeper_tools_oas.failure_class = class_
+              ; diagnostic = message
+              })
+         on_failed
+     | Tool_result.Deferred _ -> ());
     result
   in
   fun ?oas_invocation raw_input ->
@@ -91,7 +107,7 @@ let make_keeper_tool_handler
             ; "error", `String error_text
             ]
              @ invocation_fields));
-      validation_result |> record_result ~input
+      validation_result |> record_result ~input |> observe_terminal_result
     in
     match pre_validate_input raw_input with
     | Error validation_result ->
@@ -138,11 +154,8 @@ let make_keeper_tool_handler
                 ~input
                 ()
               |> record_result ~input
+              |> observe_terminal_result
             in
-            (match result with
-             | Tool_result.Completed _ ->
-               Option.iter (fun completed -> completed ()) on_completed
-             | Tool_result.Deferred _ | Tool_result.Failed _ -> ());
             result
           in
           run_with_current_eio_context ?clock:current_clock ())

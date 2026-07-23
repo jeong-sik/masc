@@ -78,6 +78,10 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
+  val terminal_effect_boundary_decision
+    :  Keeper_tools_oas.terminal_effect_state
+    -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+
   val provider_transcript_admission
     :  Agent_sdk.Types.message list
     -> (unit, Agent_sdk.Error.sdk_error) result

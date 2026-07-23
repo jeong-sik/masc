@@ -2691,31 +2691,109 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
          | Some tool -> tool
          | None -> fail "keeper_surface_post missing from Keeper tool bundle"
        in
-       let result =
-         Agent_sdk.Tool.execute
-           surface_post
-           (`Assoc
-              [ "surface", `String "dashboard"
-              ; "content", `String "must remain undelivered"
-              ])
-       in
-       (match result with
-        | Error error ->
-          let error_detail =
-            Yojson.Safe.Util.
-              (parse_json error.Agent_sdk.Types.message
-               |> member "error"
-               |> to_string)
-          in
-          check bool
-            "raw append failure retains the exact chat target"
-            true
-            (contains_substring error_detail (Filename.basename chat_path))
-        | Ok _ -> fail "durable dashboard append failure became Completed");
-       check bool
-         "failed surface delivery does not set the terminal completion latch"
-         false
-         (bundle.terminal_effect_completed ()))
+       let chat_broadcast_count = ref 0 in
+       let subscriber_id = "surface-post-append-failure" in
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun event ->
+           if contains_substring event "\"type\":\"keeper_chat_appended\""
+           then incr chat_broadcast_count)
+         ();
+       Fun.protect
+         ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
+         (fun () ->
+            let result =
+              Agent_sdk.Tool.execute
+                surface_post
+                (`Assoc
+                   [ "surface", `String "dashboard"
+                   ; "content", `String "must remain undelivered"
+                   ])
+            in
+            (match result with
+             | Error error ->
+               check bool
+                 "append failure is an OAS runtime error"
+                 true
+                 (error.Agent_sdk.Types.error_class
+                  = Some Agent_sdk.Types.Unknown);
+               let error_detail =
+                 Yojson.Safe.Util.
+                   (parse_json error.Agent_sdk.Types.message
+                    |> member "error"
+                    |> to_string)
+               in
+               check bool
+                 "raw append failure retains the exact full chat target"
+                 true
+                 (contains_substring error_detail chat_path)
+             | Ok _ -> fail "durable dashboard append failure became Completed");
+            check int
+              "failed append emits no keeper chat broadcast"
+              0
+              !chat_broadcast_count;
+            let terminal_state = bundle.terminal_effect_state () in
+            (match terminal_state with
+             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+               check bool
+                 "terminal failure retains the runtime failure class"
+                 true
+                 (failure.failure_class = Tool_result.Runtime_failure);
+               check bool
+                 "terminal failure retains the exact full chat target"
+                 true
+                 (contains_substring failure.diagnostic chat_path)
+             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+               fail "failed surface delivery left the terminal effect open"
+             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+               fail "failed surface delivery set terminal completion");
+            let boundary_error =
+              match
+                Masc.Keeper_agent_run.For_testing
+                .terminal_effect_boundary_decision terminal_state
+              with
+              | Error (Agent_sdk.Error.Internal diagnostic as error) ->
+                check bool
+                  "agent terminal error retains the exact full chat target"
+                  true
+                  (contains_substring diagnostic chat_path);
+                error
+              | Error _ -> fail "terminal failure became a different Agent error"
+              | Ok Runtime_agent.Continue ->
+                fail "terminal failure continued the ordinary model loop"
+              | Ok (Runtime_agent.Yield _) ->
+                fail "terminal failure became ordinary terminal completion"
+            in
+            check bool
+              "terminal delivery failure is not provider-failover recoverable"
+              false
+              (Masc.Keeper_error_classify.is_auto_recoverable_turn_error
+                 boundary_error);
+            let failure : Masc.Keeper_unified_turn.turn_failure =
+              { error = boundary_error
+              ; runtime_id = "opaque-runtime"
+              ; route =
+                  Masc.Keeper_runtime_failure_route.route_of_error
+                    ~boundary:Masc.Keeper_runtime_failure_route.Oas_execution
+                    boundary_error
+              ; source_lease_disposition =
+                  Masc.Keeper_unified_turn.Follow_failure_route
+              }
+            in
+            let settlement =
+              Masc.Keeper_heartbeat_loop.settlement_of_failure
+                ~settled_at:0.
+                ~compaction_consecutive_failures:0
+                failure
+            in
+            let source_ack_count = ref 0 in
+            (match settlement with
+             | Masc.Keeper_registry_event_queue.Ack -> incr source_ack_count
+             | _ -> ());
+            check int
+              "failed terminal delivery invokes no source success Ack"
+              0
+              !source_ack_count))
 ;;
 
 let () =

@@ -80,10 +80,21 @@ let make_tool_bundle
   (* Every descriptor-declared model tool is materialized. The turn hook sends
      this exact list to OAS without per-Keeper or per-turn reduction. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  (* The bundle lives for exactly one Agent run. A successful terminal effect
-     flips this turn-local latch; the OAS tool-boundary probe observes it only
-     after the whole tool batch and checkpoint sink have completed. *)
-  let terminal_effect_completed = ref false in
+  (* The bundle lives for exactly one Agent run. Its typed terminal-effect
+     state is request-scoped and observed by the OAS tool-boundary probe only
+     after the whole tool batch and checkpoint sink have completed. Failure is
+     sticky: a later completion cannot erase a failed delivery. *)
+  let terminal_effect_state = Atomic.make Terminal_effect_open in
+  let mark_terminal_effect_completed () =
+    ignore
+      (Atomic.compare_and_set
+         terminal_effect_state
+         Terminal_effect_open
+         Terminal_effect_completed)
+  in
+  let mark_terminal_effect_failed failure =
+    Atomic.set terminal_effect_state (Terminal_effect_failed failure)
+  in
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      exactly one projected Tool.schema.name is model-visible.
@@ -93,11 +104,11 @@ let make_tool_bundle
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
-         let on_completed =
+         let on_completed, on_failed =
            match completion_boundary_of_runtime_handler descriptor.runtime_handler with
            | Terminal_effect ->
-             Some (fun () -> terminal_effect_completed := true)
-           | Continue_after_success -> None
+             Some mark_terminal_effect_completed, Some mark_terminal_effect_failed
+           | Continue_after_success -> None, None
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -117,6 +128,7 @@ let make_tool_bundle
                  ?gate_grant
                  ?record_gate_result
                  ?on_completed
+                 ?on_failed
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
@@ -150,7 +162,7 @@ let make_tool_bundle
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
-  ; terminal_effect_completed = (fun () -> !terminal_effect_completed)
+  ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   }
 ;;
 

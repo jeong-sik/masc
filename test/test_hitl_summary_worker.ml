@@ -46,6 +46,7 @@ let pending_entry
       ?(input_tag = "default")
       ?(keeper_name = "keeper")
       ~base_path
+      ()
   =
   let request_context =
     `Assoc
@@ -91,7 +92,7 @@ let pending_entry
 let publish_lane slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Masc.Runtime_schema.id = Worker.For_testing.lane_id; slot_ids } ]
+      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids } ]
       snapshot
   with
   | Ok _ -> ()
@@ -202,7 +203,7 @@ let test_invalid_judgment_fails_loud () =
 let test_context_bundle_is_exact () =
   with_temp_dir "hitl-context" @@ fun base_path ->
   install_queue base_path;
-  let entry = pending_entry ~base_path in
+  let entry = pending_entry ~base_path () in
   match Worker.For_testing.build_context_bundle ~entry with
   | Error error -> fail (Worker.For_testing.context_bundle_error_to_string error)
   | Ok bundle ->
@@ -218,7 +219,7 @@ let test_context_bundle_is_exact () =
 let test_missing_context_is_terminal_before_admission () =
   with_temp_dir "hitl-missing-context" @@ fun base_path ->
   install_queue base_path;
-  let entry = pending_entry ~base_path in
+  let entry = pending_entry ~base_path () in
   match
     Worker.For_testing.prepare_flow
       ~entry:{ entry with request_context = None }
@@ -281,7 +282,7 @@ let test_flow_order_completion_and_replay () =
          F.resolver_snapshot ~source:"hitl-flow-order" fixtures
        in
        publish_lane [ "hitl-first"; "hitl-second" ] snapshot;
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        let prepared = prepare_exn entry in
        let evidence = Worker.For_testing.flow_evidence prepared in
        check
@@ -340,7 +341,7 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
        publish_lane
          [ "hitl-unreachable"; "hitl-successor" ]
          (F.resolver_snapshot ~source:"hitl-flow-failover" fixtures);
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
@@ -402,7 +403,7 @@ let test_all_candidates_rejected_before_network () =
        publish_lane
          [ "hitl-incapable" ]
          (incapable_snapshot "http://127.0.0.1:1");
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        match Worker.For_testing.prepare_flow ~entry with
        | Ok _ -> fail "incapable candidate unexpectedly admitted"
        | Error detail ->
@@ -434,7 +435,7 @@ let test_visible_bind_blocks_dispatch () =
          (F.resolver_snapshot
             ~source:"hitl-visible-bind"
             [ { id = "hitl-visible-bind"; base_url = server.base_url } ]);
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        Worker.For_testing.execute_prepared_flow_with_writers
          ~bind_writer:visible_after_rename_writer
          ~net
@@ -480,7 +481,7 @@ let test_visible_advance_blocks_successor () =
        publish_lane
          [ "hitl-advance-unreachable"; "hitl-advance-successor" ]
          (F.resolver_snapshot ~source:"hitl-visible-advance" fixtures);
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        Worker.For_testing.execute_prepared_flow_with_writers
          ~release_writer:visible_after_rename_writer
          ~net
@@ -524,8 +525,8 @@ let test_visible_completion_blocks_gate_delivery () =
             ~source:"hitl-visible-completion"
             [ { id = "hitl-visible-completion"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
-       let entry = pending_entry ~base_path in
-       let successor = pending_entry ~input_tag:"successor" ~base_path in
+       let entry = pending_entry ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        let delivered = ref false in
        (match
           Worker.For_testing.execute_prepared_flow_with_writers
@@ -596,7 +597,7 @@ let test_postdispatch_failure_never_fails_over () =
        publish_lane
          [ "hitl-postdispatch-failed"; "hitl-postdispatch-successor" ]
          (F.resolver_snapshot ~source:"hitl-postdispatch" fixtures);
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
@@ -639,7 +640,7 @@ let test_cancellation_after_dispatch_is_terminal () =
          (F.resolver_snapshot
             ~source:"hitl-cancellation"
             [ { id = "hitl-cancelled"; base_url = server.base_url } ]);
-       let entry = pending_entry ~base_path in
+       let entry = pending_entry ~base_path () in
        (match
           Eio.Fiber.first
             (fun () ->
@@ -687,8 +688,8 @@ let test_visible_uncertainty_withholds_production_drain () =
             ~source:"hitl-uncertain-lifecycle"
             [ { id = "hitl-uncertain-lifecycle"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
-       let uncertain = pending_entry ~input_tag:"uncertain" ~base_path in
-       let successor = pending_entry ~input_tag:"successor" ~base_path in
+       let uncertain = pending_entry ~input_tag:"uncertain" ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        let writer_reached, resolve_writer_reached = Eio.Promise.create () in
        let visible_writer path body =
          let outcome = visible_after_rename_writer path body in
@@ -777,8 +778,8 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
             ~source:"hitl-owner-fifo-drain"
             [ { id = "hitl-owner-fifo-drain"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
-       let first = pending_entry ~input_tag:"first" ~base_path in
-       let second = pending_entry ~input_tag:"second" ~base_path in
+       let first = pending_entry ~input_tag:"first" ~base_path () in
+       let second = pending_entry ~input_tag:"second" ~base_path () in
        let initial = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)

@@ -29,6 +29,13 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+      (** Exact-output dispatch may have crossed the external-effect boundary.
+          The source is escalated immediately without any retry successor. *)
+  | Compaction_domain_invalid_output
+      (** A dispatched exact-output response violated the MASC-owned domain
+          contract. The source is escalated immediately without failover or
+          retry. *)
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -54,6 +61,14 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+      (** Exact-output execution crossed the safe pre-dispatch boundary. The
+          provider may already have received the request, so automatic retry
+          could duplicate an outward effect. *)
+  | Domain_invalid_output
+      (** The provider returned JSON after dispatch, but it violated the
+          MASC-owned compaction domain contract. A different slot must not be
+          tried automatically for the same source. *)
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t

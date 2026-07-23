@@ -2455,12 +2455,12 @@ let test_unsupported_snapshots_fail_closed () =
      | Ok _ -> Alcotest.fail "old primary schema was migrated"))
 ;;
 
-let test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger () =
+let test_v3_snapshot_upgrades_only_without_active_lease () =
   with_temp_dir "keeper-event-queue-v3-upgrade" (fun base_path ->
     let keeper_name = "v3_upgrade_keeper" in
     let path = Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json" in
-    let v3 =
-      match State.to_yojson State.empty with
+    let v3_of_state state =
+      match State.to_yojson state with
       | `Assoc fields ->
         `Assoc
           (("schema", `String "keeper.event_queue.state.v3")
@@ -2468,10 +2468,12 @@ let test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger () =
                 (fun (name, _) ->
                    not
                      (String.equal name "schema"
-                      || String.equal name "accepted_transfer_projections"))
+                      || String.equal name "accepted_transfer_projections"
+                      || String.equal name "exact_execution_bindings"))
                 fields)
       | _ -> Alcotest.fail "current event queue state codec is not an object"
     in
+    let v3 = v3_of_state State.empty in
     Fs_compat.mkdir_p (Filename.dirname path);
     Fs_compat.save_file_atomic path (Yojson.Safe.to_string v3)
     |> require_ok "write strict v3 predecessor";
@@ -2493,7 +2495,17 @@ let test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger () =
     Alcotest.(check string)
       "next durable write uses v4"
       "keeper.event_queue.state.v4"
-      (persisted |> member "schema" |> to_string))
+      (persisted |> member "schema" |> to_string);
+    let claimed, lease =
+      State.with_pending (queue [ stimulus "possibly-dispatched" 2.0 ]) State.empty
+      |> claim_head
+    in
+    ignore (require_some "legacy active lease" lease : State.lease);
+    match State.of_yojson (v3_of_state claimed) with
+    | Error _ -> ()
+    | Ok _ ->
+      Alcotest.fail
+        "legacy active lease was promoted without exact execution bindings")
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -2793,9 +2805,9 @@ let () =
             `Quick
             test_unsupported_snapshots_fail_closed
         ; Alcotest.test_case
-            "v3 upgrades with empty transfer projection ledger"
+            "v3 upgrades only without an active lease"
             `Quick
-            test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger
+            test_v3_snapshot_upgrades_only_without_active_lease
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

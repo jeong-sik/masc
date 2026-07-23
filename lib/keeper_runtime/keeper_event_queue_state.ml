@@ -2762,6 +2762,13 @@ let of_yojson json =
           accepted_transfer_projection_of_yojson
           fields
     in
+    let* () =
+      if has_exact_execution_bindings || leases = []
+      then Ok ()
+      else
+        Error
+          "legacy keeper event queue state with active leases cannot be upgraded without exact execution bindings"
+    in
     let* exact_execution_bindings =
       if has_exact_execution_bindings
       then
@@ -2770,7 +2777,13 @@ let of_yojson json =
           "exact_execution_bindings"
           exact_execution_binding_of_yojson
           fields
-      else Ok []
+      else
+        match leases with
+        | [] -> Ok []
+        | _ :: _ ->
+          Error
+            "legacy keeper event queue state has active leases without exact \
+             execution bindings; refusing replay-unsafe promotion"
     in
     validate_state
       { revision

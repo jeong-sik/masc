@@ -1216,7 +1216,7 @@ let release_exact_execution_before_dispatch
 
 let quarantine_exact_execution
       ~(lease : lease)
-      ~terminal
+      ~(terminal : exact_execution_terminal)
       ~plan_fingerprint
       ~request_body_sha256
       state

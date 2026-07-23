@@ -2734,11 +2734,7 @@ let of_yojson json =
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
   if not (String.equal schema_value schema)
-  then
-    Error
-      (Printf.sprintf
-         "unsupported keeper event queue state schema (reset required): %s"
-         schema_value)
+  then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
     let expected_fields =
       [ "schema"

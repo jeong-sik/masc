@@ -2564,8 +2564,8 @@ let test_unsupported_snapshots_fail_closed () =
        Alcotest.(check string)
          "incompatible snapshot requires an explicit reset"
          (Printf.sprintf
-            "event queue snapshot at %s is incompatible (reset required): snapshot missing \
-             required field schema"
+            "event queue snapshot at %s is incompatible (reset required): unsupported keeper \
+             event queue state schema: keeper.event_queue.v2"
             primary)
          message
      | Ok _ -> Alcotest.fail "old primary schema was migrated");

@@ -65,14 +65,14 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   }
 
 let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
-  Agent_sdk.Tool.Invocation.create
+  Agent_sdk.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn
     ~schedule:
       { planned_index
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool.Serial
+      ; execution_mode = Agent_sdk.Tool_contract.Serial
       }
 
 let test_tool_called_carries_tool_use_id () =

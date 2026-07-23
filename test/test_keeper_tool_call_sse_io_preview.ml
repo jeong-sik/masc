@@ -106,14 +106,14 @@ let test_tool_call_event_uses_canonical_disposition () =
 
 let test_oas_invocation_fields_preserve_exact_occurrence () =
   let invocation =
-    Agent_sdk.Tool.Invocation.create
+    Agent_sdk.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:11
       ~schedule:
         { planned_index = 3
         ; batch_index = 0
         ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool.Serial
+        ; execution_mode = Agent_sdk.Tool_contract.Serial
         }
   in
   let json =

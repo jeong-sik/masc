@@ -28,7 +28,7 @@ val execute_with_observers
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
-  -> ?oas_invocation:Agent_sdk.Tool.Invocation.t
+  -> ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t
   -> input:Yojson.Safe.t
   -> unit
   -> execution_result

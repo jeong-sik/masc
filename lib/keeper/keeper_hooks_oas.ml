@@ -470,8 +470,8 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
-        let invocation_turn = Some (Agent_sdk.Tool.Invocation.turn invocation) in
+        let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
+        let invocation_turn = Some (Agent_sdk.Tool_contract.Invocation.turn invocation) in
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
@@ -495,7 +495,7 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id
-             ~planned_index:(Agent_sdk.Tool.Invocation.planned_index invocation)
+             ~planned_index:(Agent_sdk.Tool_contract.Invocation.planned_index invocation)
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id

@@ -19,7 +19,6 @@ val run :
   librarian_messages:Agent_sdk.Types.message list ->
   memory_extraction_record:Keeper_run_prompt.memory_extraction_record ->
   post_turn_t0:float ->
-  runtime_id:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->

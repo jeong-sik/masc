@@ -1,16 +1,8 @@
 (** Runtime adapter for Memory OS librarian extraction. *)
 
-(* Cap on the librarian extraction output, applied as
-   [min provider_cfg.max_tokens (librarian_max_tokens ())] at the complete call
-   (see [extract] below). The previous fixed cap of 1024 truncated episode
-   JSON mid-object whenever the summary plus facts exceeded ~1024 output
-   tokens, surfacing as "invalid_json: Unexpected end of input" every turn.
-   4096 covers realistic episode payloads while staying well under the
-   JSON-capable model context budget; tunable via
-   [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS] (floor 1). *)
-let librarian_max_tokens () = Env_config.KeeperMemoryOs.librarian_max_tokens ()
+module Exact_output = Agent_sdk.Exact_output
 
-type complete_fn = Keeper_provider_subcall.complete_fn
+let exact_lane_id = "librarian_exact"
 
 (* RFC-0257 / P0-4 adversarial hardening: per-keeper librarian provider slot.
    The previous process-global slot allowed one slow keeper to starve the fleet.
@@ -30,6 +22,7 @@ type provider_slot =
 
 let provider_slots_mu = Eio.Mutex.create ()
 let provider_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 64
+let exact_flow_mutexes : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
 
 let provider_slot_for_keeper ~keeper_id capacity =
   Eio_guard.with_mutex provider_slots_mu (fun () ->
@@ -39,6 +32,16 @@ let provider_slot_for_keeper ~keeper_id capacity =
       let slot = { capacity; in_use = 0 } in
       Hashtbl.replace provider_slots keeper_id slot;
       slot)
+;;
+
+let exact_flow_mutex_for_keeper ~keeper_id =
+  Eio_guard.with_mutex provider_slots_mu (fun () ->
+    match Hashtbl.find_opt exact_flow_mutexes keeper_id with
+    | Some mutex -> mutex
+    | None ->
+      let mutex = Eio.Mutex.create () in
+      Hashtbl.replace exact_flow_mutexes keeper_id mutex;
+      mutex)
 ;;
 
 let with_provider_slot ~keeper_id ~clock:_ f =
@@ -195,10 +198,6 @@ let max_messages () =
 let prompt_max_messages () = max_messages () * cadence_turns ()
 ;;
 
-let runtime_id_for_librarian ~runtime_id =
-  Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
-;;
-
 let select_recent_messages ~max_messages messages =
   let max_messages = max 0 max_messages in
   let len = List.length messages in
@@ -214,42 +213,41 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
-let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
-  let configured_librarian_max_tokens = librarian_max_tokens () in
-  let max_tokens =
-    match provider_cfg.max_tokens with
-    | Some n when n > 0 -> Some (min n configured_librarian_max_tokens)
-    | Some _ -> Some configured_librarian_max_tokens
-    | None -> Some configured_librarian_max_tokens
-  in
-  let tuned_cfg =
-    Keeper_structured_output_schema.for_deterministic_subcall ~max_tokens provider_cfg
-  in
-  (* No wire response format. config/prompts/keeper.librarian.episode_extraction.md
-     states the object shape and both enums, and [Keeper_librarian.episode_of_json_result]
-     re-validates every field into a closed [parse_error]; a bad reply defers the
-     next attempt instead of writing.
-
-     Dropping the schema also closes a live disagreement between the two. The
-     schema marked every claim field [required] with nullable types, so a
-     schema-conforming provider emits ["claim_id": null] — which
-     [optional_string_field_strict] rejects, failing [traverse] all-or-nothing and
-     dropping the whole episode. The prompt tells the model to omit the key
-     instead, which the parser accepts. Prompt and parser agree; the schema was
-     the one that disagreed. *)
-  Keeper_structured_output_schema.without_response_format tuned_cfg
-;;
-
 let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
 ;;
 
+type exact_setup_error =
+  | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
+  | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
+  | Exact_candidate_invalid of
+      { position : int
+      ; slot_id : string
+      }
+  | Exact_journal_unavailable of string
+  | Exact_previous_attempt_unsettled of
+      { state : string
+      ; trace_id : string
+      ; generation : int
+      }
+  | Exact_flow_admission_failed of Exact_output.flow_admission_error
+  | Exact_flow_start_failed of Exact_output.flow_start_error
+
+type exact_execution_failure =
+  | Exact_attempt_already_started
+  | Exact_callback_persistence_failed of string
+  | Exact_provider_execution_failed of Exact_output.execution_error_cause
+
+type exact_execution_error =
+  { dispatched : bool
+  ; failure : exact_execution_failure
+  }
+
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
-  | Provider_timeout
-  | Provider_transport_failed of string
-  | Provider_empty_response
+  | Exact_setup_failed of exact_setup_error
+  | Exact_execution_failed of exact_execution_error
   | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
 
@@ -257,25 +255,93 @@ let librarian_provider_clock_unavailable_error =
   "memory os librarian provider clock unavailable"
 ;;
 
+let execution_error_cause_to_string = function
+  | Exact_output.Attempt_already_started -> "attempt_already_started"
+  | Clock_required_for_timeout -> "clock_required_for_timeout"
+  | Frozen_request_mismatch -> "frozen_request_mismatch"
+  | Completion_failed -> "completion_failed"
+  | Incomplete_output -> "incomplete_output"
+  | Missing_output -> "missing_output"
+  | Ambiguous_output count -> Printf.sprintf "ambiguous_output(%d)" count
+  | Unexpected_output_content -> "unexpected_output_content"
+  | Invalid_json_output -> "invalid_json_output"
+  | Internal_non_json_output -> "internal_non_json_output"
+;;
+
+let exact_setup_error_to_string = function
+  | Exact_registry_unavailable error ->
+    "exact registry unavailable: "
+    ^ Runtime_exact_output_registry.publication_error_to_string error
+  | Exact_lane_unavailable error ->
+    Runtime_exact_output_registry.lane_resolution_error_to_string error
+  | Exact_candidate_invalid { position; slot_id } ->
+    Printf.sprintf
+      "exact lane candidate invalid position=%d slot=%S"
+      position
+      slot_id
+  | Exact_journal_unavailable detail ->
+    "exact receipt journal unavailable: " ^ detail
+  | Exact_previous_attempt_unsettled { state; trace_id; generation } ->
+    Printf.sprintf
+      "previous exact attempt is unsettled state=%s trace_id=%s generation=%d"
+      state
+      trace_id
+      generation
+  | Exact_flow_admission_failed
+      (Exact_output.Duplicate_flow_candidate_id
+         { candidate_id; first_position; duplicate_position }) ->
+    Printf.sprintf
+      "exact flow duplicate candidate id=%S first_position=%d duplicate_position=%d"
+      candidate_id
+      first_position
+      duplicate_position
+  | Exact_flow_admission_failed (No_admitted_flow_candidates admissions) ->
+    Printf.sprintf
+      "exact flow has no admitted candidates (candidates=%d)"
+      (List.length admissions)
+  | Exact_flow_start_failed
+      (Exact_output.Flow_candidate_attempt_start_failed
+         { identity; position; cause; admissions = _ }) ->
+    let detail =
+      match cause with
+      | Exact_output.Call_id_generation_failed detail -> detail
+    in
+    Printf.sprintf
+      "exact flow attempt start failed candidate=%S position=%d: %s"
+      identity.candidate_id
+      position
+      detail
+;;
+
 let extraction_error_to_string = function
   | Prompt_render_failed msg -> msg
   | Provider_clock_unavailable -> librarian_provider_clock_unavailable_error
-  | Provider_timeout -> "librarian provider timed out"
-  | Provider_transport_failed msg -> msg
-  | Provider_empty_response -> "librarian provider returned empty response"
+  | Exact_setup_failed error -> exact_setup_error_to_string error
+  | Exact_execution_failed { dispatched; failure } ->
+    let detail =
+      match failure with
+      | Exact_attempt_already_started -> "attempt_already_started"
+      | Exact_callback_persistence_failed detail ->
+        "callback_persistence_failed: " ^ detail
+      | Exact_provider_execution_failed cause ->
+        execution_error_cause_to_string cause
+    in
+    Printf.sprintf
+      "librarian exact execution failed dispatched=%b cause=%s"
+      dispatched
+      detail
   | Provider_unparseable_response msg ->
     "librarian provider returned unparseable structured response: " ^ msg
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
 let should_record_cadence_backoff_after_error = function
-  | Provider_timeout
-  | Provider_transport_failed _
-  | Provider_empty_response
-  | Provider_unparseable_response _ ->
-    true
+  | Exact_execution_failed { dispatched; _ } -> dispatched
+  | Exact_setup_failed (Exact_previous_attempt_unsettled _) -> true
+  | Provider_unparseable_response _ -> true
   | Provider_clock_unavailable
   | Prompt_render_failed _
+  | Exact_setup_failed _
   | Memory_fact_upsert_failed _ ->
     false
 ;;
@@ -310,16 +376,190 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
          ])
 ;;
 
-(* http_error_message moved to Provider_http_error.to_message (SSOT,
-   2026-06-24): four byte-for-output-identical copies unified. *)
+let effect_phase_to_string = function
+  | Exact_output.Not_started -> "not_started"
+  | Before_dispatch -> "before_dispatch"
+  | Dispatch_started -> "dispatch_started"
+  | Response_received -> "response_received"
+  | Terminal -> "terminal"
+;;
 
-let extract_with_provider_classified
-    ?complete
+let receipt_json (receipt : Exact_output.receipt) =
+  `Assoc
+    [ ( "call_id"
+      , `String
+          (Exact_output.call_id_to_string
+             (Exact_output.receipt_call_id receipt)) )
+    ; "phase", `String (effect_phase_to_string (Exact_output.receipt_phase receipt))
+    ; "dispatch_count", `Int (Exact_output.receipt_dispatch_count receipt)
+    ; ( "http_status"
+      , match Exact_output.receipt_http_status receipt with
+        | Some status -> `Int status
+        | None -> `Null )
+    ; "plan_fingerprint", `String (Exact_output.receipt_plan_fingerprint receipt)
+    ; "request_body_sha256", `String (Exact_output.receipt_request_body_sha256 receipt)
+    ; ( "catalog_generation"
+      , `String
+          (Exact_output.catalog_generation_fingerprint
+             (Exact_output.receipt_catalog_generation receipt)) )
+    ; ( "catalog_evidence_sha256"
+      , `String
+          (Exact_output.catalog_evidence_sha256
+             (Exact_output.receipt_catalog_evidence receipt)) )
+    ; ( "target_identity"
+      , `String
+          (Exact_output.target_identity_fingerprint
+             (Exact_output.receipt_target_identity receipt)) )
+    ]
+;;
+
+let attempt_receipt_json (attempt : Exact_output.flow_attempt_receipt) =
+  `Assoc
+    [ "candidate_id", `String attempt.identity.candidate_id
+    ; "receipt", receipt_json attempt.receipt
+    ]
+;;
+
+let exact_flow_state_dir ~keeper_id =
+  Keeper_memory_os_io.facts_path ~keeper_id
+  |> Filename.dirname
+  |> fun keepers_dir -> Filename.concat keepers_dir keeper_id
+  |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
+;;
+
+let exact_flow_state_path ~keeper_id =
+  Filename.concat
+    (exact_flow_state_dir ~keeper_id)
+    "librarian-exact-state.json"
+;;
+
+let persist_exact_flow_state ~keeper_id ~trace_id ~generation ~state fields =
+  let (_ : string) = Keeper_fs.ensure_dir (exact_flow_state_dir ~keeper_id) in
+  let payload =
+    `Assoc
+      ([ "schema_version", `Int 1
+       ; "trace_id", `String trace_id
+       ; "generation", `Int generation
+       ; "state", `String state
+       ]
+       @ fields)
+    |> Yojson.Safe.pretty_to_string
+  in
+  Fs_compat.save_file_atomic_strict
+    (exact_flow_state_path ~keeper_id)
+    payload
+;;
+
+type exact_journal_disposition =
+  | Journal_active
+  | Journal_terminal
+
+let exact_journal_disposition_of_state = function
+  | "candidate_bound"
+  | "candidate_advance_committed" ->
+    Ok Journal_active
+  (* The provider response is not resumable because its body is deliberately
+     absent from the journal, but no Memory OS domain write has begun. A later
+     cadence may therefore start a fresh exact-output flow safely. *)
+  | "oas_success"
+  | "domain_valid"
+  | "domain_invalid"
+  | "execution_terminal" ->
+    Ok Journal_terminal
+  | state -> Error state
+;;
+
+let preflight_exact_flow_state ~keeper_id =
+  let path = exact_flow_state_path ~keeper_id in
+  if not (Sys.file_exists path)
+  then Ok ()
+  else
+    try
+      let json =
+        In_channel.with_open_bin path In_channel.input_all
+        |> Yojson.Safe.from_string
+      in
+      let open Yojson.Safe.Util in
+      let state = json |> member "state" |> to_string in
+      match exact_journal_disposition_of_state state with
+      | Ok Journal_terminal -> Ok ()
+      | Ok Journal_active ->
+        Error
+          (Exact_previous_attempt_unsettled
+             { state
+             ; trace_id = json |> member "trace_id" |> to_string
+             ; generation = json |> member "generation" |> to_int
+             })
+      | Error state ->
+        Error (Exact_journal_unavailable ("unknown state " ^ state))
+    with
+    | Eio.Cancel.Cancelled _ as error -> raise error
+    | exn -> Error (Exact_journal_unavailable (Printexc.to_string exn))
+;;
+
+let flow_candidates selected_slots =
+  let rec loop position acc = function
+    | [] -> Ok (List.rev acc)
+    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
+      (match Exact_output.make_flow_candidate ~id:slot.slot_id ~target:slot.target with
+       | Ok candidate -> loop (position + 1) (candidate :: acc) rest
+       | Error Exact_output.Blank_flow_candidate_id ->
+         Error
+           (Exact_candidate_invalid
+              { position
+              ; slot_id = slot.slot_id
+              }))
+  in
+  loop 0 [] selected_slots
+;;
+
+let exact_execution_error = function
+  | Exact_output.Flow_attempt_already_started _ ->
+    { dispatched = false; failure = Exact_attempt_already_started }
+  | Flow_before_dispatch_callback_failed { candidate; cause; evidence = _ } ->
+    { dispatched =
+        Exact_output.receipt_dispatch_count candidate.receipt > 0
+    ; failure = Exact_callback_persistence_failed cause
+    }
+  | Flow_before_advance_callback_failed
+      { failed; failure = _; next = _; cause; evidence = _ } ->
+    { dispatched =
+        Exact_output.receipt_dispatch_count failed.receipt > 0
+    ; failure = Exact_callback_persistence_failed cause
+    }
+  | Flow_exact_execution_failed { candidate = _; cause; evidence = _ } ->
+    { dispatched = Exact_output.receipt_dispatch_count cause.receipt > 0
+    ; failure = Exact_provider_execution_failed cause.cause
+    }
+;;
+
+let persist_exact_execution_terminal
+      ~keeper_id
+      ~trace_id
+      ~generation
+      error
+  =
+  match error with
+  | Exact_output.Flow_exact_execution_failed
+      { candidate; cause; evidence = _ } ->
+    persist_exact_flow_state
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~state:"execution_terminal"
+      [ "candidate", attempt_receipt_json candidate
+      ; "failure_cause", `String (execution_error_cause_to_string cause.cause)
+      ]
+  | Flow_attempt_already_started _ -> Ok ()
+  | Flow_before_dispatch_callback_failed { cause; _ }
+  | Flow_before_advance_callback_failed { cause; _ } ->
+    Error cause
+;;
+
+let extract_with_exact_output_classified_unlocked
     ?clock
-    ~sw
     ~net
-    ~runtime_id
-    ~provider_cfg
+    ~keeper_id
     ~generation
     (inp : Keeper_librarian.input)
   =
@@ -329,60 +569,196 @@ let extract_with_provider_classified
     (match messages_for_librarian inp with
      | Error msg -> Error (Prompt_render_failed msg)
      | Ok messages ->
-       let provider_cfg = provider_for_librarian provider_cfg in
-       (
-          let attempt messages =
-            match
-              Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
-                ~config:provider_cfg ~messages ()
-            with
-            | Error (Llm_provider.Http_client.TimeoutError _) ->
-              Error Provider_timeout
-            | Error err ->
-              Error (Provider_transport_failed (Provider_http_error.to_message err))
-            | Ok response ->
-              (match
-                 Agent_sdk_response.structured_json_of_response
-                   ~schema_name:"keeper_librarian_episode"
-                   response
-               with
-               | Error detail ->
-                 Error
-                   (Provider_unparseable_response
-                      (Printf.sprintf
-                         "librarian provider returned invalid structured JSON (%s)"
-                         detail))
-               | Ok json ->
-                 (match Keeper_librarian.episode_of_json_result ~generation inp json with
-                  | Ok episode -> Ok episode
-                  | Error error ->
-                    Error
-                      (Provider_unparseable_response
-                         (Printf.sprintf
-                            "librarian provider returned invalid episode JSON (%s)"
-                            (Keeper_librarian.parse_error_to_string error)))))
-          in
-          attempt messages))
+       (match preflight_exact_flow_state ~keeper_id with
+        | Error error -> Error (Exact_setup_failed error)
+        | Ok () ->
+       (match Runtime_exact_output_registry.current () with
+        | Error error ->
+          Error (Exact_setup_failed (Exact_registry_unavailable error))
+        | Ok registry ->
+          (match
+             Runtime_exact_output_registry.resolve_lane registry ~lane_id:exact_lane_id
+           with
+           | Error error ->
+             Error (Exact_setup_failed (Exact_lane_unavailable error))
+           | Ok resolved ->
+             (match flow_candidates resolved.selected_slots with
+              | Error error -> Error (Exact_setup_failed error)
+              | Ok [] ->
+                Error
+                  (Exact_setup_failed
+                     (Exact_lane_unavailable
+                        (No_usable_lane_slots
+                           { lane_id = exact_lane_id
+                           ; unavailable_slots = resolved.unavailable_slots
+                           })))
+              | Ok (first :: rest) ->
+                let requirement =
+                  Exact_output.make_output_requirement
+                    ~schema:
+                      Keeper_structured_output_schema.librarian_episode_output_schema
+                    ~minimum_guarantee:Exact_output.Json_syntax
+                in
+                (match
+                   Exact_output.admit_flow
+                     ~first
+                     ~rest
+                     ~messages
+                     requirement
+                 with
+                 | Error error ->
+                   Error (Exact_setup_failed (Exact_flow_admission_failed error))
+                 | Ok ready_flow ->
+                   (match Exact_output.start_flow ready_flow with
+                    | Error error ->
+                      Error (Exact_setup_failed (Exact_flow_start_failed error))
+                    | Ok attempt ->
+                      (match
+                         Exact_output.execute_flow_once
+                           ~net
+                           ~clock
+                           ~before_dispatch:(fun candidate ->
+                             persist_exact_flow_state
+                               ~keeper_id
+                               ~trace_id:inp.trace_id
+                               ~generation
+                               ~state:"candidate_bound"
+                               [ "candidate", attempt_receipt_json candidate ])
+                           ~before_advance:(fun ~failed ~failure ~next ->
+                             persist_exact_flow_state
+                               ~keeper_id
+                               ~trace_id:inp.trace_id
+                               ~generation
+                               ~state:"candidate_advance_committed"
+                               [ "failed_candidate", attempt_receipt_json failed
+                               ; ( "failure_cause"
+                                 , `String
+                                     (execution_error_cause_to_string
+                                        failure.cause) )
+                               ; "next_candidate", attempt_receipt_json next
+                               ])
+                           attempt
+                       with
+                       | Error error ->
+                         let classified = exact_execution_error error in
+                         (match
+                            persist_exact_execution_terminal
+                              ~keeper_id
+                              ~trace_id:inp.trace_id
+                              ~generation
+                              error
+                          with
+                          | Ok () ->
+                            Error (Exact_execution_failed classified)
+                          | Error detail ->
+                            Error
+                              (Exact_execution_failed
+                                 { dispatched = classified.dispatched
+                                 ; failure =
+                                     Exact_callback_persistence_failed detail
+                                 }))
+                       | Ok success ->
+                         (match
+                            persist_exact_flow_state
+                              ~keeper_id
+                              ~trace_id:inp.trace_id
+                              ~generation
+                              ~state:"oas_success"
+                              [ "candidate", attempt_receipt_json success.candidate ]
+                          with
+                          | Error detail ->
+                            Error
+                              (Exact_execution_failed
+                                 { dispatched = true
+                                 ; failure =
+                                     Exact_callback_persistence_failed detail
+                                 })
+                          | Ok () ->
+                            (match
+                               Keeper_librarian.episode_of_json_result
+                                 ~generation
+                                 inp
+                                 success.success.output
+                             with
+                             | Ok episode ->
+                               (match
+                                  persist_exact_flow_state
+                                    ~keeper_id
+                                    ~trace_id:inp.trace_id
+                                    ~generation
+                                    ~state:"domain_valid"
+                                    [ ( "candidate"
+                                      , attempt_receipt_json success.candidate )
+                                    ]
+                                with
+                                | Ok () -> Ok episode
+                                | Error detail ->
+                                  Error
+                                    (Exact_execution_failed
+                                       { dispatched = true
+                                       ; failure =
+                                           Exact_callback_persistence_failed detail
+                                       }))
+                             | Error error ->
+                               let parse_error =
+                                 Keeper_librarian.parse_error_to_string error
+                               in
+                               (match
+                                  persist_exact_flow_state
+                                    ~keeper_id
+                                    ~trace_id:inp.trace_id
+                                    ~generation
+                                    ~state:"domain_invalid"
+                                    [ ( "candidate"
+                                      , attempt_receipt_json success.candidate )
+                                    ; "parse_error", `String parse_error
+                                    ]
+                                with
+                                | Error detail ->
+                                  Error
+                                    (Exact_execution_failed
+                                       { dispatched = true
+                                       ; failure =
+                                           Exact_callback_persistence_failed detail
+                                       })
+                                | Ok () ->
+                                  Error
+                                    (Provider_unparseable_response
+                                       (Printf.sprintf
+                                          "librarian provider returned invalid episode JSON (%s)"
+                                          parse_error)))))))))))))
 ;;
 
-let extract_with_provider
-    ?complete
+let extract_with_exact_output_classified
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      inp
+  =
+  Eio_guard.with_mutex
+    (exact_flow_mutex_for_keeper ~keeper_id)
+    (fun () ->
+      extract_with_exact_output_classified_unlocked
+        ?clock
+        ~net
+        ~keeper_id
+        ~generation
+        inp)
+;;
+
+let extract_with_exact_output
     ?clock
-    ~sw
     ~net
-    ~runtime_id
-    ~provider_cfg
+    ~keeper_id
     ~generation
     inp
   =
   match
-    extract_with_provider_classified
-      ?complete
+    extract_with_exact_output_classified
       ?clock
-      ~sw
       ~net
-      ~runtime_id
-      ~provider_cfg
+      ~keeper_id
       ~generation
       inp
   with
@@ -390,14 +766,10 @@ let extract_with_provider
   | Ok episode -> Ok episode
 ;;
 
-let extract_and_append_with_provider_classified
-    ?complete
+let extract_and_append_with_exact_output_classified
     ?clock
-    ~sw
     ~net
     ~keeper_id
-    ~runtime_id
-    ~provider_cfg
     inp
   =
   match clock with
@@ -410,13 +782,10 @@ let extract_and_append_with_provider_classified
         ~trace_id:inp.Keeper_librarian.trace_id
     in
     (match
-       extract_with_provider_classified
-         ?complete
+       extract_with_exact_output_classified
          ?clock
-         ~sw
          ~net
-         ~runtime_id
-         ~provider_cfg
+         ~keeper_id
          ~generation
          inp
      with
@@ -476,36 +845,24 @@ let extract_and_append_with_provider_classified
       | Error message -> Error (Memory_fact_upsert_failed message)))
 ;;
 
-let extract_and_append_with_provider
-    ?complete
+let extract_and_append_with_exact_output
     ?clock
-    ~sw
     ~net
     ~keeper_id
-    ~runtime_id
-    ~provider_cfg
     inp
   =
   match
-    extract_and_append_with_provider_classified
-      ?complete
+    extract_and_append_with_exact_output_classified
       ?clock
-      ~sw
       ~net
       ~keeper_id
-      ~runtime_id
-      ~provider_cfg
       inp
   with
   | Error err -> Error (extraction_error_to_string err)
   | Ok episode -> Ok episode
 ;;
 
-let provider_for_runtime ~runtime_id =
-  Keeper_memory_runtime_resolution.provider_for_runtime ~runtime_id
-;;
-
-let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
+let run_best_effort ~keeper_id (inp : Keeper_librarian.input) =
   (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
      advances its cadence counter, and a not-due turn skips extraction entirely
      (the messages remain in the window for the next due turn). The cadence
@@ -514,49 +871,25 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
   if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
   then (
     try
-      match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-      | Some sw, Some net ->
-        let runtime_id = runtime_id_for_librarian ~runtime_id in
-        (match provider_for_runtime ~runtime_id with
-         | Error err ->
-           Log.Keeper.warn ~keeper_name:keeper_id
-             "memory os librarian skipped runtime=%s: %s"
-             runtime_id
-             err
-         | Ok provider_cfg -> (
-             let clock = Eio_context.get_clock_opt () in
-             match clock with
-             | None ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string EpisodeCreateFailures)
-                 ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-                 ();
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s"
-                 runtime_id
-                 librarian_provider_clock_unavailable_error
-             | Some clock -> (
-             match
-               with_provider_slot ~keeper_id ~clock (fun () ->
-                 extract_and_append_with_provider_classified
-                   ?complete
-                   ~clock
-                   ~sw
-                   ~net
-                   ~keeper_id
-                   ~runtime_id
-                   ~provider_cfg
-                   inp)
-             with
+      match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+      | Some net, Some clock ->
+        (match
+           with_provider_slot ~keeper_id ~clock (fun () ->
+             extract_and_append_with_exact_output_classified
+               ~clock
+               ~net
+               ~keeper_id
+               inp)
+         with
              | None ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
                 ~labels:
                   [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
-                 ();
+               ();
                Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
-                 runtime_id
+                 "memory os librarian skipped lane=%s: per-keeper provider slot busy (capacity=%d)"
+                 exact_lane_id
                  (per_keeper_slot_capacity ())
              | Some (Ok episode) ->
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
@@ -573,14 +906,14 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
                if should_record_cadence_backoff_after_error err
                then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s; cadence deferred=%b"
-                 runtime_id
+                 "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                 exact_lane_id
                  (extraction_error_to_string err)
-                 (should_record_cadence_backoff_after_error err))))
+                 (should_record_cadence_backoff_after_error err))
       | _ ->
         Log.Keeper.warn ~keeper_name:keeper_id
-          "memory os librarian skipped: Eio context unavailable runtime=%s"
-          runtime_id
+          "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
+          exact_lane_id
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -589,7 +922,7 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
         ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
         ();
       Log.Keeper.warn ~keeper_name:keeper_id
-        "memory os librarian failed runtime=%s: %s"
-        runtime_id
+        "memory os librarian failed lane=%s: %s"
+        exact_lane_id
         (Printexc.to_string exn))
 ;;

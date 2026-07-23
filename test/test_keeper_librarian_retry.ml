@@ -135,14 +135,28 @@ let test_cadence_record_attempt_defers () =
     (R.cadence_due ~keeper_id:kid ~trace_id:tid)
 
 let test_cadence_error_backoff_policy () =
-  check bool "empty provider response defers cadence" true
-    (R.should_record_cadence_backoff_after_error R.Provider_empty_response);
-  check bool "provider timeout defers cadence" true
-    (R.should_record_cadence_backoff_after_error R.Provider_timeout);
-  check bool "provider transport failure defers cadence" true
+  check bool "dispatched exact execution failure defers cadence" true
     (R.should_record_cadence_backoff_after_error
-       (R.Provider_transport_failed "http timeout"));
-  check bool "unparseable provider response defers cadence" true
+       (R.Exact_execution_failed
+          { dispatched = true
+          ; failure =
+              R.Exact_provider_execution_failed
+                Agent_sdk.Exact_output.Completion_failed
+          }));
+  check bool "zero-dispatch exact execution failure stays due" false
+    (R.should_record_cadence_backoff_after_error
+       (R.Exact_execution_failed
+          { dispatched = false
+          ; failure =
+              R.Exact_provider_execution_failed
+                Agent_sdk.Exact_output.Completion_failed
+          }));
+  check bool "durable unsettled prior attempt defers cadence" true
+    (R.should_record_cadence_backoff_after_error
+       (R.Exact_setup_failed
+          (R.Exact_previous_attempt_unsettled
+             { state = "candidate_bound"; trace_id = "trace"; generation = 1 })));
+  check bool "domain-invalid exact output defers cadence" true
     (R.should_record_cadence_backoff_after_error
        (R.Provider_unparseable_response "invalid_json"));
   check bool "prompt render failure stays due" false

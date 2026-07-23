@@ -198,14 +198,14 @@ let claim_source ~trace_id turn tool_call_id =
 
 let claim_kind_field fields =
   match List.assoc_opt wire_field_claim_kind fields with
-  | None -> Some None
+  | None | Some `Null -> Some None
   | Some (`String raw) -> Option.map (fun kind -> Some kind) (claim_kind_of_string raw)
   | Some _ -> None
 ;;
 
 let optional_string_field_strict key fields =
   match List.assoc_opt key fields with
-  | None -> Some None
+  | None | Some `Null -> Some None
   | Some (`String value) -> Some (Some value)
   | Some _ -> None
 ;;

@@ -247,7 +247,16 @@ let configure_exact_output_registry ?config_root () =
               lanes)
        then
          Log.Server.warn
-           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs")
+           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs";
+       if
+         not
+           (List.exists
+              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                 String.equal lane.id "librarian_exact")
+              lanes)
+       then
+         Log.Server.warn
+           "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
 
 (* GC tuning for long-running server with bursty allocation.

@@ -77,7 +77,14 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   }
 ;;
 
-let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
+let target_fixture_toml
+      ?connect_timeout_s
+      ~supports_response_format_json
+      ~supports_structured_output
+      ~api_key_env
+      index
+      fixture
+  =
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout =
@@ -98,8 +105,8 @@ let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
      provider_name = %S\n\
      max_context_tokens = 8192\n\
      max_output_tokens = 1024\n\
-     supports_response_format_json = true\n\
-     supports_structured_output = true\n\n\
+     supports_response_format_json = %b\n\
+     supports_structured_output = %b\n\n\
      [[targets]]\n\
      id = %S\n\
      provider_ref = %S\n\
@@ -110,6 +117,8 @@ let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
     api_key_env
     model_id
     provider_id
+    supports_response_format_json
+    supports_structured_output
     fixture.id
     provider_id
     model_id
@@ -120,6 +129,8 @@ let resolver_snapshot
       ?(connect_timeouts = [])
       ?(api_key_env = "")
       ?(api_key_envs = [])
+      ?(supports_response_format_json = true)
+      ?(supports_structured_output = true)
       ~source
       fixtures
   =
@@ -134,6 +145,8 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ?connect_timeout_s:(timeout_for fixture.id)
+              ~supports_response_format_json
+              ~supports_structured_output
               ~api_key_env:(api_key_env_for fixture.id)
             index
             fixture)

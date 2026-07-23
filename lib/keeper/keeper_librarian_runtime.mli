@@ -4,8 +4,6 @@
     owns the side-effect boundary: render external prompts, call a provider, and
     append accepted episodes to [Keeper_memory_os_io]. *)
 
-type complete_fn = Keeper_provider_subcall.complete_fn
-
 val enabled : unit -> bool
 (** Opt-in gate controlled by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
@@ -86,10 +84,6 @@ val max_messages : unit -> int
     effective prompt window is this value scaled by [cadence_turns] so skipped
     turns are not evicted before the next due extraction. *)
 
-val runtime_id_for_librarian : runtime_id:string -> string
-(** Runtime id after applying the optional
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] override. *)
-
 val select_recent_messages
   :  max_messages:int
   -> Agent_sdk.Types.message list
@@ -99,22 +93,40 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_sdk.Types.message list, string) result
 
-val provider_for_librarian
-  :  Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Provider config specialized for episode extraction. Caps [max_tokens] at
-    the librarian output budget (default 4096, overridable with
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS], floor 1) and requests the
-    structured episode output schema. The selected provider config's exact
-    temperature and [max_concurrent_requests] are preserved, including
-    omission. OAS [Complete] remains the single endpoint admission owner. *)
+val exact_lane_id : string
+(** OAS exact-output lane used by the Librarian. *)
+
+type exact_setup_error =
+  | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
+  | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
+  | Exact_candidate_invalid of
+      { position : int
+      ; slot_id : string
+      }
+  | Exact_journal_unavailable of string
+  | Exact_previous_attempt_unsettled of
+      { state : string
+      ; trace_id : string
+      ; generation : int
+      }
+  | Exact_flow_admission_failed of Agent_sdk.Exact_output.flow_admission_error
+  | Exact_flow_start_failed of Agent_sdk.Exact_output.flow_start_error
+
+type exact_execution_failure =
+  | Exact_attempt_already_started
+  | Exact_callback_persistence_failed of string
+  | Exact_provider_execution_failed of Agent_sdk.Exact_output.execution_error_cause
+
+type exact_execution_error =
+  { dispatched : bool
+  ; failure : exact_execution_failure
+  }
 
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
-  | Provider_timeout
-  | Provider_transport_failed of string
-  | Provider_empty_response
+  | Exact_setup_failed of exact_setup_error
+  | Exact_execution_failed of exact_execution_error
   | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
 
@@ -122,8 +134,9 @@ val extraction_error_to_string : extraction_error -> string
 
 val should_record_cadence_backoff_after_error : extraction_error -> bool
 (** Whether an extraction error represents enough completed work to defer the
-    next attempt until the next cadence window. Only completed provider-attempt
-    failures should defer cadence; local deterministic failures stay due. *)
+    next attempt until the next cadence window. Completed provider attempts and
+    a durable unsettled prior-attempt guard defer cadence; local deterministic
+    setup failures stay due. *)
 
 val per_keeper_slot_capacity : unit -> int
 (** Per-keeper librarian provider slot capacity from
@@ -148,66 +161,51 @@ val librarian_provider_clock_unavailable_error : string
     extraction is called without a clock. Exposed so callers/tests do not
     classify the human diagnostic with substring matching. *)
 
-val extract_with_provider
-  :  ?complete:complete_fn
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> sw:Eio.Switch.t
+val extract_with_exact_output
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> runtime_id:string
-  -> provider_cfg:Llm_provider.Provider_config.t
+  -> keeper_id:string
   -> generation:int
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
-val extract_with_provider_classified
-  :  ?complete:complete_fn
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> sw:Eio.Switch.t
+val extract_with_exact_output_classified
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> runtime_id:string
-  -> provider_cfg:Llm_provider.Provider_config.t
+  -> keeper_id:string
   -> generation:int
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
-(** Provider-backed librarian extraction. [clock] stays optional at the API
+(** OAS exact-output Librarian extraction. Target resolution, capability
+    admission, wire materialization, and failover are owned by OAS. MASC
+    supplies only the immutable prompt, domain schema, minimum JSON guarantee,
+    post-success domain validation, and an fsync-backed receipt journal for
+    OAS's predetermined candidate transitions. An unsettled journal from a
+    prior process fails closed before dispatch. Calls are serialized per keeper
+    so the bounded journal remains a single affine flow. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
     supply an Eio clock; [None] returns
-    {!librarian_provider_clock_unavailable_error} before provider I/O because
-    the provider call itself requires the clock. The extraction now runs to
-    completion: [timeout_sec] no longer force-kills a legitimate in-flight
-    provider call (that wall-clock kill produced kill -> retry churn; see
-    RFC-0156, Withdraw MASC turn-budget timeout policy). An inner-transport
-    (connect/idle/HTTP) timeout still surfaces as {!Provider_timeout}. *)
+    {!librarian_provider_clock_unavailable_error} before provider I/O. *)
 
-val extract_and_append_with_provider
-  :  ?complete:complete_fn
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> sw:Eio.Switch.t
+val extract_and_append_with_exact_output
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
-  -> runtime_id:string
-  -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
-val extract_and_append_with_provider_classified
-  :  ?complete:complete_fn
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> sw:Eio.Switch.t
+val extract_and_append_with_exact_output_classified
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
-  -> runtime_id:string
-  -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
 
 val run_best_effort
-  :  ?complete:complete_fn
-  -> runtime_id:string
-  -> keeper_id:string
+  :  keeper_id:string
   -> Keeper_librarian.input
   -> unit
 (** Run the opt-in post-turn librarian path.
 
     Non-cancel failures are logged and counted, never raised. Runtime dispatch
-    uses OAS endpoint admission; this path adds no runtime-wide MASC slot. *)
+    uses the immutable OAS exact-output registry and [librarian_exact] lane. *)

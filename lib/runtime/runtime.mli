@@ -207,11 +207,12 @@ val cross_verifier_runtime_id : unit -> string option
     Validated at load so a [Some] always resolves to a configured runtime. *)
 
 val librarian_runtime_id : unit -> string option
-(** [\[runtime\].librarian] runtime id for the memory-os librarian, or [None]
-    when unset (the librarian inherits each keeper's runtime). Validated at load
-    so a [Some] always resolves to a configured runtime.
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides this at the librarian
-    call site. *)
+(** Legacy [\[runtime\].librarian] runtime id for Memory OS LLM summary
+    generation and the consolidation fallback, or [None] when summary generation
+    inherits each keeper's runtime. It does not route post-turn Librarian
+    exact-output extraction. Validated at load so a [Some] always resolves to a
+    configured runtime. [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides
+    summary generation only. *)
 
 val structured_judge_runtime_id : unit -> string option
 (** [\[runtime\].structured_judge] runtime id for provider-native

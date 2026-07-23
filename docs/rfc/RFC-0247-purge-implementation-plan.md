@@ -63,7 +63,7 @@ The field removals from the `fact` record (`types.ml:100-120`) and their codec h
 
 **Where it lives**: the always-on consolidation fiber, `server_bootstrap_maintenance.ml:90-118` (300s cadence, cross-keeper read + atomic `_shared.facts.jsonl` rewrite, per-tick failures caught). Keep the fiber skeleton; replace the arithmetic body in `keeper_memory_os_consolidator.ml`.
 
-**What it reads**: (orient) the keeper's current fact set + the shared store; (gather) facts written since the last consolidation tick. **What it writes**: the rewritten store(s). The LLM call reuses the existing librarian provider plumbing (`keeper_librarian_runtime.ml extract_with_provider`, `:245-255`).
+**What it reads**: (orient) the keeper's current fact set + the shared store; (gather) facts written since the last consolidation tick. **What it writes**: the rewritten store(s). The LLM call reuses the Librarian domain codec; provider admission and wire execution use the OAS exact-output surface (`keeper_librarian_runtime.ml extract_with_exact_output`).
 
 **4 phases ported from Claude Code §8** (Map Report 4):
 1. **Orient** — read existing facts so the pass *improves topic-facts rather than duplicating*. Anti-duplication read-before-write.

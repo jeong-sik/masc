@@ -224,6 +224,11 @@ supports_native_streaming = true
 # Opaque exact-output slot bindings. MASC routes only by [id]; OAS owns the
 # provider/model join, capability admission, and wire materialization.
 [[targets]]
+id = "glm-coding.glm-5-turbo"
+provider_ref = "glm-coding"
+model_id = "GLM-5-Turbo"
+
+[[targets]]
 id = "deepseek.deepseek-v4-pro"
 provider_ref = "deepseek"
 model_id = "deepseek-v4-pro"

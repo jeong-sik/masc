@@ -930,9 +930,9 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             None
         with
         | Masc.Keeper_registry_event_queue.Requeue
-            Masc.Keeper_registry_event_queue.Approval_grant_unconsumed ->
+            Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
           ()
-        | _ -> Alcotest.fail "unconsumed grant wake was acknowledged");
+        | _ -> Alcotest.fail "unscheduled grant wake was not requeued");
        let request ~input ~task_id ~goal_ids : Gate.request =
          { keeper_name
          ; operation = "external-effect"
@@ -1003,8 +1003,10 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~lease
             None
         with
-        | Masc.Keeper_registry_event_queue.Ack -> ()
-        | _ -> Alcotest.fail "consumed grant wake was not acknowledged");
+        | Masc.Keeper_registry_event_queue.Requeue
+            Masc.Keeper_registry_event_queue.Turn_not_scheduled ->
+          ()
+        | _ -> Alcotest.fail "unscheduled consumed grant wake was not requeued");
        AQ.For_testing.reset_runtime_state ();
        let _ = install_exn ~base_path in
        (match AQ.approved_resolution_state ~base_path ~id:approval_id with

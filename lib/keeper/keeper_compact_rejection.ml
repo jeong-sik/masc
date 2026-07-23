@@ -48,7 +48,12 @@ let compaction_rejection_to_string = function
 let exact_terminal_of_observation cause
       (observation : Keeper_compaction_llm_summarizer.attempt_observation) =
   Keeper_event_queue_state.
-    { cause; slot_id = observation.slot_id; call_id = observation.call_id }
+    { cause
+    ; slot_id = observation.slot_id
+    ; call_id = observation.call_id
+    ; plan_fingerprint = observation.receipt_plan_fingerprint
+    ; request_body_sha256 = observation.receipt_request_body_sha256
+    }
 ;;
 
 let summarization_rejection = function

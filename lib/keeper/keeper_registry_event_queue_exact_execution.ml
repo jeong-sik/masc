@@ -20,11 +20,27 @@ struct
     { cause : exact_execution_terminal_cause
     ; slot_id : string
     ; call_id : string
+    ; plan_fingerprint : string
+    ; request_body_sha256 : string
     }
-  
+
+  type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+    | Consume_source
+
+  type exact_settlement_semantic =
+    Keeper_event_queue_persistence.exact_settlement_semantic =
+    | Exact_no_compaction
+    | Exact_escalate
+
+  type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+    | Terminal of exact_execution_terminal_cause
+
+  type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
+
   type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
     | Dispatch_uncertain
     | Terminal_quarantined of exact_execution_terminal_cause
+    | Disposition_prepared of exact_source_disposition
   
   type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
     { lease_id : string
@@ -87,16 +103,49 @@ struct
         name
         ~lease
         ~terminal
-        ~plan_fingerprint
-        ~request_body_sha256
     =
     Keeper_event_queue_persistence.quarantine_exact_execution_result
       ~base_path
       ~keeper_name:name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
+      ()
+  ;;
+
+  let prepare_exact_source_disposition_result
+        ~base_path
+        name
+        ~lease
+        ~source
+        ~terminal
+        ~semantic
+        ~prepared_at
+    =
+    Keeper_event_queue_persistence.prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name:name
+      ~lease
+      ~source
+      ~terminal
+      ~semantic
+      ~prepared_at
+      ()
+  ;;
+
+  let finalize_exact_source_disposition_result
+        ~base_path
+        name
+        ~settled_at
+        ~lease
+        ~disposition_id
+    =
+    Keeper_event_queue_persistence.finalize_exact_source_disposition_result
+      ~base_path
+      ~keeper_name:name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ~after_commit:(Publish.publish_pending ~base_path name)
       ()
   ;;
   
@@ -128,7 +177,7 @@ struct
       ~transition_id
   ;;
   
-  let settle_exact_execution_result
+  let settle_bound_exact_nonterminal_result
         ~base_path
         name
         ~settled_at
@@ -136,7 +185,7 @@ struct
         ~binding
         ~settlement
     =
-    Keeper_event_queue_persistence.settle_exact_execution_result
+    Keeper_event_queue_persistence.settle_bound_exact_nonterminal_result
       ~base_path
       ~keeper_name:name
       ~settled_at

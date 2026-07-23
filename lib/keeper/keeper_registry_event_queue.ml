@@ -18,8 +18,6 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Approval_grant_unconsumed
-  | Approval_grant_state_unavailable
 
 let publish_pending ~base_path name pending =
   match Keeper_registry.get ~base_path name with
@@ -102,6 +100,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason

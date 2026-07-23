@@ -54,7 +54,13 @@ let no_compaction ~turn_count reason : State.no_compaction =
 ;;
 
 let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
-  State.Exact_execution_terminal { cause; slot_id; call_id }
+  State.Exact_execution_terminal
+    { cause
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint = "plan-terminal"
+    ; request_body_sha256 = String.make 64 'b'
+    }
 ;;
 
 let test_exact_output_terminal_reasons_round_trip () =
@@ -1830,60 +1836,6 @@ let test_cancelled_and_skipped_cycles_requeue () =
   | _ -> Alcotest.fail "non-executable phase acknowledged leased work"
 ;;
 
-let test_unconsumed_approval_requeues_behind_other_work () =
-  List.iter
-    (fun reason ->
-       let resolution : Queue.hitl_resolution =
-         { approval_id = "approval-tail"
-         ; decision = Queue.Hitl_approved
-         ; channel = Keeper_continuation_channel.unrouted "queue fairness test"
-         }
-       in
-       let approval =
-         stimulus
-           ~payload:(Queue.Hitl_resolved resolution)
-           (Queue.hitl_resolution_post_id resolution)
-           1.0
-       in
-       let board = stimulus "board-next" 2.0 in
-       let state = State.with_pending (queue [ approval; board ]) State.empty in
-       let state, lease = claim_head state in
-       let lease = require_some "approval lease" lease in
-       let state, _ =
-         State.settle
-           ~settled_at:3.0
-           ~lease
-           ~settlement:(State.Requeue reason)
-           state
-         |> require_ok "tail requeue approval"
-       in
-       Alcotest.(check (list string))
-         "approval remains durable at the FIFO tail"
-         [ "board-next"; Queue.hitl_resolution_post_id resolution ]
-         (post_ids (State.pending state));
-       let receipt =
-         match State.transition_outbox state with
-         | [ entry ] -> entry.receipt
-         | _ -> Alcotest.fail "approval requeue must create one receipt"
-       in
-       let state =
-         State.mark_transition_projected ~transition_id:receipt.transition_id state
-         |> require_ok "project approval requeue"
-       in
-       let _state, next = claim_head state in
-       let next = require_some "next fair lease" next in
-       match next.stimuli with
-       | [ next ] ->
-         Alcotest.(check string)
-           "unrelated work leases before the retained approval"
-           "board-next"
-           next.post_id
-       | _ -> Alcotest.fail "fairness fixture expected one leased stimulus")
-    [ State.Approval_grant_unconsumed
-    ; State.Approval_grant_state_unavailable
-    ]
-;;
-
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path
@@ -2821,10 +2773,6 @@ let () =
             "approved wake settles on delivery not consumption"
             `Quick
             test_approved_wake_settles_on_delivery_not_consumption
-        ; Alcotest.test_case
-            "unconsumed approval yields FIFO"
-            `Quick
-            test_unconsumed_approval_requeues_behind_other_work
         ; Alcotest.test_case
             "current state codec reads its own output"
             `Quick

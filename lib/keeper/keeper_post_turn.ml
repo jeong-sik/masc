@@ -779,7 +779,6 @@ let observe_exact_checkpoint_disposition
       ~lease
       ~disposition_id:disposition.disposition_id
       ~current_ref:installed_ref
-      ()
   with
   | Error _ as error -> error
   | Ok Keeper_registry_event_queue.Fsync_completed -> Ok ()

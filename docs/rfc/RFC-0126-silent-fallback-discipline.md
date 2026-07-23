@@ -202,7 +202,7 @@ audit doc `.tmp/memory-compacting-analysis.html` 가 작성 시점(01:22) 에 �
 | V03 (HIGH) | `keeper_compact_policy.ml:92-96` | tool_heavy 주석/코드 불일치 | **FIX** — line 152-159 bypass 정합, 주석/코드 align |
 | V04 (HIGH) | `keeper_compact_policy.ml:145-154` | record_pre_compact try/catch 외부 | **FIX** — line 244-261 `Cancelled re-raise + warn + None` pattern (RFC-0106 정합) |
 | V06 (HIGH) | `memory_jsonl.ml:100-113` | 50MB load_file 일괄 메모리 | **FIX** — `iter_lines` streaming (`input_line` per row, line 231-245) |
-| V08 (MED) | `keeper_memory_llm_summary.ml:107-117` | 3-silent timeout/http/empty | **FIX** — `Keeper_memory_llm_summary_outcome.t` typed variant (Timed_out / Ok_summary / Empty_response / Http_error) |
+| V08 (MED) | historical `keeper_memory_llm_summary.ml:107-117` | 3-silent timeout/http/empty | **RETIRED** — the entire Memory Bank LLM summary lane and its outcome type were hard-deleted on 2026-07-24 |
 | V11 (MED) | `keeper_post_turn.ml:511` | callback exception swallow | **FIX** — RFC-0106 P0 canary (iter 32+34, `Cancel_safe.observe` 적용) |
 
 → 6/9 V 라벨이 audit 시점 이후 iter 들로 흡수 완료. memory `feedback_workdir_grep_must_cross_check_origin_main` 정신 = audit doc 직접 grep 검증 의무의 정량 evidence (66.7% stale rate).

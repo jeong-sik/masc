@@ -188,7 +188,6 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 
 const sourceWithCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-librarian = "ollama_cloud.flash-nojson"
 structured_judge = "ollama_cloud.flash-nojson"
 
 [providers.ollama_cloud]
@@ -231,7 +230,7 @@ price-output = 0.28
 
 const sourceWithUnknownLaneCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-librarian = "ollama_cloud.flash-unknown"
+structured_judge = "ollama_cloud.flash-unknown"
 cross_verifier = "ollama_cloud.missing-binding"
 
 [providers.ollama_cloud]

@@ -11,10 +11,6 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# Legacy Memory OS summary/consolidation helpers still consume this runtime
-# role. Post-turn Librarian episode extraction does not: it resolves only the
-# OAS [runtime.exact_output_lanes.librarian_exact] lane.
-librarian = "ollama_cloud_native.minimax-m3-native-structured"
 # Existing deployments must opt in explicitly after the exact-output registry
 # is available:
 # [runtime.exact_output_lanes.librarian_exact]

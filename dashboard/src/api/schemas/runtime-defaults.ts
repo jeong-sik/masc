@@ -30,7 +30,6 @@ const RuntimeEntrySchema = object({
 })
 
 const ModelRoutingSchema = object({
-  librarian_runtime_id: nullable(string()),
   structured_judge_runtime_id: nullable(string()),
   cross_verifier_runtime_id: nullable(string()),
   media_failover: array(string()),

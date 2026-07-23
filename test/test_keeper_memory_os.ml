@@ -6,7 +6,6 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
-module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
    masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
@@ -910,24 +909,6 @@ let test_librarian_defaults_missing_optional_lists () =
   | None -> Alcotest.fail "expected missing optional list fields to parse"
 ;;
 
-let test_librarian_runtime_override_env () =
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv Env_config.KeeperMemoryOs.librarian_runtime_id_env_key "")
-    (fun () ->
-       Unix.putenv Env_config.KeeperMemoryOs.librarian_runtime_id_env_key "";
-       Alcotest.(check string)
-         "empty override falls back"
-         "keeper-runtime"
-         (Runtime_resolution.runtime_id_for_librarian ~runtime_id:"keeper-runtime");
-       Unix.putenv
-         Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
-         " runpod_mtp.qwen36-35b-a3b-mtp ";
-       Alcotest.(check string)
-         "override trims"
-         "runpod_mtp.qwen36-35b-a3b-mtp"
-         (Runtime_resolution.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
-;;
-
 let memory_runtime_resolution_toml =
   {|
 [runtime]
@@ -959,20 +940,6 @@ let with_runtime_config_toml content f =
        match Runtime.init_default ~config_path:path with
        | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg
        | Ok () -> f ())
-;;
-
-let test_librarian_provider_for_runtime_errors_on_missing_id () =
-  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
-    match Runtime_resolution.provider_for_runtime ~runtime_id:"missing.runtime" with
-    | Ok provider ->
-      Alcotest.failf
-        "missing runtime silently resolved to provider base_url=%s"
-        provider.Llm_provider.Provider_config.base_url
-    | Error msg ->
-      Alcotest.(check bool)
-        "error names missing runtime"
-        true
-      (contains "missing.runtime" msg))
 ;;
 
 let test_memory_provider_configs_use_runtime_temperature () =
@@ -1139,9 +1106,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
-  ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
-    , fun () ->
-        ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
   ; ( Env_config.KeeperMemoryOs.librarian_global_slot_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
@@ -4444,14 +4408,6 @@ let () =
             "librarian defaults missing optional lists"
             `Quick
             test_librarian_defaults_missing_optional_lists
-        ; Alcotest.test_case
-            "librarian runtime override env"
-            `Quick
-            test_librarian_runtime_override_env
-        ; Alcotest.test_case
-            "librarian provider resolution rejects missing runtime id"
-            `Quick
-            test_librarian_provider_for_runtime_errors_on_missing_id
         ; Alcotest.test_case
             "memory provider configs use runtime temperature"
             `Quick

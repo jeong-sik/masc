@@ -346,7 +346,6 @@ describe('RuntimeHealthSnapshot', () => {
         assigned_runtime_count: 1,
         default_assignment_count: 0,
         default_runtime_id: 'runpod_mtp.qwen',
-        librarian_runtime_id: null,
         warnings: ['explicit_assignments_present', 'single_runtime_assignment_pin'],
         assigned_runtimes: ['openai.gpt'],
         assignments: [

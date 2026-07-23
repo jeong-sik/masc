@@ -19,7 +19,6 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
       { id: 'anthropic.sonnet', provider: 'Anthropic', model: 'claude-sonnet-4', max_context: 200000, is_default: false },
     ],
     model_routing: {
-      librarian_runtime_id: 'openai.gpt-4o',
       structured_judge_runtime_id: 'openai.gpt-4o',
       cross_verifier_runtime_id: null,
       media_failover: ['openai.gpt-4o'],
@@ -48,7 +47,6 @@ describe('parseRuntimeDefaultsResponse', () => {
         default_max_context: null,
         runtimes: [],
         model_routing: {
-          librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],

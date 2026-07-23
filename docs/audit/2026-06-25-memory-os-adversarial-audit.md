@@ -206,7 +206,6 @@ The env surface is broad but named and centralized enough to audit:
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS`: default 3.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES`: default 24.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC`: default 600.
-- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID`: optional runtime override.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT`: default 1.
 - `MASC_KEEPER_MEMORY_OS_GC`: default false.
 - `MASC_KEEPER_MEMORY_OS_CONSOLIDATION`: default false.

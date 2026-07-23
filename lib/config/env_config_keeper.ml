@@ -169,7 +169,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
   (* On by default (RFC keeper-memory-bank-write-reduction §4b, operator decision
@@ -190,7 +189,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
@@ -257,16 +255,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Legacy Memory OS summary runtime override; not used by exact extraction.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_runtime_id () =
-    get_string
-      ~default:(optional_string_default librarian_runtime_id_default)
-      librarian_runtime_id_env_key
-    |> nonempty_string
   ;;
 
   (** Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0

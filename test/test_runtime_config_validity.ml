@@ -616,7 +616,6 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       ( runtimes
       , _default
       , _assignments
-      , _librarian
       , _structured_judge
       , _cross_verifier
       , _media_failover , _lanes ) ->
@@ -740,7 +739,6 @@ let test_repo_runtime_toml_loads () =
       ( runtimes
       , default
       , assignments
-      , _librarian
       , structured_judge
       , _cross_verifier
       , _media_failover , _lanes ) ->
@@ -1571,7 +1569,6 @@ let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
      \n\
      [runtime]\n\
      default = \"ollama.good\"\n\
-     librarian = \"ollama.missing\"\n\
      media_failover = [\"ollama.missing\", \"ollama.good\"]\n\
      \n\
      [runtime.assignments]\n\
@@ -1596,8 +1593,6 @@ let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
            "expected routing-reference config error, got missing catalog report: %s"
            (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
        | Error (Runtime.Runtime_config_error msg) ->
-         check bool "diagnostic names librarian route" true
-           (String_util.contains_substring msg "[runtime].librarian");
          check bool "diagnostic names keeper assignment" true
            (String_util.contains_substring msg "[runtime.assignments].keeper_a");
          check bool "diagnostic names media failover" true
@@ -1636,7 +1631,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      \n\
      [runtime]\n\
      default = \"ollama.good\"\n\
-     librarian = \"ollama.good\"\n\
      media_failover = [\"ollama.good\"]\n\
      \n\
      [runtime.assignments]\n\
@@ -1691,9 +1685,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
-         check (option string) "librarian route preserved"
-           (Some "ollama.good")
-           (Runtime.librarian_runtime_id ());
          check (list string) "media failover keeps known ids only"
            [ "ollama.good" ]
            (Runtime.media_failover ());
@@ -1795,7 +1786,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         ( runtimes
         , _default
         , _assignments
-        , _librarian
         , _structured_judge
         , _cross_verifier
         , _media_failover
@@ -1829,10 +1819,9 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
 
-(* [runtime].librarian (RFC: memory-os librarian routing): resolves to a
-   configured runtime and is returned by load_list; absent = None (inherit
-   keeper runtime); an unknown id is rejected at load like [runtime].default. *)
-let test_librarian_runtime_routing () =
+(* [runtime].cross_verifier resolves to a configured JSON-capable runtime,
+   defaults to None, and rejects unknown or incapable targets. *)
+let test_cross_verifier_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
   let base =
     "[providers.local]\n\
@@ -1858,35 +1847,6 @@ let test_librarian_runtime_routing () =
      [runtime]\n\
      default = \"local.chat\"\n"
   in
-  with_temp_runtime_toml (base ^ "librarian = \"local.libr\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "librarian routing should load: %s" msg
-    | Ok
-        ( _runtimes
-        , _default
-        , _assignments
-        , librarian
-        , _structured_judge
-        , _cross_verifier
-        , _media_failover , _lanes ) ->
-      check (option string) "librarian runtime id" (Some "local.libr") librarian);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent librarian should load: %s" msg
-    | Ok
-        ( _
-        , _
-        , _
-        , librarian
-        , _structured_judge
-        , _cross_verifier
-        , _media_failover
-        , _lanes ) ->
-      check (option string) "librarian unset is None" None librarian);
-  with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "unknown [runtime].librarian id must be rejected at load"
-    | Error _ -> ());
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.libr\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "cross_verifier routing should load: %s" msg
@@ -1894,7 +1854,6 @@ let test_librarian_runtime_routing () =
         ( _runtimes
         , _default
         , _assignments
-        , _librarian
         , _structured_judge
         , cross_verifier
         , _media_failover , _lanes ) ->
@@ -1905,7 +1864,6 @@ let test_librarian_runtime_routing () =
     | Error msg -> failf "absent cross_verifier should load: %s" msg
     | Ok
         ( _
-        , _
         , _
         , _
         , _structured_judge
@@ -1955,7 +1913,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, structured_judge, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1964,7 +1922,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, structured_judge, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1977,12 +1935,11 @@ let test_structured_judge_runtime_routing () =
         "[runtime].structured_judge must reject models without structured-output \
          support"
     | Error _ -> ());
-  let librarian_fallback = base ^ "librarian = \"local.judge\"\n" in
-  with_temp_runtime_toml librarian_fallback (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path librarian_fallback with
-    | Error msg -> failf "save_config_text should load librarian fallback: %s" msg
+  with_temp_runtime_toml base (fun path ->
+    match Runtime.save_config_text ~runtime_config_path:path base with
+    | Error msg -> failf "save_config_text should load default fallback: %s" msg
     | Ok () ->
-      check string "structured judge falls back to librarian" "local.judge"
+      check string "structured judge falls back to default" "local.chat"
         (Runtime.runtime_id_for_structured_judge ()));
   let explicit_structured_judge = base ^ "structured_judge = \"local.judge\"\n" in
   with_temp_runtime_toml explicit_structured_judge (fun path ->
@@ -2095,7 +2052,7 @@ let test_structured_judge_lane_target () =
   with_temp_runtime_toml capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+    | Ok (_, _, _, structured_judge, _, _, lanes) ->
       check
         (option string)
         "structured_judge keeps the lane id"
@@ -2163,7 +2120,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"
@@ -2634,9 +2591,8 @@ let () =
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case
-            "[runtime].librarian and .cross_verifier resolve, default None, \
-             reject unknown"
-            `Quick test_librarian_runtime_routing;
+            "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
+            `Quick test_cross_verifier_runtime_routing;
           test_case
             "[runtime].structured_judge resolves and rejects unsupported models"
             `Quick test_structured_judge_runtime_routing;

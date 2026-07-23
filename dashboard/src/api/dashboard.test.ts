@@ -2805,7 +2805,6 @@ describe('fetchRuntimeProviders', () => {
           assigned_runtime_count: 1,
           default_assignment_count: 0,
           default_runtime_id: 'runpod_mtp.qwen',
-          librarian_runtime_id: 'ollama_cloud.minimax-m3',
           warnings: ['explicit_assignments_present', 'single_runtime_assignment_pin'],
           assigned_runtimes: ['openai.gpt'],
           assignments: [
@@ -2837,7 +2836,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'runtime.librarian', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.structured_judge', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -2942,7 +2941,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.librarian')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.structured_judge')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
@@ -3359,7 +3358,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        librarian_runtime_id: null,
         structured_judge_runtime_id: null,
         cross_verifier_runtime_id: null,
         media_failover: [],

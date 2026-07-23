@@ -133,28 +133,6 @@ let validate_keeper_assignments ~(config_path : string)
             ~runtime_count:(List.length runtimes) runtime_id))
 ;;
 
-(* [runtime].librarian must resolve to a configured runtime when set, mirroring
-   [runtime].default / [runtime.assignments] validation: an unknown id is an
-   operator typo rejected at load, not a silent fallback (Unknown→Permissive
-   anti-pattern). [None] is the designed "inherit the keeper's runtime" case. *)
-let validate_librarian_runtime ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (librarian_id : string option) : (unit, string) result =
-  match librarian_id with
-  | None -> Ok ()
-  | Some id ->
-    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "%s: [runtime].librarian = %S%s"
-           config_path
-           id
-           (unresolved_runtime_suffix ~dropped_bindings
-              ~runtime_count:(List.length runtimes) id))
-;;
-
 (* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
    over a same-named runtime), so route validation must judge the same target
    the consumer will actually get: lane first, runtime second. *)
@@ -750,12 +728,11 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments, librarian_id, structured_judge_id,
-       cross_verifier_id, media_failover, lanes) :
+    ( (runtimes, configured_default, assignments, structured_judge_id, cross_verifier_id,
+       media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string option
       * string option
       * string list
@@ -764,7 +741,6 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string option
         * string option
         * string list
@@ -852,7 +828,6 @@ let degrade_loaded_for_missing_catalog
       None, Some { route_name; runtime_id }
     | Some _ as value -> value, None
   in
-  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
   let structured_judge_id, structured_judge_drop =
     drop_route "[runtime].structured_judge" structured_judge_id
   in
@@ -861,7 +836,6 @@ let degrade_loaded_for_missing_catalog
   in
   let dropped_routes =
     [ default_drop
-    ; librarian_drop
     ; structured_judge_drop
     ; cross_verifier_drop
     ]
@@ -918,7 +892,6 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , librarian_id
         , structured_judge_id
         , cross_verifier_id
         , kept_media_failover
@@ -931,7 +904,6 @@ let hitl_auto_judge_lane_id = "hitl_auto_judge"
 let ensure_hitl_auto_judge_lane
     ~runtimes
     ~default_runtime
-    ~librarian_runtime_id
     ~structured_judge_runtime_id
     ~lanes
     exact_output_lane_decls
@@ -945,9 +917,9 @@ let ensure_hitl_auto_judge_lane
     Ok exact_output_lane_decls
   else
     let assignment_id =
-      match structured_judge_runtime_id, librarian_runtime_id with
-      | Some runtime_id, _ | None, Some runtime_id -> runtime_id
-      | None, None -> default_runtime.id
+      match structured_judge_runtime_id with
+      | Some runtime_id -> runtime_id
+      | None -> default_runtime.id
     in
     let slot_ids =
       match
@@ -989,7 +961,6 @@ let materialize_config
        * (string * string) list
        * string option
        * string option
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1020,10 +991,6 @@ let materialize_config
   in
   let* () =
     validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
-  in
-  let* () =
-    validate_librarian_runtime ~config_path ~dropped_bindings runtimes
-      cfg.librarian_runtime_id
   in
   (* Lanes are materialized before the judge/verifier route validations so a
      route id can name a lane (#25394); candidate resolution is enforced by
@@ -1058,7 +1025,6 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.librarian_runtime_id
     , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover
@@ -1068,7 +1034,6 @@ let materialize_config
     ensure_hitl_auto_judge_lane
       ~runtimes
       ~default_runtime:rt
-      ~librarian_runtime_id:cfg.librarian_runtime_id
       ~structured_judge_runtime_id:cfg.structured_judge_runtime_id
       ~lanes
       cfg.exact_output_lane_decls
@@ -1080,7 +1045,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string option
        * string list
@@ -1122,7 +1086,6 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
@@ -1135,7 +1098,6 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; librarian_runtime_id = None
   ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
@@ -1154,7 +1116,6 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , librarian_id
     , structured_judge_id
     , cross_verifier_id
     , media_failover
@@ -1163,7 +1124,6 @@ let set_loaded
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; librarian_runtime_id = librarian_id
     ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
@@ -1194,7 +1154,7 @@ let publish_exact_output_registry ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1208,7 +1168,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1219,7 +1179,7 @@ let init_default_degraded_report ~config_path =
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+        | Ok (((active_runtimes, _, _, _, _, _, _) as degraded_loaded), degradation) ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
@@ -1241,7 +1201,6 @@ let effective_exact_output_lane_declarations exact_output_lane_decls =
     ensure_hitl_auto_judge_lane
       ~runtimes:state.runtimes
       ~default_runtime
-      ~librarian_runtime_id:state.librarian_runtime_id
       ~structured_judge_runtime_id:state.structured_judge_runtime_id
       ~lanes:state.lanes
       exact_output_lane_decls
@@ -1279,21 +1238,14 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
 
 let keeper_assignments () = (runtime_state ()).keeper_assignments
 
-(* [runtime].librarian routing for the memory-os librarian. [None] = the
-   librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
-   [init_default]; the env override lives in keeper_librarian_runtime. *)
-let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
-
 (* [runtime].structured_judge is the explicit runtime.toml SSOT for
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
 
 let runtime_id_for_structured_judge () =
-  let state = runtime_state () in
-  match state.structured_judge_runtime_id, state.librarian_runtime_id with
-  | Some id, _ -> id
-  | None, Some id -> id
-  | None, None -> default_runtime_id_or_fail ()
+  match (runtime_state ()).structured_judge_runtime_id with
+  | Some id -> id
+  | None -> default_runtime_id_or_fail ()
 ;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
@@ -1958,10 +1910,6 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
-;;
-
-let set_runtime_librarian ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"librarian" ~runtime_id ()
 ;;
 
 let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =

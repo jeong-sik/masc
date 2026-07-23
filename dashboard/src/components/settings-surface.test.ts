@@ -167,7 +167,6 @@ function makeRuntimeDefaults(
       { id: 'rt-c', provider: 'P', model: 'm3', max_context: 128000, is_default: false },
     ],
     model_routing: {
-      librarian_runtime_id: null,
       structured_judge_runtime_id: null,
       cross_verifier_runtime_id: null,
       media_failover: [],
@@ -1278,7 +1277,6 @@ describe('SettingsSurface', () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: {
-          librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: 'rt-c',
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
@@ -1291,7 +1289,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Structured judge')
       expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
         .toContain('PATCH /api/v1/runtime/routing')
       expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
@@ -1313,8 +1311,7 @@ describe('SettingsSurface', () => {
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          librarian_runtime_id: 'rt-b',
-          structured_judge_runtime_id: null,
+          structured_judge_runtime_id: 'rt-b',
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -1323,19 +1320,19 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
     await waitFor(() => {
-      const select = container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement | null
+      const select = container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null
       expect(select).not.toBeNull()
       expect(select?.disabled).toBe(false)
       expect(select?.options.length).toBeGreaterThan(1)
     })
 
-    const librarian = container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement
-    await fireEvent.input(librarian, { target: { value: 'rt-b' } })
+    const structuredJudge = container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement
+    await fireEvent.input(structuredJudge, { target: { value: 'rt-b' } })
 
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('librarian', 'rt-b')
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('structured_judge', 'rt-b')
       expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-      expect((container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement).value)
+      expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement).value)
         .toBe('rt-b')
     })
     expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
@@ -1401,7 +1398,6 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
@@ -1409,7 +1405,6 @@ describe('SettingsSurface', () => {
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: {
-          librarian_runtime_id: null,
           structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],

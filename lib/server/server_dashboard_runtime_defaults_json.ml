@@ -30,7 +30,6 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
@@ -69,8 +68,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
     ; ( "model_routing"
       , `Assoc
-          [ "librarian_runtime_id", string_opt_json r.librarian_runtime_id
-          ; ( "structured_judge_runtime_id"
+          [ ( "structured_judge_runtime_id"
             , string_opt_json r.structured_judge_runtime_id )
           ; "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
           ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
@@ -93,7 +91,6 @@ let resolved_of_runtime () : resolved =
   ; default_max_context =
       Option.map Runtime.max_context_of_runtime default
   ; runtimes = List.map entry (Runtime.get_runtimes ())
-  ; librarian_runtime_id = Runtime.librarian_runtime_id ()
   ; structured_judge_runtime_id = Runtime.structured_judge_runtime_id ()
   ; cross_verifier_runtime_id = Runtime.cross_verifier_runtime_id ()
   ; media_failover = Runtime.media_failover ()

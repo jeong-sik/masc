@@ -288,7 +288,6 @@ export interface DashboardRuntimeAssignmentStatus {
   assigned_runtime_count: number
   default_assignment_count: number
   default_runtime_id?: string | null
-  librarian_runtime_id?: string | null
   warnings: string[]
   assigned_runtimes: string[]
   assignments: DashboardRuntimeAssignment[]
@@ -801,7 +800,6 @@ function decodeRuntimeAssignmentStatus(raw: unknown): DashboardRuntimeAssignment
     assigned_runtime_count: asNumber(raw.assigned_runtime_count) ?? 0,
     default_assignment_count: asNumber(raw.default_assignment_count) ?? 0,
     default_runtime_id: asNullableString(raw.default_runtime_id),
-    librarian_runtime_id: asNullableString(raw.librarian_runtime_id),
     warnings: asStringArray(raw.warnings),
     assigned_runtimes: asStringArray(raw.assigned_runtimes),
     assignments: asRecordArray(raw.assignments)
@@ -1119,7 +1117,6 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
 
 export type RuntimeRoutingLane =
   | 'default'
-  | 'librarian'
   | 'structured_judge'
   | 'cross_verifier'
 

@@ -1868,7 +1868,6 @@ let runtime_assignment_status_json ~default_id =
       |> List.filter (fun (_, runtime_id) -> String.equal runtime_id default_id)
       |> List.length
   in
-  let librarian_runtime_id = Runtime.librarian_runtime_id () in
   let single_runtime_pin = assignment_count > 1 && assigned_runtime_count = 1 in
   let assignments_match_default =
     assignment_count > 0 && default_assignment_count = assignment_count
@@ -1881,13 +1880,12 @@ let runtime_assignment_status_json ~default_id =
     |> add_if (assignment_count > 0) "explicit_assignments_present"
     |> add_if single_runtime_pin "single_runtime_assignment_pin"
     |> add_if assignments_match_default "assignments_match_default_runtime"
-    |> add_if (Option.is_some librarian_runtime_id) "librarian_runtime_override"
     |> List.rev
   in
   let status =
     if warnings = []
     then "ok"
-    else if single_runtime_pin || assignments_match_default || Option.is_some librarian_runtime_id
+    else if single_runtime_pin || assignments_match_default
     then "degraded"
     else "watch"
   in
@@ -1908,7 +1906,6 @@ let runtime_assignment_status_json ~default_id =
     ; "assigned_runtime_count", `Int assigned_runtime_count
     ; "default_assignment_count", `Int default_assignment_count
     ; "default_runtime_id", Json_util.string_opt_to_json default_id
-    ; "librarian_runtime_id", Json_util.string_opt_to_json librarian_runtime_id
     ; "warnings", Json_util.json_string_list warnings
     ; "assigned_runtimes", Json_util.json_string_list assigned_runtimes
     ; ( "assignments"

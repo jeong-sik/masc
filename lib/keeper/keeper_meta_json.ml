@@ -25,7 +25,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "multimodal_policy", `String (multimodal_policy_to_string m.multimodal_policy)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "generation", `Int rt.generation
+    ; "generation", `Int rt.nonce
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
     ; "updated_at", `String m.updated_at
@@ -81,12 +81,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.last_runtime_attempt with
         | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
-    ; ( "last_turn_tool_calls"
-      , `List
-          (List.map
-             (fun (s : Keeper_meta_contract.tool_call_summary) ->
-                `Assoc [ ("tool_name", `String s.tool_name); ("outcome", `String s.outcome) ])
-             rt.last_turn_tool_calls) )
     ; "paused", `Bool m.paused
     ; ( "latched_reason"
       , match m.latched_reason with

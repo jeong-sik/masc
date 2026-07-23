@@ -614,21 +614,21 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
         | Ok state -> state
         | Error detail -> fail detail
       in
-      let generation = entry.meta.runtime.generation in
+      let generation = entry.meta.runtime.nonce in
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
         { source =
             (match Keeper_registry_event_queue.lease_stimuli lease with
              | [ source ] -> source
              | _ -> fail "schedule cancellation lease did not retain one source")
         ; source_revision = Keeper_event_queue_state.revision claimed_state
-        ; owner_generation = generation
+        ; owner_nonce = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
         }
       in
       let cancelled_state, cancellation_result =
         Keeper_event_queue_state.cancel_accepted
-          ~current_owner_generation:generation
+          ~current_owner_nonce:generation
           ~settled_at:203.0
           ~lease
           ~cancellation

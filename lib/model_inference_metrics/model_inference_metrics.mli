@@ -172,7 +172,8 @@ val render_keeper_prompt_feedback : aggregate -> string
 (** Render a compact, redacted telemetry block for opt-in keeper prompt
     feedback. Returns the empty string when the aggregate has no entries.
     Provider/model identities are represented as stable runtime-lane labels
-    rather than concrete provider or model names. *)
+    rather than concrete provider or model names. Billing and pricing values
+    are observation-only and are never included in this planning input. *)
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
     whose [provider] matches. Feeds the runtime health surface (removed)'s

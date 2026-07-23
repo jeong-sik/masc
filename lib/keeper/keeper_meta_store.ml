@@ -410,6 +410,11 @@ let retired_keeper_meta_key_names =
   [ (* #23929 continuity purge left these behind in .masc/keepers/ *)
     "last_continuity_update_ts"
   ; "continuity_summary"
+    (* Dropped with [tool_call_summary]: both codec sides stopped knowing it in
+       the same change, and all 16 live keeper metas carry the key, so without
+       this entry every read of every existing file would warn and increment
+       MetaJsonFailures(site=unknown_keys) indefinitely. *)
+  ; "last_turn_tool_calls"
   ]
 ;;
 
@@ -681,7 +686,7 @@ let update_meta_if_identity
            | Ok (Some latest) ->
              if
                not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-               || not (Int.equal latest.runtime.generation generation)
+               || not (Int.equal latest.runtime.nonce generation)
              then Error Identity_changed
              else
                let caller = update latest in
@@ -729,7 +734,7 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
            | Ok (Some latest) ->
              if
                not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-               || not (Int.equal latest.runtime.generation generation)
+               || not (Int.equal latest.runtime.nonce generation)
              then Error Remove_identity_changed
              else
                try
@@ -765,7 +770,7 @@ let exact_identity_error_to_string = function
 let validate_exact_identity ~trace_id ~generation ~meta_version latest =
   if
     not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-    || not (Int.equal latest.runtime.generation generation)
+    || not (Int.equal latest.runtime.nonce generation)
   then Error Exact_identity_changed
   else if not (Int.equal latest.meta_version meta_version)
   then

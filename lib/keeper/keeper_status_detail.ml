@@ -476,7 +476,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            if include_metrics_overview then
              summarize_metrics_lines
                metrics_window_lines
-               ~default_generation:m.runtime.generation
+               ~default_generation:m.runtime.nonce
            else
              empty_metrics_summary
          in
@@ -671,7 +671,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                            ("ts_unix", `Float ts_unix);
                            ("age_s", Json_util.float_opt_to_json age_s);
                            ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
-                           ("generation", `Int (Safe_ops.json_int ~default:m.runtime.generation "generation" j));
+                           ("generation", `Int (Safe_ops.json_int ~default:m.runtime.nonce "generation" j));
                            ("context_before_tokens", `Int before_tokens);
                            ("context_after_tokens", `Int after_tokens);
                            ("context_saved_tokens", `Int saved_tokens);

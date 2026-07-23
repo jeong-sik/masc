@@ -49,7 +49,7 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
                     Keeper_latched_reason.operator_actor_grpc_directive
                 })
          else None)
-    ; runtime = { meta.runtime with generation }
+    ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
     }
   in
   Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
@@ -115,8 +115,8 @@ let with_transfer_lane f =
        let request : Transaction.request =
          { source
          ; source_revision
-         ; owner_generation = source_meta.runtime.generation
-         ; target_generation = target_meta.runtime.generation
+         ; owner_nonce = source_meta.runtime.nonce
+         ; target_generation = target_meta.runtime.nonce
          ; continuation_binding = Receipt.Routed channel
          ; operator_operation_id = "operator-transfer-1"
          ; settled_at = 3.0
@@ -264,7 +264,7 @@ let test_replay_after_source_settlement_projects_target () =
     let receipt : Receipt.t =
       { keeper_name = from_keeper
       ; expected_trace_id = source_meta.runtime.trace_id
-      ; expected_generation = request.owner_generation
+      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 2.0
       ; operation = Receipt.Transfer_owner transfer
@@ -280,7 +280,7 @@ let test_replay_after_source_settlement_projects_target () =
     let causal : Keeper_registry_event_queue.accepted_transfer =
       { source = request.source
       ; source_revision = request.source_revision
-      ; owner_generation = request.owner_generation
+      ; owner_nonce = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; from_keeper
       ; to_keeper
@@ -291,7 +291,7 @@ let test_replay_after_source_settlement_projects_target () =
       (Keeper_registry_event_queue.transfer_pending_accepted_result
          ~base_path:config.Workspace.base_path
          from_keeper
-         ~current_owner_generation:request.owner_generation
+         ~current_owner_nonce:request.owner_nonce
          ~settled_at:request.settled_at
          ~transfer:causal
        |> require_ok "simulate committed source settlement");

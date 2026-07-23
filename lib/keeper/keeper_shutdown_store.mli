@@ -64,10 +64,10 @@ val path :
   (string, error) result
 
 val to_json : Keeper_shutdown_types.t -> Yojson.Safe.t
-(** Decode the current schema and deterministically upgrade schema 5 blocked
-    records, schema 4 lifecycle records, and schema 3 shutdown records emitted
-    by preceding deployments. Unknown versions remain explicit decode
-    failures. *)
+(** Decode the current schema and deterministically upgrade schema 6
+    supersession records, schema 5 blocked records, schema 4 lifecycle
+    records, and schema 3 shutdown records emitted by preceding deployments.
+    Unknown versions remain explicit decode failures. *)
 val of_json : Yojson.Safe.t -> (Keeper_shutdown_types.t, error) result
 
 val persist_new :

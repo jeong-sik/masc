@@ -129,10 +129,15 @@ let record_keeper_tool_duration_bucket ~labels duration_seconds =
     tool_call_duration_bucket_bounds;
   emit_bucket "+Inf" ~increment:true
 
+(* Cost-only usage (all token counters zero, only cost_usd set) is not
+   usage evidence: [usage_reported] delegates to [usage_has_tokens] so a
+   cost-only turn classifies as [Usage_missing] — consistent with
+   [Keeper_hooks_oas.usage_missing_of_usage] — instead of producing the
+   contradictory pair usage_trust=trusted + usage_missing=true. *)
 let classify_usage_trust ?usage () =
   let usage_reported, usage =
     match usage with
-    | Some usage -> true, usage
+    | Some usage -> usage_has_tokens usage, usage
     | None -> false, zero_usage
   in
   Keeper_usage_trust.classify ~usage_reported ~usage

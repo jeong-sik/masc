@@ -60,6 +60,10 @@ type binding_store_error =
 
 type audit_append_error =
   | Audit_append_failed of Fs_compat.private_jsonl_append_error
+  | Audit_append_failed_with_cleanup of {
+      error : Fs_compat.private_jsonl_append_error;
+      cleanup_failure : Fs_compat.private_jsonl_operation_failure;
+    }
   | Audit_io_failed of string
 
 type mutation_error =
@@ -95,6 +99,11 @@ let binding_store_error_to_string = function
 
 let audit_append_error_to_string = function
   | Audit_append_failed error -> Fs_compat.private_jsonl_append_error_to_string error
+  | Audit_append_failed_with_cleanup { error; cleanup_failure } ->
+    Printf.sprintf
+      "%s; descriptor settlement failed: %s"
+      (Fs_compat.private_jsonl_append_error_to_string error)
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   | Audit_io_failed detail -> detail
 
 let mutation_error_to_string = function
@@ -274,8 +283,18 @@ let append_audit_event_result store event =
   let path = store.binding_audit_path () in
   let suffix = Yojson.Safe.to_string (audit_event_json store event) ^ "\n" in
   try
-    Fs_compat.append_private_jsonl_durable_locked_result path suffix
-    |> Result.map_error (fun error -> Audit_append_failed error)
+    match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+    | Private_file_succeeded () -> Ok ()
+    | Private_file_succeeded_with_cleanup_failure
+        { value = (); cleanup_failure } ->
+      Log.Gate.error
+        "binding audit append succeeded with descriptor settlement failure path=%s: %s"
+        path
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      Ok ()
+    | Private_file_failed error -> Error (Audit_append_failed error)
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Error (Audit_append_failed_with_cleanup { error; cleanup_failure })
   with
   | Sys_error detail -> Error (Audit_io_failed detail)
   | Unix.Unix_error (code, fn, arg) ->

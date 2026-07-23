@@ -213,17 +213,21 @@ let text (signal : Board_dispatch.board_signal) =
 
 let address_text (signal : Board_dispatch.board_signal) =
   match signal.kind with
-  | Board_dispatch.Board_post_created -> text signal
+  | Board_dispatch.Board_post_created ->
+    String.concat
+      "\n"
+      (List.filter
+         (fun part -> not (String.equal (String.trim part) ""))
+         [ signal.title; signal.content ])
   | Board_dispatch.Board_comment_added -> signal.content
   | Board_dispatch.Board_reaction_changed _ -> ""
 ;;
 
 let mention_ids_of_signal signal =
-  (* Board dispatch still carries textual Board content. Convert that boundary
-     payload exactly once into canonical Keeper ids and compare only those typed
-     identities below. This deliberately replaces substring matching; tokens
-     such as [@foo-extra] and [email@foo.example] cannot address [foo]. *)
-  Keeper_lane_mentions.mention_ids_of_content (address_text signal)
+  Board.direct_targets_of_text (address_text signal)
+  |> List.filter_map (fun target ->
+    Board.Agent_id.to_string target |> Keeper_identity.Keeper_id.of_string)
+  |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
 let match_signal

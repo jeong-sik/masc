@@ -133,6 +133,7 @@ let test_invalid_plan_is_distinct_from_before_dispatch_failure () =
         Compact_policy.compact_for_request_typed
           ~meta
           ~trigger:Compaction_trigger.Manual
+          ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
           context
         |> fun preparation -> preparation.Compact_policy.decision
       in

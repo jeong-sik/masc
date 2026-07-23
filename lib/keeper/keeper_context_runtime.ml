@@ -265,7 +265,7 @@ let dispatch_post_turn_lifecycle_events
         ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
-             generation = lifecycle.updated_meta.runtime.generation;
+             generation = lifecycle.updated_meta.runtime.nonce;
              new_trace_id =
                Keeper_id.Trace_id.to_string
                  lifecycle.updated_meta.runtime.trace_id;

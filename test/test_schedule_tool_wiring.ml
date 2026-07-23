@@ -118,8 +118,14 @@ let test_flat_tool_surface () =
     Tool_catalog_surfaces.public_schedule_surface_tools;
   check (list string) "keeper schedule surface" names
     Tool_catalog_surfaces.keeper_schedule_surface_tools;
+  check (list string) "schedule surface" names
+    Tool_catalog_surfaces.schedule_surface_tools;
   List.iter
     (fun name ->
+       check bool ("tool_inventory includes: " ^ name) true
+         (List.exists
+            (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+            Config.raw_all_tool_schemas);
        check bool ("schema registered: " ^ name) true
          (List.exists
             (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)

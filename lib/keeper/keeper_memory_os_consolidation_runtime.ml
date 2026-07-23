@@ -71,20 +71,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
     | Some n when n > 0 -> Some n
     | Some _ | None -> Some consolidation_max_tokens
   in
-  { provider_cfg with
-    Llm_provider.Provider_config.max_tokens
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
-    (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
-       otherwise spend the whole output budget on thinking and return an
-       empty visible text — observed live on 2026-07-20 as 256 consecutive
-       [Empty_response] outcomes while only trivial 2-fact stores
-       consolidated. *)
-  ; enable_thinking = Some false
-  ; preserve_thinking = Some false
-  ; thinking_budget = None
-  ; clear_thinking = Some true
-  }
+  Keeper_structured_output_schema.for_deterministic_subcall ~max_tokens provider_cfg
   |> Keeper_structured_output_schema.without_response_format
 ;;
 

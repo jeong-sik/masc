@@ -133,6 +133,7 @@ let run
     Keeper_memory_lane.submit
       ~base_path:config.base_path
       ~keeper_name:meta.name
+      ~lane:Keeper_memory_lane.Deterministic
       det_write_series
   in
   (match memory_extraction_record with
@@ -141,6 +142,7 @@ let run
        Keeper_memory_lane.submit
          ~base_path:config.base_path
          ~keeper_name:meta.name
+         ~lane:Keeper_memory_lane.Librarian
          librarian_series
      in
      ()

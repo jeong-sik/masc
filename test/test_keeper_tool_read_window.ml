@@ -15,6 +15,21 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 
+(* [Keeper_tool_filesystem_runtime.handle_read_file] (the bare
+   string-returning wrapper) was retired: it had zero production callers
+   ([keeper_tool_runtime.ml] calls [handle_read_file_with_outcome]
+   directly). This test-local shim reproduces its [.raw_output] projection
+   so the assertions below keep exercising the real production entry
+   point. *)
+let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
+  (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~args)
+    .raw_output
+;;
+
 let temp_dir () =
   let d = Filename.temp_file "keeper-read-window-" "" in
   Unix.unlink d;
@@ -165,7 +180,7 @@ let numbered_lines n =
 ;;
 
 let read ~config ~meta args =
-  Keeper_tool_filesystem_runtime.handle_read_file
+  handle_read_file
     ~turn_sandbox_factory:None
     ~config
     ~meta

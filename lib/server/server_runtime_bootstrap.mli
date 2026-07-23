@@ -38,45 +38,6 @@ val configure_oas_model_catalog_overlay :
     unreadable or invalid overlay raises [Env_config_core.Config_error]
     (fail-loud at boot, same as the full-catalog path). *)
 
-val compaction_exact_lane_id : string
-(** Lane id the compaction summarizer resolves by name; every published
-    exact-output registry must carry it. *)
-
-val backfill_required_exact_output_lanes
-  :  seed_lanes:Runtime_schema.exact_output_lane_decl list
-  -> Runtime_schema.exact_output_lane_decl list
-  -> Runtime_schema.exact_output_lane_decl list * bool
-(** Append the seed {!compaction_exact_lane_id} declaration when the operator
-    config does not declare the lane (legacy runtime.toml from before
-    [runtime.exact_output_lanes] existed). Returns the effective lane list and
-    whether a backfill happened. Operator declarations always win. *)
-
-val merge_catalog_overlay_toml
-  :  base_contents:string
-  -> overlay_contents:string
-  -> (string, string) result
-(** Deep-merge two TOML catalog documents: tables merge recursively, table
-    arrays ([[providers]]/[[models]]/[[targets]]) union with overlay rows
-    replacing same-identity base rows (provider/target [id], model
-    [id_prefix]+[provider_name]), scalars take the overlay value. Used to fold
-    an [OAS_MODEL_CATALOG] full replacement (base) and the config-root
-    deployment overlay into the single overlay document
-    [Exact_output.load_resolver_snapshot] accepts. *)
-
-val exact_output_resolver_overlay
-  :  ?config_root:string
-  -> ?env:(string -> string option)
-  -> unit
-  -> Agent_sdk.Exact_output.catalog_overlay option * string
-(** Resolve the catalog document the exact-output resolver loads on top of the
-    OAS embedded catalog, plus a human-readable description for the boot log.
-    Without [OAS_MODEL_CATALOG] this is the config-root
-    [oas-models-overlay.toml] (or [None]); with it, the full replacement is
-    folded in ahead of the deployment overlay via
-    {!merge_catalog_overlay_toml}, so exact-output resolution sees the same
-    catalog source runtime routing installed through
-    {!configure_oas_model_catalog_env}. *)
-
 (** {1 Runtime Context}
 
     Extracts Eio resources from the standard environment.

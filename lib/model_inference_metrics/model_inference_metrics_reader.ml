@@ -168,8 +168,8 @@ let usage_signal_present (entry : raw_entry) : bool =
   entry.input_tokens <> None
   || entry.output_tokens <> None
   || entry.cache_read_tokens <> None
+  || entry.cache_creation_tokens <> None
   || entry.reasoning_tokens <> None
-  || entry.cost_usd <> None
 ;;
 
 let telemetry_signal_present (entry : raw_entry) : bool =

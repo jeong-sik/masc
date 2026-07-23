@@ -145,10 +145,7 @@ type t =
 val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
-val keeper_model_projection_to_string : keeper_model_projection -> string
-val model_description_projection_to_string : model_description_projection -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
-val input_schema_source_to_string : input_schema_source -> string
 val runtime_handler_to_string : runtime_handler -> string
 
 (** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut).
@@ -156,15 +153,12 @@ val runtime_handler_to_string : runtime_handler -> string
     [public_aliases] that reuse the same schema/translation/runtime. *)
 val public_descriptors : t list
 
-(** [internal_descriptors] is the descriptor-backed workspace surface
-    (RFC-0179). Starts empty; each cluster migration PR adds entries that map
-    [keeper_*] / [masc_*] workspace tools to a typed handler. Not part of
-    the LLM-native public-name contract. *)
-val internal_descriptors : t list
-
-(** [all_descriptors ()] is [public_descriptors @ internal_descriptors]. The
-    runtime dispatcher walks this list to resolve [internal_name] for any
-    descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
+(** [all_descriptors ()] is [public_descriptors] plus the module-private
+    descriptor-backed workspace surface (RFC-0179; [keeper_*] / [masc_*]
+    workspace tools mapped to a typed handler, not part of the LLM-native
+    public-name contract). The runtime dispatcher walks this list to
+    resolve [internal_name] for any descriptor-backed tool, regardless of
+    LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
 (** Objective schema-shape errors that prevent model projection. Empty means
@@ -214,19 +208,11 @@ val readonly_internal_names : unit -> string list
     MASC tools safe for keeper use without an MCP session context. *)
 val keeper_safe_inline_names : unit -> string list
 
-(** Descriptor-owned projection for read-only tools whose legitimate progress
-    is polling a prior async request rather than taking a new snapshot. *)
-val polling_read_internal_names : unit -> string list
-
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
-val receipt_labels_json : t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t
 
 (** Read-only discovery projection for capability introspection surfaces.
     Keeps executor, policy, schema-shape, and curated typed examples attached
     to the descriptor that owns the runtime route. *)
 val discovery_fields : t -> (string * Yojson.Safe.t) list
-
-(** Object wrapper for {!discovery_fields}. *)
-val discovery_json : t -> Yojson.Safe.t

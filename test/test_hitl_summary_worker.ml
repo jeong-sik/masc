@@ -654,9 +654,9 @@ let test_cancellation_after_dispatch_is_terminal () =
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
 ;;
 
-let test_unknown_callback_exception_preserves_owner_barrier () =
+let test_visible_uncertainty_withholds_production_drain () =
   run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-unknown" @@ fun base_path ->
+  with_temp_dir "hitl-uncertain-lifecycle" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
@@ -671,49 +671,58 @@ let test_unknown_callback_exception_preserves_owner_barrier () =
            (F.Reply (F.openai_response (judgment_json "approve")))
        in
        publish_lane
-         [ "hitl-unknown" ]
+         [ "hitl-uncertain-lifecycle" ]
          (F.resolver_snapshot
-            ~source:"hitl-unknown"
-            [ { id = "hitl-unknown"; base_url = server.base_url } ]);
+            ~source:"hitl-uncertain-lifecycle"
+            [ { id = "hitl-uncertain-lifecycle"; base_url = server.base_url } ]);
        select_auto_judge_mode base_path;
-       let failed = pending_entry ~input_tag:"failed" ~base_path in
+       let uncertain = pending_entry ~input_tag:"uncertain" ~base_path in
        let successor = pending_entry ~input_tag:"successor" ~base_path in
-       let independent =
-         pending_entry
-           ~input_tag:"independent"
-           ~keeper_name:"other-keeper"
-           ~base_path
+       let mono_clock =
+         match Eio_context.get_mono_clock_opt () with
+         | Some mono_clock -> mono_clock
+         | None -> fail "test monotonic clock is unavailable"
+       in
+       let supervisor_observed_uncertainty =
+         match
+           Eio.Switch.run
+           @@ fun worker_sw ->
+           Eio_context.with_test_env
+             ~net
+             ~clock
+             ~mono_clock
+             ~sw:worker_sw
+           @@ fun () ->
+           (match
+              Gate.For_testing.spawn_auto_judge_entry_with_worker
+                ~spawn_worker:
+                  (Worker.For_testing.spawn_with_writers
+                     ~complete_writer:visible_after_rename_writer)
+                uncertain
+            with
+            | Ok true -> ()
+            | Ok false -> fail "production Gate chain did not claim oldest work"
+            | Error detail -> fail detail);
+           Eio.Time.sleep clock 0.2;
+           false
+         with
+         | exception Worker.Exact_terminalization_persistence_failed _ -> true
+         | observed -> observed
        in
        check bool
-         "first owner work claimed"
+         "typed persistence uncertainty reached the worker supervisor"
          true
-         (Gate.For_testing.claim_auto_judge failed);
-       Eio.Fiber.fork ~sw (fun () ->
-         Fun.protect
-           ~finally:(fun () ->
-             Gate.For_testing.release_auto_judge failed;
-             ignore (Gate.resume_persisted_auto_judges ~base_path))
-           (fun () ->
-              Worker.For_testing.execute_prepared_flow_with_writers
-                ~bind_writer:unknown_writer
-                ~net
-                ~clock
-                ~on_summary:(fun _ ->
-                  fail "unknown callback delivered a summary")
-                (prepare_exn failed)));
-       F.await_first_request server;
-       check int
-         "only the independent owner dispatches"
-         1
-         (F.post_count server);
-       (match Q.get_pending_entry ~id:failed.id with
+         supervisor_observed_uncertainty;
+       check int "only the uncertain entry dispatched" 1 (F.post_count server);
+       (match Q.get_pending_entry ~id:uncertain.id with
        | Some
-           { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_failed { retryable = false; _ }
+           { exact_attempt =
+               Q.Exact_bound { status = Q.Exact_completed; _ }
+           ; summary_status = Q.Summary_available _
            ; _
            } ->
          ()
-       | _ -> fail "unknown callback exception did not require operator recovery");
+       | _ -> fail "uncertain completion did not remain durably visible");
        (match Q.get_pending_entry ~id:successor.id with
         | Some
             { exact_attempt = Q.Exact_unbound
@@ -721,16 +730,12 @@ let test_unknown_callback_exception_preserves_owner_barrier () =
             ; _
             } ->
           ()
-        | _ -> fail "durable failed predecessor did not block its owner FIFO");
-       await_condition
-         ~clock
-         ~remaining:100
-         ~failure:"independent owner did not complete after peer owner failure"
-         (fun () -> Option.is_none (Q.get_pending_entry ~id:independent.id));
-       check int
-         "root survived without dispatching the blocked successor"
-         1
-         (F.post_count server))
+        | _ -> fail "uncertainty lifecycle dispatched the same-owner successor");
+       check bool
+         "uncertain lifecycle released the active-owner claim"
+         true
+         (Gate.For_testing.claim_auto_judge successor);
+       Gate.For_testing.release_auto_judge successor)
 ;;
 
 let test_owner_fifo_atomic_drain_is_nonsharing () =
@@ -867,9 +872,9 @@ let () =
             `Quick
             test_cancellation_after_dispatch_is_terminal
         ; test_case
-            "unknown callback preserves owner barrier"
+            "visible uncertainty withholds production drain"
             `Quick
-            test_unknown_callback_exception_preserves_owner_barrier
+            test_visible_uncertainty_withholds_production_drain
         ; test_case
             "owner FIFO atomic drain is non-sharing"
             `Quick

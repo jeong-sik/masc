@@ -748,7 +748,14 @@ type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
 
-let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_finish () =
+let spawn_with
+      ~queue_writers
+      ~sw
+      ~(entry : pending_approval)
+      ~on_summary
+      ~on_finish
+      ()
+  =
   let* net =
     Eio_context.get_net_opt ()
     |> Option.to_result
@@ -757,7 +764,14 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_finish () =
   let* prepared = prepare_flow ~entry in
   let clock = Eio_context.get_clock_opt () in
   Eio.Fiber.fork ~sw (fun () ->
-    match execute_prepared_flow ~net ?clock ~on_summary prepared with
+    match
+      execute_prepared_flow_with_queue_writers
+        ~queue_writers
+        ~net
+        ?clock
+        ~on_summary
+        prepared
+    with
     | () -> on_finish Conclusive_terminalization
     | exception Eio.Cancel.Cancelled _ as cancellation ->
       on_finish Conclusive_terminalization;
@@ -769,6 +783,10 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_finish () =
       on_finish Terminalization_persistence_uncertain;
       raise exn);
   Ok ()
+;;
+
+let spawn =
+  spawn_with ~queue_writers:production_exact_queue_writers
 ;;
 
 module For_testing = struct
@@ -793,12 +811,33 @@ module For_testing = struct
         ~on_summary
         prepared
     =
+    let queue_writers = { bind_writer; release_writer; complete_writer } in
     execute_prepared_flow_with_queue_writers
-      ~queue_writers:{ bind_writer; release_writer; complete_writer }
+      ~queue_writers
       ~net
       ?clock
       ~on_summary
       prepared
+  ;;
+
+  let spawn_with_writers
+        ?bind_writer
+        ?release_writer
+        ?complete_writer
+        ~sw
+        ~entry
+        ~on_summary
+        ~on_finish
+        ()
+    =
+    let queue_writers = { bind_writer; release_writer; complete_writer } in
+    spawn_with
+      ~queue_writers
+      ~sw
+      ~entry
+      ~on_summary
+      ~on_finish
+      ()
   ;;
 
   let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt

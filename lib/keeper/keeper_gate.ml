@@ -410,7 +410,16 @@ type auto_judge_drain_outcome =
   ; failures : (string * string) list
   }
 
-let rec spawn_claimed_auto_judge_entry
+type hitl_worker_spawner =
+  sw:Eio.Switch.t ->
+  entry:Keeper_approval_queue.pending_approval ->
+  on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
+  on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
+  unit ->
+  (unit, string) result
+
+let rec spawn_claimed_auto_judge_entry_with
+      ~(spawn_worker : hitl_worker_spawner)
       (entry : Keeper_approval_queue.pending_approval)
   =
   let approval_id = entry.id in
@@ -454,7 +463,7 @@ let rec spawn_claimed_auto_judge_entry
   | Some sw ->
     (try
        match
-         Hitl_summary_worker.spawn
+         spawn_worker
            ~sw
            ~entry
            ~on_summary
@@ -491,10 +500,23 @@ let rec spawn_claimed_auto_judge_entry
       ~reason:"Auto Judge unavailable: server root switch is not installed"
       ~retryable:true
 
-and spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and spawn_claimed_auto_judge_entry entry =
+  spawn_claimed_auto_judge_entry_with
+    ~spawn_worker:Hitl_summary_worker.spawn
+    entry
+
+and spawn_auto_judge_entry_with
+      ~(spawn_worker : hitl_worker_spawner)
+      (entry : Keeper_approval_queue.pending_approval)
+  =
   if claim_auto_judge entry
-  then spawn_claimed_auto_judge_entry entry
+  then spawn_claimed_auto_judge_entry_with ~spawn_worker entry
   else Ok Skipped
+
+and spawn_auto_judge_entry entry =
+  spawn_auto_judge_entry_with
+    ~spawn_worker:Hitl_summary_worker.spawn
+    entry
 
 and retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
@@ -1064,6 +1086,15 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
+
+  type nonrec hitl_worker_spawner = hitl_worker_spawner
+
+  let spawn_auto_judge_entry_with_worker ~spawn_worker entry =
+    match spawn_auto_judge_entry_with ~spawn_worker entry with
+    | Ok Started -> Ok true
+    | Ok Skipped -> Ok false
+    | Error reason -> Error reason
+  ;;
 
   let resume_persisted_auto_judges_with_exact_completion =
     resume_persisted_auto_judges_with

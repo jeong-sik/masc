@@ -78,6 +78,19 @@ module For_testing : sig
   (** The same production callbacks with only the queue's strict atomic writer
       replaced, so durability-uncertainty tests exercise the real OAS flow. *)
 
+  val spawn_with_writers
+    :  ?bind_writer:strict_snapshot_writer
+    -> ?release_writer:strict_snapshot_writer
+    -> ?complete_writer:strict_snapshot_writer
+    -> sw:Eio.Switch.t
+    -> entry:Keeper_approval_queue.pending_approval
+    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> on_finish:(finish_outcome -> unit)
+    -> unit
+    -> (unit, string) result
+  (** Dependency injection over the same [spawn_with] lifecycle used by
+      production [spawn]; only strict queue writers differ. *)
+
   val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
   val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
   val summary_version : int

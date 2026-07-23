@@ -153,6 +153,21 @@ module For_testing : sig
   val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
   val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
 
+  type hitl_worker_spawner =
+    sw:Eio.Switch.t ->
+    entry:Keeper_approval_queue.pending_approval ->
+    on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
+    on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
+    unit ->
+    (unit, string) result
+
+  val spawn_auto_judge_entry_with_worker
+    :  spawn_worker:hitl_worker_spawner
+    -> Keeper_approval_queue.pending_approval
+    -> (bool, string) result
+  (** Run the production atomic claim, active-owner lifecycle, cleanup, and
+      conclusive-only drain with only the worker spawner injected. *)
+
   val resume_persisted_auto_judges_with_exact_completion :
     complete_summary_exact_attempt:exact_completion ->
     base_path:string ->

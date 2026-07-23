@@ -23,12 +23,29 @@ type in_lane_compaction =
   | Compaction_committed
   | Compaction_attempt_failed of { reason : string }
 
+type exact_output_terminal_reason =
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+
 type source_lease_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
   | Acknowledge_after_in_turn_handling
+
+let source_lease_disposition_after_no_compaction = function
+  | Keeper_event_queue_state.Execution_may_have_dispatched ->
+    Escalate_after_exact_output_terminal Execution_may_have_dispatched
+  | Keeper_event_queue_state.Domain_invalid_output ->
+    Escalate_after_exact_output_terminal Domain_invalid_output
+  | ( Keeper_event_queue_state.No_eligible_history
+    | Keeper_event_queue_state.Invalid_structural_source
+    | Keeper_event_queue_state.Structurally_unchanged
+    | Keeper_event_queue_state.Checkpoint_not_reduced ) as reason ->
+    Follow_failure_route_after_no_compaction { reason }
+;;
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
@@ -297,7 +314,6 @@ let append_provider_overflow_manifest
         ~turn_state
         ~site:"provider_overflow_compaction"
         ~status
-        ~runtime_id:evidence.selected_runtime_id
         ~compaction_source:"provider_overflow"
         ~checkpoint_path
         ~decision:
@@ -319,20 +335,18 @@ let append_provider_overflow_manifest
   | Not_provider_overflow -> Follow_failure_route, turn_state
   | Provider_overflow_no_compaction no_compaction ->
     Log.Keeper.info
-      "provider overflow compaction made no progress; preserving the source failure route trace_id=%s generation=%d turn_count=%d reason=%s"
+      "provider overflow compaction reached a typed no-compaction terminal trace_id=%s generation=%d turn_count=%d reason=%s"
       (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
       no_compaction.source.generation
       no_compaction.source.turn_count
       (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
     (* [No_compaction] is terminal evidence for an explicit manual-compaction
        operation, not successful handling of the product event whose provider
-       turn overflowed. Preserve the typed context-overflow route so the
-       owning source lease is escalated instead of silently consumed — but
-       carry the terminal reason so the settlement can advance the
-       compaction-failure streak: a context that cannot shrink re-overflows
-       deterministically, so unbounded route retries burn one summarizer LLM
-       call per cycle (RFC-0351 S0, #25461). *)
-    Follow_failure_route_after_no_compaction { reason = no_compaction.reason },
+       turn overflowed. Deterministic no-progress reasons preserve the bounded
+       failure route. Effect-boundary and domain-invalid reasons instead become
+       an immediate typed escalation: replaying the source could issue a second
+       exact-output request after dispatch. *)
+    source_lease_disposition_after_no_compaction no_compaction.reason,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =

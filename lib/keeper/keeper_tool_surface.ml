@@ -124,7 +124,8 @@ let compaction_recovery_error_data ?dispatch_error error =
     match error with
     | Keeper_post_turn.Checkpoint_ref_load_failed
         Keeper_checkpoint_store.Ref_not_found -> Not_found
-    | Compaction_rejected Runtime_identity_unavailable
+    | Compaction_rejected Exact_target_selection_failed
+    | Compaction_rejected Exact_admission_failed
     | Compaction_rejected (Invalid_structure _)
     | Compaction_rejected No_eligible_history
     | Compaction_rejected Structurally_unchanged
@@ -132,8 +133,9 @@ let compaction_recovery_error_data ?dispatch_error error =
     | No_compaction _ ->
       Precondition_failed
     | Retry_suspended _ -> Precondition_failed
-    | Compaction_rejected Summarizer_unavailable
-    | Compaction_rejected Plan_provider_unavailable
+    | Compaction_rejected Exact_execution_context_unavailable
+    | Compaction_rejected Exact_execution_failed_before_dispatch
+    | Compaction_rejected Exact_execution_failed_after_dispatch
     | Compaction_rejected Invalid_compaction_plan
     | Compaction_rejected (Invalid_structural_evidence _)
     | Checkpoint_ref_load_failed _

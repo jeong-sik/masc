@@ -62,37 +62,6 @@ let test_bulk_resume_requires_per_owner_targets () =
     parsed
 ;;
 
-let test_legacy_owner_generation_key_is_accepted () =
-  (* Regression (#25599): pre-rename dashboard clients send the fencing counter
-     as ["owner_generation"]. During the deprecation window both keys are
-     accepted; the new ["owner_nonce"] key wins when a request carries both. *)
-  let legacy =
-    Surface.parse_resume_request
-      (`Assoc
-         [ "action", `String "resume"
-         ; "owner_generation", `Int 7
-         ; "operator_operation_id", `String "dashboard-resume-legacy-7"
-         ])
-    |> require_ok "parse legacy-key Resume_owner"
-  in
-  check (pair int string) "legacy key fences" (7, "dashboard-resume-legacy-7") legacy;
-  let both_keys =
-    Surface.parse_resume_request
-      (`Assoc
-         [ "action", `String "resume"
-         ; "owner_generation", `Int 99
-         ; "owner_nonce", `Int 7
-         ; "operator_operation_id", `String "dashboard-resume-both-7"
-         ])
-    |> require_ok "parse both-keys Resume_owner"
-  in
-  check
-    (pair int string)
-    "owner_nonce wins over legacy owner_generation"
-    (7, "dashboard-resume-both-7")
-    both_keys
-;;
-
 let () =
   run
     "keeper paused-work resume surface"
@@ -105,10 +74,6 @@ let () =
             "bulk requires per-owner targets"
             `Quick
             test_bulk_resume_requires_per_owner_targets
-        ; test_case
-            "legacy owner_generation key is accepted"
-            `Quick
-            test_legacy_owner_generation_key_is_accepted
         ] )
     ]
 ;;

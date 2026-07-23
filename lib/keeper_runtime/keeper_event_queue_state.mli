@@ -8,7 +8,6 @@
 type lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason =
   | Cycle_busy
@@ -252,11 +251,6 @@ val claim_when :
 val claim_board : claimed_at:float -> t -> (t * lease option, string) result
 (** Lease every pending board stimulus as one ordered digest. *)
 
-val add_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result
-(** Migration/test compatibility boundary.  Adds one lease for legacy
-    [event-queue-inflight.json] rows and removes matching pending identities. *)
-
 val settle :
   settled_at:float ->
   lease:lease ->
@@ -427,12 +421,6 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
 
-val release_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> t
-(** Compatibility-only projection for the retired split-file API.  Removes
-    matching identities from active leases while leaving pending untouched.
-    New runtime code must settle the opaque lease instead. *)
-
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
@@ -448,5 +436,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v4"]. Strict v3 snapshots are read as the sole
-    supported predecessor and upgraded on their next durable mutation. *)
+(** ["keeper.event_queue.state.v4"]. Only this current schema is accepted.
+    Stale or unknown persisted state fails closed and requires a runtime reset. *)

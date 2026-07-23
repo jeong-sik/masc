@@ -52,12 +52,12 @@ describe('bulkKeeperDirective', () => {
       targets: [
         {
           name: 'rondo',
-          owner_generation: 3,
+          owner_nonce: 3,
           operator_operation_id: 'resume-rondo-1',
         },
         {
           name: 'qa-king',
-          owner_generation: 5,
+          owner_nonce: 5,
           operator_operation_id: 'resume-qa-1',
         },
       ],

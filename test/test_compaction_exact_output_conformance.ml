@@ -1286,6 +1286,8 @@ let test_visible_unknown_quarantine_preserves_cause_and_settles () =
     { cause = Keeper_event_queue_state.Domain_invalid_output
     ; slot_id = observation.slot_id
     ; call_id = observation.call_id
+    ; plan_fingerprint = observation.receipt_plan_fingerprint
+    ; request_body_sha256 = observation.receipt_request_body_sha256
     }
   in
   Alcotest.(check int) "visible quarantine follows one POST" 1 (F.post_count server);

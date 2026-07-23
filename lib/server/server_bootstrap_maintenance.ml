@@ -657,24 +657,16 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                      (Server_runtime_startup_maintenance
                       .prune_flat_jsonl_older_than ~days)
                    (Filename.concat masc "trajectories")
-               (* execution-receipts canonical layout is
-                  keepers/<name>/execution-receipts (dated) — no top-level
-                  writer exists, so prune keeper-scoped only. *)
-               + (let keepers = Filename.concat masc "keepers" in
-                  if not (Sys.file_exists keepers)
-                  then 0
-                  else
-                    Array.fold_left
-                      (fun acc name ->
-                        let keeper_dir = Filename.concat keepers name in
-                        if Sys.is_directory keeper_dir
-                        then
-                          acc
-                          + prune_dir
-                              (Filename.concat keeper_dir "execution-receipts")
-                        else acc)
-                      0
-                      (Sys.readdir keepers))
+               (* Keeper-scoped stores (metrics, crash-events,
+                  execution-receipts) live only under keepers/<name>/ — no
+                  top-level writer exists, so prune keeper-scoped only. The
+                  store list is the SSOT shared with the startup pass; the
+                  inline execution-receipts-only fold this replaced had
+                  already drifted, letting metrics/crash-events accumulate
+                  until restart. *)
+               + Server_runtime_startup_maintenance.prune_keeper_scoped_stores
+                   ~prune_dir
+                   ~masc_root:masc
              in
              if total > 0
              then

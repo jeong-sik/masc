@@ -660,12 +660,8 @@ let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
                (Ref_lock_failed
                   (File_lock_eio.durable_lock_error_to_string error)))))
 
-type prepared_oas_candidate =
-  { canonical_bytes : string
-  ; candidate_ref : Keeper_checkpoint_ref.t
-  }
-
-let prepare_oas_candidate
+let save_oas_if_source
+    ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_sdk.Checkpoint.t) =
   let candidate_bytes =
@@ -697,25 +693,11 @@ let prepare_oas_candidate
          { source_turn = expected_source_ref.turn_count
          ; candidate_turn = candidate_ref.turn_count
          })
-  | Ok candidate_ref -> Ok { canonical_bytes = candidate_bytes; candidate_ref }
-;;
-
-let prepared_oas_candidate_ref prepared = prepared.candidate_ref
-
-let commit_prepared_oas_if_source
-    ~session_dir
-    ~(expected_source_ref : Keeper_checkpoint_ref.t)
-    prepared =
-  let candidate_ref = prepared.candidate_ref in
-  let expected_session_id = expected_source_ref.trace_id in
-  with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
+  | Ok candidate_ref ->
+    let expected_session_id = expected_source_ref.trace_id in
+    with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
       match load_ref_locked ~session_dir ~expected_session_id with
       | Error error -> Error (Source_unavailable error)
-      | Ok snapshot
-        when Keeper_checkpoint_ref.equal
-               candidate_ref
-               (exact_snapshot_reference snapshot) ->
-        Ok candidate_ref
       | Ok snapshot
         when not
                (Keeper_checkpoint_ref.equal
@@ -733,7 +715,7 @@ let commit_prepared_oas_if_source
               Keeper_fs.save_bytes_durable_atomic
                 ~ownership_root
                 canonical_path
-                prepared.canonical_bytes
+                candidate_bytes
             with
             | Error error when error.Keeper_fs.renamed ->
               Error
@@ -749,13 +731,6 @@ let commit_prepared_oas_if_source
                  post-commit read cannot downgrade that committed outcome to
                  a retryable failure. *)
               Ok candidate_ref))
-;;
-
-let save_oas_if_source ~session_dir ~expected_source_ref candidate =
-  match prepare_oas_candidate ~expected_source_ref candidate with
-  | Error _ as error -> error
-  | Ok prepared ->
-    commit_prepared_oas_if_source ~session_dir ~expected_source_ref prepared
 
 let save_oas_classified_typed
     ~(session_dir : string)

@@ -111,12 +111,7 @@ let save_oas_checkpoint_classified
      | Ok outcome -> Ok (checkpoint, outcome)
      | Error error -> Error (Persistence_error error))
 
-type prepared_oas_checkpoint =
-  { checkpoint : Agent_sdk.Checkpoint.t
-  ; candidate : Keeper_checkpoint_store.prepared_oas_candidate
-  }
-
-let prepare_oas_checkpoint_if_source
+let save_oas_checkpoint_if_source
     ~multimodal_policy
     ~keeper_name
     ~session
@@ -137,59 +132,17 @@ let prepare_oas_checkpoint_if_source
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
     (match
-       Keeper_checkpoint_store.prepare_oas_candidate ~expected_source_ref checkpoint
+       Keeper_checkpoint_store.save_oas_if_source
+         ~session_dir:session.session_dir
+         ~expected_source_ref
+         checkpoint
      with
      | Error error -> Error (Persistence_error error)
-     | Ok candidate -> Ok { checkpoint; candidate })
-;;
-
-let prepared_oas_checkpoint_ref prepared =
-  Keeper_checkpoint_store.prepared_oas_candidate_ref prepared.candidate
-;;
-
-let commit_prepared_oas_checkpoint_if_source
-    ~session
-    ~expected_source_ref
-    prepared =
-  match
-    Keeper_checkpoint_store.commit_prepared_oas_if_source
-      ~session_dir:session.session_dir
-      ~expected_source_ref
-      prepared.candidate
-  with
-  | Error error -> Error (Persistence_error error)
-  | Ok installed_ref ->
-    Keeper_checkpoint_store.save_oas_history
-      ~session_dir:session.session_dir
-      prepared.checkpoint;
-    Ok (prepared.checkpoint, installed_ref)
-;;
-
-let save_oas_checkpoint_if_source
-    ~multimodal_policy
-    ~keeper_name
-    ~session
-    ~agent_name
-    ~ctx
-    ~generation
-    ~expected_source_ref
-  =
-  match
-    prepare_oas_checkpoint_if_source
-      ~multimodal_policy
-      ~keeper_name
-      ~session
-      ~agent_name
-      ~ctx
-      ~generation
-      ~expected_source_ref
-  with
-  | Error _ as error -> error
-  | Ok prepared ->
-    commit_prepared_oas_checkpoint_if_source
-      ~session
-      ~expected_source_ref
-      prepared
+     | Ok installed_ref ->
+       Keeper_checkpoint_store.save_oas_history
+         ~session_dir:session.session_dir
+         checkpoint;
+       Ok (checkpoint, installed_ref))
 
 let save_oas_checkpoint
     ~multimodal_policy

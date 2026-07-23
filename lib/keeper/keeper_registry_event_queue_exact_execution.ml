@@ -36,9 +36,6 @@ struct
 
   type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
     | Terminal of exact_execution_terminal_cause
-    | Checkpoint_committed of
-        { intended_ref : Keeper_checkpoint_ref.t
-        }
 
   type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
@@ -46,8 +43,6 @@ struct
     | Dispatch_uncertain
     | Terminal_quarantined of exact_execution_terminal_cause
     | Disposition_prepared of exact_source_disposition
-    | Checkpoint_commit_intent of exact_source_disposition
-    | Checkpoint_commit_observed of exact_source_disposition
   
   type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
     { lease_id : string
@@ -144,22 +139,6 @@ struct
       ~action
       ~semantic
       ~prepared_at
-      ()
-  ;;
-
-  let observe_exact_checkpoint_commit_result
-        ~base_path
-        name
-        ~lease
-        ~disposition_id
-        ~current_ref
-    =
-    Keeper_event_queue_persistence.observe_exact_checkpoint_commit_result
-      ~base_path
-      ~keeper_name:name
-      ~lease
-      ~disposition_id
-      ~current_ref
       ()
   ;;
 

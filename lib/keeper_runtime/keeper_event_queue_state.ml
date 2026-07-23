@@ -52,11 +52,7 @@ type exact_settlement_semantic =
   | Exact_requeue
   | Exact_escalate
 
-type exact_source_outcome =
-  | Terminal of exact_execution_terminal_cause
-  | Checkpoint_committed of
-      { intended_ref : Keeper_checkpoint_ref.t
-      }
+type exact_source_outcome = Terminal of exact_execution_terminal_cause
 
 type exact_source_disposition =
   { disposition_id : string
@@ -75,8 +71,6 @@ type exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
   | Disposition_prepared of exact_source_disposition
-  | Checkpoint_commit_intent of exact_source_disposition
-  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding =
   { lease_id : string
@@ -956,8 +950,6 @@ let checkpoint_ref_identity (reference : Keeper_checkpoint_ref.t) =
 let exact_source_outcome_identity = function
   | Terminal cause ->
     "terminal\000" ^ exact_execution_terminal_cause_label cause
-  | Checkpoint_committed { intended_ref } ->
-    "checkpoint_committed\000" ^ checkpoint_ref_identity intended_ref
 ;;
 
 let exact_source_action_identity = function
@@ -1031,18 +1023,13 @@ let validate_exact_source_disposition
   else if not (String.equal disposition.disposition_id expected_id)
   then Error "exact source disposition id does not match its immutable fields"
   else
-    match disposition.outcome with
-    | Terminal _ -> Ok ()
-    | Checkpoint_committed { intended_ref } ->
-      if
-        not
-          (String.equal
-             (Keeper_id.Trace_id.to_string disposition.source.trace_id)
-             (Keeper_id.Trace_id.to_string intended_ref.trace_id))
-      then Error "exact checkpoint disposition changed trace identity"
-      else if Keeper_checkpoint_ref.equal disposition.source intended_ref
-      then Error "exact checkpoint disposition target must differ from its source"
-      else Ok ()
+    match disposition.outcome, disposition.semantic, disposition.action with
+    | Terminal _, Exact_no_compaction, Consume_source
+    | Terminal _, Exact_escalate, Consume_source ->
+      Ok ()
+    | Terminal _, _, _ ->
+      Error
+        "terminal exact disposition semantic and source action are incoherent"
 ;;
 
 let validate_settlement = function
@@ -1258,11 +1245,7 @@ let validate_bound_settlement binding settlement =
   match binding.status, settlement with
   | Disposition_prepared disposition, Settle_exact requested
     when disposition = requested -> Ok ()
-  | Checkpoint_commit_observed disposition, Settle_exact requested
-    when disposition = requested -> Ok ()
-  | Checkpoint_commit_intent _, Settle_exact _ ->
-    Error "unobserved exact checkpoint disposition cannot be finalized"
-  | (Disposition_prepared _ | Checkpoint_commit_observed _), Settle_exact _ ->
+  | Disposition_prepared _, Settle_exact _ ->
     Error "exact source disposition proof conflicts with its durable binding"
   | Dispatch_uncertain, Ack -> Ok ()
   | Dispatch_uncertain, Requeue Context_compaction_retry -> Ok ()
@@ -1303,7 +1286,7 @@ let validate_bound_settlement binding settlement =
          "quarantined exact execution lease %s call %s requires its matching terminal settlement"
          binding.lease_id
          binding.call_id)
-  | (Disposition_prepared _ | Checkpoint_commit_intent _ | Checkpoint_commit_observed _), _ ->
+  | Disposition_prepared _, _ ->
     Error
       (Printf.sprintf
          "exact execution lease %s call %s requires Settle_exact with its full durable proof"
@@ -1387,9 +1370,7 @@ let bind_exact_execution
             "exact execution lease %s call %s is already terminally quarantined"
             lease.lease_id
             call_id)
-     | Disposition_prepared _
-     | Checkpoint_commit_intent _
-     | Checkpoint_commit_observed _ ->
+     | Disposition_prepared _ ->
        Error
          (Printf.sprintf
             "exact execution lease %s call %s already owns a source disposition"
@@ -1439,12 +1420,7 @@ let release_exact_execution_before_dispatch
          "terminally quarantined exact execution lease cannot be released: %s"
          lease.lease_id)
   | Some
-      { status =
-          ( Disposition_prepared _
-          | Checkpoint_commit_intent _
-          | Checkpoint_commit_observed _ )
-      ; _
-      } ->
+      { status = Disposition_prepared _; _ } ->
     Error
       (Printf.sprintf
          "source-disposition exact execution lease cannot be released: %s"
@@ -1490,21 +1466,11 @@ let quarantine_exact_execution
   | Some { status = Terminal_quarantined _; _ } ->
     Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
   | Some
-      { status =
-          ( Disposition_prepared disposition
-          | Checkpoint_commit_intent disposition
-          | Checkpoint_commit_observed disposition )
-      ; _
-      } ->
+      { status = Disposition_prepared disposition; _ } ->
     (match disposition.outcome with
      | Terminal cause when cause = terminal.cause -> Ok state
      | Terminal _ ->
-       Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
-     | Checkpoint_committed _ ->
-       Error
-         (Printf.sprintf
-            "checkpoint disposition cannot be replaced by terminal quarantine: %s"
-            lease.lease_id))
+       Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id))
 ;;
 
 let prepare_exact_source_disposition
@@ -1577,11 +1543,7 @@ let prepare_exact_source_disposition
       }
     in
     let* () = validate_exact_source_disposition disposition in
-    let prepared_status =
-      match outcome with
-      | Terminal _ -> Disposition_prepared disposition
-      | Checkpoint_committed _ -> Checkpoint_commit_intent disposition
-    in
+    let prepared_status = Disposition_prepared disposition in
     (match binding.status with
      | Dispatch_uncertain ->
        Ok
@@ -1603,15 +1565,8 @@ let prepare_exact_source_disposition
           Error
             (Printf.sprintf
                "exact execution terminal cause conflict: %s"
-               lease.lease_id)
-        | Checkpoint_committed _ ->
-          Error
-            (Printf.sprintf
-               "legacy terminal quarantine cannot become a checkpoint disposition: %s"
                lease.lease_id))
-     | Disposition_prepared existing
-     | Checkpoint_commit_intent existing
-     | Checkpoint_commit_observed existing ->
+     | Disposition_prepared existing ->
        if String.equal existing.disposition_id disposition.disposition_id
        then Ok (state, existing)
        else
@@ -1619,60 +1574,6 @@ let prepare_exact_source_disposition
            (Printf.sprintf
               "exact source disposition conflict: %s"
               lease.lease_id))
-;;
-
-let observe_exact_checkpoint_commit
-      ~(lease : lease)
-      ~disposition_id
-      ~current_ref
-      state
-  =
-  let* () =
-    match committed_lease lease state with
-    | Some committed when lease_equal committed lease -> Ok ()
-    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
-    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
-  in
-  match binding_for_lease lease state with
-  | Some ({ status = Checkpoint_commit_intent disposition; _ } as binding) ->
-    if not (String.equal disposition.disposition_id disposition_id)
-    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
-    else
-      (match disposition.outcome with
-       | Terminal _ ->
-         Error "checkpoint commit intent carries a terminal disposition"
-       | Checkpoint_committed { intended_ref } ->
-         if Keeper_checkpoint_ref.equal current_ref intended_ref
-         then
-           Ok
-             { state with
-               exact_execution_bindings =
-                 [ { binding with status = Checkpoint_commit_observed disposition } ]
-             }
-         else if Keeper_checkpoint_ref.equal current_ref disposition.source
-         then Error "exact checkpoint commit remains at its expected source"
-         else Error "exact checkpoint commit conflicts with a foreign checkpoint")
-  | Some { status = Checkpoint_commit_observed disposition; _ } ->
-    if not (String.equal disposition.disposition_id disposition_id)
-    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
-    else
-      (match disposition.outcome with
-       | Checkpoint_committed { intended_ref }
-         when Keeper_checkpoint_ref.equal current_ref intended_ref ->
-         Ok state
-       | Checkpoint_committed _ ->
-         Error "observed exact checkpoint disposition no longer matches the installed checkpoint"
-       | Terminal _ ->
-         Error "observed checkpoint state carries a terminal disposition")
-  | Some
-      { status =
-          ( Dispatch_uncertain
-          | Terminal_quarantined _
-          | Disposition_prepared _ )
-      ; _
-      } ->
-    Error "exact execution binding has no checkpoint commit intent"
-  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
 ;;
 
 let settle_committed ~settled_at ~lease ~settlement state =
@@ -1810,12 +1711,7 @@ let finalize_exact_source_disposition
       state
   =
   match binding_for_lease lease state with
-  | Some
-      { status =
-          ( Disposition_prepared disposition
-          | Checkpoint_commit_observed disposition )
-      ; _
-      } ->
+  | Some { status = Disposition_prepared disposition; _ } ->
     if not (String.equal disposition.disposition_id disposition_id)
     then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
     else
@@ -1824,8 +1720,6 @@ let finalize_exact_source_disposition
         ~lease
         ~settlement:(Settle_exact disposition)
         state
-  | Some { status = Checkpoint_commit_intent _; _ } ->
-    Error "unobserved exact checkpoint disposition cannot be finalized"
   | Some { status = Dispatch_uncertain; _ } ->
     Error "dispatch-uncertain exact execution has no source disposition"
   | Some { status = Terminal_quarantined _; _ } ->
@@ -2637,14 +2531,10 @@ let checkpoint_source_of_yojson json =
 ;;
 
 let exact_source_disposition_to_yojson disposition =
-  let outcome_kind, terminal_cause, intended_ref =
+  let terminal_cause =
     match disposition.outcome with
     | Terminal cause ->
-      ( "terminal"
-      , `String (exact_execution_terminal_cause_label cause)
-      , `Null )
-    | Checkpoint_committed { intended_ref } ->
-      "checkpoint_committed", `Null, checkpoint_source_to_yojson intended_ref
+      `String (exact_execution_terminal_cause_label cause)
   in
   let action_kind, successor =
     match disposition.action with
@@ -2660,9 +2550,7 @@ let exact_source_disposition_to_yojson disposition =
     ; "call_id", `String disposition.call_id
     ; "plan_fingerprint", `String disposition.plan_fingerprint
     ; "request_body_sha256", `String disposition.request_body_sha256
-    ; "outcome_kind", `String outcome_kind
     ; "terminal_cause", terminal_cause
-    ; "intended_ref", intended_ref
     ; "action_kind", `String action_kind
     ; "successor", successor
     ; ( "settlement_semantic"
@@ -2684,9 +2572,7 @@ let exact_source_disposition_of_yojson json =
         ; "call_id"
         ; "plan_fingerprint"
         ; "request_body_sha256"
-        ; "outcome_kind"
         ; "terminal_cause"
-        ; "intended_ref"
         ; "action_kind"
         ; "successor"
         ; "settlement_semantic"
@@ -2701,23 +2587,13 @@ let exact_source_disposition_of_yojson json =
   let* call_id = string_field ~context "call_id" fields in
   let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
   let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
-  let* outcome_kind = string_field ~context "outcome_kind" fields in
   let* terminal_cause_json = required_field ~context "terminal_cause" fields in
-  let* intended_ref_json = required_field ~context "intended_ref" fields in
   let* outcome =
-    match outcome_kind, terminal_cause_json, intended_ref_json with
-    | "terminal", `String cause, `Null ->
+    match terminal_cause_json with
+    | `String cause ->
       let* cause = exact_execution_terminal_cause_of_label cause in
       Ok (Terminal cause)
-    | "checkpoint_committed", `Null, (`Assoc _ as intended_ref_json) ->
-      let* intended_ref = checkpoint_source_of_yojson intended_ref_json in
-      Ok (Checkpoint_committed { intended_ref })
-    | "terminal", _, _ ->
-      Error "terminal exact source disposition has invalid outcome evidence"
-    | "checkpoint_committed", _, _ ->
-      Error "checkpoint exact source disposition has invalid outcome evidence"
-    | unknown, _, _ ->
-      Error (Printf.sprintf "unknown exact source disposition outcome: %s" unknown)
+    | _ -> Error "terminal exact source disposition requires one terminal cause"
   in
   let* action_kind = string_field ~context "action_kind" fields in
   let* successor_json = required_field ~context "successor" fields in
@@ -3146,10 +3022,6 @@ let exact_execution_binding_to_yojson binding =
       , `Null )
     | Disposition_prepared disposition ->
       "disposition_prepared", `Null, exact_source_disposition_to_yojson disposition
-    | Checkpoint_commit_intent disposition ->
-      "checkpoint_commit_intent", `Null, exact_source_disposition_to_yojson disposition
-    | Checkpoint_commit_observed disposition ->
-      "checkpoint_commit_observed", `Null, exact_source_disposition_to_yojson disposition
   in
   `Assoc
     [ "lease_id", `String binding.lease_id
@@ -3202,26 +3074,12 @@ let exact_execution_binding_of_yojson json =
     | "disposition_prepared", `Null, Some disposition_json ->
       let* disposition = exact_source_disposition_of_yojson disposition_json in
       (match disposition.outcome with
-       | Terminal _ -> Ok (Disposition_prepared disposition)
-       | Checkpoint_committed _ ->
-         Error "prepared terminal status carries a checkpoint disposition")
-    | "checkpoint_commit_intent", `Null, Some disposition_json ->
-      let* disposition = exact_source_disposition_of_yojson disposition_json in
-      (match disposition.outcome with
-       | Terminal _ ->
-         Error "checkpoint commit intent carries a terminal disposition"
-       | Checkpoint_committed _ -> Ok (Checkpoint_commit_intent disposition))
-    | "checkpoint_commit_observed", `Null, Some disposition_json ->
-      let* disposition = exact_source_disposition_of_yojson disposition_json in
-      (match disposition.outcome with
-       | Terminal _ ->
-         Error "checkpoint commit observation carries a terminal disposition"
-       | Checkpoint_committed _ -> Ok (Checkpoint_commit_observed disposition))
+       | Terminal _ -> Ok (Disposition_prepared disposition))
     | "dispatch_uncertain", _, _ ->
       Error "dispatch-uncertain exact execution binding must not carry a terminal cause"
     | "terminal_quarantined", _, _ ->
       Error "terminally quarantined exact execution binding requires a terminal cause"
-    | ("disposition_prepared" | "checkpoint_commit_intent" | "checkpoint_commit_observed"), _, _ ->
+    | "disposition_prepared", _, _ ->
       Error "v5 exact execution binding status requires one source disposition"
     | status, _, _ ->
       Error (Printf.sprintf "unknown exact execution binding status: %s" status)
@@ -3241,9 +3099,7 @@ let exact_execution_binding_of_yojson json =
   else if
     match status with
     | Dispatch_uncertain | Terminal_quarantined _ -> false
-    | Disposition_prepared disposition
-    | Checkpoint_commit_intent disposition
-    | Checkpoint_commit_observed disposition ->
+    | Disposition_prepared disposition ->
       not
         (String.equal disposition.slot_id slot_id
          && String.equal disposition.call_id call_id
@@ -3341,9 +3197,7 @@ let validate_state state =
       (fun (binding : exact_execution_binding) ->
          match binding.status with
          | Dispatch_uncertain | Terminal_quarantined _ -> false
-         | Disposition_prepared disposition
-         | Checkpoint_commit_intent disposition
-         | Checkpoint_commit_observed disposition ->
+         | Disposition_prepared disposition ->
            Result.is_error (validate_exact_source_disposition disposition)
            || not
                 (String.equal binding.slot_id disposition.slot_id
@@ -3355,17 +3209,8 @@ let validate_state state =
                       binding.request_body_sha256
                       disposition.request_body_sha256)
            ||
-           match binding.status, disposition.outcome with
-           | Disposition_prepared _, Terminal _
-           | Checkpoint_commit_intent _, Checkpoint_committed _
-           | Checkpoint_commit_observed _, Checkpoint_committed _ ->
-             false
-           | ( Dispatch_uncertain
-             | Terminal_quarantined _
-             | Disposition_prepared _
-             | Checkpoint_commit_intent _
-             | Checkpoint_commit_observed _ ), _ ->
-             true)
+           match disposition.outcome with
+           | Terminal _ -> false)
       state.exact_execution_bindings
   then Error "event queue state contains an invalid exact source disposition"
   else if

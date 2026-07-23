@@ -1,5 +1,4 @@
 module State = Keeper_event_queue_state
-module Persistence = Keeper_event_queue_persistence
 
 let require_ok = function
   | Ok value -> value
@@ -23,8 +22,6 @@ let checkpoint_ref ~sha =
 ;;
 
 let source_ref = checkpoint_ref ~sha:(String.make 64 '0')
-let target_ref = checkpoint_ref ~sha:(String.make 64 '1')
-let foreign_ref = checkpoint_ref ~sha:(String.make 64 '2')
 
 let stimulus post_id arrived_at =
   { Keeper_event_queue.post_id
@@ -65,14 +62,14 @@ let bound_state ?post_id () =
   state, lease
 ;;
 
-let prepare_terminal state lease =
+let prepare_terminal ?(prepared_at = 3.0) state lease =
   State.prepare_exact_source_disposition
     ~lease
     ~source:source_ref
     ~outcome:(State.Terminal State.Domain_invalid_output)
     ~semantic:State.Exact_no_compaction
     ~action:State.Consume_source
-    ~prepared_at:3.0
+    ~prepared_at
     ~slot_id:"slot-a"
     ~call_id:"call-a"
     ~plan_fingerprint:"plan-a"
@@ -176,6 +173,44 @@ let test_wrong_full_proof_is_rejected () =
   | Ok _ -> Alcotest.fail "changed request proof retained the disposition id"
 ;;
 
+let test_incoherent_semantic_action_is_rejected () =
+  let state, lease = bound_state ~post_id:"bad-coherence" () in
+  let rejects semantic action =
+    match
+      State.prepare_exact_source_disposition
+        ~lease
+        ~source:source_ref
+        ~outcome:(State.Terminal State.Domain_invalid_output)
+        ~semantic
+        ~action
+        ~prepared_at:6.0
+        ~slot_id:"slot-a"
+        ~call_id:"call-a"
+        ~plan_fingerprint:"plan-a"
+        ~request_body_sha256:(String.make 64 'a')
+        state
+    with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "incoherent terminal disposition was accepted"
+  in
+  rejects State.Exact_ack State.Resume_source;
+  rejects State.Exact_requeue State.Consume_source
+;;
+
+let test_retry_adopts_stored_prepared_at () =
+  let state, lease = bound_state ~post_id:"stable-retry" () in
+  let prepared, original = prepare_terminal state lease in
+  let _, retried = prepare_terminal ~prepared_at:99.0 prepared lease in
+  Alcotest.(check string)
+    "stable disposition id"
+    original.disposition_id
+    retried.disposition_id;
+  Alcotest.(check (float 0.0))
+    "stored observation retained"
+    original.prepared_at
+    retried.prepared_at
+;;
+
 let legacy_v4_json = function
   | `Assoc state_fields ->
     let bindings =
@@ -227,194 +262,6 @@ let test_v4_cause_only_remains_fail_closed () =
    | Ok _ -> Alcotest.fail "generic registration recovered a cause-only exact lease")
 ;;
 
-let with_temp_base_path label run =
-  let base_path =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "masc-exact-disposition-%s-%d-%06x"
-         label
-         (Unix.getpid ())
-         (Random.bits ()))
-  in
-  Unix.mkdir base_path 0o700;
-  Fun.protect
-    ~finally:(fun () ->
-      ignore (Sys.command ("rm -rf " ^ Filename.quote base_path)))
-    (fun () -> run base_path)
-;;
-
-let require_fsync = function
-  | Persistence.Fsync_completed -> ()
-  | Visible_sync_unconfirmed detail ->
-    Alcotest.fail ("fixture durability was not confirmed: " ^ detail)
-;;
-
-let durable_checkpoint_intent ~base_path ~keeper_name =
-  Persistence.update_checked_result
-    ~base_path
-    ~keeper_name
-    (fun pending ->
-      Ok
-        (Keeper_event_queue.enqueue
-           pending
-           (stimulus "checkpoint-exact" 1.0)))
-  |> require_ok;
-  let lease =
-    match
-      Persistence.claim_when_result
-        ~base_path
-        ~keeper_name
-        ~claimed_at:2.0
-        ~ready:(fun _ -> true)
-        ()
-      |> require_ok
-    with
-    | Some lease -> lease
-    | None -> Alcotest.fail "durable fixture lease was not claimed"
-  in
-  Persistence.bind_exact_execution_result
-    ~base_path
-    ~keeper_name
-    ~lease
-    ~slot_id:"slot-a"
-    ~call_id:"call-a"
-    ~plan_fingerprint:"plan-a"
-    ~request_body_sha256:(String.make 64 'a')
-    ()
-  |> require_ok
-  |> require_fsync;
-  let binding =
-    match
-      Persistence.exact_execution_binding_result ~base_path ~keeper_name
-      |> require_ok
-    with
-    | Some binding -> binding
-    | None -> Alcotest.fail "durable fixture binding was not persisted"
-  in
-  let disposition, write_outcome =
-    Persistence.prepare_exact_source_disposition_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~binding
-      ~source:source_ref
-      ~outcome:
-        (Persistence.Checkpoint_committed { intended_ref = target_ref })
-      ~semantic:Persistence.Exact_requeue
-      ~action:Persistence.Resume_source
-      ~prepared_at:6.0
-      ()
-    |> require_ok
-  in
-  require_fsync write_outcome;
-  lease, binding, disposition
-;;
-
-let current_ref_callback current_ref observed_trace_id =
-  Alcotest.(check bool)
-    "callback uses durable source trace"
-    true
-    (Keeper_id.Trace_id.equal observed_trace_id source_ref.trace_id);
-  Ok current_ref
-;;
-
-let test_checkpoint_target_recovers_and_finalizes_once () =
-  with_temp_base_path "target" (fun base_path ->
-    let keeper_name = "target-keeper" in
-    let lease, binding, disposition =
-      durable_checkpoint_intent ~base_path ~keeper_name
-    in
-    let adopted, retry_outcome =
-      Persistence.prepare_exact_source_disposition_result
-        ~base_path
-        ~keeper_name
-        ~lease
-        ~binding
-        ~source:source_ref
-        ~outcome:
-          (Persistence.Checkpoint_committed { intended_ref = target_ref })
-        ~semantic:Persistence.Exact_requeue
-        ~action:Persistence.Resume_source
-        ~prepared_at:99.0
-        ()
-      |> require_ok
-    in
-    require_fsync retry_outcome;
-    Alcotest.(check string)
-      "retry adopts stable disposition identity"
-      disposition.disposition_id
-      adopted.disposition_id;
-    Alcotest.(check (float 0.0))
-      "retry adopts the durable preparation time"
-      disposition.prepared_at
-      adopted.prepared_at;
-    let recover () =
-      Persistence.prepare_registration_after_exact_recovery_result
-        ~base_path
-        ~keeper_name
-        ~settled_at:7.0
-        ~current_checkpoint_ref:
-          (Some (current_ref_callback target_ref))
-        ()
-      |> require_ok
-    in
-    let first = recover () in
-    let second = recover () in
-    Alcotest.(check int)
-      "target recovery resumes source once"
-      1
-      (Keeper_event_queue.length first);
-    Alcotest.(check int)
-      "registration retry does not duplicate source"
-      1
-      (Keeper_event_queue.length second);
-    match
-      Persistence.exact_execution_binding_result ~base_path ~keeper_name
-      |> require_ok
-    with
-    | None -> ()
-    | Some _ -> Alcotest.fail "finalized exact binding survived recovery")
-;;
-
-let test_checkpoint_ref_blocks_without_candidate label current_ref =
-  with_temp_base_path label (fun base_path ->
-    let keeper_name = label ^ "-keeper" in
-    let _, _, disposition =
-      durable_checkpoint_intent ~base_path ~keeper_name
-    in
-    (match
-       Persistence.prepare_registration_after_exact_recovery_result
-         ~base_path
-         ~keeper_name
-         ~settled_at:7.0
-         ~current_checkpoint_ref:
-           (Some (current_ref_callback current_ref))
-         ()
-     with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "unproven checkpoint intent was finalized");
-    match
-      Persistence.exact_execution_binding_result ~base_path ~keeper_name
-      |> require_ok
-    with
-    | Some
-        { status = Persistence.Checkpoint_commit_intent retained; _ }
-      when String.equal
-             retained.disposition_id
-             disposition.disposition_id ->
-      ()
-    | _ -> Alcotest.fail "failed reconciliation discarded its durable intent")
-;;
-
-let test_checkpoint_source_remains_fail_closed () =
-  test_checkpoint_ref_blocks_without_candidate "source" source_ref
-;;
-
-let test_checkpoint_foreign_remains_fail_closed () =
-  test_checkpoint_ref_blocks_without_candidate "foreign" foreign_ref
-;;
-
 let () =
   Alcotest.run
     "keeper exact disposition recovery"
@@ -428,21 +275,17 @@ let () =
             `Quick
             test_wrong_full_proof_is_rejected
         ; Alcotest.test_case
+            "incoherent semantic and action are rejected"
+            `Quick
+            test_incoherent_semantic_action_is_rejected
+        ; Alcotest.test_case
+            "retry adopts stored prepared_at"
+            `Quick
+            test_retry_adopts_stored_prepared_at
+        ; Alcotest.test_case
             "v4 cause-only remains fail-closed"
             `Quick
             test_v4_cause_only_remains_fail_closed
-        ; Alcotest.test_case
-            "checkpoint target recovers and finalizes once"
-            `Quick
-            test_checkpoint_target_recovers_and_finalizes_once
-        ; Alcotest.test_case
-            "checkpoint source remains fail-closed without candidate"
-            `Quick
-            test_checkpoint_source_remains_fail_closed
-        ; Alcotest.test_case
-            "checkpoint foreign ref remains fail-closed"
-            `Quick
-            test_checkpoint_foreign_remains_fail_closed
         ] )
     ]
 ;;

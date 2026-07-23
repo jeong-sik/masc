@@ -57,11 +57,7 @@ type exact_settlement_semantic =
   | Exact_requeue
   | Exact_escalate
 
-type exact_source_outcome =
-  | Terminal of exact_execution_terminal_cause
-  | Checkpoint_committed of
-      { intended_ref : Keeper_checkpoint_ref.t
-      }
+type exact_source_outcome = Terminal of exact_execution_terminal_cause
 
 type exact_source_disposition =
   { disposition_id : string
@@ -75,9 +71,9 @@ type exact_source_disposition =
   ; semantic : exact_settlement_semantic
   ; prepared_at : float
   }
-(** Immutable source disposition for one exact call. The ID is the SHA-256 of
-    its stable proof, outcome, semantic, and action fields. [prepared_at] is
-    observational metadata and is deliberately excluded from identity. *)
+(** Immutable terminal source disposition for one exact call. The ID is the
+    SHA-256 of its stable proof, outcome, semantic, and action fields.
+    [prepared_at] is observational and excluded from identity. *)
 
 type exact_execution_lease_status =
   | Dispatch_uncertain
@@ -85,8 +81,6 @@ type exact_execution_lease_status =
       (** v4 cause-only migration state. It has no source authority and can
           never be finalized or registration-requeued. *)
   | Disposition_prepared of exact_source_disposition
-  | Checkpoint_commit_intent of exact_source_disposition
-  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding =
   { lease_id : string
@@ -361,19 +355,8 @@ val prepare_exact_source_disposition :
   t ->
   (t * exact_source_disposition, string) result
 (** Atomically replace a matching dispatch fence or matching v4 cause-only
-    quarantine with one immutable v5 source disposition. Repeating the exact
-    preparation is idempotent; any timestamp, source, action, outcome, or OAS
-    identity conflict fails closed. *)
-
-val observe_exact_checkpoint_commit :
-  lease:lease ->
-  disposition_id:string ->
-  current_ref:Keeper_checkpoint_ref.t ->
-  t ->
-  (t, string) result
-(** Advance a checkpoint intent to observed only when [current_ref] exactly
-    equals its intended installed reference. Source or foreign refs fail
-    closed; this pure transition performs no checkpoint I/O. *)
+    quarantine with one immutable terminal source disposition. Repeating the
+    same stable proof adopts the first durable preparation timestamp. *)
 
 val finalize_exact_source_disposition :
   settled_at:float ->
@@ -381,9 +364,9 @@ val finalize_exact_source_disposition :
   disposition_id:string ->
   t ->
   (t * settle_result, string) result
-(** Finalize only a validated terminal disposition or an observed checkpoint
-    disposition through [Settle_exact]. The disposition's action is applied
-    exactly once by the canonical receipt transition. *)
+(** Finalize only a validated terminal disposition through [Settle_exact].
+    Its source action is applied exactly once by the canonical receipt
+    transition. *)
 
 val settle_exact_execution :
   settled_at:float ->

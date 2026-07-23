@@ -109,7 +109,6 @@ type prepared_compaction
     slot while this runs. *)
 val prepare_compaction :
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
-  ?base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
@@ -139,7 +138,6 @@ val no_compaction_of_uncommitted_prepared :
     {!commit_prepared_compaction} for callers that stay synchronous. *)
 val recover_latest_checkpoint_for_compaction :
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
-  ?base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->

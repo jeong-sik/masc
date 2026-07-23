@@ -1,10 +1,9 @@
 (** Restart composition root for exact source dispositions.
 
-    Checkpoint I/O stays above [masc.keeper_runtime]. The persistence boundary
-    receives a callback keyed by the durable disposition's source trace and
-    performs WAL replay, current-reference reconciliation, exact finalization,
-    and generic registration recovery in that order under the queue owner's
-    durable lock. *)
+    The persistence boundary performs WAL replay, terminal exact disposition
+    finalization, and generic registration recovery in that order under the
+    queue owner's durable lock. Checkpoint-success reconciliation is outside
+    this boundary. *)
 
 val prepare_registration_result :
   base_path:string ->

@@ -512,8 +512,7 @@ let terminal_reason_of_rejection = function
 ;;
 
 type prepared_compaction =
-  { base_path : string option
-  ; session : Keeper_context_core.session_context
+  { session : Keeper_context_core.session_context
   ; source_ref : Keeper_checkpoint_ref.t
   ; retry_meta : keeper_meta
   ; turn_generation : int
@@ -614,9 +613,8 @@ let prepare_compaction_admitted
      | Keeper_compact_policy.Prepared prepared_trigger,
        Some evidence,
        Some post_success_terminalizer ->
-  Ok
-    { base_path = None
-    ; session
+       Ok
+         { session
          ; source_ref
          ; retry_meta
          ; turn_generation
@@ -679,119 +677,27 @@ let prepare_compaction_with
 
 let prepare_compaction
       ?exact_execution_guard
-      ?base_path
       ~base_dir
       ~meta
       ~trigger
       ~projection_request
       ()
   =
-  match
-    prepare_compaction_with
-      ~compact_for_request:
-        (Keeper_compact_policy.compact_for_request_typed ?exact_execution_guard)
-      ~base_dir
-      ~meta
-      ~trigger
-      ~projection_request
-  with
-  | Error _ as error -> error
-  | Ok prepared -> Ok { prepared with base_path }
-;;
-
-let exact_checkpoint_semantic_and_action
-    ~(trigger : Compaction_trigger.t)
-    ~(retry_meta : keeper_meta) =
-  match trigger with
-  | Compaction_trigger.Manual ->
-    ( Keeper_registry_event_queue.Exact_ack
-    , Keeper_registry_event_queue.Consume_source )
-  | Compaction_trigger.Provider_overflow _ ->
-    let attempts =
-      retry_meta.runtime.compaction_rt.consecutive_failures + 1
-    in
-    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
-    then
-      ( Keeper_registry_event_queue.Exact_escalate
-      , Keeper_registry_event_queue.Consume_source )
-    else
-      ( Keeper_registry_event_queue.Exact_requeue
-      , Keeper_registry_event_queue.Resume_source )
-;;
-
-let prepare_exact_checkpoint_disposition
-    ~base_path
-    ~keeper_name
-    ~source_ref
-    ~intended_ref
+  prepare_compaction_with
+    ~compact_for_request:
+      (Keeper_compact_policy.compact_for_request_typed ?exact_execution_guard)
+    ~base_dir
+    ~meta
     ~trigger
-    ~retry_meta =
-  match Keeper_registry_event_queue.active_lease_result ~base_path keeper_name with
-  | Error _ as error -> error
-  | Ok None -> Error "exact checkpoint commit requires an active source lease"
-  | Ok (Some lease) ->
-    (match
-       Keeper_registry_event_queue.exact_execution_binding_result
-         ~base_path
-         keeper_name
-     with
-     | Error _ as error -> error
-     | Ok None -> Error "exact checkpoint commit requires an execution binding"
-     | Ok (Some binding) ->
-       let semantic, action =
-         exact_checkpoint_semantic_and_action ~trigger ~retry_meta
-       in
-       (match
-          Keeper_registry_event_queue.prepare_exact_source_disposition_result
-            ~base_path
-            keeper_name
-            ~lease
-            ~binding
-            ~source:source_ref
-            ~outcome:
-              (Keeper_registry_event_queue.Checkpoint_committed
-                 { intended_ref })
-            ~semantic
-            ~action
-            ~prepared_at:(Unix.gettimeofday ())
-        with
-        | Error _ as error -> error
-        | Ok (disposition, Keeper_registry_event_queue.Fsync_completed) ->
-          Ok (lease, disposition)
-        | Ok
-            ( _
-            , Keeper_registry_event_queue.Visible_sync_unconfirmed detail ) ->
-          Error
-            ("exact checkpoint intent became visible without confirmed sync: "
-             ^ detail)))
-;;
-
-let observe_exact_checkpoint_disposition
-    ~base_path
-    ~keeper_name
-    ~lease
-    ~(disposition : Keeper_registry_event_queue.exact_source_disposition)
-    ~installed_ref =
-  match
-    Keeper_registry_event_queue.observe_exact_checkpoint_commit_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~disposition_id:disposition.disposition_id
-      ~current_ref:installed_ref
-  with
-  | Error _ as error -> error
-  | Ok Keeper_registry_event_queue.Fsync_completed -> Ok ()
-  | Ok (Keeper_registry_event_queue.Visible_sync_unconfirmed detail) ->
-    Error
-      ("exact checkpoint observation became visible without confirmed sync: "
-       ^ detail)
+    ~projection_request
 ;;
 
 let commit_prepared_compaction (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
-  let { base_path
-      ; session
+  (* Source-CAS commit.  The caller decides which admission (if any) guards
+     this phase; correctness against interleaved state change is enforced
+     by [expected_source_ref], not by the slot. *)
+  let { session
       ; source_ref
       ; retry_meta
       ; turn_generation
@@ -808,44 +714,9 @@ let commit_prepared_compaction (prepared : prepared_compaction)
       (No_compaction
          (no_compaction_of_uncommitted_prepared ~cause prepared))
   in
-  let record_success saved_checkpoint installed_ref =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string Compactions)
-      ~labels:[ "keeper", retry_meta.name ]
-      ();
-    Ok
-      { checkpoint = saved_checkpoint
-      ; trigger = prepared_trigger
-      ; evidence
-      ; turn_generation
-      ; projection_target =
-          Keeper_compaction_projection_target.bind_committed_checkpoint
-            installed_ref
-            projection_target
-      }
-  in
-  let handle_persistence_error = function
-    | Keeper_checkpoint_store.Source_changed actual ->
-      Log.Keeper.warn
-        "compaction checkpoint source changed: %s"
-        (checkpoint_ref_detail actual);
-      terminal Keeper_event_queue_state.Checkpoint_source_changed
-    | cas_error ->
-      let detail = checkpoint_cas_error_detail cas_error in
-      Log.Keeper.error "compaction checkpoint save failed: %s" detail;
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string CheckpointFailures)
-        ~labels:
-          [ "keeper", retry_meta.agent_name
-          ; ( "operation"
-            , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
-          ]
-        ();
-      terminal Keeper_event_queue_state.Checkpoint_persistence_failed
-  in
   (try
      match
-       Keeper_context_core.prepare_oas_checkpoint_if_source
+       save_oas_checkpoint_if_source
          ~multimodal_policy:retry_meta.multimodal_policy
          ~keeper_name:retry_meta.name
          ~session
@@ -854,65 +725,40 @@ let commit_prepared_compaction (prepared : prepared_compaction)
          ~generation:turn_generation
          ~expected_source_ref:source_ref
      with
+     | Ok (saved_checkpoint, installed_ref) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string Compactions)
+         ~labels:[ "keeper", retry_meta.name ]
+         ();
+       Ok
+         { checkpoint = saved_checkpoint
+         ; trigger = prepared_trigger
+         ; evidence
+         ; turn_generation
+         ; projection_target =
+             Keeper_compaction_projection_target.bind_committed_checkpoint
+               installed_ref
+               projection_target
+         }
+     | Error (Persistence_error (Keeper_checkpoint_store.Source_changed actual)) ->
+       Log.Keeper.warn
+         "compaction checkpoint source changed: %s"
+         (checkpoint_ref_detail actual);
+       terminal Keeper_event_queue_state.Checkpoint_source_changed
      | Error (Persistence_error cas_error) ->
-       handle_persistence_error cas_error
+       let detail = checkpoint_cas_error_detail cas_error in
+       Log.Keeper.error "compaction checkpoint save failed: %s" detail;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:
+           [ "keeper", retry_meta.agent_name
+           ; ( "operation"
+             , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
+         ]
+         ();
+       terminal Keeper_event_queue_state.Checkpoint_persistence_failed
      | Error (Tool_history_invalid _) ->
        terminal Keeper_event_queue_state.Invalid_structural_source_after_dispatch
-     | Ok checkpoint_candidate ->
-       let intended_ref =
-         Keeper_context_core.prepared_oas_checkpoint_ref checkpoint_candidate
-       in
-       let exact_disposition =
-         match base_path with
-         | None -> Ok None
-         | Some base_path ->
-           (match
-              prepare_exact_checkpoint_disposition
-                ~base_path
-                ~keeper_name:retry_meta.name
-                ~source_ref
-                ~intended_ref
-                ~trigger:prepared_trigger
-                ~retry_meta
-            with
-            | Error _ as error -> error
-            | Ok disposition -> Ok (Some (base_path, disposition)))
-       in
-       (match exact_disposition with
-        | Error detail ->
-          Log.Keeper.error "exact checkpoint intent failed: %s" detail;
-          terminal Keeper_event_queue_state.Checkpoint_persistence_failed
-        | Ok exact_disposition ->
-          (match
-             Keeper_context_core.commit_prepared_oas_checkpoint_if_source
-               ~session
-               ~expected_source_ref:source_ref
-               checkpoint_candidate
-           with
-           | Error (Persistence_error cas_error) ->
-             handle_persistence_error cas_error
-           | Error (Tool_history_invalid _) ->
-             terminal
-               Keeper_event_queue_state.Invalid_structural_source_after_dispatch
-           | Ok (saved_checkpoint, installed_ref) ->
-             let exact_observation =
-               match exact_disposition with
-               | None -> Ok ()
-               | Some (base_path, (lease, disposition)) ->
-                 observe_exact_checkpoint_disposition
-                   ~base_path
-                   ~keeper_name:retry_meta.name
-                   ~lease
-                   ~disposition
-                   ~installed_ref
-             in
-             (match exact_observation with
-              | Error detail ->
-                Log.Keeper.error
-                  "exact checkpoint observation failed: %s"
-                  detail;
-                terminal Keeper_event_queue_state.Checkpoint_persistence_failed
-              | Ok () -> record_success saved_checkpoint installed_ref)))
    with
    | Eio.Cancel.Cancelled _ ->
      terminal Keeper_event_queue_state.Execution_cancelled_after_dispatch
@@ -925,7 +771,6 @@ let commit_prepared_compaction (prepared : prepared_compaction)
 
 let recover_latest_checkpoint_for_compaction
     ?exact_execution_guard
-    ?base_path
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
@@ -935,7 +780,6 @@ let recover_latest_checkpoint_for_compaction
   match
     prepare_compaction
       ?exact_execution_guard
-      ?base_path
       ~base_dir
       ~meta
       ~trigger

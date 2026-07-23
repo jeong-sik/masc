@@ -308,8 +308,7 @@ let reaction_kind_of_settlement = function
     Event_queue_no_compaction
   | Keeper_event_queue_state.Settle_exact { semantic = Exact_requeue; _ } ->
     Event_queue_requeued
-  | Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_escalate; _ } ->
+  | Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
     Event_queue_escalated
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
@@ -700,8 +699,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Event_queue_escalated,
-    Keeper_event_queue_state.Settle_exact
-      { semantic = Exact_escalate; _ } ->
+    Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
     true
   | Turn_started, _
   | Cursor_ack, _

@@ -46,8 +46,7 @@ type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
   | Resume_source
   | Replace_with_successor of Keeper_event_queue.stimulus
 
-type exact_settlement_semantic =
-  Keeper_event_queue_persistence.exact_settlement_semantic =
+type exact_settlement_semantic = Keeper_event_queue_persistence.exact_settlement_semantic =
   | Exact_ack
   | Exact_no_compaction
   | Exact_requeue
@@ -55,9 +54,6 @@ type exact_settlement_semantic =
 
 type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
-  | Checkpoint_committed of
-      { intended_ref : Keeper_checkpoint_ref.t
-      }
 
 type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
@@ -65,8 +61,6 @@ type exact_execution_lease_status = Keeper_event_queue_persistence.exact_executi
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
   | Disposition_prepared of exact_source_disposition
-  | Checkpoint_commit_intent of exact_source_disposition
-  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
   { lease_id : string
@@ -265,14 +259,6 @@ val finalize_exact_source_disposition_result :
   lease:lease ->
   disposition_id:string ->
   (settle_result, string) result
-
-val observe_exact_checkpoint_commit_result :
-  base_path:string ->
-  string ->
-  lease:lease ->
-  disposition_id:string ->
-  current_ref:Keeper_checkpoint_ref.t ->
-  (exact_write_outcome, string) result
 
 val cancel_accepted_result :
   base_path:string ->

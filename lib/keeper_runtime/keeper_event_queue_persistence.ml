@@ -52,9 +52,6 @@ type exact_settlement_semantic = State.exact_settlement_semantic =
 
 type exact_source_outcome = State.exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
-  | Checkpoint_committed of
-      { intended_ref : Keeper_checkpoint_ref.t
-      }
 
 type exact_source_disposition = State.exact_source_disposition =
   { disposition_id : string
@@ -73,8 +70,6 @@ type exact_execution_lease_status = State.exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
   | Disposition_prepared of exact_source_disposition
-  | Checkpoint_commit_intent of exact_source_disposition
-  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding = State.exact_execution_binding =
   { lease_id : string
@@ -1046,28 +1041,6 @@ let prepare_exact_source_disposition_result
        |> Result.map (fun (next, disposition) -> next, disposition))
 ;;
 
-let observe_exact_checkpoint_commit_result
-      ~base_path
-      ~keeper_name
-      ~lease
-      ~disposition_id
-      ~current_ref
-      ()
-  =
-  commit_exact_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       State.observe_exact_checkpoint_commit
-         ~lease
-         ~disposition_id
-         ~current_ref
-         state
-       |> Result.map (fun next -> next, ()))
-  |> Result.map snd
-;;
-
 let commit_settlement_transition_unlocked owner ~after_commit transition current =
   match transition current with
   | Error _ as error -> error
@@ -1415,7 +1388,6 @@ let prepare_registration_after_exact_recovery_result
       ~base_path
       ~keeper_name
       ~settled_at
-      ~current_checkpoint_ref
       ()
   =
   match resolve_owner ~base_path ~keeper_name with
@@ -1477,61 +1449,7 @@ let prepare_registration_after_exact_recovery_result
                    lease.lease_id)
             | Some lease, Some { status = Disposition_prepared disposition; _ } ->
               (match disposition.outcome with
-               | Terminal _ -> finish_exact lease disposition state
-               | Checkpoint_committed _ ->
-                 Error "terminal disposition status carries a checkpoint outcome")
-            | Some lease, Some { status = Checkpoint_commit_intent disposition; _ } ->
-              (match disposition.outcome, current_checkpoint_ref with
-               | Terminal _, _ ->
-                 Error "checkpoint commit intent carries a terminal disposition"
-               | Checkpoint_committed _, None ->
-                 Error "exact checkpoint commit intent requires a current checkpoint observation"
-               | Checkpoint_committed { intended_ref }, Some read_current_ref ->
-                 (match read_current_ref disposition.source.trace_id with
-                  | Error _ as error -> error
-                  | Ok current_ref ->
-                    if Keeper_checkpoint_ref.equal current_ref disposition.source
-                    then
-                      Error
-                        "exact checkpoint commit is still at its source; no durable candidate artifact is available for retry"
-                    else if not (Keeper_checkpoint_ref.equal current_ref intended_ref)
-                    then Error "exact checkpoint commit conflicts with a foreign checkpoint"
-                    else
-                      (match
-                         State.observe_exact_checkpoint_commit
-                           ~lease
-                           ~disposition_id:disposition.disposition_id
-                           ~current_ref
-                           state
-                       with
-                       | Error _ as error -> error
-                       | Ok observed ->
-                         (match bump_revision observed with
-                          | Error _ as error -> error
-                          | Ok observed ->
-                            (match save_state_unlocked_strict_staged owner observed with
-                             | Error _ as error -> error
-                             | Ok (Visible_sync_unconfirmed detail) ->
-                               Error
-                                 ("exact checkpoint observation became visible with unconfirmed sync; refusing finalization: "
-                                  ^ detail)
-                             | Ok Fsync_completed ->
-                               finish_exact lease disposition observed))))
-            | Some lease, Some { status = Checkpoint_commit_observed disposition; _ } ->
-              (match disposition.outcome, current_checkpoint_ref with
-               | Terminal _, _ ->
-                 Error "checkpoint commit observation carries a terminal disposition"
-               | Checkpoint_committed _, None ->
-                 Error "observed exact checkpoint disposition requires current checkpoint reconciliation"
-               | Checkpoint_committed { intended_ref }, Some read_current_ref ->
-                 (match read_current_ref disposition.source.trace_id with
-                  | Error _ as error -> error
-                  | Ok current_ref ->
-                    if Keeper_checkpoint_ref.equal current_ref intended_ref
-                    then finish_exact lease disposition state
-                    else if Keeper_checkpoint_ref.equal current_ref disposition.source
-                    then Error "observed exact checkpoint disposition regressed to its source"
-                    else Error "observed exact checkpoint disposition conflicts with a foreign checkpoint"))))
+               | Terminal _ -> finish_exact lease disposition state))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -1554,7 +1472,6 @@ let prepare_registration_result
     ~base_path
     ~keeper_name
     ~settled_at
-    ~current_checkpoint_ref:None
     ()
 ;;
 

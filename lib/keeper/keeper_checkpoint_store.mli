@@ -218,22 +218,6 @@ type checkpoint_cas_error =
     [Transaction_outcome_unknown] requires reconciliation rather than retry. The
     payload-store commit is not an operation terminal fact; the Keeper operation
     journal owns that authority. *)
-type prepared_oas_candidate
-
-val prepare_oas_candidate :
-  expected_source_ref:Keeper_checkpoint_ref.t ->
-  Agent_sdk.Checkpoint.t ->
-  (prepared_oas_candidate, checkpoint_cas_error) result
-
-val prepared_oas_candidate_ref :
-  prepared_oas_candidate -> Keeper_checkpoint_ref.t
-
-val commit_prepared_oas_if_source :
-  session_dir:string ->
-  expected_source_ref:Keeper_checkpoint_ref.t ->
-  prepared_oas_candidate ->
-  (Keeper_checkpoint_ref.t, checkpoint_cas_error) result
-
 val save_oas_if_source :
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->

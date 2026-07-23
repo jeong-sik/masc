@@ -8,6 +8,7 @@
   board
   board_agent_effect_hooks
   board_attachment_meta
+  board_audience
   board_core
   board_core_classify
   board_core_json

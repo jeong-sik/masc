@@ -438,8 +438,9 @@ let deliver_addressed_board_signal
 
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
+  let signal = addressed.signal in
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
     |> List.filter board_signal_entry_accepts_delivery
@@ -450,18 +451,7 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
-  match Board_dispatch.get_post ~post_id:signal.post_id with
-  | Error error ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", "routing"); ("phase", "board_audience_post_read") ]
-      ();
-    Log.Keeper.warn
-      "board signal audience post unavailable: post=%s error=%s"
-      signal.post_id
-      (Board.show_board_error error)
-  | Ok post ->
-  match Keeper_board_audience.classify ~visibility:post.visibility signal with
+  match Keeper_board_audience.of_board_audience addressed.audience with
   | Error error ->
     (* Fail closed: a classification error (unsupported [@@] selector,
        mixed direct+broadcast address, or a Direct post without targets)

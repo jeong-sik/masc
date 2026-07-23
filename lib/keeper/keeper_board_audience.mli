@@ -9,9 +9,8 @@ type t =
     [Discoverable] may enter semantic attention judgment. *)
 
 type classification_error =
-  | Unsupported_broadcast of string list
-  | Direct_without_targets of string
-  | Broadcast_on_direct of string
+  | Invalid_board_audience of Board.board_error
+  | Invalid_board_target of string
 
 type route =
   | Deliver of Keeper_world_observation_board_signal.wake_reason
@@ -26,15 +25,20 @@ val classify
     to structural thread participants, while a newly-created unaddressed post
     is discoverable.
 
-    Fail-closed address/visibility contract:
-    - an unsupported [@@name] selector rejects the whole signal, even when
-      valid [@keeper] targets are mixed in (no partial routing);
-    - [@@all] on a [Direct] post is rejected ([Broadcast_on_direct]):
-      [Direct] means "mentioned agents only", so a fleet broadcast would
-      contradict the visibility the author chose.  [@@all] on
-      [Public]/[Unlisted]/[Internal] classifies as {!Broadcast};
-    - a [Direct] post-creation without any explicit address is rejected
-      ([Direct_without_targets]). *)
+    Fail-closed address/visibility contract (validated through the typed
+    {!Board.audience} write boundary, surfaced as [Invalid_board_audience]):
+    - an unsupported [@@name] selector or a malformed [@target] token rejects
+      the whole signal, even when valid [@keeper] targets are mixed in (no
+      partial routing);
+    - [@@all] on a [Direct] post is rejected: [Direct] means "mentioned
+      agents only", so a fleet broadcast would contradict the visibility the
+      author chose.  [@@all] on [Public]/[Unlisted]/[Internal] classifies as
+      {!Broadcast};
+    - a [Direct] post-creation without any explicit address is rejected. *)
+
+val of_board_audience : Board.audience -> (t, classification_error) result
+(** Project generic Board identities into canonical Keeper lane identities.
+    This is the only MASC-specific step; Board remains Keeper-independent. *)
 
 val route_for_keeper
   :  audience:t

@@ -113,6 +113,24 @@ val create_post_once_by_fusion_run_id :
     the committed post instead of appending another row. A conflicting replay
     returns [Already_exists]. The regular create path remains unchanged. *)
 
+val create_post_with_audience :
+  store ->
+  author:string ->
+  content:string ->
+  ?title:string ->
+  ?body:string ->
+  post_kind:post_kind ->
+  ?meta_json:Yojson.Safe.t ->
+  ?visibility:visibility ->
+  ?ttl_hours:int ->
+  ?hearth:string ->
+  ?thread_id:string ->
+  ?origin:post_origin ->
+  unit ->
+  (post_creation, board_error) result
+(** Validate and freeze the post audience before mutating or persisting the
+    Board, returning that same authority with the committed post. *)
+
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid

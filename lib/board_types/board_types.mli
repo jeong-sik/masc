@@ -71,6 +71,14 @@ type visibility =
   | Internal    (** This MASC instance only. *)
   | Direct      (** Mentioned agents only. *)
 
+type audience =
+  | Targets of Agent_id.t list
+  | Broadcast
+  | Thread_participants
+  | Discoverable
+(** Closed Board routing authority. Target identities remain Board-level
+    {!Agent_id.t}; no Keeper dependency crosses into this library. *)
+
 type post_kind =
   | Human_post
   | Automation_post
@@ -130,6 +138,19 @@ type comment = {
   votes_up : int;
   votes_down : int;
 }
+
+type post_creation = {
+  post : post;
+  audience : audience;
+}
+(** Successful post write together with the audience fixed at the same write
+    boundary. Consumers must not re-derive routing from mutable projections. *)
+
+type comment_creation = {
+  comment : comment;
+  audience : audience;
+}
+(** Successful comment write and its write-boundary routing authority. *)
 
 type reaction_target_type =
   | Reaction_post

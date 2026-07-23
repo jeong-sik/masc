@@ -65,7 +65,8 @@ val list_posts_after_cursor : float * string option -> Board.post list
 val text : Board_dispatch.board_signal -> string
 val address_text : Board_dispatch.board_signal -> string
 (** Text authored by the current signal producer and therefore allowed to
-    carry addressing authority. A post uses its title/content/hearth, a
+    carry addressing authority. A post uses its title/content (never the
+    category [hearth]), a
     comment uses only the new comment body, and a reaction carries no textual
     address. Inherited post display fields never re-address later events. *)
 val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keeper_id.t list

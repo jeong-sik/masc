@@ -209,7 +209,7 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
-let add_comment
+let add_comment_with_audience
       store
       ~post_id
       ~author
@@ -217,7 +217,7 @@ let add_comment
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
       ()
-  : (comment, board_error) Result.t
+  : (comment_creation, board_error) Result.t
   =
   maybe_sweep store;
   (* Validate all IDs first *)
@@ -243,7 +243,10 @@ let add_comment
           then Error (Validation_error "ttl_hours must be non-negative")
           else if String.length content = 0
           then Error (Validation_error "Content cannot be empty")
-          else (
+          else
+            match Board_audience.audience_for_comment ~content with
+            | Error _ as error -> error
+            | Ok audience ->
             let board_result =
               with_lock store (fun () ->
                 (* Verify post exists *)
@@ -313,11 +316,23 @@ let add_comment
                  with_lock store (fun () ->
                    mark_dirty_post store (Post_id.to_string comment.post_id);
                    mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok comment
+                 Ok { comment; audience }
                | Error e ->
                  rollback_fresh_comment store ~comment ~previous_post;
                  Error e)
-            | Error _ as e -> e)))
+            | Error _ as e -> e))
+;;
+
+let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_audience
+    store
+    ~post_id
+    ~author
+    ~content
+    ?parent_id
+    ?ttl_hours
+    ()
+  |> Result.map (fun creation -> creation.comment)
 ;;
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =

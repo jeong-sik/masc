@@ -188,6 +188,22 @@ self_test() (
   fi
   cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
 
+  for accessor in receipt_phase receipt_dispatch_count; do
+    printf '\nlet _ = Exact_output.%s\n' "$accessor" \
+      >>"$fixture/lib/keeper/hitl_summary_worker.ml"
+    if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+      fail "self-test did not reject Exact_output.${accessor}"
+    fi
+    cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
+  done
+
+  printf 'let _ = fail_summary_exact_attempt_before_dispatch\n' \
+    >"$fixture/lib/keeper/retired_exact_failure.ml"
+  if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+    fail "self-test did not reject the retired exact failure transition"
+  fi
+  rm "$fixture/lib/keeper/retired_exact_failure.ml"
+
   printf 'let hitl_summary_runtime_id = None\n' \
     >"$fixture/lib/retired_scalar.ml"
   if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then

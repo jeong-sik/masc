@@ -1271,22 +1271,27 @@ let test_exact_attempt_binding_release_and_conflicts () =
        expect_summary_rejection
          "bound restart"
          (AQ.restart_failed_summary ~id);
-       let quarantine_cause = AQ.Exact_flow_execution_failed in
+       let quarantine_cause = AQ.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
          true
          (quarantine_exact replacement quarantine_cause);
        (match pending_entry_exn id with
-        | { exact_attempt =
+        | { summary_status =
+              AQ.Summary_failed { reason; retryable = false }
+          ; exact_attempt =
               AQ.Exact_bound
                 { status =
                     AQ.Exact_quarantined
-                      AQ.Exact_flow_execution_failed
+                      AQ.Exact_domain_invalid_output
                 ; _
                 }
           ; _
           } ->
-          ()
+          Alcotest.(check string)
+            "quarantine summary reason"
+            "Auto Judge exact attempt quarantined: domain_invalid_output"
+            reason
         | _ -> Alcotest.fail "quarantine cause was not durably typed");
        check_exact_update
          "same quarantine cause is idempotent"
@@ -1312,199 +1317,6 @@ let test_exact_attempt_binding_release_and_conflicts () =
         | Ok _ -> Alcotest.fail "quarantined exact attempt was released"))
 ;;
 
-let test_exact_attempt_final_predispatch_failure_requires_operator_restart () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let id =
-         submit
-           ~base_path
-           ~keeper_name:"queue-exact-predispatch-failure"
-           ~input:(`Assoc [ "request", `String "fail-before-dispatch" ])
-       in
-       check_update
-         "mark exact predispatch failure pending"
-         true
-         (AQ.mark_summary_pending ~id);
-       let identity = exact_identity id in
-       check_exact_update
-         "bind exact predispatch failure"
-         true
-         (run_exact_transition AQ.bind_summary_exact_attempt identity);
-       List.iter
-         (fun (field, wrong_identity) ->
-            (match
-               fail_exact_before_dispatch
-                 wrong_identity
-                 ~reason:"before dispatch"
-                 ~retryable:true
-             with
-             | Error
-                 (AQ.Exact_attempt_rejected
-                   (AQ.Exact_attempt_identity_conflict _)) ->
-               ()
-             | Error error ->
-               Alcotest.failf
-                 "%s mismatch returned %s"
-                 field
-                 (AQ.exact_attempt_error_to_string error)
-             | Ok _ ->
-               Alcotest.failf "%s mismatch changed failure state" field);
-            match pending_entry_exn id with
-            | { summary_status = AQ.Summary_pending
-              ; exact_attempt =
-                  AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
-              ; _
-              } ->
-              ()
-            | _ ->
-              Alcotest.failf "%s mismatch mutated the durable entry" field)
-         [ "slot_id", { identity with slot_id_arg = "wrong-slot-id" }
-         ; "call_id", { identity with call_id_arg = "wrong-call-id" }
-         ; ( "plan_fingerprint"
-           , { identity with plan_fingerprint_arg = "wrong-plan-fingerprint" } )
-         ; ( "request_body_sha256"
-           , { identity with request_body_sha256_arg = String.make 64 'c' } )
-         ];
-       check_exact_update
-         "final before-dispatch failure"
-         true
-         (fail_exact_before_dispatch
-            identity
-            ~reason:"all exact slots failed before dispatch"
-            ~retryable:true);
-       (match pending_entry_exn id with
-        | { summary_status =
-              AQ.Summary_failed
-                { reason = "all exact slots failed before dispatch"
-                ; retryable = true
-                }
-          ; exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; _
-          } ->
-          ()
-        | _ ->
-          Alcotest.fail
-            "before-dispatch release and summary failure were not atomic");
-       check_exact_update
-         "same before-dispatch failure is idempotent"
-         false
-         (fail_exact_before_dispatch
-            identity
-            ~reason:"all exact slots failed before dispatch"
-            ~retryable:true);
-       let expect_failure_replay_conflict label result =
-         match result with
-         | Error
-             (AQ.Exact_attempt_rejected
-               (AQ.Exact_attempt_status_conflict _)) ->
-           ()
-         | Error error ->
-           Alcotest.failf
-             "%s returned %s"
-             label
-             (AQ.exact_attempt_error_to_string error)
-         | Ok _ -> Alcotest.failf "%s replaced the first durable failure" label
-       in
-       expect_failure_replay_conflict
-         "changed failure reason"
-         (fail_exact_before_dispatch
-            identity
-            ~reason:"different failure reason"
-            ~retryable:true);
-       expect_failure_replay_conflict
-         "changed retryable observation"
-         (fail_exact_before_dispatch
-            identity
-            ~reason:"all exact slots failed before dispatch"
-            ~retryable:false);
-       (match pending_entry_exn id with
-        | { summary_status =
-              AQ.Summary_failed
-                { reason = "all exact slots failed before dispatch"
-                ; retryable = true
-                }
-          ; exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; _
-          } ->
-          ()
-        | _ -> Alcotest.fail "conflicting replay replaced the first failure");
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       (match pending_entry_exn id with
-        | { summary_status =
-              AQ.Summary_failed
-                { reason = "all exact slots failed before dispatch"
-                ; retryable = true
-                }
-          ; exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; _
-          } ->
-          ()
-        | _ ->
-          Alcotest.fail
-            "released exact failure did not survive codec round-trip");
-       check_update
-         "single operator restart"
-         true
-         (AQ.restart_failed_summary ~id);
-       (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_pending
-          ; exact_attempt = AQ.Exact_unbound
-          ; _
-          } ->
-          ()
-        | _ ->
-          Alcotest.fail
-            "single operator restart did not clear the released binding");
-       let second_identity =
-         exact_identity
-           ~slot_id:"slot-restarted"
-           ~call_id:"call-restarted"
-           ~plan_fingerprint:"plan-restarted"
-           ~request_body_sha256:(String.make 64 'b')
-           id
-       in
-       check_exact_update
-         "bind restarted exact attempt"
-         true
-         (run_exact_transition AQ.bind_summary_exact_attempt second_identity);
-       check_exact_update
-         "fail restarted attempt before dispatch"
-         true
-         (fail_exact_before_dispatch
-            second_identity
-            ~reason:"restarted slot unavailable"
-            ~retryable:false);
-       (match AQ.restart_failed_summaries ~base_path with
-        | Ok restarted_ids ->
-          Alcotest.(check (list string))
-            "bulk operator restart includes exact failure"
-            [ id ]
-            restarted_ids
-        | Error error ->
-          Alcotest.fail (AQ.summary_transition_error_to_string error));
-       match pending_entry_exn id with
-       | { summary_status = AQ.Summary_pending
-         ; exact_attempt = AQ.Exact_unbound
-         ; _
-         } ->
-         ()
-       | _ ->
-         Alcotest.fail
-           "bulk operator restart did not clear the released binding")
-;;
 
 let test_restart_classifies_uncertain_and_released_recovery () =
   let base_path = temp_dir () in
@@ -3074,10 +2886,6 @@ let () =
             "exact binding release and conflicts"
             `Quick
             test_exact_attempt_binding_release_and_conflicts
-        ; Alcotest.test_case
-            "final predispatch failure requires operator restart"
-            `Quick
-            test_exact_attempt_final_predispatch_failure_requires_operator_restart
         ; Alcotest.test_case
             "restart classifies uncertain and released states stably"
             `Quick

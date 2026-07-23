@@ -601,6 +601,8 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
         | Some
             { input_hash
             ; sequence
+            ; summary_status =
+                Q.Summary_failed { reason; retryable = false }
             ; exact_attempt =
                 Q.Exact_bound
                   { slot_id
@@ -612,6 +614,11 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
                   }
             ; _
             } ->
+          check
+            string
+            "terminal summary reason"
+            "Auto Judge exact attempt quarantined: flow_execution_failed"
+            reason;
           check string "quarantine input identity" entry.input_hash input_hash;
           check int "quarantine sequence identity" entry.sequence sequence;
           check string "quarantine opaque slot identity" "hitl-flow-failed" slot_id;

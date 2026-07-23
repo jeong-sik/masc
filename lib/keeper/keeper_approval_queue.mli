@@ -381,8 +381,10 @@ val quarantine_summary_exact_attempt :
     A dispatch-uncertain binding accepts any public exact cause. A released
     binding accepts only [Exact_terminal_persistence_failure],
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same identity
-    and cause is idempotently strict-rewritten. It can never return to the
-    summary mutation path. Restart-only states are not values of
+    and cause is idempotently strict-rewritten. The same strict snapshot
+    atomically records a non-retryable [Summary_failed] with a stable MASC-owned
+    cause. It can never return to the summary mutation path. Restart-only states
+    are not values of
     [exact_attempt_quarantine_cause] and cannot enter this surface. *)
 
 val complete_summary_exact_attempt :

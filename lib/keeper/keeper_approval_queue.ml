@@ -535,6 +535,16 @@ let exact_attempt_identity_matches
   && String.equal left.request_body_sha256 right.request_body_sha256
 ;;
 
+let exact_attempt_quarantine_summary_status cause =
+  Summary_failed
+    { reason =
+        Printf.sprintf
+          "Auto Judge exact attempt quarantined: %s"
+          (exact_attempt_quarantine_cause_to_string cause)
+    ; retryable = false
+    }
+;;
+
 let validate_entry_exact_attempt
       ~id
       ~input_hash
@@ -551,11 +561,13 @@ let validate_entry_exact_attempt
             && Int.equal binding.sequence sequence) ->
     Error "exact attempt binding key does not match its approval entry"
   | Exact_bound { status = Exact_completed; _ }, Summary_available _ -> Ok ()
+  | Exact_bound { status = Exact_quarantined cause; _ }, summary_status
+    when summary_status = exact_attempt_quarantine_summary_status cause ->
+    Ok ()
   | Exact_bound
       { status =
           ( Exact_dispatch_uncertain
           | Exact_released_recovery_required
-          | Exact_quarantined _
           | Exact_restart_quarantined )
       ; _
       },
@@ -567,7 +579,7 @@ let validate_entry_exact_attempt
   | Exact_bound { status = Exact_completed; _ }, _ ->
     Error "completed exact attempt requires an available summary"
   | Exact_bound _, _ ->
-    Error "non-completed exact attempt requires a pending summary"
+    Error "exact attempt and summary status are not a valid current-schema pair"
 ;;
 
 let pending_entry_of_yojson ~base_path json =
@@ -2064,7 +2076,10 @@ let quarantine_summary_exact_attempt_with
                     ~changed:true
                     ~map
                     ~entry
-                    { entry with exact_attempt = Exact_bound quarantined }
+                    { entry with
+                      summary_status = exact_attempt_quarantine_summary_status cause
+                    ; exact_attempt = Exact_bound quarantined
+                    }
                 | Exact_quarantined durable_cause
                   when durable_cause = cause ->
                   persist_exact_attempt_entry_unlocked
@@ -2087,7 +2102,10 @@ let quarantine_summary_exact_attempt_with
                     ~changed:true
                     ~map
                     ~entry
-                    { entry with exact_attempt = Exact_bound quarantined }
+                    { entry with
+                      summary_status = exact_attempt_quarantine_summary_status cause
+                    ; exact_attempt = Exact_bound quarantined
+                    }
                 | Exact_quarantined _
                 | Exact_released_before_dispatch
                 | Exact_released_recovery_required

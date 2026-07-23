@@ -246,7 +246,7 @@ function approvalSummaryBlock(status: HitlSummaryStatus | null | undefined) {
       </div>`
     case 'failed':
       return html`<div class="ap-summary ap-summary-failed" data-testid="approval-summary" data-summary-state="failed">
-        <span class="ap-summary-label">컨텍스트 요약 실패 · 수동 재시도 가능</span>
+        <span class="ap-summary-label">컨텍스트 요약 실패 · ${status.retryable ? '수동 재시도 가능' : '재시도 불가'}</span>
         ${status.reason ? html`<span class="ap-summary-reason">${status.reason}</span>` : null}
       </div>`
     case 'available':
@@ -326,7 +326,7 @@ function ApprovalCard({
           </div>
         </div>
         <div class="ap-actions">
-          ${item.summary_status?.status === 'failed'
+          ${item.summary_status?.status === 'failed' && item.summary_status.retryable
             ? html`<button
                 type="button"
                 class="ap-act retry"

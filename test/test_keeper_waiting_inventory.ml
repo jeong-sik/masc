@@ -195,10 +195,18 @@ let test_event_queue_pending_and_inflight_are_visible () =
   Keeper_event_queue_persistence.persist
     ~base_path:config.Workspace_utils_backend_setup.base_path
     ~keeper_name
-    (queue_of_list [ pending ]);
-  Keeper_event_queue_persistence.record_inflight
-    ~base_path:config.Workspace_utils_backend_setup.base_path
-    ~keeper_name [ inflight ];
+    (queue_of_list [ inflight; pending ]);
+  (match
+     Keeper_event_queue_persistence.claim_when_result
+       ~base_path:config.Workspace_utils_backend_setup.base_path
+       ~keeper_name
+       ~claimed_at:120.0
+       ~ready:(fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id inflight.post_id)
+       ()
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "current queue fixture did not claim inflight stimulus"
+   | Error detail -> fail detail);
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "event pending metric"
     Otel_metric_store.metric_keeper_waiting_count

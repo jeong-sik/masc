@@ -746,10 +746,20 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     ~base_path
     keeper_name
     (board_stimulus ~post_id:"post-live-backlog-2" ());
-  Keeper_event_queue_persistence.record_inflight
-    ~base_path
-    ~keeper_name
-    [ fusion_completed_stimulus () ];
+  let inflight = fusion_completed_stimulus () in
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name inflight;
+  (match
+     Keeper_event_queue_persistence.claim_when_result
+       ~base_path
+       ~keeper_name
+       ~claimed_at:1235.0
+       ~ready:(fun stimulus ->
+         Keeper_event_queue.stimulus_identity_equal stimulus inflight)
+       ()
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "current queue fixture did not claim fusion stimulus"
+   | Error detail -> fail detail);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path

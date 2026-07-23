@@ -176,7 +176,7 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
   // A paused directive can outlive its process: the persisted `paused` flag
   // stays set after the keeper fiber dies, but only a live fiber can be
-  // resumed — resume needs a live owner_generation as its fencing token, and
+  // resumed — resume needs a live owner nonce as its fencing token, and
   // a dead keeper has none. Treat paused-but-not-live as needing boot, so
   // the boot verb surfaces for a dead paused keeper and resume stays hidden
   // instead of returning "current owner generation is unavailable".

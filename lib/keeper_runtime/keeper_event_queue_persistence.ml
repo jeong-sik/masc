@@ -4,7 +4,6 @@ module State = Keeper_event_queue_state
 type lease_kind = State.lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason = State.requeue_reason =
   | Cycle_busy
@@ -375,26 +374,9 @@ let settlement_wal_entry_to_line owner entry =
   |> fun row -> row ^ "\n"
 ;;
 
-type settlement_wal_transition =
-  | Legacy_receipt of transition_receipt
-  | Source_entry of outbox_entry
-
-let settlement_wal_transition_of_json owner = function
+let settlement_wal_entry_of_json owner = function
   | `Assoc fields ->
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
-     | [ ("base_path", `String base_path)
-       ; ("keeper_name", `String keeper_name)
-       ; ("receipt", receipt)
-       ; ("schema", `String schema)
-       ] ->
-       if not (String.equal schema "masc.keeper_event_queue.settlement.v1")
-       then Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
-       else if
-         not
-           (String.equal base_path (Owner_lock.base_path owner)
-            && String.equal keeper_name (keeper_name_of_owner owner))
-       then Error "settlement WAL row owner does not match its Keeper lane"
-       else State.transition_receipt_of_yojson receipt |> Result.map (fun receipt -> Legacy_receipt receipt)
      | [ ("base_path", `String base_path)
        ; ("keeper_name", `String keeper_name)
        ; ("outbox_entry", entry)
@@ -407,7 +389,7 @@ let settlement_wal_transition_of_json owner = function
            (String.equal base_path (Owner_lock.base_path owner)
             && String.equal keeper_name (keeper_name_of_owner owner))
        then Error "settlement WAL row owner does not match its Keeper lane"
-       else State.outbox_entry_of_yojson entry |> Result.map (fun entry -> Source_entry entry)
+       else State.outbox_entry_of_yojson entry
      | _ -> Error "settlement WAL row fields are not exact")
   | _ -> Error "settlement WAL row must be a JSON object"
 ;;
@@ -423,13 +405,9 @@ let replay_settlement_wal_bytes owner state bytes =
        with
        | Error detail -> Error ("invalid settlement WAL JSON: " ^ detail)
        | Ok json ->
-         (match settlement_wal_transition_of_json owner json with
+         (match settlement_wal_entry_of_json owner json with
           | Error _ as error -> error
-          | Ok (Legacy_receipt receipt) ->
-            (match State.replay_transition_receipt receipt state with
-             | Error _ as error -> error
-             | Ok state -> replay state rest)
-          | Ok (Source_entry entry) ->
+          | Ok entry ->
             (match State.replay_transition_outbox_entry entry state with
              | Error _ as error -> error
              | Ok state -> replay state rest)))
@@ -1337,42 +1315,6 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
        match State.mark_transition_projected ~transition_id state with
        | Error _ as error -> error
        | Ok state -> Ok (state, ()))
-;;
-
-let record_inflight ~base_path ~keeper_name stimuli =
-  match stimuli with
-  | [] -> ()
-  | _ ->
-    (match
-       commit_transform
-         ~base_path
-         ~keeper_name
-         ~after_commit:(fun _ -> ())
-         (fun state ->
-            match State.add_legacy_inflight stimuli state with
-            | Error _ as error -> error
-            | Ok (state, _lease) -> Ok (state, ()))
-     with
-     | Ok () -> ()
-     | Error message ->
-       Log.Keeper.error
-         "event_queue_snapshot: record legacy inflight failed keeper=%s: %s"
-         keeper_name
-         message)
-;;
-
-let ack_inflight ~base_path ~keeper_name stimuli =
-  match
-    commit_transform
-      ~base_path
-      ~keeper_name
-      ~after_commit:(fun _ -> ())
-      (fun state ->
-         Ok (State.release_legacy_inflight stimuli state, ()))
-  with
-  | Ok () -> ()
-  | Error message ->
-    Log.Keeper.error "event_queue_snapshot: ack_inflight failed keeper=%s: %s" keeper_name message
 ;;
 
 let remove_post_ids stimuli state =

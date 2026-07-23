@@ -365,8 +365,7 @@ let heartbeat_event_intake
         match Keeper_registry_event_queue.lease_kind lease, stimuli with
         | Keeper_event_queue_persistence.Board_batch, batch ->
           consume_board_stimulus_batch ~meta_after_triage batch
-        | ( Keeper_event_queue_persistence.Single
-          | Keeper_event_queue_persistence.Legacy_inflight ), stimuli ->
+        | Keeper_event_queue_persistence.Single, stimuli ->
           List.concat_map
             (consume_single_heartbeat_stimulus ~ctx ~meta_after_triage)
             stimuli

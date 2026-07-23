@@ -103,7 +103,7 @@ describe('keeperActionVisibility', () => {
   })
 
   describe('paused keeper whose fiber died (keepalive_running=false)', () => {
-    it('exposes boot instead of resume — resume needs a live owner_generation', () => {
+    it('exposes boot instead of resume — resume needs a live owner nonce', () => {
       const k = makeKeeper({ status: 'active', phase: 'Paused', paused: true, keepalive_running: false })
       const v = keeperActionVisibility(k)
       expect(v.canResume).toBe(false)

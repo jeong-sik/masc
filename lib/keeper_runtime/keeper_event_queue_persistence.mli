@@ -1,15 +1,14 @@
 (** Durable per-Keeper Event Layer state.
 
-    [event-queue.json] keeps the v4 envelope containing pending stimuli, active
+    [event-queue.json] keeps the current v4 envelope containing pending stimuli, active
     typed leases, exact-execution dispatch fences, the monotonic lease
-    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v3 is the only supported
-    predecessor. [event-queue-inflight.json] is rejected explicitly rather
-    than migrated or treated as a second authority. *)
+    sequence, transition outbox, and durable accepted-transfer target accounting.
+    Stale schemas and [event-queue-inflight.json] fail closed rather than being
+    migrated or treated as a second authority. *)
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Cycle_busy
@@ -443,14 +442,6 @@ val project_accepted_transfer_result :
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-val record_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Legacy source/test adapter. Writes a typed [Legacy_inflight] lease into the
-    v4 envelope; it never creates [event-queue-inflight.json]. *)
-
-val ack_inflight :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 
 val ack_consumed :
   base_path:string ->

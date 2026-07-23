@@ -7,7 +7,7 @@
 // Actions available per keeper:
 //   pause     → POST /api/v1/keepers/:name/directive  { action: "pause" }
 //   resume    → POST /api/v1/keepers/:name/directive
-//               { action: "resume", owner_generation, operator_operation_id }
+//               { action: "resume", owner_nonce, operator_operation_id }
 //   wakeup    → POST /api/v1/keepers/:name/directive  { action: "wakeup" }
 //   boot      → POST /api/v1/keepers/:name/boot
 //   shutdown  → POST /api/v1/keepers/:name/shutdown

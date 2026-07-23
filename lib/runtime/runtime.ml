@@ -1737,9 +1737,14 @@ let commit_runtime_config_text ~path content =
        set_loaded ~config_path:path loaded;
        Ok ()
      | Error error ->
-       failwith
-         ("invariant violation: runtime config file committed but the \
-           exact-output registry reservation was inactive; restart is required: "
+       (* The file is durably committed, so crashing here would strand a
+          running process whose on-disk config no longer matches its
+          in-memory registry.  Surface the inconsistency as an Error so the
+          caller can report it; a restart re-materializes the registry from
+          the committed file. *)
+       Error
+         ("runtime config file committed but the exact-output registry \
+           reservation was inactive; restart is required: "
           ^ Runtime_exact_output_registry.reservation_error_to_string error))
   | Error detail ->
     (match abort_exact_output_replacement reservation with

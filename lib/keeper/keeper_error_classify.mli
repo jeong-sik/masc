@@ -45,7 +45,9 @@ val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
     provider refused the request body itself (malformed payload, orphan
     tool-call residues), so same-turn retry is futile.  Also matches legacy
-    string-rendered ["Invalid request"] / ["Bad Request"] messages. *)
+    string-rendered ["Invalid request"] / ["Bad Request"] messages.  The
+    typed arm is authoritative; the string arms are pinned against the SDK
+    rendering shape by a drift test (see the .ml doc comment). *)
 val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for a 0-byte empty completion: the provider ended the turn with a

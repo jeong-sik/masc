@@ -371,7 +371,9 @@ let save_snapshot_file_strict_staged_unlocked
           | _ -> Error { path; reason })
        | Fs_compat.After_rename -> Ok (Visible_sync_unconfirmed reason))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exn backtrace
   | exn -> Error { path; reason = Printexc.to_string exn }
 ;;
 

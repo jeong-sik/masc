@@ -365,13 +365,12 @@ let before_rename_writer path _body =
     }
 ;;
 
-let before_rename_cancellation_writer path _body =
+let before_rename_cancellation_writer ~payload ~backtrace path _body =
   Error
     { Fs_compat.path
     ; stage = Fs_compat.Before_rename
-    ; exception_ =
-        Eio.Cancel.Cancelled (Failure "injected cancellation before rename")
-    ; backtrace = Printexc.get_raw_backtrace ()
+    ; exception_ = Eio.Cancel.Cancelled payload
+    ; backtrace
     }
 ;;
 
@@ -1788,13 +1787,29 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          let cancel_before_id, cancel_before_identity =
            prepare "cancel-before-rename"
          in
+         let cancellation_payload =
+           Failure ("injected cancellation before rename: " ^ cancel_before_id)
+         in
+         let cancellation_backtrace = Printexc.get_callstack 32 in
          (match
             run_exact_transition_with_writer
               AQ.For_testing.bind_summary_exact_attempt_with_writer
-              ~writer:before_rename_cancellation_writer
+              ~writer:
+                (before_rename_cancellation_writer
+                   ~payload:cancellation_payload
+                   ~backtrace:cancellation_backtrace)
               cancel_before_identity
           with
-          | exception Eio.Cancel.Cancelled _ -> ()
+          | exception Eio.Cancel.Cancelled observed_payload ->
+            let observed_backtrace = Printexc.get_raw_backtrace () in
+            Alcotest.(check bool)
+              "pre-rename cancellation payload preserved"
+              true
+              (observed_payload == cancellation_payload);
+            Alcotest.(check string)
+              "pre-rename cancellation backtrace preserved"
+              (Printexc.raw_backtrace_to_string cancellation_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace)
           | Error error ->
             Alcotest.failf
               "pre-rename cancellation became an exact error: %s"

@@ -821,12 +821,14 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
   let finalized = Atomic.make false in
   let prepare_entered = Atomic.make false in
   let progress_resolved = Atomic.make false in
+  let release_attempts = Atomic.make 0 in
   let release_resolved = Atomic.make false in
   let resolve_progress_once progress =
     if Atomic.compare_and_set progress_resolved false true
     then Eio.Promise.resolve resolve_progress progress
   in
   let resolve_release_once () =
+    ignore (Atomic.fetch_and_add release_attempts 1);
     if Atomic.compare_and_set release_resolved false true
     then Eio.Promise.resolve resolve_release ()
   in
@@ -890,6 +892,10 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
     "release resolver settled exactly once"
     true
     (Atomic.get release_resolved);
+  Alcotest.(check int)
+    "release resolver invoked exactly once"
+    1
+    (Atomic.get release_attempts);
   (match worker_finished_early with
    | None -> ()
    | Some Cancellation_observed ->

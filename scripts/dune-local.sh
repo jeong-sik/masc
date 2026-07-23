@@ -16,8 +16,9 @@ Local Dune wrapper for multi-agent development:
   - disables the shared Dune artifact cache by default for local builds
   - injects --root <repo-root> unless --root is already present
   - asserts agent_sdk opam pin matches the repo SSOT before each build
-  - asserts core opam dependencies are installed in the active switch
-  - asserts OCaml is at or above the repo floor declared in dune-project
+  - asserts the shell and opam resolve one coherent toolchain
+  - asserts required findlib libraries are installed in the active switch
+  - asserts OCaml exactly matches the repo version declared in dune-project
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_CACHE=enabled or enabled-except-user-rules to opt into the shared Dune cache.
@@ -29,8 +30,8 @@ Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait behind a live _build/.lock holder.
 Set MASC_DUNE_ALLOW_BARE_DUNE=1 to run despite a live Dune process outside this wrapper.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
-Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
-Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the OCaml minimum version guard.
+Set MASC_SKIP_DEPS_CHECK=1 to skip the required-findlib guard.
+Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the exact OCaml toolchain guard.
 USAGE
 }
 
@@ -471,6 +472,75 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- exact OCaml toolchain guard ---------------------------------------
+# MASC supports one compiler version.  Verify both the version and the
+# identity of the active opam prefix before any findlib or pin inspection.
+# This catches split-brain shells where `opam switch show` names one switch
+# while PATH/OPAM_SWITCH_PREFIX still point at another.
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_SKIP_OCAML_VERSION_CHECK:-0}" != "1" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${_subcommand}" != "clean" ]]; then
+  _required_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(=[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)\)\).*$/ { s//\1/; p; q; }' \
+    "${repo_root}/dune-project")"
+  if [[ -z "${_required_version}" ]]; then
+    printf '[dune-local] unable to read exact OCaml version from %s\n' \
+      "${repo_root}/dune-project" >&2
+    exit 1
+  fi
+
+  if ! command -v opam >/dev/null 2>&1; then
+    printf '[dune-local] opam is unavailable; MASC requires an opam-managed OCaml %s switch\n' \
+      "${_required_version}" >&2
+    exit 1
+  fi
+  _opam_switch="$(opam switch show 2>/dev/null || true)"
+  _opam_prefix="$(opam var prefix 2>/dev/null || true)"
+  if [[ -z "${_opam_switch}" || -z "${_opam_prefix}" ]]; then
+    printf '[dune-local] unable to resolve the active opam switch and prefix\n' >&2
+    exit 1
+  fi
+  if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
+        && "${OPAM_SWITCH_PREFIX%/}" != "${_opam_prefix%/}" ]]; then
+    printf '[dune-local] split opam environment: switch %s uses %s but OPAM_SWITCH_PREFIX=%s\n' \
+      "${_opam_switch}" "${_opam_prefix}" "${OPAM_SWITCH_PREFIX}" >&2
+    printf '%s\n' \
+      "[dune-local] repair: eval \"\$(opam env --switch=${_required_version} --set-switch)\"" >&2
+    exit 1
+  fi
+  for _tool in ocamlc dune ocamlfind; do
+    _tool_path="$(command -v "${_tool}" 2>/dev/null || true)"
+    if [[ -z "${_tool_path}" || "${_tool_path}" != "${_opam_prefix%/}/bin/"* ]]; then
+      printf '[dune-local] split opam environment: %s resolves to %s, expected %s/bin/%s\n' \
+        "${_tool}" "${_tool_path:-<missing>}" "${_opam_prefix%/}" "${_tool}" >&2
+      printf '%s\n' \
+        "[dune-local] repair: eval \"\$(opam env --switch=${_required_version} --set-switch)\"" >&2
+      exit 1
+    fi
+  done
+
+  if ! command -v ocamlc >/dev/null 2>&1; then
+    printf '[dune-local] ocamlc is unavailable; this repo requires OCaml %s\n' \
+      "${_required_version}" >&2
+    exit 1
+  fi
+  _ocaml_v="$(ocamlc -version 2>/dev/null || true)"
+  if [[ "${_ocaml_v}" != "${_required_version}" ]]; then
+    printf '[dune-local] OCaml %s detected; this repo requires exactly %s (dune-project)\n' \
+      "${_ocaml_v:-unknown}" "${_required_version}" >&2
+    printf '[dune-local] repair (run each line in turn):\n' >&2
+    printf '[dune-local]   opam switch create %s ocaml-base-compiler.%s\n' \
+      "${_required_version}" "${_required_version}" >&2
+    printf '%s\n' \
+      "[dune-local]   eval \"\$(opam env --switch=${_required_version} --set-switch)\"" >&2
+    printf '[dune-local]   bash scripts/opam-pin-external-deps.sh --install\n' >&2
+    printf '[dune-local]   opam install . --deps-only --with-test -y\n' >&2
+    printf '[dune-local] set MASC_SKIP_OCAML_VERSION_CHECK=1 to bypass this guard\n' >&2
+    exit 1
+  fi
+fi
+# -----------------------------------------------------------------------
+
 # --- agent_sdk pin guard -----------------------------------------------
 # Assert the local opam switch is pinned to the SSOT SHA before each local
 # build.  Multiple concurrent sessions that share one opam switch can
@@ -628,20 +698,20 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
-# --- core opam-deps installed guard ------------------------------------
-# Catch the "deps declared but not installed" failure mode before Dune
-# emits a wall of cryptic abstract-cmi errors:
+# --- required findlib libraries guard ----------------------------------
+# Catch absent packages and incompatible package API layouts before Dune
+# emits a wall of cryptic library-resolution or abstract-cmi errors:
 #
+#   Error: Library "opentelemetry.client" not found
+#   Error: Library "piaf.stream" not found
 #   Error: Unbound module Httpun
 #   Type Httpun.Method.t is abstract because no corresponding cmi file
 #   was found in path.
 #
-# Pin guard above checks that agent_sdk *would resolve to* the right
-# SHA, but does not catch the case where the operator added a new opam
-# switch and forgot `opam install . --deps-only -y`.  Hardcoded list
-# covers the four packages whose absence produces the worst error
-# spew; full validation belongs to opam itself (the wrapper deliberately
-# stays cheap).
+# Query the actual findlib names consumed by Dune instead of only checking
+# opam package names.  Package existence alone did not catch
+# opentelemetry.0.91.1, which is installed successfully but does not expose
+# the [opentelemetry.client] library consumed by MASC.
 #
 # Skipped under the same envelope as the pin guard plus
 # MASC_SKIP_DEPS_CHECK=1.
@@ -650,66 +720,33 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
       && "${_subcommand}" != "clean" ]]; then
   if command -v opam >/dev/null 2>&1; then
-    _core_deps=(httpun httpun-eio httpun-ws agent_sdk)
+    _required_findlib=(
+      httpun
+      httpun-eio
+      httpun-ws
+      agent_sdk
+      piaf
+      piaf.stream
+      opentelemetry.client
+    )
     _missing=()
-    for _pkg in "${_core_deps[@]}"; do
-      if ! opam list --installed --short "${_pkg}" 2>/dev/null \
-           | grep -qx "${_pkg}"; then
-        _missing+=("${_pkg}")
+    for _library in "${_required_findlib[@]}"; do
+      _library_path="$(opam exec -- ocamlfind query "${_library}" 2>/dev/null || true)"
+      if [[ -z "${_library_path}" ]]; then
+        _missing+=("${_library}")
       fi
     done
     if [[ ${#_missing[@]} -gt 0 ]]; then
-      printf '[dune-local] missing opam packages in switch %s: %s\n' \
+      printf '[dune-local] missing or incompatible findlib libraries in switch %s: %s\n' \
         "$(opam switch show 2>/dev/null || echo '?')" \
         "${_missing[*]}" >&2
       printf '[dune-local] symptom you would otherwise see:\n' >&2
-      printf '[dune-local]   Error: Unbound module <Pkg>\n' >&2
-      printf '[dune-local]   Type <Pkg>.<T>.t is abstract because no corresponding cmi file...\n' >&2
-      printf '[dune-local] repair: opam install . --deps-only -y\n' >&2
+      printf '[dune-local]   Error: Library "<name>" not found\n' >&2
+      printf '[dune-local] repair (run each line in turn):\n' >&2
+      printf '[dune-local]   bash scripts/opam-pin-external-deps.sh --install\n' >&2
+      printf '[dune-local]   opam install . --deps-only --with-test -y\n' >&2
       printf '[dune-local] set MASC_SKIP_DEPS_CHECK=1 to bypass this guard\n' >&2
       exit 1
-    fi
-  fi
-fi
-# -----------------------------------------------------------------------
-
-# --- OCaml minimum version guard ---------------------------------------
-# dune-project declares the OCaml floor and masc.opam is generated from it.
-# Older switches build the early lib/ deps fine but fail later during opam
-# dependency resolution or in stdlib calls added by the declared floor.  Catch
-# the mismatch up-front so the error mentions the real floor rather than the
-# trailing symptom (e.g. an "Unbound value" from a newer stdlib API).
-if [[ "${GITHUB_ACTIONS:-}" != "true" \
-      && "${MASC_SKIP_OCAML_VERSION_CHECK:-0}" != "1" \
-      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
-      && "${_subcommand}" != "clean" ]]; then
-  if command -v ocaml >/dev/null 2>&1; then
-    _ocaml_v="$(ocaml -version 2>/dev/null \
-                | sed -nE 's/.*version ([0-9]+\.[0-9]+).*/\1/p')"
-    if [[ -n "${_ocaml_v}" ]]; then
-      _required_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(>=[[:space:]]+([0-9]+)\.([0-9]+)\)\).*$/ { s//\1.\2/; p; q; }' \
-        "${repo_root}/dune-project")"
-      if [[ -z "${_required_version}" ]]; then
-        printf '[dune-local] unable to read OCaml floor from %s\n' \
-          "${repo_root}/dune-project" >&2
-        exit 1
-      fi
-      _required_major="${_required_version%%.*}"
-      _required_minor="${_required_version##*.}"
-      _major="${_ocaml_v%%.*}"
-      _minor="${_ocaml_v##*.}"
-      if [[ "${_major}" -lt "${_required_major}" \
-            || ( "${_major}" -eq "${_required_major}" && "${_minor}" -lt "${_required_minor}" ) ]]; then
-        printf '[dune-local] OCaml %s detected; this repo requires >= %s (dune-project)\n' \
-          "${_ocaml_v}" "${_required_version}" >&2
-        printf '[dune-local] symptom under older switch: opam dep resolution fails or stdlib API missing\n' >&2
-        printf '[dune-local] repair (run each line in turn):\n' >&2
-        printf '[dune-local]   opam switch create %s.0\n' "${_required_version}" >&2
-        printf '[dune-local]   eval $%s\n' '(opam env)' >&2
-        printf '[dune-local]   opam install . --deps-only -y\n' >&2
-        printf '[dune-local] set MASC_SKIP_OCAML_VERSION_CHECK=1 to bypass this guard\n' >&2
-        exit 1
-      fi
     fi
   fi
 fi

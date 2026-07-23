@@ -25,7 +25,7 @@
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
-  (ocaml (>= 5.5))
+  (ocaml (= 5.5.0))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
   ; declaring it again here makes the generated .opam emit
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
@@ -53,7 +53,7 @@
   ; brew openssl@3 + CPATH=/opt/homebrew/opt/openssl@3/include
   ; LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib environment overrides
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
-  (piaf (>= 0.2.0))
+  (piaf (= 0.2.0))
   (eio-ssl (>= 0.3.0))
   ;; The exact OAS release pin carries typed recovery, response-shape, and
   ;; ordered multimodal delivery contracts;
@@ -79,6 +79,7 @@
   (zstd (>= 0.4))
   (httpun (>= 0.2))
   (httpun-eio (>= 0.2))
+  (httpun-ws (= 0.2.0))
   (bigstringaf (>= 0.10))
   (eio (>= 1.0))
   (eio_main (>= 1.0))
@@ -118,8 +119,10 @@
   ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
   ; pbrt_services (iter #11): declared but never imported.  Re-add
   ; when Neo4j Bolt support resumes.
-  ; OpenTelemetry observability + OTLP exporter
-  (opentelemetry (>= 0.13))
+  ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
+  ; [opentelemetry.client] findlib library exposed by 0.13; newer package
+  ; families use a different public library layout.
+  (opentelemetry (= 0.13))
   (ambient-context-eio (>= 0.2))
   ; Build-time embedder for default config seeds (init subcommand)
   (crunch (and :build (>= 4.0)))))

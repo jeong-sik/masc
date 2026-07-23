@@ -24,6 +24,22 @@ cat > "${FAKE_BIN}/opam" <<'FAKE_OPAM'
 set -euo pipefail
 
 case "$1" in
+  switch)
+    [[ "${2:-}" == "show" ]] || exit 2
+    printf '%s\n' "${FAKE_OPAM_SWITCH:-5.5.0}"
+    ;;
+  var)
+    [[ "${2:-}" == "prefix" ]] || exit 2
+    printf '%s\n' "${FAKE_OPAM_PREFIX:?}"
+    ;;
+  exec)
+    if [[ "${2:-}" == "--" && "${3:-}" == "ocamlc" && "${4:-}" == "-version" ]]; then
+      printf '%s\n' "${FAKE_OCAML_VERSION:-5.5.0}"
+      exit 0
+    fi
+    echo "unexpected fake opam exec command: $*" >&2
+    exit 2
+    ;;
   list)
     for arg in "$@"; do
       if [[ "${arg}" == "--short" ]]; then
@@ -80,6 +96,8 @@ run_pin_script() {
   env \
     PATH="${FAKE_BIN}:${PATH}" \
     OPAM_FAKE_CALLS="${CALLS_FILE}" \
+    FAKE_OPAM_PREFIX="${TMP}/switch" \
+    OPAM_SWITCH_PREFIX="${TMP}/switch" \
     MASC_AGENT_SDK_FLOOR_PATH="${FLOOR_FILE}" \
     MASC_SKIP_OPAM_LOCK=1 \
     "$@"
@@ -231,5 +249,32 @@ if [[ "${recorded_floor}" != "${OAS_AGENT_SDK_MIN_VERSION}" ]]; then
 fi
 echo "ok case 10 - fresh switch without installed agent_sdk permits initial pinning"
 
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  OPAM_SWITCH_PREFIX="${TMP}/other-switch" \
+  FAKE_AGENT_SDK_VERSION="${OAS_AGENT_SDK_MIN_VERSION}" \
+  bash "${PIN_SCRIPT}" >"${TMP}/case11.out" 2>"${TMP}/case11.err"; then
+  echo "FAIL case 11: split opam prefix should be rejected" >&2
+  exit 1
+fi
+assert_contains "${TMP}/case11.err" "split opam environment"
+assert_contains "${TMP}/case11.err" "opam env --switch=5.5.0 --set-switch"
+assert_not_contains "${CALLS_FILE}" "pin add"
+echo "ok case 11 - split opam prefix fails before pin mutation"
+
+: > "${CALLS_FILE}"
+rm -f "${FLOOR_FILE}"
+if run_pin_script \
+  FAKE_OCAML_VERSION=5.4.1 \
+  FAKE_AGENT_SDK_VERSION="${OAS_AGENT_SDK_MIN_VERSION}" \
+  bash "${PIN_SCRIPT}" >"${TMP}/case12.out" 2>"${TMP}/case12.err"; then
+  echo "FAIL case 12: unsupported OCaml should be rejected" >&2
+  exit 1
+fi
+assert_contains "${TMP}/case12.err" "OCaml 5.4.1 detected; MASC requires exactly 5.5.0"
+assert_not_contains "${CALLS_FILE}" "pin add"
+echo "ok case 12 - unsupported OCaml fails before pin mutation"
+
 echo ""
-echo "[opam-pin-downgrade-guard test] PASS - 10/10 cases"
+echo "[opam-pin-downgrade-guard test] PASS - 12/12 cases"

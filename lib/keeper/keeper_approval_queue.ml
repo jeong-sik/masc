@@ -109,6 +109,8 @@ let exact_attempt_binding_to_string binding =
         (exact_attempt_quarantine_cause_to_string cause)
     | Exact_dispatch_uncertain
     | Exact_released_before_dispatch
+    | Exact_released_recovery_required
+    | Exact_restart_quarantined
     | Exact_completed ->
       exact_attempt_status_to_string binding.status
   in
@@ -190,7 +192,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 6
+let pending_store_version = 7
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
@@ -551,7 +553,10 @@ let validate_entry_exact_attempt
   | Exact_bound { status = Exact_completed; _ }, Summary_available _ -> Ok ()
   | Exact_bound
       { status =
-          (Exact_dispatch_uncertain | Exact_quarantined _)
+          ( Exact_dispatch_uncertain
+          | Exact_released_recovery_required
+          | Exact_quarantined _
+          | Exact_restart_quarantined )
       ; _
       },
     Summary_pending ->
@@ -894,45 +899,65 @@ let snapshot_of_yojson ~base_path json =
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
-let quarantine_restarted_entry (entry : pending_approval) =
-  match entry.exact_attempt with
+let classify_restarted_entry (entry : pending_approval) =
+  match entry.exact_attempt, entry.summary_status with
   | Exact_bound
       ( { status =
             Exact_dispatch_uncertain
         ; _
-        } as binding ) ->
+        } as binding ),
+    _ ->
     ( { entry with
         exact_attempt =
           Exact_bound
             (exact_attempt_binding_with_status
                binding
-               (Exact_quarantined Exact_restart_uncertainty))
+               Exact_restart_quarantined)
       }
     , true )
-  | Exact_unbound
+  | Exact_bound
+      ( { status =
+            Exact_released_before_dispatch
+        ; _
+        } as binding ),
+    Summary_pending ->
+    ( { entry with
+        exact_attempt =
+          Exact_bound
+            (exact_attempt_binding_with_status
+               binding
+               Exact_released_recovery_required)
+      }
+    , true )
+  | Exact_unbound, _
   | Exact_bound
       { status =
-          (Exact_released_before_dispatch | Exact_quarantined _ | Exact_completed)
+          ( Exact_released_before_dispatch
+          | Exact_released_recovery_required
+          | Exact_quarantined _
+          | Exact_restart_quarantined
+          | Exact_completed )
       ; _
-      } ->
+      },
+    _ ->
     entry, false
 ;;
 
-let quarantine_restarted_pending map =
+let classify_restarted_pending map =
   SMap.fold
-    (fun id entry (changed, quarantined) ->
-       let entry, entry_changed = quarantine_restarted_entry entry in
-       changed || entry_changed, SMap.add id entry quarantined)
+    (fun id entry (changed, classified) ->
+       let entry, entry_changed = classify_restarted_entry entry in
+       changed || entry_changed, SMap.add id entry classified)
     map
     (false, SMap.empty)
 ;;
 
-let quarantine_restarted_deliveries map =
+let classify_restarted_deliveries map =
   SMap.fold
-    (fun id delivery (changed, quarantined) ->
-       let entry, entry_changed = quarantine_restarted_entry delivery.entry in
+    (fun id delivery (changed, classified) ->
+       let entry, entry_changed = classify_restarted_entry delivery.entry in
        ( changed || entry_changed
-       , SMap.add id { delivery with entry } quarantined ))
+       , SMap.add id { delivery with entry } classified ))
     map
     (false, SMap.empty)
 ;;
@@ -954,10 +979,10 @@ let load_snapshot_unlocked ~base_path =
         (match snapshot_of_yojson ~base_path json with
          | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
            let pending_changed, loaded_pending =
-             quarantine_restarted_pending loaded_pending
+             classify_restarted_pending loaded_pending
            in
            let deliveries_changed, loaded_deliveries =
-             quarantine_restarted_deliveries loaded_deliveries
+             classify_restarted_deliveries loaded_deliveries
            in
            if pending_changed || deliveries_changed
            then
@@ -971,7 +996,7 @@ let load_snapshot_unlocked ~base_path =
               | Error _ as error -> error
               | Ok () ->
                 Log.Server.warn
-                  "gate_pending restart quarantine workspace=%s"
+                  "gate_pending restart exact-state classification workspace=%s"
                   base_path;
                 Ok (loaded_pending, loaded_deliveries, loaded_next_sequence))
            else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
@@ -1884,7 +1909,9 @@ let bind_summary_exact_attempt_with
                        ~entry
                        entry
                    | Exact_released_before_dispatch
+                   | Exact_released_recovery_required
                    | Exact_quarantined _
+                   | Exact_restart_quarantined
                    | Exact_completed ->
                    Error
                      (Exact_attempt_rejected
@@ -1970,6 +1997,8 @@ let release_summary_exact_attempt_before_dispatch_with
                     ~entry
                     entry
                 | Exact_quarantined _
+                | Exact_released_recovery_required
+                | Exact_restart_quarantined
                 | Exact_completed ->
                 Error
                   (Exact_attempt_rejected
@@ -2058,7 +2087,9 @@ let fail_summary_exact_attempt_before_dispatch_with
                   (Exact_attempt_rejected
                      (Exact_attempt_summary_not_pending entry.id))
               | ( Exact_released_before_dispatch
+                | Exact_released_recovery_required
                 | Exact_quarantined _
+                | Exact_restart_quarantined
                 | Exact_completed ),
                 _ ->
                 Error
@@ -2071,15 +2102,6 @@ let fail_summary_exact_attempt_before_dispatch_with
 let fail_summary_exact_attempt_before_dispatch =
   fail_summary_exact_attempt_before_dispatch_with
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
-;;
-
-let exact_attempt_quarantine_cause_is_public = function
-  | Exact_restart_uncertainty -> false
-  | Exact_flow_execution_failed
-  | Exact_cancellation
-  | Exact_attempt_replay
-  | Exact_domain_invalid_output
-  | Exact_terminal_persistence_failure -> true
 ;;
 
 let quarantine_summary_exact_attempt_with
@@ -2122,12 +2144,7 @@ let quarantine_summary_exact_attempt_with
                (Exact_attempt_rejected
                   (Exact_attempt_identity_conflict existing))
            | Exact_bound existing ->
-             if not (exact_attempt_quarantine_cause_is_public cause) then
-               Error
-                 (Exact_attempt_rejected
-                    (Exact_attempt_status_conflict existing))
-             else
-               (match existing.status with
+             (match existing.status with
               | Exact_dispatch_uncertain ->
                 let quarantined =
                   exact_attempt_binding_with_status
@@ -2165,10 +2182,12 @@ let quarantine_summary_exact_attempt_with
                     { entry with exact_attempt = Exact_bound quarantined }
                 | Exact_quarantined _
                 | Exact_released_before_dispatch
+                | Exact_released_recovery_required
+                | Exact_restart_quarantined
                 | Exact_completed ->
                 Error
                   (Exact_attempt_rejected
-                     (Exact_attempt_status_conflict existing)))))
+                     (Exact_attempt_status_conflict existing))))
   in
   publish_exact_attempt_transition ~id result
 ;;
@@ -2258,7 +2277,9 @@ let complete_summary_exact_attempt_with
                     (Exact_attempt_rejected
                        (Exact_attempt_content_conflict entry.id))
               | ( Exact_released_before_dispatch
+                | Exact_released_recovery_required
                 | Exact_quarantined _
+                | Exact_restart_quarantined
                 | Exact_completed ),
                 _ ->
                 Error
@@ -2320,6 +2341,19 @@ let restart_failed_summary ~id =
       match SMap.find_opt id map with
         | None -> Ok false
         | Some
+            ({ summary_status = Summary_pending
+             ; exact_attempt =
+                 Exact_bound
+                   { status = Exact_released_recovery_required; _ }
+             ; _
+             } as entry) ->
+          persist_pending_entry_unlocked
+            ~map
+            ~entry
+            { entry with exact_attempt = Exact_unbound }
+          |> Result.map_error (fun error ->
+            Summary_transition_storage_error error)
+        | Some
             ({ summary_status = Summary_failed _
              ; exact_attempt =
                  Exact_bound { status = Exact_released_before_dispatch; _ }
@@ -2364,16 +2398,31 @@ let restart_failed_summaries ~base_path =
                if
                  String.equal entry.audit_base_path base_path
                  &&
-                 match entry.summary_status with
-                 | Summary_failed _ -> true
-                 | Summary_not_requested
-                 | Summary_pending
-                 | Summary_available _ ->
+                 match entry.summary_status, entry.exact_attempt with
+                 | ( Summary_pending
+                   , Exact_bound
+                       { status = Exact_released_recovery_required; _ } ) ->
+                   true
+                 | Summary_failed _, _ -> true
+                 | ( Summary_not_requested
+                   | Summary_available _
+                   | Summary_pending ),
+                   _ ->
                    false
                then
-                 (match entry.exact_attempt with
-                  | Exact_bound
-                      { status = Exact_released_before_dispatch; _ } ->
+                 (match entry.summary_status, entry.exact_attempt with
+                  | ( Summary_pending
+                    , Exact_bound
+                        { status = Exact_released_recovery_required; _ } ) ->
+                    ( id :: ids
+                    , SMap.add
+                        id
+                        { entry with exact_attempt = Exact_unbound }
+                        acc
+                    , rejected )
+                  | ( Summary_failed _
+                    , Exact_bound
+                        { status = Exact_released_before_dispatch; _ } ) ->
                     ( id :: ids
                     , SMap.add
                         id
@@ -2383,7 +2432,7 @@ let restart_failed_summaries ~base_path =
                         }
                         acc
                     , rejected )
-                  | _ ->
+                  | Summary_failed _, _ ->
                     (match summary_transition_rejection entry with
                      | Some rejection -> ids, acc, Some rejection
                      | None ->
@@ -2392,7 +2441,12 @@ let restart_failed_summaries ~base_path =
                            id
                            { entry with summary_status = Summary_not_requested }
                            acc
-                       , rejected )))
+                       , rejected ))
+                  | ( Summary_not_requested
+                    | Summary_pending
+                    | Summary_available _ ),
+                    _ ->
+                    ids, acc, rejected)
                else ids, acc, rejected)
             map
             ([], map, None)

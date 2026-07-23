@@ -29,12 +29,13 @@ type exact_attempt_quarantine_cause =
   | Exact_attempt_replay
   | Exact_domain_invalid_output
   | Exact_terminal_persistence_failure
-  | Exact_restart_uncertainty
 
 type exact_attempt_status =
   | Exact_dispatch_uncertain
   | Exact_released_before_dispatch
+  | Exact_released_recovery_required
   | Exact_quarantined of exact_attempt_quarantine_cause
+  | Exact_restart_quarantined
   | Exact_completed
 
 type exact_attempt_binding =
@@ -242,7 +243,9 @@ let summary_status_to_yojson = function
 let exact_attempt_status_to_string = function
   | Exact_dispatch_uncertain -> "dispatch_uncertain"
   | Exact_released_before_dispatch -> "released_before_dispatch"
+  | Exact_released_recovery_required -> "released_recovery_required"
   | Exact_quarantined _ -> "quarantined"
+  | Exact_restart_quarantined -> "restart_quarantined"
   | Exact_completed -> "completed"
 ;;
 
@@ -252,7 +255,6 @@ let exact_attempt_quarantine_cause_to_string = function
   | Exact_attempt_replay -> "attempt_replay"
   | Exact_domain_invalid_output -> "domain_invalid_output"
   | Exact_terminal_persistence_failure -> "terminal_persistence_failure"
-  | Exact_restart_uncertainty -> "restart_uncertainty"
 ;;
 
 let exact_attempt_state_to_yojson = function
@@ -264,6 +266,8 @@ let exact_attempt_state_to_yojson = function
         `String (exact_attempt_quarantine_cause_to_string cause)
       | Exact_dispatch_uncertain
       | Exact_released_before_dispatch
+      | Exact_released_recovery_required
+      | Exact_restart_quarantined
       | Exact_completed ->
         `Null
     in
@@ -341,7 +345,6 @@ let exact_attempt_quarantine_cause_of_string = function
   | "attempt_replay" -> Ok Exact_attempt_replay
   | "domain_invalid_output" -> Ok Exact_domain_invalid_output
   | "terminal_persistence_failure" -> Ok Exact_terminal_persistence_failure
-  | "restart_uncertainty" -> Ok Exact_restart_uncertainty
   | cause ->
     Error
       (Printf.sprintf
@@ -418,6 +421,9 @@ let exact_attempt_state_of_yojson_with_error json =
          | "dispatch_uncertain", `Null -> Ok Exact_dispatch_uncertain
          | "released_before_dispatch", `Null ->
            Ok Exact_released_before_dispatch
+         | "released_recovery_required", `Null ->
+           Ok Exact_released_recovery_required
+         | "restart_quarantined", `Null -> Ok Exact_restart_quarantined
          | "completed", `Null -> Ok Exact_completed
          | "quarantined", `String cause ->
            let* cause = exact_attempt_quarantine_cause_of_string cause in
@@ -427,6 +433,8 @@ let exact_attempt_state_of_yojson_with_error json =
              "exact_attempt.quarantined requires a typed quarantine_cause"
          | ( "dispatch_uncertain"
            | "released_before_dispatch"
+           | "released_recovery_required"
+           | "restart_quarantined"
            | "completed" ),
            _ ->
            Error

@@ -1062,7 +1062,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v6 snapshot" 6 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v7 snapshot" 7 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -1137,7 +1137,10 @@ let test_exact_binding_codec_validates_entry_identity () =
               Alcotest.failf
                 "removed quarantine cause %s was decoded"
                 removed_cause)
-         [ "post_dispatch_failure"; "provenance_mismatch" ];
+         [ "post_dispatch_failure"
+         ; "provenance_mismatch"
+         ; "restart_uncertainty"
+         ];
        (match
           AQ.exact_attempt_state_of_yojson_with_error
             (replace_field "call_id" (`String " ") exact_json)
@@ -1510,7 +1513,7 @@ let test_exact_attempt_final_predispatch_failure_requires_operator_restart () =
            "bulk operator restart did not clear the released binding")
 ;;
 
-let test_dispatch_uncertain_restart_is_durably_quarantined () =
+let test_restart_classifies_uncertain_and_released_recovery () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1545,12 +1548,27 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
          (run_exact_transition
             AQ.release_summary_exact_attempt_before_dispatch
             released_identity);
+       (match AQ.restart_failed_summary ~id:released_id with
+        | Ok true ->
+          Alcotest.fail
+            "live released pending work entered restart-only recovery"
+        | Ok false | Error _ -> ());
+       (match pending_entry_exn released_id with
+        | { exact_attempt =
+              AQ.Exact_bound
+                { status = AQ.Exact_released_before_dispatch; _ }
+          ; summary_status = AQ.Summary_pending
+          ; _
+          } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "live recovery attempt changed released no-dispatch proof");
        let assert_restart_states label =
          (match pending_entry_exn uncertain_id with
           | { exact_attempt =
                 AQ.Exact_bound
-                  { status =
-                      AQ.Exact_quarantined AQ.Exact_restart_uncertainty
+                  { status = AQ.Exact_restart_quarantined
                   ; slot_id
                   ; call_id
                   ; _
@@ -1571,7 +1589,7 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
          match pending_entry_exn released_id with
          | { exact_attempt =
                AQ.Exact_bound
-                 { status = AQ.Exact_released_before_dispatch
+                 { status = AQ.Exact_released_recovery_required
                  ; slot_id
                  ; call_id
                  ; _
@@ -1588,7 +1606,7 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
              call_id
          | _ ->
            Alcotest.fail
-             (label ^ " did not preserve released no-dispatch proof")
+             (label ^ " did not latch released operator recovery")
        in
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
@@ -1605,7 +1623,46 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
        Alcotest.(check string)
          "second install does not rewrite stable exact states"
          first_snapshot
-         second_snapshot)
+         second_snapshot;
+       check_update
+         "explicit operator recovery clears restart-only released binding"
+         true
+         (AQ.restart_failed_summary ~id:released_id);
+       (match pending_entry_exn released_id with
+        | { summary_status = AQ.Summary_pending
+          ; exact_attempt = AQ.Exact_unbound
+          ; _
+          } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "operator recovery did not restore one fresh unbound flow");
+       let bulk_id, bulk_identity = prepare "released-bulk" in
+       check_exact_update
+         "release bulk recovery fixture"
+         true
+         (run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            bulk_identity);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match AQ.restart_failed_summaries ~base_path with
+        | Ok reopened_ids ->
+          Alcotest.(check (list string))
+            "bulk operator recovery selects only restart-classified release"
+            [ bulk_id ]
+            reopened_ids
+        | Error error ->
+          Alcotest.fail (AQ.summary_transition_error_to_string error));
+       match pending_entry_exn bulk_id with
+       | { summary_status = AQ.Summary_pending
+         ; exact_attempt = AQ.Exact_unbound
+         ; _
+         } ->
+         ()
+       | _ ->
+         Alcotest.fail
+           "bulk operator recovery did not restore fresh unbound work")
 ;;
 
 let test_exact_attempt_completion_is_atomic () =
@@ -1882,7 +1939,6 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
                 label)
          [ "domain-invalid output", AQ.Exact_domain_invalid_output
          ; "attempt replay", AQ.Exact_attempt_replay
-         ; "restart uncertainty", AQ.Exact_restart_uncertainty
          ];
        assert_status
          "rejected causes preserve release"
@@ -1970,24 +2026,6 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          "bind quarantine fixture"
          true
          (run_exact_transition AQ.bind_summary_exact_attempt quarantine_identity);
-(match
-   quarantine_exact
-     quarantine_identity
-     AQ.Exact_restart_uncertainty
- with
- | Error
-     (AQ.Exact_attempt_rejected
-       (AQ.Exact_attempt_status_conflict _)) ->
-   ()
- | Error error ->
-   Alcotest.fail (AQ.exact_attempt_error_to_string error)
- | Ok _ ->
-   Alcotest.fail
-     "public quarantine accepted restart uncertainty");
-assert_status
-  "public restart rejection preserves dispatch uncertainty"
-  quarantine_id
-  "dispatch_uncertain";
        check_visible_update
          "visible quarantine"
          true
@@ -2631,7 +2669,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 2
+            [ "version", `Int 6
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -2640,7 +2678,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 2 is unsupported (current 6); reset \
+                  "gate_pending.version 6 is unsupported (current 7); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -2657,7 +2695,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
          (Yojson.Safe.equal
             preserved
             (`Assoc
-               [ "version", `Int 2
+               [ "version", `Int 6
                ; "pending", `List []
                ; "deliveries", `List []
                ])))
@@ -3093,9 +3131,9 @@ let () =
             `Quick
             test_exact_attempt_final_predispatch_failure_requires_operator_restart
         ; Alcotest.test_case
-            "restart quarantines only dispatch-uncertain and is stable"
+            "restart classifies uncertain and released states stably"
             `Quick
-            test_dispatch_uncertain_restart_is_durably_quarantined
+            test_restart_classifies_uncertain_and_released_recovery
         ; Alcotest.test_case
             "exact completion is atomic"
             `Quick

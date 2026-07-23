@@ -30,12 +30,17 @@ type exact_attempt_quarantine_cause =
   | Exact_attempt_replay
   | Exact_domain_invalid_output
   | Exact_terminal_persistence_failure
-  | Exact_restart_uncertainty
 
 type exact_attempt_status =
   | Exact_dispatch_uncertain
   | Exact_released_before_dispatch
+  (** Durable no-dispatch proof created by a live flow before restart. *)
+  | Exact_released_recovery_required
+  (** Install-only nonterminal latch. Only explicit operator recovery may
+      return this identity to [Exact_unbound]. *)
   | Exact_quarantined of exact_attempt_quarantine_cause
+  | Exact_restart_quarantined
+  (** Install-only terminal projection for dispatch-uncertain work. *)
   | Exact_completed
 
 type exact_attempt_binding = private

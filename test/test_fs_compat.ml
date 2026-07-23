@@ -147,6 +147,35 @@ let test_save_file_atomic_returns_temp_creation_failure () =
   | Ok () -> fail "atomic save unexpectedly wrote into a missing directory"
 ;;
 
+let test_save_file_atomic_strict_rejects_unsupported_payload_sync () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  let parent_sync_called = ref false in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+       ~sync_file:(fun path ->
+         raise (Unix.Unix_error (Unix.EOPNOTSUPP, "fsync", path)))
+       ~sync_parent:(fun _ -> parent_sync_called := true)
+       target
+       "new"
+   with
+   | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
+     (match failure.exception_ with
+      | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) -> ()
+      | exception_ ->
+        failf "unexpected payload sync failure: %s" (Printexc.to_string exception_))
+   | Error failure ->
+     failf
+       "unsupported payload sync reported after rename: %s"
+       (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "unsupported payload sync was accepted");
+  check bool "parent sync not reached" false !parent_sync_called;
+  check string "target remains old" "old" (Fs_compat.load_file target)
+;;
+
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   with_tmp_dir
   @@ fun base ->
@@ -446,6 +475,10 @@ let () =
             "returns temp creation failure"
             `Quick
             test_save_file_atomic_returns_temp_creation_failure
+        ; test_case
+            "strict payload unsupported is before rename"
+            `Quick
+            test_save_file_atomic_strict_rejects_unsupported_payload_sync
         ; test_case
             "temp writer uses canonical shared shape"
             `Quick

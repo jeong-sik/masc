@@ -1040,7 +1040,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
           quarantine =
             (fun cause observation ->
                quarantine_calls := (cause, observation) :: !quarantine_calls;
-               Ok Summarizer.Durable)
+               Ok Summarizer.Fsync_completed)
         }
       in
       let plan_for_units ~units =
@@ -1113,7 +1113,7 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
             quarantine =
               (fun cause observation ->
                  quarantine_calls := (cause, observation) :: !quarantine_calls;
-                 Ok Summarizer.Durable)
+                 Ok Summarizer.Fsync_completed)
           }
         in
         let preparation =

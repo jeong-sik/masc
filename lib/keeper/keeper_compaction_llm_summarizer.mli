@@ -23,8 +23,8 @@ type attempt_observation =
   }
 
 type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type exact_execution_guard =
   { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
@@ -35,12 +35,15 @@ type exact_execution_guard =
       (exact_write_outcome, string) result
   }
 (** Explicit lease-scoped exact-execution persistence authority.
-    [before_dispatch] must return [Durable] before POST; visible uncertainty
-    returns a source-bound terminal without POST. [release_before_dispatch]
-    permits the next slot only after [Durable]; visible removal returns a
-    terminal for the original slot/call and does not fail over. A visible
-    [quarantine] preserves the original post-dispatch terminal cause for
-    source-bound settlement. None of these callbacks performs POST. *)
+    [before_dispatch] must return [Fsync_completed] before POST; this means
+    payload and parent [Unix.fsync] returned and supports process-restart
+    safety, not hardware/power-loss persistence or Darwin [F_FULLFSYNC].
+    Visible uncertainty returns a source-bound terminal without POST.
+    [release_before_dispatch] permits the next slot only after
+    [Fsync_completed]; visible removal returns a terminal for the original
+    slot/call and does not fail over. A visible [quarantine] preserves the
+    original post-dispatch terminal cause for source-bound settlement. None of
+    these callbacks performs POST. *)
 
 type summarization_failure =
   | Exact_lane_unconfigured

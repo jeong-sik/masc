@@ -51,8 +51,8 @@ type attempt_observation =
   }
 
 type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type exact_execution_guard =
   { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
@@ -438,11 +438,11 @@ let release_exact_execution_before_dispatch
   | None -> Release_failed
   | Some guard ->
     (match guard.release_before_dispatch observation with
-     | Ok Durable -> Release_durable
-     | Ok (Visible_durability_unknown detail) ->
+     | Ok Fsync_completed -> Release_durable
+     | Ok (Visible_sync_unconfirmed detail) ->
        Log.Keeper.error
          ~keeper_name
-         "compaction exact pre-dispatch fence release is visible but durability is unknown slot=%s call_id=%s: %s"
+         "compaction exact pre-dispatch fence release is visible but sync is unconfirmed slot=%s call_id=%s: %s"
          observation.slot_id
          observation.call_id
          detail;
@@ -465,11 +465,11 @@ let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observ
   | None -> Error "exact execution guard is unavailable"
   | Some guard ->
     (match guard.quarantine cause observation with
-     | Ok Durable -> Ok Durable
-     | Ok (Visible_durability_unknown detail as outcome) ->
+     | Ok Fsync_completed -> Ok Fsync_completed
+     | Ok (Visible_sync_unconfirmed detail as outcome) ->
        Log.Keeper.warn
          ~keeper_name
-         "compaction exact terminal quarantine is visible but durability is unknown slot=%s call_id=%s: %s"
+         "compaction exact terminal quarantine is visible but sync is unconfirmed slot=%s call_id=%s: %s"
          observation.slot_id
          observation.call_id
          detail;
@@ -551,11 +551,11 @@ let terminalize_post_success terminalizer cause =
               ~cause:terminal.cause
               terminalizer.attempt_observation
           with
-          | Ok Durable -> None
-          | Ok (Visible_durability_unknown detail) ->
+          | Ok Fsync_completed -> None
+          | Ok (Visible_sync_unconfirmed detail) ->
             Log.Keeper.warn
               ~keeper_name:terminalizer.keeper_name
-              "post-success exact-execution quarantine is visible but durability is unknown slot_id=%s call_id=%s: %s"
+              "post-success exact-execution quarantine is visible but sync is unconfirmed slot_id=%s call_id=%s: %s"
               terminal.slot_id
               terminal.call_id
               detail;
@@ -782,10 +782,10 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
               initial_observation.call_id
               detail;
             Error Exact_execution_failed_before_dispatch
-          | Ok (Visible_durability_unknown detail) ->
+          | Ok (Visible_sync_unconfirmed detail) ->
             Log.Keeper.error
               ~keeper_name
-              "compaction exact pre-dispatch binding is visible but durability is unknown; refusing POST and terminally settling the source slot=%s call_id=%s: %s"
+              "compaction exact pre-dispatch binding is visible but sync is unconfirmed; refusing POST and terminally settling the source slot=%s call_id=%s: %s"
               slot_id
               initial_observation.call_id
               detail;
@@ -794,7 +794,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
                  (terminal_of_observation
                     Keeper_event_queue_state.Terminal_persistence_failed
                     initial_observation))
-          | Ok Durable ->
+          | Ok Fsync_completed ->
             (try handle_result (Exact_output.execute_once ~net ?clock attempt) with
              | Eio.Cancel.Cancelled _ as cancellation ->
                Eio.Cancel.protect

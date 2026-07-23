@@ -59,8 +59,13 @@ type exact_execution_binding = Keeper_event_queue_state.exact_execution_binding 
   }
 
 type exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+(** [Fsync_completed] means the payload and parent-directory [Unix.fsync]
+    calls both returned successfully. It is the process-restart dispatch
+    fence, not a hardware/power-loss persistence or Darwin [F_FULLFSYNC]
+    guarantee. [Visible_sync_unconfirmed _] means rename is visible but the
+    parent sync did not complete. *)
 
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
   | Failure_judgment_requested
@@ -273,9 +278,10 @@ val bind_exact_execution_result :
   request_body_sha256:string ->
   unit ->
   (exact_write_outcome, string) result
-(** Bind the affine call identity before dispatch. Only [Ok Durable] permits
-    the provider call to start. [Ok (Visible_durability_unknown _)] means the
-    replacement is visible but its parent-directory durability is unknown; the
+(** Bind the affine call identity before dispatch. Only [Ok Fsync_completed]
+    permits the provider call to start. [Ok (Visible_sync_unconfirmed _)]
+    means the replacement is visible but its parent-directory sync is
+    unconfirmed; the
     exact identity must be settled terminally without POST or failover. An
     [Error] means the replacement was not visible. *)
 
@@ -289,9 +295,10 @@ val release_exact_execution_before_dispatch_result :
   request_body_sha256:string ->
   unit ->
   (exact_write_outcome, string) result
-(** Remove a bound identity only while it is still pre-dispatch. [Durable]
-    permits fallback to another slot. [Visible_durability_unknown _] means the
-    removal is visible but its directory durability is unknown; the caller
+(** Remove a bound identity only while it is still pre-dispatch.
+    [Fsync_completed] permits fallback to another slot.
+    [Visible_sync_unconfirmed _] means the removal is visible but its
+    directory sync is unconfirmed; the caller
     must return a source-bound terminal for the original identity and must not
     fail over. [Error] means the removal was not visible. *)
 
@@ -305,7 +312,7 @@ val quarantine_exact_execution_result :
   unit ->
   (exact_write_outcome, string) result
 (** Persist the canonical post-dispatch terminal cause. A visible replacement
-    with unknown directory durability keeps that original cause and remains
+    with unconfirmed directory sync keeps that original cause and remains
     eligible for matching source-bound settlement. *)
 
 val settle_exact_execution_result :

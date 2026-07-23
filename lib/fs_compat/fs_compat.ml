@@ -281,8 +281,9 @@ let save_file_atomic_strict path content =
 ;;
 
 module Atomic_replace_for_testing = struct
-  let save_file_atomic_strict_staged ~sync_parent path content =
+  let save_file_atomic_strict_staged ?sync_file ~sync_parent path content =
     Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ?sync_file
       ~sync_parent
       ~save_file
       path

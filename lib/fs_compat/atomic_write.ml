@@ -1,9 +1,10 @@
 (* See [atomic_write.mli] for the contract. *)
 
-(* Durable atomic write: tmp → fsync(tmp) → rename → fsync(parent dir).
-   Without the fsync pair, a crash between the rename and the kernel's
-   dirty-page flush can leave the target truncated or zero-length —
-   observed on backlog.json after an abrupt shutdown (2026-04-18). *)
+(* Atomic replacement with process-restart sync:
+   tmp → Unix.fsync(tmp) → rename → Unix.fsync(parent dir).
+   The strict path requires both syncs to succeed; the general path retains
+   its legacy best-effort handling. This is not a hardware/power-loss
+   persistence claim and does not use Darwin F_FULLFSYNC. *)
 let fsync_path_with ~allow_unsupported path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Stdlib.Fun.protect
@@ -2528,6 +2529,7 @@ let atomic_replace_failure_to_string failure =
 ;;
 
 let save_file_atomic_with_parent_sync
+  ~sync_file
   ~sync_parent
   ~(save_file : string -> string -> unit)
   (path : string)
@@ -2558,7 +2560,7 @@ let save_file_atomic_with_parent_sync
   | Ok tmp ->
     (try
        save_file tmp content;
-       fsync_path tmp;
+       sync_file tmp;
        Stdlib.Sys.rename tmp path;
        stage := After_rename;
        sync_parent dir;
@@ -2582,6 +2584,7 @@ let legacy_atomic_replace_result = function
 
 let save_file_atomic ~save_file path content =
   save_file_atomic_with_parent_sync
+    ~sync_file:fsync_path
     ~sync_parent:(fun dir ->
       try fsync_path dir with
       | Unix.Unix_error _ -> ())
@@ -2593,6 +2596,7 @@ let save_file_atomic ~save_file path content =
 
 let save_file_atomic_strict_staged ~save_file path content =
   save_file_atomic_with_parent_sync
+    ~sync_file:fsync_path_strict
     ~sync_parent:fsync_path_strict
     ~save_file
     path
@@ -2605,8 +2609,19 @@ let save_file_atomic_strict ~save_file path content =
 ;;
 
 module Atomic_replace_for_testing = struct
-  let save_file_atomic_strict_staged ~sync_parent ~save_file path content =
-    save_file_atomic_with_parent_sync ~sync_parent ~save_file path content
+  let save_file_atomic_strict_staged
+      ?(sync_file = fsync_path_strict)
+      ~sync_parent
+      ~save_file
+      path
+      content
+    =
+    save_file_atomic_with_parent_sync
+      ~sync_file
+      ~sync_parent
+      ~save_file
+      path
+      content
   ;;
 end
 

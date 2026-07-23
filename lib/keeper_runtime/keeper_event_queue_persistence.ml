@@ -54,8 +54,8 @@ type exact_execution_binding = State.exact_execution_binding =
   }
 
 type exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type escalation_reason = State.escalation_reason =
   | Failure_judgment_requested
@@ -238,7 +238,7 @@ let save_json_atomic_strict_staged path json =
       json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
     in
     (match Fs_compat.save_file_atomic_strict_staged path content with
-     | Ok () -> Ok Durable
+     | Ok () -> Ok Fsync_completed
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        let detail = Fs_compat.atomic_replace_failure_to_string failure in
        (match failure.stage with
@@ -248,7 +248,7 @@ let save_json_atomic_strict_staged path json =
              Printexc.raise_with_backtrace failure.exception_ failure.backtrace
            | _ -> Error detail)
         | Fs_compat.After_rename ->
-          Ok (Visible_durability_unknown detail)))
+          Ok (Visible_sync_unconfirmed detail)))
 ;;
 
 let save_state_unlocked_with ~strict_parent_sync owner state =

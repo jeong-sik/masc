@@ -56,8 +56,8 @@ type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_bi
   }
 
 type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested

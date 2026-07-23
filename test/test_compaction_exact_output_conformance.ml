@@ -92,9 +92,9 @@ let persisted_checkpoint_source_exn trace_id =
 ;;
 
 let permissive_exact_execution_guard : C.exact_execution_guard =
-  { before_dispatch = (fun _ -> Ok C.Durable)
-  ; release_before_dispatch = (fun _ -> Ok C.Durable)
-  ; quarantine = (fun _ _ -> Ok C.Durable)
+  { before_dispatch = (fun _ -> Ok C.Fsync_completed)
+  ; release_before_dispatch = (fun _ -> Ok C.Fsync_completed)
+  ; quarantine = (fun _ _ -> Ok C.Fsync_completed)
   }
 ;;
 
@@ -585,11 +585,11 @@ let test_visible_release_uncertainty_is_source_bound_terminal () =
   let prepared = prepare_exn ~keeper_name:"keeper-visible-release" ~registry in
   let release_calls = ref [] in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Durable)
+    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
     ; release_before_dispatch =
         (fun observation ->
            release_calls := observation :: !release_calls;
-           Ok (C.Visible_durability_unknown "injected release after-rename failure"))
+           Ok (C.Visible_sync_unconfirmed "injected release after-rename failure"))
     ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
     }
   in
@@ -1014,7 +1014,7 @@ let test_quarantine_persistence_failure_preserves_original_cause () =
   let prepared = prepare_exn ~keeper_name:"keeper-quarantine-persistence-failure" ~registry in
   let quarantine_calls = ref [] in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Durable)
+    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
     ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
     ; quarantine =
         (fun cause observation ->
@@ -1132,9 +1132,9 @@ let test_visible_unknown_binding_prevents_post_and_settles () =
       before_dispatch =
         (fun observation ->
            match durable_guard.before_dispatch observation with
-           | Ok C.Durable ->
-             Ok (C.Visible_durability_unknown "injected bind after-rename failure")
-           | Ok (C.Visible_durability_unknown _ as outcome) -> Ok outcome
+           | Ok C.Fsync_completed ->
+             Ok (C.Visible_sync_unconfirmed "injected bind after-rename failure")
+           | Ok (C.Visible_sync_unconfirmed _ as outcome) -> Ok outcome
            | Error _ as error -> error)
     }
   in
@@ -1239,9 +1239,9 @@ let test_visible_unknown_quarantine_preserves_cause_and_settles () =
       quarantine =
         (fun cause observation ->
            match durable_guard.quarantine cause observation with
-           | Ok C.Durable ->
-             Ok (C.Visible_durability_unknown "injected quarantine after-rename failure")
-           | Ok (C.Visible_durability_unknown _ as outcome) -> Ok outcome
+           | Ok C.Fsync_completed ->
+             Ok (C.Visible_sync_unconfirmed "injected quarantine after-rename failure")
+           | Ok (C.Visible_sync_unconfirmed _ as outcome) -> Ok outcome
            | Error _ as error -> error)
     }
   in

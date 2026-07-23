@@ -90,8 +90,8 @@ let bind_and_quarantine
        ~request_body_sha256
        ()
    with
-   | Ok P.Durable -> ()
-   | Ok (P.Visible_durability_unknown detail) ->
+   | Ok P.Fsync_completed -> ()
+   | Ok (P.Visible_sync_unconfirmed detail) ->
      Alcotest.failf "exact execution bind durability unknown: %s" detail
    | Error detail -> Alcotest.failf "exact execution bind failed: %s" detail);
   let terminal : P.exact_execution_terminal = { cause; slot_id; call_id } in
@@ -105,8 +105,8 @@ let bind_and_quarantine
        ~request_body_sha256
        ()
    with
-   | Ok P.Durable -> ()
-   | Ok (P.Visible_durability_unknown detail) ->
+   | Ok P.Fsync_completed -> ()
+   | Ok (P.Visible_sync_unconfirmed detail) ->
      Alcotest.failf "exact execution quarantine durability unknown: %s" detail
    | Error detail -> Alcotest.failf "exact execution quarantine failed: %s" detail);
   lease, terminal
@@ -155,8 +155,8 @@ let bind_exact_execution
       ~request_body_sha256
       ()
   with
-  | Ok P.Durable -> ()
-  | Ok (P.Visible_durability_unknown detail) ->
+  | Ok P.Fsync_completed -> ()
+  | Ok (P.Visible_sync_unconfirmed detail) ->
     Alcotest.failf "exact execution bind durability unknown: %s" detail
   | Error detail -> Alcotest.failf "exact execution bind failed: %s" detail
 ;;

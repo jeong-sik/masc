@@ -37,8 +37,8 @@ struct
     }
 
   type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
-    | Durable
-    | Visible_durability_unknown of string
+    | Fsync_completed
+    | Visible_sync_unconfirmed of string
   
   let bind_exact_execution_result
         ~base_path

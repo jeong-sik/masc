@@ -170,15 +170,19 @@ val save_file_atomic_strict_staged
   -> string
   -> (unit, atomic_replace_failure) Result.t
 (** Strict replacement retaining whether a failure preceded or followed the
-    target rename. Transaction owners must converge any dependent in-memory
-    publication before propagating an [After_rename] failure. *)
+    target rename. Payload and parent-directory [Unix.fsync] must both return
+    successfully. This supports process-restart recovery, not hardware or
+    power-loss persistence, and does not use Darwin [F_FULLFSYNC]. Transaction
+    owners must converge any dependent in-memory publication before
+    propagating an [After_rename] failure. *)
 
-(** Atomic replacement whose parent-directory fsync is mandatory. *)
+(** Atomic replacement whose payload and parent-directory fsyncs are mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
 
 module Atomic_replace_for_testing : sig
   val save_file_atomic_strict_staged
-    :  sync_parent:(string -> unit)
+    :  ?sync_file:(string -> unit)
+    -> sync_parent:(string -> unit)
     -> string
     -> string
     -> (unit, atomic_replace_failure) Result.t

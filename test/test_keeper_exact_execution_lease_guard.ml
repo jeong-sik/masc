@@ -76,8 +76,8 @@ let test_before_dispatch_release_allows_registration_requeue () =
        ~request_body_sha256
        ()
    with
-   | Ok P.Durable -> ()
-   | Ok (P.Visible_durability_unknown detail) ->
+   | Ok P.Fsync_completed -> ()
+   | Ok (P.Visible_sync_unconfirmed detail) ->
      Alcotest.failf "before-dispatch release durability unknown: %s" detail
    | Error detail -> Alcotest.failf "before-dispatch release failed: %s" detail);
   (match P.exact_execution_binding_result ~base_path ~keeper_name with
@@ -141,12 +141,12 @@ let test_conflicting_concurrent_bind_has_single_winner () =
   in
   let winner_call, winner_plan, winner_request =
     match result_a, result_b with
-    | Ok P.Durable, Error _ -> call_a, plan_a, request_a
-    | Error _, Ok P.Durable -> call_b, plan_b, request_b
-    | Ok P.Durable, Ok P.Durable ->
+    | Ok P.Fsync_completed, Error _ -> call_a, plan_a, request_a
+    | Error _, Ok P.Fsync_completed -> call_b, plan_b, request_b
+    | Ok P.Fsync_completed, Ok P.Fsync_completed ->
       Alcotest.fail "conflicting exact binds both succeeded"
-    | Ok (P.Visible_durability_unknown detail), _
-    | _, Ok (P.Visible_durability_unknown detail) ->
+    | Ok (P.Visible_sync_unconfirmed detail), _
+    | _, Ok (P.Visible_sync_unconfirmed detail) ->
       Alcotest.failf "concurrent exact bind durability unknown: %s" detail
     | Error first, Error second ->
       Alcotest.failf "conflicting exact binds both failed: %s / %s" first second

@@ -1,11 +1,10 @@
-(** Durable atomic write + crash-recovery orphan sweep.
+(** Atomic replacement with process-restart sync and orphan recovery.
 
-    Owns the durability boundary that protects against partial
-    writes, torn renames, and SIGKILL-during-write data loss. The
-    contract is [tmp → fsync(tmp) → rename → fsync(parent dir)],
-    so a crash between rename and the kernel's dirty-page flush
-    cannot leave the target truncated or zero-length. Observed on
-    [backlog.json] after an abrupt shutdown on 2026-04-18.
+    The strict contract is
+    [tmp → Unix.fsync(tmp) → rename → Unix.fsync(parent dir)]. Successful
+    return means both Unix sync calls returned successfully and supports
+    process-restart recovery. It does not claim hardware/power-loss
+    persistence and does not use Darwin [F_FULLFSYNC].
 
     Crash recovery is provided by [cleanup_atomic_orphans], a boot-time sweep
     for canonical [.atomic_*.tmp] files left behind when the owning process was
@@ -48,13 +47,15 @@ val save_file_atomic_strict_staged
   -> string
   -> (unit, atomic_replace_failure) Result.t
 (** Strict atomic replacement that preserves whether failure occurred before
-    or after the target rename became visible. Unlike the compatibility
-    wrapper below, cancellation is returned with its original backtrace so a
-    transaction owner can repair publication state before re-raising it. *)
+    or after the target rename became visible. Payload [Unix.fsync] is
+    mandatory before rename and parent-directory [Unix.fsync] is mandatory
+    afterward. Unlike the compatibility wrapper below, cancellation is
+    returned with its original backtrace so a transaction owner can repair
+    publication state before re-raising it. *)
 
-(** Strict sibling of {!save_file_atomic}. Parent-directory descriptor or
-    fsync failure is returned as [Error] after the rename instead of being
-    treated as best effort. *)
+(** Strict sibling of {!save_file_atomic}. Payload or parent-directory
+    descriptor/fsync failure is returned as [Error] instead of being treated
+    as best effort. *)
 val save_file_atomic_strict
   :  save_file:(string -> string -> unit)
   -> string
@@ -63,7 +64,8 @@ val save_file_atomic_strict
 
 module Atomic_replace_for_testing : sig
   val save_file_atomic_strict_staged
-    :  sync_parent:(string -> unit)
+    :  ?sync_file:(string -> unit)
+    -> sync_parent:(string -> unit)
     -> save_file:(string -> string -> unit)
     -> string
     -> string

@@ -3,7 +3,9 @@
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
 readonly OAS_AGENT_SDK_BASE_VERSION="v0.221.1"
 # v0.221.1 extends the exact-output boundary with one affine outer flow:
-# - every opaque runtime candidate is admitted and frozen before dispatch;
+# - MASC owns ordered logical Runtime candidate IDs and domain I/O contracts;
+# - each candidate's executable selected-target/ready materialization remains
+#   opaque to MASC and is admitted and frozen by OAS before dispatch;
 # - immutable ready flows create non-shared attempts with aggregate evidence;
 # - execute_flow_once owns candidate advancement and permits it only for exact
 #   Before_dispatch evidence with dispatch_count=0;

@@ -192,9 +192,10 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       ["empty completion (stop_reason="] — a recognized non-overflow
       stop_reason (e.g. [end_turn]) on an empty assistant turn, routed to
       provider-unavailability handling upstream;
-    - [Provider (ParseError {detail})] whose detail embeds the
-      backend_openai_parse fail-closed marker
-      ["empty completion (no thinking, text, or tool calls"].
+    - [Provider (ParseError {detail})] whose detail embeds the marker
+      ["empty completion (no thinking, text, or tool calls"]
+      (defensive: see the branch comment in [is_empty_completion_error] —
+      no production producer of this shape exists at the pinned SDK).
 
     Deliberately excluded:
 
@@ -214,8 +215,14 @@ let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
       (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
       String.starts_with ~prefix:"empty completion (stop_reason=" detail
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
-      (* backend_openai_parse.ml renders the fail-closed empty completion as
-         "<parser>: empty completion (no thinking, text, or tool calls; ...)". *)
+      (* Defensive: no production producer at pinned SDK 5851df2e.  The
+         marker is rendered only by backend_openai_parse.ml
+         [parse_error_to_string], whose callers are all test-only; production
+         empty completions route via [Http_client.empty_completion_error] into
+         [ProviderUnavailable]/[InvalidRequest], and production [ParseError]
+         details come from sse/glm/image_generation/speech_generation parse
+         failures.  Kept as a bounded guard (exemption budget caps the blast
+         radius) in case a future SDK promotes this shape to [ParseError]. *)
       String_util.contains_substring detail "empty completion (no thinking"
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Api _ -> false

@@ -120,9 +120,12 @@ let test_attributed_empty_completion_is_auto_recoverable () =
     false
     (EC.is_server_rejected_parse_error err)
 
-(* The backend_openai_parse fail-closed path surfaces an all-empty completion
-   as a [ParseError] whose detail embeds the empty-completion marker.  It is
-   both a server parse rejection and auto-recoverable. *)
+(* Defensive shape: at pinned SDK 5851df2e no production code surfaces an
+   all-empty completion as a [ParseError] — the marker text is rendered only
+   by backend_openai_parse [parse_error_to_string], whose callers are
+   test-only.  This test pins the defensive classification in [is_empty_-
+   completion_error] so a future SDK that promotes this shape keeps it both
+   auto-recoverable and budget-bounded. *)
 let test_parse_error_empty_completion_is_auto_recoverable () =
   let err =
     Agent_sdk.Error.Provider

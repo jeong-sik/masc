@@ -600,7 +600,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
               ~cause:Keeper_event_queue_state.Execution_failed_after_dispatch
               ~failure:(Exact_execution_failed_after_dispatch observation)
               observation)
-        | Ok success ->
+        | Ok (success : Exact_output.success) ->
           let observation = observe_attempt slot in
           let success_call_id = call_id_to_string success.call_id in
           let success_receipt_call_id =

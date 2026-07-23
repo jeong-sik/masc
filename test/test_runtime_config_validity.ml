@@ -2356,7 +2356,10 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     with
     | Ok resolved ->
       (match resolved.unavailable_slots with
-       | [] -> List.map (fun slot -> slot.slot_id) resolved.selected_slots
+       | [] ->
+         List.map
+           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+           resolved.selected_slots
        | unavailable_slots ->
          failf
            "compaction lane unexpectedly has unavailable slots: %s"

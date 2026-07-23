@@ -582,6 +582,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~trigger:Compaction_trigger.Manual
           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
           ~projection_request:(projection_request_of_meta meta)
+          ()
       in
       check int
         "stale-source plan performs one real exact dispatch"
@@ -669,6 +670,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~config
           ~meta
           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+          ()
       in
       check int
         "planning-admission race performs one exact dispatch"
@@ -728,6 +730,8 @@ let test_manual_compaction_serializes_owner_lane () =
          ()
        | Registry_queue.Requeue _ ->
          fail "post-dispatch final admission remained replayable"
+       | Registry_queue.No_compaction _ ->
+         fail "post-dispatch final admission changed its terminal cause"
        | Registry_queue.Ack
        | Registry_queue.Cancel_accepted _
        | Registry_queue.Transfer_accepted _
@@ -829,6 +833,7 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            ~meta
            ~trigger:Compaction_trigger.Manual
            ~projection_request:(projection_request_of_meta meta)
+           ()
        with
        | Error
            (Post_turn.No_compaction
@@ -963,6 +968,7 @@ let test_prepare_commit_source_cas () =
       ~trigger:Compaction_trigger.Manual
       ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
       ~projection_request:(projection_request_of_meta meta)
+      ()
   with
   | Error error ->
     failf
@@ -1103,6 +1109,7 @@ let test_suspended_streak_refuses_reactive_prepare () =
       ~meta:(meta_with_streak streak)
       ~trigger
       ~projection_request
+      ()
   in
   let suspended = meta_with_streak 3 in
   check bool

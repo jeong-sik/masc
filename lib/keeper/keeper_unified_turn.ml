@@ -237,6 +237,7 @@ let recover_provider_context_overflow_in_lane
                  ~meta
                  ~trigger
                  ~projection_request
+                 ()
              with
       | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
         Eio.Cancel.protect (fun () ->

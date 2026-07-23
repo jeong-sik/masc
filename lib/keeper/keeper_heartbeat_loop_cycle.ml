@@ -405,6 +405,7 @@ let run_keeper_cycle_with
          ?exact_execution_guard
          ~config:ctx.config
          ~meta:meta_after_triage
+         ()
      with
      | `Busy block -> busy_outcome block
      | `Compaction_failed failure ->

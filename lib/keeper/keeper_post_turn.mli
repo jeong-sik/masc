@@ -112,6 +112,7 @@ val prepare_compaction :
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
   projection_request:Keeper_compaction_projection_target.request ->
+  unit ->
   (prepared_compaction, compaction_recovery_error) result
 
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
@@ -139,4 +140,5 @@ val recover_latest_checkpoint_for_compaction :
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
   projection_request:Keeper_compaction_projection_target.request ->
+  unit ->
   (compaction_recovery, compaction_recovery_error) result

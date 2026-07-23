@@ -203,7 +203,8 @@ let prepare ~config ~meta =
         ~base_dir
         ~meta
         ~trigger
-        ~projection_request)
+        ~projection_request
+        ())
     ~config
     ~meta
 ;;
@@ -335,10 +336,18 @@ let run_admitted_with
 ;;
 
 
-let run_admitted ?exact_execution_guard =
+let run_admitted ?exact_execution_guard ~config ~meta () =
   run_admitted_with
-    ~prepare_compaction:
-      (Keeper_context_runtime.prepare_compaction ?exact_execution_guard)
+    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+      Keeper_context_runtime.prepare_compaction
+        ?exact_execution_guard
+        ~base_dir
+        ~meta
+        ~trigger
+        ~projection_request
+        ())
+    ~config
+    ~meta
 ;;
 
 let lifecycle_stage_to_string = function

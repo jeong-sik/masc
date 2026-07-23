@@ -37,6 +37,7 @@ val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> unit
   -> [ `Applied of success
      | `No_compaction of Keeper_post_turn.no_compaction
      | `Compaction_failed of failure

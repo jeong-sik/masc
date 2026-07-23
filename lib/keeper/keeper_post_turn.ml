@@ -664,7 +664,7 @@ let prepare_compaction_with
       ~projection_request
 ;;
 
-let prepare_compaction ?exact_execution_guard =
+let prepare_compaction ?exact_execution_guard () =
   prepare_compaction_with
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed ?exact_execution_guard)
@@ -752,6 +752,7 @@ let recover_latest_checkpoint_for_compaction
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
     ~projection_request
+    ()
   : (compaction_recovery, compaction_recovery_error) result =
   match
     prepare_compaction
@@ -760,6 +761,7 @@ let recover_latest_checkpoint_for_compaction
       ~meta
       ~trigger
       ~projection_request
+      ()
   with
   | Error _ as error -> error
   | Ok prepared -> commit_prepared_compaction prepared

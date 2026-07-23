@@ -490,7 +490,7 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
             | Ok (P.Settled _ | P.Already_settled _ | P.Committed_followup_failed _) ->
               Atomic.set committed true
             | Error detail -> failwith detail);
-          Keeper_heartbeat_loop.For_testing.check_cancellation_after_exact_terminal_settlement
+          Masc.Keeper_heartbeat_loop.For_testing.check_cancellation_after_exact_terminal_settlement
             settlement;
           Returned)
       with

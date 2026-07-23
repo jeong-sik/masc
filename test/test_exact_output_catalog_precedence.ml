@@ -37,7 +37,7 @@ let overlay_target = "overlay-only-target"
 let replacement_target = "replacement-only-target"
 let embedded_target = "ollama-cloud-minimax-m3-json"
 
-let catalog_toml ?(api_key_env = "") ~provider_id ~model_id ~target_id =
+let catalog_toml ?(api_key_env = "") ~provider_id ~model_id ~target_id () =
   Printf.sprintf
     {|[[providers]]
 id = %S
@@ -74,6 +74,7 @@ let overlay_catalog =
     ~provider_id:"overlay_provider"
     ~model_id:"overlay-model"
     ~target_id:overlay_target
+    ()
 ;;
 
 let replacement_catalog =
@@ -81,6 +82,7 @@ let replacement_catalog =
     ~provider_id:"replacement_provider"
     ~model_id:"replacement-model"
     ~target_id:replacement_target
+    ()
 ;;
 
 let runtime_toml lane_target =

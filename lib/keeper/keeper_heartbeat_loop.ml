@@ -572,6 +572,7 @@ let settle_claimed_lease
       ~settled_at
       ~lease
       ~settlement
+      ()
   =
   Eio.Cancel.protect (fun () ->
     if not exact_execution
@@ -808,6 +809,7 @@ let run_keepalive_unified_turn
              ~settled_at:(Time_compat.now ())
              ~lease
              ~settlement:(Keeper_registry_event_queue.Requeue reason)
+             ()
          with
          | Ok
              ( Keeper_registry_event_queue.Settled _
@@ -851,6 +853,7 @@ let run_keepalive_unified_turn
                 ~settled_at
                 ~lease
                 ~settlement
+                ()
             with
             | Ok
                 ( Keeper_registry_event_queue.Settled _
@@ -1274,6 +1277,7 @@ let run_keepalive_unified_turn
               ~settled_at
               ~lease
               ~settlement
+              ()
           with
           | Error message ->
             Log.Keeper.error

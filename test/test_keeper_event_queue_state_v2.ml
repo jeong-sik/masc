@@ -2429,6 +2429,182 @@ let test_legacy_settlement_wal_v1_remains_replayable () =
       (Fs_compat.load_file wal_path))
 ;;
 
+(* Regression (#25599): #25535 renamed the persisted fencing-counter wire key
+   ["owner_generation"] -> ["owner_nonce"] with no reader fallback, so replay
+   of any pre-rename snapshot / settlement WAL row carrying a source-bearing
+   settlement failed with "row fields are not exact". The reader must accept
+   the legacy key (new key wins when both are present) while the writer keeps
+   emitting only ["owner_nonce"]. *)
+let rec rename_owner_nonce_to_legacy = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (name, value) ->
+           ( (if String.equal name "owner_nonce" then "owner_generation" else name)
+           , rename_owner_nonce_to_legacy value ))
+         fields)
+  | `List items -> `List (List.map rename_owner_nonce_to_legacy items)
+  | other -> other
+;;
+
+let test_legacy_owner_generation_wire_key_replays () =
+  let accepted = stimulus "legacy-owner-key-source" 1.0 in
+  let claimed, lease =
+    State.empty
+    |> State.with_pending (queue [ accepted ])
+    |> State.with_revision 7L
+    |> State.claim_when ~claimed_at:3.0 ~ready:(fun _ -> true)
+    |> require_ok "claim legacy owner-key fixture"
+  in
+  let lease = require_some "legacy owner-key lease" lease in
+  let cancellation =
+    accepted_cancellation
+      ~source:accepted
+      ~source_revision:7L
+      ~owner_nonce:4
+      "op-legacy-owner-key"
+  in
+  let settled, receipt =
+    match
+      State.cancel_accepted
+        ~current_owner_nonce:4
+        ~settled_at:4.0
+        ~lease
+        ~cancellation
+        claimed
+      |> require_ok "cancel legacy owner-key source"
+    with
+    | state, State.Settled receipt -> state, receipt
+    | _, State.Already_settled _ ->
+      Alcotest.fail "legacy owner-key fixture replayed early"
+  in
+  (* 1) Receipt codec: a pre-rename receipt decodes to the same value. *)
+  let legacy_receipt_json =
+    rename_owner_nonce_to_legacy (State.transition_receipt_to_yojson receipt)
+  in
+  let decoded =
+    State.transition_receipt_of_yojson legacy_receipt_json
+    |> require_ok "legacy owner_generation receipt decode"
+  in
+  Alcotest.(check bool)
+    "legacy-key receipt roundtrips"
+    true
+    (State.transition_receipt_equal receipt decoded);
+  (* 2) Snapshot codec: a pre-rename snapshot (last_settlement + outbox carry
+     the settlement) loads. *)
+  let legacy_snapshot = rename_owner_nonce_to_legacy (State.to_yojson settled) in
+  let restored =
+    State.of_yojson legacy_snapshot
+    |> require_ok "legacy owner_generation snapshot decode"
+  in
+  Alcotest.(check int)
+    "legacy snapshot keeps the outbox transition"
+    1
+    (List.length (State.transition_outbox restored));
+  (* 3) New key wins when a row carries both keys. *)
+  let both_keys_json =
+    match State.transition_receipt_to_yojson receipt with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+             match name, value with
+             | "settlement", `Assoc settlement_fields ->
+               name, `Assoc (("owner_generation", `Int 99) :: settlement_fields)
+             | _ -> name, value)
+           fields)
+    | other -> other
+  in
+  let decoded_both =
+    State.transition_receipt_of_yojson both_keys_json
+    |> require_ok "both-keys receipt decode"
+  in
+  (match decoded_both.State.settlement with
+   | State.Cancel_accepted decoded_cancellation ->
+     Alcotest.(check int)
+       "owner_nonce wins over legacy owner_generation"
+       4
+       decoded_cancellation.owner_nonce
+   | _ -> Alcotest.fail "both-keys decode changed the settlement kind");
+  (* 4) WAL replay: a pre-rename settlement row replays through persistence. *)
+  with_temp_dir "keeper-event-queue-legacy-owner-key" (fun base_path ->
+    let keeper_name = "legacy_owner_key_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "legacy-owner-key-wal-source" 1.0))
+    |> require_ok "seed legacy owner-key WAL owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim legacy owner-key WAL source"
+      |> require_some "legacy owner-key WAL lease"
+    in
+    let claimed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load legacy owner-key WAL pre-settlement state"
+    in
+    let source =
+      match Persistence.lease_stimuli lease with
+      | [ source ] -> source
+      | _ -> Alcotest.fail "legacy owner-key WAL lease lost its source"
+    in
+    let cancellation =
+      accepted_cancellation
+        ~source
+        ~source_revision:(State.revision claimed)
+        ~owner_nonce:4
+        "op-legacy-owner-key-wal"
+    in
+    let receipt =
+      match
+        State.cancel_accepted
+          ~current_owner_nonce:4
+          ~settled_at:3.0
+          ~lease
+          ~cancellation
+          claimed
+        |> require_ok "construct legacy owner-key WAL receipt"
+      with
+      | _, State.Settled receipt -> receipt
+      | _, State.Already_settled _ ->
+        Alcotest.fail "legacy owner-key WAL fixture replayed early"
+    in
+    let wal_path =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    let row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+        ; "base_path", `String (Unix.realpath base_path)
+        ; "keeper_name", `String keeper_name
+        ; ( "receipt"
+          , rename_owner_nonce_to_legacy
+              (State.transition_receipt_to_yojson receipt) )
+        ]
+      |> Yojson.Safe.to_string
+      |> fun row -> row ^ "\n"
+    in
+    Fs_compat.save_file_atomic wal_path row
+    |> require_ok "write legacy owner-key WAL row";
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay legacy owner-key WAL row"
+    in
+    Alcotest.(check int)
+      "legacy owner-key WAL settles active lease"
+      0
+      (List.length (State.leases replayed));
+    Alcotest.(check int)
+      "legacy owner-key WAL recreates transition outbox"
+      1
+      (List.length (State.transition_outbox replayed)))
+;;
+
 let test_context_compaction_retry_is_durable_and_lane_local () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
@@ -2945,6 +3121,10 @@ let () =
             "legacy settlement WAL v1 remains replayable"
             `Quick
             test_legacy_settlement_wal_v1_remains_replayable
+        ; Alcotest.test_case
+            "legacy owner_generation wire key replays"
+            `Quick
+            test_legacy_owner_generation_wire_key_replays
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick

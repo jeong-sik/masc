@@ -2046,6 +2046,29 @@ let int_field ~context name fields =
   | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
 ;;
 
+(* Wire-compat (#25599): pre-rename persisted rows (snapshot "last_settlement",
+   "transition_outbox", "accepted_transfer_projections" and every settlement
+   WAL entry) carry the fencing counter under ["owner_generation"]; post-rename
+   rows use ["owner_nonce"]. Read both — the new key wins when a row carries
+   both — so replay of pre-rename state survives the rename boundary. The
+   writer keeps emitting only ["owner_nonce"]. *)
+let owner_nonce_field ~context fields =
+  let parse name = function
+    | `Int value -> Ok value
+    | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
+  in
+  match List.assoc_opt "owner_nonce" fields with
+  | Some value -> parse "owner_nonce" value
+  | None ->
+    (match List.assoc_opt "owner_generation" fields with
+     | Some value -> parse "owner_generation" value
+     | None ->
+       Error
+         (Printf.sprintf
+            "%s missing required field owner_nonce (or legacy owner_generation)"
+            context))
+;;
+
 let int64_field ~context name fields =
   let* value = required_field ~context name fields in
   match value with
@@ -2326,6 +2349,7 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
+          ; "owner_generation"
           ; "operator_operation_id"
           ; "reason"
           ]
@@ -2334,7 +2358,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
+    let* owner_nonce = owner_nonce_field ~context fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -2353,6 +2377,7 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
+          ; "owner_generation"
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
@@ -2362,7 +2387,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
+    let* owner_nonce = owner_nonce_field ~context fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -2388,6 +2413,7 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
+          ; "owner_generation"
           ; "operator_operation_id"
           ; "source_receipt_kind"
           ]
@@ -2396,7 +2422,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = int_field ~context "owner_nonce" fields in
+    let* owner_nonce = owner_nonce_field ~context fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in

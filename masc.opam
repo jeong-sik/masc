@@ -12,7 +12,7 @@ doc: "https://github.com/jeong-sik/masc"
 bug-reports: "https://github.com/jeong-sik/masc/issues"
 depends: [
   "dune" {>= "3.22"}
-  "ocaml" {>= "5.5"}
+  "ocaml" {= "5.5.0"}
   "mcp_protocol" {>= "1.3.0"}
   "ocaml-webrtc" {>= "0.2.3"}
   "grpc-direct-core" {>= "0.1.0"}
@@ -28,7 +28,7 @@ depends: [
   "cmdliner" {>= "1.1"}
   "cohttp" {>= "5.0"}
   "cohttp-eio" {>= "6.0"}
-  "piaf" {>= "0.2.0"}
+  "piaf" {= "0.2.0"}
   "eio-ssl" {>= "0.3.0"}
   "agent_sdk" {>= "0.222.0"}
   "uri" {>= "4.4"}
@@ -50,6 +50,7 @@ depends: [
   "zstd" {>= "0.4"}
   "httpun" {>= "0.2"}
   "httpun-eio" {>= "0.2"}
+  "httpun-ws" {= "0.2.0"}
   "bigstringaf" {>= "0.10"}
   "eio" {>= "1.0"}
   "eio_main" {>= "1.0"}
@@ -69,7 +70,7 @@ depends: [
   "atdgen" {build & >= "4.2.0"}
   "atdgen-runtime" {>= "4.2.0"}
   "atdts" {build & >= "4.2.0"}
-  "opentelemetry" {>= "0.13"}
+  "opentelemetry" {= "0.13"}
   "ambient-context-eio" {>= "0.2"}
   "crunch" {build & >= "4.0"}
   "odoc" {with-doc}

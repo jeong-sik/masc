@@ -101,15 +101,15 @@ jobs:
           path: |
             ~/.opam
             ~/.local/share/opam
-          key: opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.2-${{ runner.os }}-v1
+          key: opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.5.0-${{ runner.os }}-v1
           restore-keys: |
-            opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.2-${{ runner.os }}-
+            opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.5.0-${{ runner.os }}-
 
       - name: Set up OCaml
         if: steps.changed.outputs.no_files != 'true'
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: '5.2'
+          ocaml-compiler: '5.5.0'
 
       - name: Install ocamlformat
         if: steps.changed.outputs.no_files != 'true'

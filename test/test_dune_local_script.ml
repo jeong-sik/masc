@@ -120,7 +120,7 @@ let run_process ?(env = []) ?(unset_env = []) ~cwd prog argv =
     - bin/opam  (fake: exists, exits 0)
 
     Returns [(bin_dir, dune_log)] where [dune_log] records each dune call. *)
-let setup_fake_repo ?(ocaml_floor = "5.5") base ~pin_check_exit_code
+let setup_fake_repo ?(ocaml_version = "5.5.0") base ~pin_check_exit_code
     ~pin_check_stderr_msg =
   let scripts_dir = Filename.concat base "scripts" in
   let bin_dir = Filename.concat base "bin" in
@@ -132,9 +132,9 @@ let setup_fake_repo ?(ocaml_floor = "5.5") base ~pin_check_exit_code
 (package
  (name masc)
  (depends
-  (ocaml (>= %s))))
+  (ocaml (= %s))))
 |}
-       ocaml_floor);
+       ocaml_version);
   (* Real dune-local.sh *)
   write_executable
     (Filename.concat scripts_dir "dune-local.sh")
@@ -244,6 +244,11 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
     then []
     else [ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
   in
+  let default_skip_env name =
+    if List.exists (String.equal name) unset_env || List.mem_assoc name env
+    then []
+    else [ (name, "1") ]
+  in
   let full_env =
     [
       ("PATH", path);
@@ -255,6 +260,8 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
       ("MASC_OPAM_LOCK_HELD", "0");
     ]
     @ allow_bare_dune_env
+    @ default_skip_env "MASC_SKIP_DEPS_CHECK"
+    @ default_skip_env "MASC_SKIP_OCAML_VERSION_CHECK"
     @ List.filter
         (fun (k, _) ->
           k <> "PATH" && k <> "GIT_CEILING_DIRECTORIES" && k <> "DUNE_LOCAL_LOCK")
@@ -385,17 +392,24 @@ let test_github_actions_bypasses_pin_guard () =
       check int "exits zero when GITHUB_ACTIONS=true" 0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_opam_absent_skips_pin_guard () =
+let test_opam_absent_aborts_before_pin_guard () =
   with_temp_dir "dune-local-no-opam" (fun dir ->
       (* Set up repo with failing pin check but no fake opam in PATH *)
       let scripts_dir = Filename.concat dir "scripts" in
       let bin_dir = Filename.concat dir "bin" in
       mkdir_p scripts_dir;
       mkdir_p bin_dir;
+      write_file (Filename.concat dir "dune-project")
+        {|(lang dune 3.22)
+(package
+ (name masc)
+ (depends
+  (ocaml (= 5.5.0))))
+|};
       write_executable
         (Filename.concat scripts_dir "dune-local.sh")
         (read_file (dune_local_script_path ()));
-      (* Failing pin check: should never be called when opam is absent *)
+      (* Failing pin check: should never be called when opam is absent. *)
       write_executable
         (Filename.concat scripts_dir "check-oas-pin.sh")
         "#!/bin/sh\necho 'pin mismatch' >&2\nexit 1\n";
@@ -437,7 +451,7 @@ exec "$@"
       let minimal_path = Printf.sprintf "%s:/usr/bin:/bin" bin_dir in
       let lock_path = Filename.concat dir "dune-local.lock" in
       let script = Filename.concat scripts_dir "dune-local.sh" in
-      let code, _stdout, _stderr =
+      let code, _stdout, stderr =
         run_process ~cwd:dir "/bin/bash"
           ~env:
             [
@@ -450,13 +464,15 @@ exec "$@"
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
           [| "/bin/bash"; script; "build" |]
       in
-      check int "exits zero when opam absent" 0 code;
+      check int "exits non-zero when opam absent" 1 code;
+      check_contains "opam requirement is explicit" stderr
+        "opam is unavailable; MASC requires an opam-managed OCaml 5.5.0 switch";
       let lock_log =
         if Sys.file_exists lockf_log then read_file lockf_log else ""
       in
       check bool "opam lockf not invoked" false
         (contains_substring lock_log opam_lock_path);
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
+      check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_dune_lock_wait_reports_holder () =
   with_temp_dir "dune-local-lock-diag" (fun dir ->
@@ -1210,11 +1226,10 @@ let test_dry_run_skips_pin_check () =
       check int "exits zero for dry run" 0 code;
       check bool "dune not actually invoked" false (Sys.file_exists dune_log))
 
-(* --- deps guard tests (#13117 review) ---------------------------------
-   Helper: fake a missing-deps environment by overriding [opam] in PATH
-   with one that responds to [list --installed --short <pkg>] with an
-   empty body (the case the guard is supposed to catch).  pin check
-   passes so the test isolates the deps-guard branch. *)
+(* --- required findlib guard tests -------------------------------------
+   Helper: fake a dependency environment where opam package installation
+   may have succeeded but [ocamlfind query] resolves no public libraries.
+   The pin check passes so the test isolates the findlib guard. *)
 
 let setup_repo_with_missing_deps base =
   let bin_dir, dune_log = setup_fake_repo base ~pin_check_exit_code:0
@@ -1246,9 +1261,12 @@ let test_missing_deps_aborts_build () =
     in
     check int "exits non-zero on missing deps" 1 code;
     check bool "missing deps message present" true
-      (contains_substring stderr "missing opam packages");
+      (contains_substring stderr "missing or incompatible findlib libraries");
+    check_contains "piaf stream is checked" stderr "piaf.stream";
+    check_contains "OpenTelemetry API layout is checked" stderr
+      "opentelemetry.client";
     check bool "repair hint present" true
-      (contains_substring stderr "opam install . --deps-only");
+      (contains_substring stderr "opam-pin-external-deps.sh --install");
     check bool "skip hint present" true
       (contains_substring stderr "MASC_SKIP_DEPS_CHECK=1");
     check bool "dune not invoked" false (Sys.file_exists dune_log))
@@ -1265,87 +1283,109 @@ let test_skip_deps_check_env_bypasses_guard () =
     check int "exits zero when MASC_SKIP_DEPS_CHECK=1" 0 code;
     check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-(* --- OCaml minimum version guard tests (#13117 review) ---------------- *)
+(* --- exact OCaml toolchain guard tests -------------------------------- *)
 
-let setup_repo_with_old_ocaml ?(ocaml_floor = "5.5")
+let setup_repo_with_ocaml ?(required_version = "5.5.0")
     ?(ocaml_version = "5.4.0") base =
   let bin_dir, dune_log =
-    setup_fake_repo base ~ocaml_floor ~pin_check_exit_code:0
+    setup_fake_repo base ~ocaml_version:required_version ~pin_check_exit_code:0
       ~pin_check_stderr_msg:""
   in
-  (* opam list --installed --short returns the dep so deps-guard passes;
-     we test the OCaml branch in isolation. *)
+  (* The exact-toolchain tests exercise opam prefix identity before any
+     dependency checks, so provide one coherent fake switch and prefix. *)
   let opam_path = Filename.concat bin_dir "opam" in
   let opam_script =
-    {|#!/bin/sh
-# Echo back the requested package name for `opam list --installed --short PKG`
-# (args: $1=list $2=--installed $3=--short $4=PKG) so the deps-installed
-# guard sees every package as present and we can isolate the OCaml-version
-# branch in this fixture.
-if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
-  printf '%s\n' "$4"; exit 0
+    Printf.sprintf
+      {|#!/bin/sh
+if [ "$1" = "switch" ] && [ "$2" = "show" ]; then
+  printf 'fake-switch\n'; exit 0
 fi
-if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
+if [ "$1" = "var" ] && [ "$2" = "prefix" ]; then
+  printf '%%s\n' %s; exit 0
+fi
 exit 0
 |}
+      (quote base)
   in
   write_executable opam_path opam_script;
-  (* Fake ocaml that reports an old version. *)
-  let ocaml_path = Filename.concat bin_dir "ocaml" in
-  write_executable ocaml_path
+  (* Fake compiler that reports the requested exact version. *)
+  let ocamlc_path = Filename.concat bin_dir "ocamlc" in
+  write_executable ocamlc_path
     (Printf.sprintf
-       "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'The OCaml \
-        toplevel, version %s\\n'; fi\nexit 0\n"
+       "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf '%s\\n'; fi\nexit 0\n"
        ocaml_version);
   (bin_dir, dune_log)
 
 let test_old_ocaml_aborts_build () =
   with_temp_dir "dune-local-old-ocaml" (fun dir ->
-    let bin_dir, dune_log = setup_repo_with_old_ocaml dir in
+    let bin_dir, dune_log = setup_repo_with_ocaml dir in
     let code, _stdout, stderr =
       run_dune_local dir bin_dir
+        ~env:[ ("OPAM_SWITCH_PREFIX", dir) ]
         ~unset_env:
           [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
           ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
         "build"
     in
     check int "exits non-zero on old OCaml" 1 code;
-    check_contains "OCaml version message present" stderr "OCaml 5.4 detected";
-    check_contains "minimum 5.5 mentioned" stderr ">= 5.5";
+    check_contains "OCaml version message present" stderr "OCaml 5.4.0 detected";
+    check_contains "exact 5.5.0 mentioned" stderr "exactly 5.5.0";
     check_contains "skip hint present" stderr
       "MASC_SKIP_OCAML_VERSION_CHECK=1";
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let test_skip_ocaml_version_env_bypasses_guard () =
   with_temp_dir "dune-local-skip-ocaml" (fun dir ->
-    let bin_dir, dune_log = setup_repo_with_old_ocaml dir in
+    let bin_dir, dune_log = setup_repo_with_ocaml dir in
     let code, _stdout, _stderr =
       run_dune_local dir bin_dir
         ~env:[ ("MASC_SKIP_OCAML_VERSION_CHECK", "1") ]
-        ~unset_env:
-          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"; "MASC_SKIP_DEPS_CHECK" ]
+        ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
         "build"
     in
     check int "exits zero when MASC_SKIP_OCAML_VERSION_CHECK=1" 0 code;
     check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-let test_ocaml_floor_comes_from_dune_project () =
-  with_temp_dir "dune-local-ocaml-floor-ssot" (fun dir ->
+let test_ocaml_version_comes_from_dune_project () =
+  with_temp_dir "dune-local-ocaml-version-ssot" (fun dir ->
     let bin_dir, dune_log =
-      setup_repo_with_old_ocaml dir ~ocaml_floor:"5.6" ~ocaml_version:"5.5.0"
+      setup_repo_with_ocaml dir ~required_version:"5.6.0"
+        ~ocaml_version:"5.5.0"
     in
     let code, _stdout, stderr =
       run_dune_local dir bin_dir
+        ~env:[ ("OPAM_SWITCH_PREFIX", dir) ]
         ~unset_env:
           [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
           ; "MASC_SKIP_DEPS_CHECK"; "MASC_SKIP_OCAML_VERSION_CHECK" ]
         "build"
     in
-    check int "exits non-zero below dune-project floor" 1 code;
+    check int "exits non-zero on dune-project version mismatch" 1 code;
     check bool "live OCaml version message present" true
-      (contains_substring stderr "OCaml 5.5 detected");
-    check bool "dune-project floor mentioned" true
-      (contains_substring stderr ">= 5.6");
+      (contains_substring stderr "OCaml 5.5.0 detected");
+    check bool "dune-project exact version mentioned" true
+      (contains_substring stderr "exactly 5.6.0");
+    check bool "dune not invoked" false (Sys.file_exists dune_log))
+
+let test_split_opam_prefix_aborts_build () =
+  with_temp_dir "dune-local-split-opam-prefix" (fun dir ->
+    let bin_dir, dune_log = setup_repo_with_ocaml dir ~ocaml_version:"5.5.0" in
+    let wrong_prefix = Filename.concat dir "other-switch" in
+    let code, _stdout, stderr =
+      run_dune_local dir bin_dir
+        ~env:[ ("OPAM_SWITCH_PREFIX", wrong_prefix) ]
+        ~unset_env:
+          [ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK"
+          ; "MASC_SKIP_OCAML_VERSION_CHECK" ]
+        "build"
+    in
+    check int "exits non-zero on split opam prefix" 1 code;
+    check_contains "split environment message present" stderr
+      "split opam environment";
+    check_contains "selected prefix present" stderr dir;
+    check_contains "stale prefix present" stderr wrong_prefix;
+    check_contains "repair command present" stderr
+      "opam env --switch=5.5.0 --set-switch";
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let () =
@@ -1367,8 +1407,8 @@ let () =
             test_skip_pin_check_still_cleans_on_provider_kind_crc_change;
           test_case "GITHUB_ACTIONS=true bypasses pin guard" `Quick
             test_github_actions_bypasses_pin_guard;
-          test_case "opam absent skips pin guard" `Quick
-            test_opam_absent_skips_pin_guard;
+          test_case "opam absent aborts before pin guard" `Quick
+            test_opam_absent_aborts_before_pin_guard;
           test_case "Dune lock wait reports holder" `Quick
             test_dune_lock_wait_reports_holder;
           test_case "live build-dir lock aborts before Dune" `Quick
@@ -1441,7 +1481,9 @@ let () =
             test_old_ocaml_aborts_build;
           test_case "MASC_SKIP_OCAML_VERSION_CHECK=1 bypasses ocaml guard"
             `Quick test_skip_ocaml_version_env_bypasses_guard;
-          test_case "OCaml floor is read from dune-project" `Quick
-            test_ocaml_floor_comes_from_dune_project;
+          test_case "exact OCaml version is read from dune-project" `Quick
+            test_ocaml_version_comes_from_dune_project;
+          test_case "split opam prefix aborts with repair command" `Quick
+            test_split_opam_prefix_aborts_build;
         ] );
     ]

@@ -3,7 +3,7 @@ description: Shared OCaml toolchain bootstrap with Linux local-opam pinning and 
 
 inputs:
   ocaml-compiler:
-    description: OCaml compiler version
+    description: OCaml compiler version (MASC supports exactly 5.5.0)
     required: false
     default: "5.5.0"
   dune-cache:
@@ -22,6 +22,16 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate OCaml compiler contract
+      shell: bash
+      env:
+        OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+      run: |
+        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.0" ]]; then
+          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.0" >&2
+          exit 1
+        fi
+
     - name: Setup OCaml (macOS)
       if: runner.os == 'macOS'
       uses: ocaml/setup-ocaml@v3.6.0
@@ -102,21 +112,7 @@ runs:
       run: |
         set -euo pipefail
 
-        case "${OCAML_COMPILER_INPUT}" in
-          5.5|5.5.x)
-            compiler_pkg="ocaml-base-compiler.5.5.0"
-            ;;
-          [0-9]*.[0-9]*.[0-9]*)
-            compiler_pkg="ocaml-base-compiler.${OCAML_COMPILER_INPUT}"
-            ;;
-          ocaml-base-compiler.*)
-            compiler_pkg="${OCAML_COMPILER_INPUT}"
-            ;;
-          *)
-            echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}" >&2
-            exit 1
-            ;;
-        esac
+        compiler_pkg="ocaml-base-compiler.5.5.0"
 
         switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
 

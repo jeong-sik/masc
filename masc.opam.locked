@@ -43,6 +43,7 @@ depends: [
   "cmdliner" {= "2.1.1"}
   "cohttp" {= "6.2.1"}
   "cohttp-eio" {= "6.2.1"}
+  "compiler-cloning" {= "enabled"}
   "conduit" {= "8.0.0"}
   "conf-gmp" {= "5"}
   "conf-gmp-powm-sec" {= "4"}
@@ -92,12 +93,13 @@ depends: [
   "httpun" {= "0.2.0"}
   "httpun-eio" {= "0.2.0"}
   "httpun-types" {= "0.2.0"}
+  "httpun-ws" {= "0.2.0"}
   "integers" {= "0.7.0"}
   "iomux" {= "0.4"}
   "ipaddr" {= "5.6.2"}
   "ipaddr-sexp" {= "5.6.2"}
   "jane-street-headers" {= "v0.17.0"}
-  "js_of_ocaml-compiler" {= "6.3.2"}
+  "js_of_ocaml-compiler" {= "6.4.1"}
   "jsonm" {= "1.0.2"}
   "jst-config" {= "v0.17.0"}
   "kdf" {= "1.0.0"}
@@ -119,11 +121,10 @@ depends: [
   "mirage-crypto-rng-eio" {= "1.2.0"}
   "mtime" {= "2.1.0"}
   "num" {= "1.6"}
-  "ocaml" {= "5.4.1"}
-  "ocaml-base-compiler" {= "5.4.1"}
-  "ocaml-compiler" {= "5.4.1"}
+  "ocaml" {= "5.5.0"}
+  "ocaml-base-compiler" {= "5.5.0"}
+  "ocaml-compiler" {= "5.5.0"}
   "ocaml-compiler-libs" {= "v0.17.0"}
-  "ocaml-config" {= "3"}
   "ocaml-options-vanilla" {= "1"}
   "ocaml-protoc-plugin" {= "6.2.0"}
   "ocaml-syntax-shims" {= "1.0.0"}

@@ -57,6 +57,39 @@ if [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
   fi
 fi
 
+# Refuse to mutate a different or unsupported switch.  This script is the
+# documented repair path for local OAS pin drift, so it must not silently
+# repair the switch named by opam while the caller's shell still executes
+# tools from another prefix.
+required_ocaml_version="$(sed -nE '/^[[:space:]]*\(ocaml[[:space:]]+\(=[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)\)\).*$/ { s//\1/; p; q; }' \
+  "${REPO_ROOT}/dune-project")"
+if [[ -z "${required_ocaml_version}" ]]; then
+  echo "[opam-pin] ERROR: unable to read exact OCaml version from ${REPO_ROOT}/dune-project" >&2
+  exit 1
+fi
+if ! command -v opam >/dev/null 2>&1; then
+  echo "[opam-pin] ERROR: opam is unavailable; MASC requires OCaml ${required_ocaml_version}" >&2
+  exit 1
+fi
+active_opam_switch="$(opam switch show 2>/dev/null || true)"
+active_opam_prefix="$(opam var prefix 2>/dev/null || true)"
+active_ocaml_version="$(opam exec -- ocamlc -version 2>/dev/null || true)"
+if [[ -z "${active_opam_switch}" || -z "${active_opam_prefix}" ]]; then
+  echo "[opam-pin] ERROR: unable to resolve the active opam switch and prefix" >&2
+  exit 1
+fi
+if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
+      && "${OPAM_SWITCH_PREFIX%/}" != "${active_opam_prefix%/}" ]]; then
+  echo "[opam-pin] ERROR: split opam environment: switch ${active_opam_switch} uses ${active_opam_prefix} but OPAM_SWITCH_PREFIX=${OPAM_SWITCH_PREFIX}" >&2
+  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  exit 1
+fi
+if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
+  echo "[opam-pin] ERROR: OCaml ${active_ocaml_version:-unknown} detected; MASC requires exactly ${required_ocaml_version}" >&2
+  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  exit 1
+fi
+
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly WEBRTC_SHA="1b7993605b293f45169369d488f970ba15132a9f"
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
@@ -203,7 +236,7 @@ guard_agent_sdk_downgrade() {
   if [[ -r "${agent_sdk_floor_path}" ]]; then
     recorded_floor="$(head -n 1 "${agent_sdk_floor_path}" 2>/dev/null || true)"
     if [[ -n "${recorded_floor}" ]] && version_gt "${recorded_floor}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
-      echo "[opam-pin] ERROR: refusing to downgrade shared agent_sdk pin below recorded floor ${recorded_floor}; branch floor is ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+      echo "[opam-pin] ERROR: refusing to downgrade agent_sdk below recorded floor ${recorded_floor}; branch floor is ${OAS_AGENT_SDK_MIN_VERSION}" >&2
       echo "[opam-pin] worktree: ${REPO_ROOT}" >&2
       echo "[opam-pin] recorded floor: ${agent_sdk_floor_path}" >&2
       echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
@@ -235,9 +268,10 @@ guard_agent_sdk_downgrade() {
   fi
 
   if version_gt "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
-    echo "[opam-pin] ERROR: refusing to downgrade shared agent_sdk pin" >&2
+    echo "[opam-pin] ERROR: refusing to downgrade installed agent_sdk ${installed_version}" >&2
     echo "[opam-pin] worktree: ${REPO_ROOT}" >&2
-    echo "[opam-pin] requested: agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION} at ${agent_sdk_pin_source}" >&2
+    echo "[opam-pin] requested floor: agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+    echo "[opam-pin] branch pin source: ${agent_sdk_pin_source}" >&2
     echo "[opam-pin] installed: agent_sdk ${installed_version}" >&2
     echo "[opam-pin] lock path: ${opam_lock_path}" >&2
     print_opam_lock_holder

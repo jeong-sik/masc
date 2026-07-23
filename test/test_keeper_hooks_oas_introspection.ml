@@ -129,6 +129,7 @@ let test_pre_tool_use_is_observation_only () =
           Agent_sdk.Tool_contract.Invocation.create
             ~tool_use_id:"toolu_observation_only"
             ~turn:7
+            ~completion:Agent_sdk.Tool_contract.Continue_after_success
             ~schedule:
               { planned_index = 0
               ; batch_index = 0

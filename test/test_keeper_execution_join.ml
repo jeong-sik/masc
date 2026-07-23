@@ -68,6 +68,7 @@ let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
   Agent_sdk.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn
+    ~completion:Agent_sdk.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index
       ; batch_index = 0

@@ -221,6 +221,7 @@ let test_execution_env_preserves_exact_invocation () =
     Agent_sdk.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:7
+      ~completion:Agent_sdk.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 2
         ; batch_index = 0

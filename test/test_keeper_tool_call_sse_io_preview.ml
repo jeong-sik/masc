@@ -109,6 +109,7 @@ let test_oas_invocation_fields_preserve_exact_occurrence () =
     Agent_sdk.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:11
+      ~completion:Agent_sdk.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 3
         ; batch_index = 0

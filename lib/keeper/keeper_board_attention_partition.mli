@@ -88,7 +88,10 @@ val recover_for_process_start :
   base_path:string -> keeper_name:string -> (int, string) result
 (** Release prior-process [Running] rows to [Ready] and canonically compact
     the append ledger to one latest row per partition. [Deferred] rows retain
-    their exact retry requirement; process restart is not retry authority. *)
+    their exact retry requirement; process restart is not retry authority. A
+    torn tail left by a mid-append crash is truncated to the last complete row
+    under the ledger lock before recovery; general reads keep hard-failing on
+    it. *)
 
 val release_due_provider_retries :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result

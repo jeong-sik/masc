@@ -41,6 +41,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history so origin/<base> and the PR head commit exist locally;
+          # the version-drift gate below reads dune-project from both refs.
+          fetch-depth: 0
 
       - name: Verify PR sync
         env:

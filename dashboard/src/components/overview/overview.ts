@@ -503,13 +503,7 @@ export function summarizeScheduledAutomation(
     unsupportedPayloadCount,
     unknownPayloadCount,
     truncated: typeof automation.truncated === 'boolean' ? automation.truncated : false,
-    tone: hasWarnings
-      ? 'warn'
-      : hasActive
-        ? 'volt'
-        : requestCount > 0
-          ? 'ok'
-          : 'ok',
+    tone: hasWarnings ? 'warn' : hasActive ? 'volt' : 'ok',
   }
 }
 

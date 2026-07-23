@@ -163,11 +163,22 @@ if [[ -n "$BASE_REF" ]]; then
   BASE_VERSION="$(extract_dune_project_version "$BASE_REF")"
   HEAD_VERSION="$(extract_dune_project_version "$EXPECTED_HEAD_SHA")"
 
+  # Fail loud instead of warning-only: with a shallow checkout (default
+  # actions/checkout depth 1) neither origin/<base> nor the head commit
+  # exists locally, both versions come back empty, and the drift gate below
+  # would silently never evaluate. A gate that cannot read its inputs must
+  # fail, not pass.
   if [[ -z "$BASE_VERSION" ]]; then
-    echo "::warning title=PR base package version missing::Could not read version from ${BASE_REF}:dune-project"
+    echo "::error title=PR base package version unreadable::Could not read version from ${BASE_REF}:dune-project. Ensure the base branch is fetched locally (checkout fetch-depth)."
+    exit 1
   fi
 
-  if [[ -n "$HEAD_VERSION" && -n "$BASE_VERSION" ]] && version_gt "$BASE_VERSION" "$HEAD_VERSION"; then
+  if [[ -z "$HEAD_VERSION" ]]; then
+    echo "::error title=PR head package version unreadable::Could not read version from ${EXPECTED_HEAD_SHA}:dune-project. Ensure the PR head commit is fetched locally."
+    exit 1
+  fi
+
+  if version_gt "$BASE_VERSION" "$HEAD_VERSION"; then
     echo "::error title=PR base package version drift::Base (${BASE_REF}) is on package ${BASE_VERSION} but PR head ${EXPECTED_HEAD_SHA} is still ${HEAD_VERSION}."
     echo "  Rebase this branch onto ${BASE_REF}, then re-run CI."
 

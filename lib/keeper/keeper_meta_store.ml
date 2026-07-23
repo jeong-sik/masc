@@ -411,6 +411,10 @@ let retired_keeper_meta_key_names =
        this entry every read of every existing file would warn and increment
        MetaJsonFailures(site=unknown_keys) indefinitely. *)
   ; "last_turn_tool_calls"
+    (* Removed with the transcript-corruption retry latch. Existing dormant
+       Keeper metas still carry the codec-orphaned counter, so boot must
+       canonicalize it instead of warning on every later read. *)
+  ; "transcript_quarantine_consecutive_retries"
   ]
 ;;
 

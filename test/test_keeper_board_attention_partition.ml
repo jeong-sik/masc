@@ -29,6 +29,12 @@ let expect_error label = function
   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
 ;;
 
+let ledger_lines path =
+  Fs_compat.load_file path
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal line ""))
+;;
+
 let signal post_id : Masc.Board_dispatch.board_signal =
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
@@ -177,6 +183,67 @@ let test_claim_ownership_completion_and_settlement () =
   Alcotest.(check bool) "settlement is idempotent" true (settled = settled_again);
   let next = claim ~base_path ~worker_epoch:owner ~now:13.0 in
   Alcotest.(check string) "next singleton remains independent" late.candidate_id next.candidate_id
+;;
+
+let test_runtime_transitions_append_then_startup_compacts () =
+  with_temp_base "board-attention-partition-append-index" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-append" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  let ready_bytes = Fs_compat.load_file ledger_path in
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let running_bytes = Fs_compat.load_file ledger_path in
+  Alcotest.(check bool)
+    "claim preserves Ready prefix"
+    true
+    (String.starts_with running_bytes ~prefix:ready_bytes);
+  let item : P.completed_item =
+    { candidate_id = claimed.candidate_id; judgment = judgment () }
+  in
+  let completed =
+    match
+      ok
+        "complete append"
+        (P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item)
+    with
+    | P.Partition_completed partition -> partition
+    | P.Partition_deferred _ | P.Partition_blocked _ ->
+      Alcotest.fail "append fixture did not complete"
+  in
+  let completed_bytes = Fs_compat.load_file ledger_path in
+  Alcotest.(check bool)
+    "completion preserves Running prefix"
+    true
+    (String.starts_with completed_bytes ~prefix:running_bytes);
+  let settled = ok "settle append" (P.settle ~now:12.0 ~base_path ~partition:completed) in
+  let settled_bytes = Fs_compat.load_file ledger_path in
+  Alcotest.(check bool)
+    "settlement preserves Completed prefix"
+    true
+    (String.starts_with settled_bytes ~prefix:completed_bytes);
+  Alcotest.(check int)
+    "one row per runtime transition"
+    4
+    (List.length (ledger_lines ledger_path));
+  ignore (ok "idempotent settlement" (P.settle ~now:13.0 ~base_path ~partition:settled) : P.t);
+  Alcotest.(check string)
+    "idempotent settlement appends nothing"
+    settled_bytes
+    (Fs_compat.load_file ledger_path);
+  Alcotest.(check int)
+    "settled history recovers no claims"
+    0
+    (ok
+       "startup compaction"
+       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
+  Alcotest.(check int)
+    "startup compacts to one latest row"
+    1
+    (List.length (ledger_lines ledger_path));
+  match ok "load compacted ledger" (P.load ~base_path ~keeper_name:"sangsu") with
+  | [ { P.state = P.Settled _; _ } ] -> ()
+  | _ -> Alcotest.fail "startup compaction lost the Settled receipt"
 ;;
 
 let test_lane_abort_and_process_start_recovery_are_explicit () =
@@ -350,6 +417,10 @@ let () =
             "claim ownership completion and settlement"
             `Quick
             test_claim_ownership_completion_and_settlement
+        ; Alcotest.test_case
+            "runtime transitions append then startup compacts"
+            `Quick
+            test_runtime_transitions_append_then_startup_compacts
         ; Alcotest.test_case
             "lane abort and process-start recovery"
             `Quick

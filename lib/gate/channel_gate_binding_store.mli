@@ -45,6 +45,10 @@ type binding_store_error =
 
 type audit_append_error =
   | Audit_append_failed of Fs_compat.private_jsonl_append_error
+  | Audit_append_failed_with_cleanup of {
+      error : Fs_compat.private_jsonl_append_error;
+      cleanup_failure : Fs_compat.private_jsonl_operation_failure;
+    }
   | Audit_io_failed of string
 
 type mutation_error =

@@ -350,35 +350,56 @@ let replay_settlement_wal_bytes owner state bytes =
 
 let replay_settlement_wal_unlocked owner state =
   let path = settlement_wal_path_of_owner owner in
+  let replay_slice slice =
+    match slice.Fs_compat.Private_jsonl_slice.bytes with
+    | "" -> Ok state
+    | bytes ->
+      (match replay_settlement_wal_bytes owner state bytes with
+       | Error detail ->
+         Error (Printf.sprintf "failed to replay %s: %s" path detail)
+       | Ok replayed ->
+         (match bump_revision replayed with
+          | Error _ as error -> error
+          | Ok replayed ->
+            (match save_state_unlocked owner replayed with
+             | Ok () ->
+               (match compact_settlement_wal_unlocked owner with
+                | Ok () -> Ok replayed
+                | Error detail ->
+                  Error
+                    ("settlement WAL checkpoint recovered but compaction failed: "
+                     ^ detail))
+             | Error detail ->
+               Error
+                 (Printf.sprintf
+                    "settlement WAL is committed but checkpoint replay failed: %s"
+                    detail))))
+  in
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
-  | Error error ->
+  | Private_file_failed error ->
     Error
       (Printf.sprintf
          "failed to read settlement WAL keeper=%s path=%s: %s"
          (keeper_name_of_owner owner)
          path
          (Fs_compat.Private_jsonl_slice.error_to_string error))
-  | Ok { bytes = ""; _ } -> Ok state
-  | Ok slice ->
-    (match replay_settlement_wal_bytes owner state slice.bytes with
-     | Error detail -> Error (Printf.sprintf "failed to replay %s: %s" path detail)
-     | Ok replayed ->
-       (match bump_revision replayed with
-        | Error _ as error -> error
-        | Ok replayed ->
-          (match save_state_unlocked owner replayed with
-           | Ok () ->
-             (match compact_settlement_wal_unlocked owner with
-              | Ok () -> Ok replayed
-              | Error detail ->
-                Error
-                  ("settlement WAL checkpoint recovered but compaction failed: "
-                   ^ detail))
-           | Error detail ->
-             Error
-               (Printf.sprintf
-                  "settlement WAL is committed but checkpoint replay failed: %s"
-                  detail))))
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Error
+      (Printf.sprintf
+         "failed to read settlement WAL keeper=%s path=%s: %s; descriptor settlement failed: %s"
+         (keeper_name_of_owner owner)
+         path
+         (Fs_compat.Private_jsonl_slice.error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | Private_file_succeeded slice -> replay_slice slice
+  | Private_file_succeeded_with_cleanup_failure
+      { value = slice; cleanup_failure } ->
+    Log.Keeper.error
+      "settlement WAL read succeeded with descriptor settlement failure keeper=%s path=%s: %s"
+      (keeper_name_of_owner owner)
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    replay_slice slice
 ;;
 
 let load_state_unlocked owner =
@@ -745,52 +766,72 @@ let commit_settlement_transition_unlocked owner ~after_commit transition current
      | Ok checkpoint ->
        let suffix = settlement_wal_entry_to_line owner entry in
        let path = settlement_wal_path_of_owner owner in
+       let continue_after_commit () =
+         let pending = State.pending checkpoint in
+         match save_state_unlocked owner checkpoint with
+         | Error detail ->
+           Ok
+             ( Committed_followup_failed
+                 { receipt; stage = `Checkpoint; detail }
+             , pending )
+         | Ok () ->
+           (match compact_settlement_wal_unlocked owner with
+            | Error detail ->
+              Ok
+                ( Committed_followup_failed
+                    { receipt; stage = `Wal_compaction; detail }
+                , pending )
+            | Ok () ->
+              (match
+                 try
+                   after_commit pending;
+                   Ok ()
+                 with
+                 | Eio.Cancel.Cancelled _ as exn ->
+                   Error
+                     ("pending projection cancelled after settlement commit: "
+                      ^ Printexc.to_string exn)
+                 | exn -> Error (Printexc.to_string exn)
+               with
+               | Ok () -> Ok (Settled receipt, pending)
+               | Error detail ->
+                 Ok
+                   ( Committed_followup_failed
+                       { receipt; stage = `Projection; detail }
+                   , pending )))
+       in
        (match
           Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
             path
             ~expected_end_offset:0
             suffix
         with
-        | Error error ->
+        | Private_file_failed error ->
           Error
             (Printf.sprintf
                "settlement WAL commit failed keeper=%s path=%s: %s"
                (keeper_name_of_owner owner)
                path
                (Fs_compat.private_jsonl_append_error_to_string error))
-        | Ok _committed_end_offset ->
-          let pending = State.pending checkpoint in
-          (match save_state_unlocked owner checkpoint with
-           | Error detail ->
-             Ok
-               ( Committed_followup_failed
-                   { receipt; stage = `Checkpoint; detail }
-               , pending )
-           | Ok () ->
-             (match compact_settlement_wal_unlocked owner with
-              | Error detail ->
-                Ok
-                  ( Committed_followup_failed
-                      { receipt; stage = `Wal_compaction; detail }
-                  , pending )
-              | Ok () ->
-                (match
-                   try
-                     after_commit pending;
-                     Ok ()
-                   with
-                   | Eio.Cancel.Cancelled _ as exn ->
-                     Error
-                       ("pending projection cancelled after settlement commit: "
-                        ^ Printexc.to_string exn)
-                   | exn -> Error (Printexc.to_string exn)
-                 with
-                 | Ok () -> Ok (Settled receipt, pending)
-                 | Error detail ->
-                   Ok
-                     ( Committed_followup_failed
-                         { receipt; stage = `Projection; detail }
-                     , pending ))))))
+        | Private_file_failed_with_cleanup_failure
+            { error; cleanup_failure } ->
+          Error
+            (Printf.sprintf
+               "settlement WAL commit failed keeper=%s path=%s: %s; descriptor settlement failed: %s"
+               (keeper_name_of_owner owner)
+               path
+               (Fs_compat.private_jsonl_append_error_to_string error)
+               (Fs_compat.private_jsonl_operation_failure_to_string
+                  cleanup_failure))
+        | Private_file_succeeded _committed_end_offset -> continue_after_commit ()
+        | Private_file_succeeded_with_cleanup_failure
+            { value = _committed_end_offset; cleanup_failure } ->
+          Log.Keeper.error
+            "settlement WAL commit succeeded with descriptor settlement failure keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            path
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+          continue_after_commit ()))
      | [] | [ _ ] | _ :: _ :: _ ->
        Error "settlement transition did not produce its canonical outbox entry")
 ;;

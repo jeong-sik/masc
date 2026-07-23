@@ -691,8 +691,21 @@ let read_locked path parse =
     Fs_compat.update_private_file_durable_locked_result path (fun content ->
       None, parse content)
   with
-  | Error error -> Error (durable_error_to_string error)
-  | Ok result -> result
+  | Private_file_failed error -> Error (durable_error_to_string error)
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Error
+      (Printf.sprintf
+         "%s; descriptor settlement failed: %s"
+         (durable_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | Private_file_succeeded result -> result
+  | Private_file_succeeded_with_cleanup_failure
+      { value = result; cleanup_failure } ->
+    Log.Keeper.error
+      "board attention candidate read succeeded with descriptor settlement failure path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    result
 ;;
 
 (* Read-side stat memo. Owner-lane drains call [load_candidates] far more often

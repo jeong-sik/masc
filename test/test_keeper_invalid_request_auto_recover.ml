@@ -103,6 +103,40 @@ let test_counters_are_per_keeper () =
   KUF.reset_invalid_request_failures ~keeper_name:keeper_b
 ;;
 
+(* Drift guard for the legacy string arms in [EC.is_invalid_request_error]
+   (#25606).  The classification shape and the rendered prefix are both
+   produced by the pinned OAS SDK (oas 5851df2e, lib/llm_provider/retry.ml):
+   [Retry.classify_error] maps HTTP 400/422 to
+   [InvalidRequest { reason = Unknown_invalid_request; message = body }] and
+   [Retry.error_message] renders it as ["Invalid request (%s): %s"] — the
+   prefix the legacy string arm matches.  This test generates the real SDK
+   product and asserts the predicate catches it and the rendering keeps the
+   matched prefix, so an SDK-side shape change fails here instead of
+   silently deadening the matcher.  At the pin no [sdk_error] rendering
+   starts with ["Bad Request"] or ["oas-ollama_cloud"]; those string arms
+   are defensive legacy shapes with no SDK producer to pin. *)
+let test_sdk_invalid_request_shape_drift_guard () =
+  let api_error =
+    Llm_provider.Retry.classify_error
+      ~retry_after_header:None
+      ~status:400
+      ~body:"Bad Request"
+  in
+  let err = Agent_sdk.Error.Api api_error in
+  check
+    bool
+    "SDK-classified 400 is caught by the predicate"
+    true
+    (EC.is_invalid_request_error err);
+  check
+    bool
+    "SDK rendering keeps the Invalid request prefix the string arm matches"
+    true
+    (String.starts_with
+       ~prefix:"Invalid request"
+       (Agent_sdk.Error.to_string err))
+;;
+
 let () =
   run
     "keeper_invalid_request_auto_recover"
@@ -123,6 +157,10 @@ let () =
             "consecutive counters are per-keeper"
             `Quick
             test_counters_are_per_keeper
+        ; test_case
+            "SDK 400 classification/rendering shape drift guard"
+            `Quick
+            test_sdk_invalid_request_shape_drift_guard
         ] )
     ]
 ;;

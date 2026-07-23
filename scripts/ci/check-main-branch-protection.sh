@@ -18,6 +18,10 @@ required_contexts_csv="${BRANCH_PROTECTION_REQUIRED_CONTEXTS:-CI Gate}"
 allow_unreadable="${BRANCH_PROTECTION_ALLOW_UNREADABLE:-0}"
 unreadable_state_file="${BRANCH_PROTECTION_UNREADABLE_STATE_FILE:-}"
 max_consecutive_unreadable="${BRANCH_PROTECTION_UNREADABLE_MAX_CONSECUTIVE:-3}"
+if ! [[ "$max_consecutive_unreadable" =~ ^[0-9]+$ ]]; then
+  echo "::error title=Branch protection check misconfigured::BRANCH_PROTECTION_UNREADABLE_MAX_CONSECUTIVE must be a non-negative integer (got '${max_consecutive_unreadable}'); refusing to run with an unparsable fail-closed threshold."
+  exit 1
+fi
 
 if [[ -z "$repo" ]]; then
   echo "::error title=Branch protection check misconfigured::BRANCH_PROTECTION_REPOSITORY or GITHUB_REPOSITORY is required."
@@ -74,6 +78,9 @@ record_consecutive_unauthorized() {
   # Tracks consecutive bypassed 401s in $unreadable_state_file. Returns 1 when
   # the count reaches the fail-closed threshold; no-op (returns 0) when no
   # state file is configured.
+  # Called under `if ! ...`, which suspends `set -e` inside the function, so
+  # write failures are checked explicitly: a bypass without accounting would
+  # reset the count to 1 every run (fail-open), so it fails closed instead.
   [[ -n "$unreadable_state_file" ]] || return 0
   local count=0
   if [[ -f "$unreadable_state_file" ]]; then
@@ -81,8 +88,11 @@ record_consecutive_unauthorized() {
     [[ "$count" =~ ^[0-9]+$ ]] || count=0
   fi
   count=$((count + 1))
-  mkdir -p "$(dirname "$unreadable_state_file")"
-  printf '%s\n' "$count" >"$unreadable_state_file"
+  if ! mkdir -p "$(dirname "$unreadable_state_file")" ||
+    ! printf '%s\n' "$count" >"$unreadable_state_file"; then
+    echo "::error title=Branch protection check failing closed::Could not write consecutive-401 state file '${unreadable_state_file}'; refusing to bypass without accounting. Fix the path or unset BRANCH_PROTECTION_UNREADABLE_STATE_FILE."
+    exit 1
+  fi
   ((count >= max_consecutive_unreadable)) && return 1
   return 0
 }

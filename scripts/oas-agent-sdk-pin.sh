@@ -67,4 +67,4 @@ readonly OAS_AGENT_SDK_DECLARED_VERSION="0.220.5"
 # sync-oas-pin-docs.sh; removed by #25579 and restored here (#25584).
 readonly OAS_AGENT_SDK_TRACK_REF="main"
 readonly OAS_AGENT_SDK_SHA="5851df2e276872d640769813f2000642f7bd56d3"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.219.0"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.220.5"

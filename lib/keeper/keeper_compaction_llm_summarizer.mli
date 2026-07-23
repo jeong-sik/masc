@@ -101,8 +101,14 @@ val terminalize_post_success
   -> Keeper_event_queue_state.exact_execution_terminal_cause
   -> Keeper_event_queue_state.exact_execution_terminal
 (** Durably quarantine the real retained attempt observation before returning
-    its source-bound terminal identity. Persistence errors are logged but never
-    replace the original domain cause. *)
+    its source-bound terminal identity. The first call atomically owns the
+    canonical cause, performs the only quarantine attempt outside the mutex
+    under cancellation protection, and releases concurrent waiters. Later calls
+    return that same terminal even when they propose a different cause.
+    Persistence errors and raised exceptions are logged without replacing the
+    canonical terminal; the durable binding remains dispatch-uncertain and
+    therefore fail-closed against restart replay. A cancelled waiter can retry
+    and retrieve the same canonical terminal without repeating quarantine. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string

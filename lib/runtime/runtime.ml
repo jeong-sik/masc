@@ -1192,13 +1192,6 @@ let init_default_degraded_report ~config_path =
 
 let runtime_state () = Atomic.get loaded_state_ref
 
-module For_testing = struct
-  type snapshot = loaded_state
-
-  let snapshot () = runtime_state ()
-  let restore snapshot = Atomic.set loaded_state_ref snapshot
-end
-
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
@@ -1722,16 +1715,29 @@ let runtime_config_atomic_failure ~replacement_visible failure =
     else Error detail
 ;;
 
-let runtime_config_write_effect ~path content () =
-  match Fs_compat.save_file_atomic_strict_staged path content with
-  | Ok () -> Runtime_exact_output_registry.Committed `Durable
+let runtime_config_write_outcome
+    ~replace_file
+    ~on_replacement_visible
+    ~path
+    content
+    ()
+  =
+  match replace_file path content with
+  | Ok () ->
+    on_replacement_visible ();
+    Runtime_exact_output_registry.Committed `Durable
   | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
     Runtime_exact_output_registry.Not_committed failure
   | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
+    on_replacement_visible ();
     Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure)
 ;;
 
-let commit_runtime_config_text ~path content =
+let commit_runtime_config_text
+    ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
+    ~path
+    content
+  =
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
@@ -1739,7 +1745,7 @@ let commit_runtime_config_text ~path content =
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
   | Error Runtime_exact_output_registry.Registry_not_published ->
-    (match Fs_compat.save_file_atomic_strict_staged path content with
+    (match replace_file path content with
      | Ok () -> Ok ()
      | Error failure ->
        runtime_config_atomic_failure
@@ -1756,7 +1762,13 @@ let commit_runtime_config_text ~path content =
     (match
        Runtime_exact_output_registry.transact_replacement
          prepared_replacement
-         ~effect:(runtime_config_write_effect ~path content)
+         ~apply_write:
+           (runtime_config_write_outcome
+              ~replace_file
+              ~on_replacement_visible:(fun () ->
+                set_loaded ~config_path:path loaded)
+              ~path
+              content)
      with
      | Error error ->
        Error
@@ -1764,21 +1776,50 @@ let commit_runtime_config_text ~path content =
           ^ Runtime_exact_output_registry.publication_error_to_string error)
      | Ok (Runtime_exact_output_registry.Not_committed failure) ->
        runtime_config_atomic_failure ~replacement_visible:false failure
-     | Ok (Runtime_exact_output_registry.Committed `Durable) ->
-       set_loaded ~config_path:path loaded;
-       Ok ()
+     | Ok (Runtime_exact_output_registry.Committed `Durable) -> Ok ()
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
-       set_loaded ~config_path:path loaded;
        runtime_config_atomic_failure ~replacement_visible:true failure)
 ;;
 
-let save_config_text ?runtime_config_path content =
+let save_config_text_with_replace_file
+    ?runtime_config_path
+    ~replace_file
+    content
+  =
   with_runtime_config_write_lock
   @@ fun () ->
   let* path = runtime_config_path_result ?runtime_config_path () in
-  commit_runtime_config_text ~path content
+  commit_runtime_config_text ~replace_file ~path content
+;;
+
+let save_config_text ?runtime_config_path content =
+  save_config_text_with_replace_file
+    ?runtime_config_path
+    ~replace_file:Fs_compat.save_file_atomic_strict_staged
+    content
+;;
+
+module For_testing = struct
+  type snapshot = loaded_state
+
+  let snapshot () = runtime_state ()
+  let restore snapshot = Atomic.set loaded_state_ref snapshot
+
+  let save_config_text_with_sync_parent
+      ?runtime_config_path
+      ~sync_parent
+      content
+    =
+    save_config_text_with_replace_file
+      ?runtime_config_path
+      ~replace_file:
+        (Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+           ~sync_parent)
+      content
+  ;;
+end
 ;;
 
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =

@@ -165,6 +165,14 @@ module For_testing : sig
 
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
+
+  val save_config_text_with_sync_parent :
+    ?runtime_config_path:string ->
+    sync_parent:(string -> unit) ->
+    string ->
+    (unit, string) result
+  (** Production-equivalent runtime config replacement with an injected
+      parent-directory sync operation. *)
 end
 
 val get_default_runtime : unit -> t option

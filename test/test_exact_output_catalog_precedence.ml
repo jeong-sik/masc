@@ -399,70 +399,6 @@ let test_registry_skips_typed_unavailable_credentials () =
   | Ok _ -> Alcotest.fail "all-unavailable lane must fail closed"
 ;;
 
-let test_staged_write_and_closed_registry_transaction () =
-  with_temp_dir "exact-output-closed-transaction" @@ fun root ->
-  let path = Filename.concat root "runtime.toml" in
-  write_file path "old";
-  (match
-     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-       ~sync_parent:(fun _ -> failwith "injected parent fsync failure")
-       path
-       "new"
-   with
-   | Error { stage = Fs_compat.After_rename; _ } -> ()
-   | Error { stage = Fs_compat.Before_rename; _ } ->
-     Alcotest.fail "parent fsync failure was classified before rename"
-   | Ok () -> Alcotest.fail "parent fsync failure was downgraded to success");
-  Alcotest.(check string) "rename is visible" "new" (Fs_compat.load_file path);
-  let snapshot = load_control_snapshot replacement_catalog in
-  let lanes id : Runtime_schema.exact_output_lane_decl list =
-    [ { id; slot_ids = [ replacement_target ] } ]
-  in
-  let baseline =
-    match Registry.publish ~lanes:(lanes "transaction-a") snapshot with
-    | Ok registry -> registry
-    | Error error ->
-      Alcotest.failf "baseline publication failed: %s"
-        (Registry.publication_error_to_string error)
-  in
-  let prepare id =
-    match Registry.prepare_replacement ~lanes:(lanes id) with
-    | Ok prepared -> prepared
-    | Error error ->
-      Alcotest.failf "transaction preparation failed: %s"
-        (Registry.publication_error_to_string error)
-  in
-  (match
-     Registry.transact_replacement (prepare "transaction-b") ~effect:(fun () ->
-       Registry.current ()
-       |> require_publication_busy "transaction callback acquisition";
-       Registry.Not_committed ())
-   with
-   | Ok (Registry.Not_committed ()) -> ()
-   | Ok (Registry.Committed _) -> Alcotest.fail "not-committed effect published"
-   | Error error ->
-     Alcotest.failf "not-committed transaction failed: %s"
-       (Registry.publication_error_to_string error));
-  let unchanged =
-    match Registry.current () with
-    | Ok registry -> registry
-    | Error error ->
-      Alcotest.failf "transaction fence leaked: %s"
-        (Registry.publication_error_to_string error)
-  in
-  Alcotest.(check int64) "abort preserves generation"
-    (Registry.generation baseline) (Registry.generation unchanged);
-  (match
-     Registry.transact_replacement (prepare "transaction-b")
-       ~effect:(fun () -> Registry.Committed ())
-   with
-   | Ok (Registry.Committed ()) -> ()
-   | Ok (Registry.Not_committed _) -> Alcotest.fail "committed effect was aborted"
-   | Error error ->
-     Alcotest.failf "committed transaction failed: %s"
-       (Registry.publication_error_to_string error))
-;;
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -486,8 +422,12 @@ let () =
             `Quick
             test_registry_skips_typed_unavailable_credentials
         ; Alcotest.test_case
-            "staged write and closed registry transaction preserve commit boundary"
+            "closed registry transaction publishes final generation and lane"
             `Quick
-            test_staged_write_and_closed_registry_transaction
+            test_closed_registry_transaction
+        ; Alcotest.test_case
+            "after-rename runtime save converges file, registry, and cache"
+            `Quick
+            test_runtime_after_rename_converges_state
         ] ) ]
 ;;

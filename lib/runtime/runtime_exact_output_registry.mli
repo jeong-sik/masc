@@ -91,13 +91,13 @@ val prepare_replacement
 
 val transact_replacement
   :  prepared_replacement
-  -> effect:(unit -> ('not_committed, 'committed) replacement_effect)
+  -> apply_write:(unit -> ('not_committed, 'committed) replacement_effect)
   -> (('not_committed, 'committed) replacement_effect, publication_error) result
-(** Reserve the candidate's exact base, run [effect] outside the publication
+(** Reserve the candidate's exact base, run [apply_write] outside the publication
     mutex while all acquisitions observe [Publication_busy], then close the
     private reservation. [Not_committed] preserves the published registry;
     [Committed] publishes the immutable candidate exactly once. The opaque
-    reservation never escapes to [effect], so it cannot be finished or aborted
+    reservation never escapes to [apply_write], so it cannot be finished or aborted
     by another caller. An exception clears the fence and is re-raised with its
     original backtrace; effects that made an external commit visible must
     therefore return [Committed] rather than raise. *)

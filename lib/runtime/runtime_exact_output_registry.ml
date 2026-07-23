@@ -299,7 +299,7 @@ let close_private_transaction reservation ~publish =
   @@ fun () ->
   (* [reservation] never leaves [transact_replacement]'s closure. Other
      publication operations can only observe the active fence, so no external
-     caller can consume or replace this exact token while [effect] runs. *)
+     caller can consume or replace this exact token while [apply_write] runs. *)
   active_reservation := None;
   if publish
   then
@@ -308,9 +308,9 @@ let close_private_transaction reservation ~publish =
       reservation.candidate
 ;;
 
-let transact_replacement prepared ~effect =
+let transact_replacement prepared ~apply_write =
   let* reservation = reserve_replacement prepared in
-  match effect () with
+  match apply_write () with
   | Not_committed _ as outcome ->
     close_private_transaction reservation ~publish:false;
     Ok outcome

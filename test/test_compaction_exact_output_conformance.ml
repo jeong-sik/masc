@@ -1032,6 +1032,251 @@ let test_heartbeat_guard_binds_before_post () =
   Alcotest.(check int) "heartbeat guarded request posts once" 1 (F.post_count server)
 ;;
 
+let test_post_success_terminalization_is_affine () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-post-success-terminal-affinity"
+  @@ fun base_path ->
+  let keeper_name = "keeper-post-success-terminal-affinity" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  let slot_id = "post-success-terminal-affinity" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc post-success terminal affinity"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let durable_guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  let quarantine_entered, resolve_quarantine_entered = Eio.Promise.create () in
+  let release_quarantine, resolve_release_quarantine = Eio.Promise.create () in
+  let quarantine_calls = ref 0 in
+  let guard : C.exact_execution_guard =
+    { durable_guard with
+      quarantine =
+        (fun cause observation ->
+           incr quarantine_calls;
+           Eio.Promise.resolve resolve_quarantine_entered ();
+           Eio.Promise.await release_quarantine;
+           durable_guard.quarantine cause observation)
+    }
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name
+      ~net
+      ~clock
+      ~exact_execution_guard:guard
+      prepared
+    |> completed_exn
+  in
+  let observation = C.completed_attempt_observation completed in
+  let terminalizer = C.completed_post_success_terminalizer completed in
+  let first_result, resolve_first_result = Eio.Promise.create () in
+  let second_started, resolve_second_started = Eio.Promise.create () in
+  let second_result, resolve_second_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    C.terminalize_post_success
+      terminalizer
+      Keeper_event_queue_state.Invalid_structural_evidence
+    |> Eio.Promise.resolve resolve_first_result);
+  Eio.Promise.await quarantine_entered;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve resolve_second_started ();
+    C.terminalize_post_success
+      terminalizer
+      Keeper_event_queue_state.Checkpoint_persistence_failed
+    |> Eio.Promise.resolve resolve_second_result);
+  Eio.Promise.await second_started;
+  Eio.Fiber.yield ();
+  Eio.Promise.resolve resolve_release_quarantine ();
+  let first = Eio.Promise.await first_result in
+  let second = Eio.Promise.await second_result in
+  Alcotest.(check int) "post-success quarantine runs once" 1 !quarantine_calls;
+  Alcotest.(check bool)
+    "different causes retain the first canonical terminal"
+    true
+    (first = second);
+  Alcotest.(check bool)
+    "first cause remains canonical"
+    true
+    (first.cause = Keeper_event_queue_state.Invalid_structural_evidence);
+  let source =
+    match Keeper_id.Trace_id.of_string "trace-post-success-terminal-affinity" with
+    | Error detail -> Alcotest.failf "terminal source trace id failed: %s" detail
+    | Ok trace_id ->
+      (match
+         Keeper_checkpoint_ref.of_persisted
+           ~trace_id
+           ~generation:1
+           ~turn_count:1
+           ~sha256:(String.make 64 'a')
+       with
+       | Ok source -> source
+       | Error _ -> Alcotest.fail "terminal source checkpoint ref failed")
+  in
+  let settlement : P.settlement =
+    P.No_compaction
+      { source
+      ; reason = P.Exact_execution_terminal second
+      }
+  in
+  match
+    P.settle_exact_execution_result
+      ~base_path
+      ~keeper_name
+      ~settled_at:4.0
+      ~lease
+      ~slot_id:observation.slot_id
+      ~call_id:observation.call_id
+      ~plan_fingerprint:observation.receipt_plan_fingerprint
+      ~request_body_sha256:observation.receipt_request_body_sha256
+      ~settlement
+      ()
+  with
+  | Ok (P.Settled receipt) ->
+    (match P.exact_execution_binding_result ~base_path ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "settlement retained exact-execution binding"
+     | Error detail -> Alcotest.failf "settled binding reload failed: %s" detail);
+    (match P.active_lease_result ~base_path ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "settlement retained active lease"
+     | Error detail -> Alcotest.failf "settled lease reload failed: %s" detail);
+    let state =
+      P.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload canonical terminal state"
+    in
+    Alcotest.(check int)
+      "reloaded state has no lease"
+      0
+      (List.length (Keeper_event_queue_state.leases state));
+    (match Keeper_event_queue_state.transition_outbox state with
+     | [ { receipt = durable_receipt; _ } ] ->
+       Alcotest.(check bool)
+         "canonical terminal receipt is durable"
+         true
+         (receipt = durable_receipt);
+       (match durable_receipt.settlement with
+        | P.No_compaction
+            { reason = P.Exact_execution_terminal durable_terminal; _ } ->
+          Alcotest.(check bool)
+            "durable terminal retains canonical cause and identity"
+            true
+            (durable_terminal = first)
+        | _ -> Alcotest.fail "durable receipt lost canonical exact terminal")
+     | _ -> Alcotest.fail "canonical terminal state has no exact durable receipt")
+  | Ok (P.Already_settled _) ->
+    Alcotest.fail "first canonical terminal settlement was already settled"
+  | Ok (P.Committed_followup_failed { detail; _ }) ->
+    Alcotest.failf "canonical terminal settlement follow-up failed: %s" detail
+  | Error detail -> Alcotest.failf "canonical terminal settlement failed: %s" detail
+;;
+
+let test_post_success_terminalization_failures_preserve_canonical () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let cases =
+    [ "error", (fun _cause _observation -> Error "injected quarantine error")
+    ; "exception", (fun _cause _observation -> failwith "injected quarantine exception")
+    ]
+  in
+  List.iteri
+    (fun index (label, quarantine) ->
+       with_temp_dir ("masc-post-success-terminal-" ^ label)
+       @@ fun base_path ->
+       let keeper_name = "keeper-post-success-terminal-" ^ label in
+       let lease = claim_manual_lease ~base_path ~keeper_name in
+       let slot_id = Printf.sprintf "post-success-terminal-%s-%d" label index in
+       let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+       let snapshot =
+         F.resolver_snapshot
+           ~source:("masc post-success terminal " ^ label)
+           [ { id = slot_id; base_url = server.base_url } ]
+       in
+       let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+       let prepared = prepare_exn ~keeper_name ~registry in
+       let durable_guard =
+         Keeper_heartbeat_loop.For_testing.exact_execution_guard
+           ~base_path
+           ~keeper_name
+           ~lease
+       in
+       let quarantine_calls = ref 0 in
+       let guard : C.exact_execution_guard =
+         { durable_guard with
+           quarantine =
+             (fun cause observation ->
+                incr quarantine_calls;
+                quarantine cause observation)
+         }
+       in
+       let completed =
+         execute_prepared_lane
+           ~keeper_name
+           ~net
+           ~clock
+           ~exact_execution_guard:guard
+           prepared
+         |> completed_exn
+       in
+       let observation = C.completed_attempt_observation completed in
+       let terminalizer = C.completed_post_success_terminalizer completed in
+       let first =
+         C.terminalize_post_success
+           terminalizer
+           Keeper_event_queue_state.Invalid_structural_evidence
+       in
+       let replay =
+         C.terminalize_post_success
+           terminalizer
+           Keeper_event_queue_state.Checkpoint_persistence_failed
+       in
+       Alcotest.(check int) (label ^ " quarantine runs once") 1 !quarantine_calls;
+       Alcotest.(check bool)
+         (label ^ " preserves canonical terminal")
+         true
+         (first = replay);
+       match P.exact_execution_binding_result ~base_path ~keeper_name with
+       | Ok
+           (Some
+             { slot_id = durable_slot_id
+             ; call_id = durable_call_id
+             ; plan_fingerprint
+             ; request_body_sha256
+             ; status = P.Dispatch_uncertain
+             ; _
+             }) ->
+         Alcotest.(check string)
+           (label ^ " retains slot identity")
+           observation.slot_id
+           durable_slot_id;
+         Alcotest.(check string)
+           (label ^ " retains call identity")
+           observation.call_id
+           durable_call_id;
+         Alcotest.(check string)
+           (label ^ " retains plan identity")
+           observation.receipt_plan_fingerprint
+           plan_fingerprint;
+         Alcotest.(check string)
+           (label ^ " retains request identity")
+           observation.receipt_request_body_sha256
+           request_body_sha256
+       | Ok (Some _) ->
+         Alcotest.failf "%s quarantine failure did not remain dispatch-uncertain" label
+       | Ok None -> Alcotest.failf "%s quarantine failure removed the binding" label
+       | Error detail ->
+         Alcotest.failf "%s quarantine failure binding reload failed: %s" label detail)
+    cases
+;;
+
 let () =
   Alcotest.run
     "compaction exact-output conformance"
@@ -1098,6 +1343,14 @@ let () =
             "heartbeat durable bind precedes POST"
             `Quick
             test_heartbeat_guard_binds_before_post
+        ; Alcotest.test_case
+            "post-success terminalization is affine"
+            `Quick
+            test_post_success_terminalization_is_affine
+        ; Alcotest.test_case
+            "post-success terminalization failures preserve canonical identity"
+            `Quick
+            test_post_success_terminalization_failures_preserve_canonical
         ] )
     ; ( "Keeper isolation"
       , [ Alcotest.test_case

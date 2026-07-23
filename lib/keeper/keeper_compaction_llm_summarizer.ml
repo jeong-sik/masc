@@ -63,6 +63,9 @@ type post_success_terminalizer =
   { keeper_name : string
   ; exact_execution_guard : exact_execution_guard
   ; attempt_observation : attempt_observation
+  ; terminalization_mutex : Eio.Mutex.t
+  ; mutable canonical_terminal :
+      (Keeper_event_queue_state.exact_execution_terminal * unit Eio.Promise.t) option
   }
 
 type completed_plan =
@@ -464,24 +467,66 @@ let terminal_failure_after_quarantine
   Error failure
 ;;
 
-let terminalize_post_success
-      { keeper_name; exact_execution_guard; attempt_observation }
-      cause
-  =
-  Eio.Cancel.protect
-  @@ fun () ->
-  ignore
-    quarantine_exact_execution
-      ~keeper_name
-      ~exact_execution_guard:(Some exact_execution_guard)
-      ~cause
-      attempt_observation
-    : (unit, string) result;
-  Keeper_event_queue_state.
-    { cause
-    ; slot_id = attempt_observation.slot_id
-    ; call_id = attempt_observation.call_id
-    }
+let log_terminal_quarantine_failure terminalizer terminal detail =
+  try
+    Log.Keeper.warn
+      ~keeper_name:terminalizer.keeper_name
+      "post-success exact-execution quarantine failed; retaining canonical \
+       terminal slot_id=%s call_id=%s: %s"
+      terminal.Keeper_event_queue_state.slot_id
+      terminal.call_id
+      detail
+  with
+  | _ -> ()
+;;
+
+let terminalize_post_success terminalizer cause =
+  let role =
+    Eio.Cancel.protect
+    @@ fun () ->
+    let role =
+      Eio.Mutex.use_rw ~protect:true terminalizer.terminalization_mutex
+      @@ fun () ->
+      match terminalizer.canonical_terminal with
+      | Some (terminal, completion) -> `Await (terminal, completion)
+      | None ->
+        let terminal =
+          Keeper_event_queue_state.
+            { cause
+            ; slot_id = terminalizer.attempt_observation.slot_id
+            ; call_id = terminalizer.attempt_observation.call_id
+            }
+        in
+        let completion, resolve_completion = Eio.Promise.create () in
+        terminalizer.canonical_terminal <- Some (terminal, completion);
+        `Own (terminal, resolve_completion)
+    in
+    match role with
+    | `Await _ as role -> role
+    | `Own (terminal, resolve_completion) ->
+      let failure =
+        try
+          match
+            quarantine_exact_execution
+              ~keeper_name:terminalizer.keeper_name
+              ~exact_execution_guard:(Some terminalizer.exact_execution_guard)
+              ~cause:terminal.cause
+              terminalizer.attempt_observation
+          with
+          | Ok () -> None
+          | Error detail -> Some detail
+        with
+        | exn -> Some ("raised " ^ Printexc.to_string exn)
+      in
+      Option.iter (log_terminal_quarantine_failure terminalizer terminal) failure;
+      Eio.Promise.resolve resolve_completion ();
+      `Done terminal
+  in
+  match role with
+  | `Done terminal -> terminal
+  | `Await (terminal, completion) ->
+    Eio.Promise.await completion;
+    terminal
 ;;
 
 let exact_execution_evidence ~slot_id ready_plan (success : Exact_output.success) =
@@ -671,6 +716,8 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
                         { keeper_name
                         ; exact_execution_guard
                         ; attempt_observation = observation
+                        ; terminalization_mutex = Eio.Mutex.create ()
+                        ; canonical_terminal = None
                         }
                     }))
       in

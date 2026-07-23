@@ -135,6 +135,8 @@ let default_config
 let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
 let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
+let context_fit_admission = Agent_sdk.Agent.Enforce_when_supported
+
 let builder
       ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(config : config)
@@ -148,6 +150,7 @@ let builder
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_tools config.tools
+    |> Agent_sdk.Builder.with_context_fit_admission context_fit_admission
   in
   let builder =
     match config.temperature with
@@ -269,6 +272,7 @@ type prepared_resume =
   { patched_checkpoint : Agent_sdk.Checkpoint.t
   ; agent_config : Agent_sdk.Types.agent_config
   ; options : Agent_sdk.Agent.options
+  ; context_fit_admission : Agent_sdk.Agent.context_fit_admission
   }
 
 let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
@@ -319,5 +323,5 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; on_run_complete = config.on_run_complete
     }
   in
-  { patched_checkpoint; agent_config; options }
+  { patched_checkpoint; agent_config; options; context_fit_admission }
 ;;

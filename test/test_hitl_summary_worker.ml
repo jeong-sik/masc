@@ -162,7 +162,7 @@ let rec await_condition ~clock ~remaining ~failure predicate =
 let select_auto_judge_mode base_path =
   match
     Masc.Keeper_gate_mode.set
-       (Masc.Workspace.default_config base_path)
+      (Masc.Workspace.default_config base_path)
       ~actor:"test"
       Masc.Keeper_gate_mode.Auto_judge
   with

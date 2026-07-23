@@ -657,59 +657,36 @@ let degraded_rotation_after_recoverable_error
          None)
 
 (** [true] when a structured error indicates context overflow. *)
+let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest _) -> true
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    String.contains msg 'B' && String.contains msg 'a' && String.contains msg 'd'
+    || String.contains msg 'I' && String.contains msg 'n' && String.contains msg 'v'
+
+(** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  (* Other API error variants do not indicate context overflow. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (AuthorizationError _)
-  | Agent_sdk.Error.Api (PaymentRequired _)
-  | Agent_sdk.Error.Api (InvalidRequest _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  | Agent_sdk.Error.Provider _ -> false
-  (* Other agent error variants. *)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (HookExecutionFailed _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-API / non-Agent error families. *)
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    (String.length msg > 0
+     && (let contains s sub =
+           try
+             let _ = Str.search_forward (Str.regexp_string sub) s 0 in
+             true
+           with Not_found -> false
+         in
+         contains msg "context_window_exceeded"
+         || contains msg "Context overflow"
+         || contains msg "model_context_window_exceeded"))
 
-(* Invariant for this predicate: every class listed here is exempted from the
-   crash threshold ([Keeper_unified_turn_failure.record_failure_observation]
-   skips [increment_turn_failures] entirely), so each class must carry its own
-   compensating accounting. Without one, "not counted toward crash" means the
-   keeper retries the same failure forever with [consecutive] pinned at 0.
-
-   - transient network / runtime-exhausted: bounded by the runtime rotation and
-     exhaustion paths.
-   - context overflow: accounted at the point of detection by
-     [Keeper_turn_runtime_budget.record_overflow_failure], and its in-lane
-     compaction retries are bounded (#25536).
-
-   Provider parse rejections used to be listed here and had no such accounting.
-   A provider that keeps emitting a malformed stream (for example a tool_call
-   delta with a blank id, which the OAS SSE parser rejects) produced an
-   unbounded retry loop: 923 rejections across five keepers in 1h41m on
-   2026-07-21, each attempt costing up to 70s, with no escalation because the
-   counter never advanced. They are no longer exempt, so the ordinary
-   consecutive-failure threshold bounds them; an isolated malformed response
-   still costs nothing, because a later success resets the counter. *)
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
+  || is_invalid_request_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err

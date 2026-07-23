@@ -220,6 +220,42 @@ let test_prepares_every_candidate_before_network () =
      |> List.length)
 ;;
 
+let test_provenance_mismatch_matrix_fails_closed () =
+  let expected : Worker.For_testing.provenance_evidence =
+    { source_schema_fingerprint = "source-schema"
+    ; effective_schema_fingerprint = Some "effective-schema"
+    ; actual_assurance = Exact_output.Json_syntax_only
+    ; catalog_generation_fingerprint = "catalog-generation"
+    ; catalog_evidence_sha256 = "catalog-evidence"
+    ; target_identity_fingerprint = "target-identity"
+    }
+  in
+  check bool "identical provenance is accepted" true
+    (Worker.For_testing.provenance_evidence_matches expected expected);
+  let mismatches =
+    [ ( "source schema fingerprint"
+      , { expected with source_schema_fingerprint = "other-source-schema" } )
+    ; ( "effective schema fingerprint"
+      , { expected with effective_schema_fingerprint = None } )
+    ; ( "actual assurance"
+      , { expected with
+          actual_assurance = Exact_output.Provider_schema_requested
+        } )
+    ; ( "catalog generation"
+      , { expected with catalog_generation_fingerprint = "other-generation" } )
+    ; ( "catalog evidence"
+      , { expected with catalog_evidence_sha256 = "other-evidence" } )
+    ; ( "target identity"
+      , { expected with target_identity_fingerprint = "other-target" } )
+    ]
+  in
+  List.iter
+    (fun (dimension, actual) ->
+       check bool dimension false
+         (Worker.For_testing.provenance_evidence_matches expected actual))
+    mismatches
+;;
+
 let test_readiness_resolves_exact_lane () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
@@ -280,6 +316,10 @@ let () =
             "all lane candidates are prepared before network"
             `Quick
             test_prepares_every_candidate_before_network
+        ; test_case
+            "all provenance mismatches fail closed"
+            `Quick
+            test_provenance_mismatch_matrix_fails_closed
         ; test_case
             "readiness resolves exact lane"
             `Quick

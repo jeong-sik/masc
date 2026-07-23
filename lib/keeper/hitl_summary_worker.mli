@@ -57,6 +57,15 @@ module For_testing : sig
 
   type prepared_lane
 
+  type provenance_evidence =
+    { source_schema_fingerprint : string
+    ; effective_schema_fingerprint : string option
+    ; actual_assurance : Agent_sdk.Exact_output.actual_assurance
+    ; catalog_generation_fingerprint : string
+    ; catalog_evidence_sha256 : string
+    ; target_identity_fingerprint : string
+    }
+
   type preparation_error =
     | Context_unavailable of context_bundle_error
     | Prompt_unavailable of string
@@ -71,5 +80,6 @@ module For_testing : sig
   val preparation_error_to_string : preparation_error -> string
   val observations : prepared_lane -> attempt_observation list
   val is_before_dispatch_zero : Agent_sdk.Exact_output.receipt -> bool
+  val provenance_evidence_matches : provenance_evidence -> provenance_evidence -> bool
   val summary_version : int
 end

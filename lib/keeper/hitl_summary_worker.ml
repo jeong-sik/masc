@@ -108,6 +108,15 @@ type attempt_observation =
 
 type prepared_lane = admitted_slot list
 
+type provenance_evidence =
+  { source_schema_fingerprint : string
+  ; effective_schema_fingerprint : string option
+  ; actual_assurance : Exact_output.actual_assurance
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+
 type preparation_error =
   | Context_unavailable of context_bundle_error
   | Prompt_unavailable of string
@@ -222,19 +231,6 @@ let same_call_id left right =
     (Exact_output.call_id_to_string right)
 ;;
 
-let same_schema_fingerprint left right =
-  String.equal
-    (Exact_output.schema_fingerprint_to_string left)
-    (Exact_output.schema_fingerprint_to_string right)
-;;
-
-let same_optional_schema_fingerprint left right =
-  match left, right with
-  | None, None -> true
-  | Some left, Some right -> same_schema_fingerprint left right
-  | None, Some _ | Some _, None -> false
-;;
-
 let same_assurance left right =
   match left, right with
   | Exact_output.Json_syntax_only, Exact_output.Json_syntax_only
@@ -243,6 +239,44 @@ let same_assurance left right =
   | Exact_output.Json_syntax_only, Exact_output.Provider_schema_requested
   | Exact_output.Provider_schema_requested, Exact_output.Json_syntax_only ->
     false
+;;
+
+let provenance_evidence_of_plan (provenance : Exact_output.plan_provenance) =
+  { source_schema_fingerprint =
+      Exact_output.schema_fingerprint_to_string
+        provenance.source_schema_fingerprint
+  ; effective_schema_fingerprint =
+      Option.map
+        Exact_output.schema_fingerprint_to_string
+        provenance.effective_schema_fingerprint
+  ; actual_assurance = provenance.actual_assurance
+  ; catalog_generation_fingerprint =
+      Exact_output.catalog_generation_fingerprint provenance.catalog_generation
+  ; catalog_evidence_sha256 =
+      Exact_output.catalog_evidence_sha256 provenance.catalog_evidence
+  ; target_identity_fingerprint =
+      Exact_output.target_identity_fingerprint provenance.target_identity
+  }
+;;
+
+let provenance_evidence_matches expected actual =
+  String.equal
+    expected.source_schema_fingerprint
+    actual.source_schema_fingerprint
+  && Option.equal
+       String.equal
+       expected.effective_schema_fingerprint
+       actual.effective_schema_fingerprint
+  && same_assurance expected.actual_assurance actual.actual_assurance
+  && String.equal
+       expected.catalog_generation_fingerprint
+       actual.catalog_generation_fingerprint
+  && String.equal
+       expected.catalog_evidence_sha256
+       actual.catalog_evidence_sha256
+  && String.equal
+       expected.target_identity_fingerprint
+       actual.target_identity_fingerprint
 ;;
 
 let receipt_identity_matches observation receipt =
@@ -272,6 +306,8 @@ let receipt_identity_matches observation receipt =
 let success_provenance_matches slot observation (success : Exact_output.success) =
   let expected = Exact_output.plan_provenance slot.ready_plan in
   let actual = success.provenance in
+  let expected_evidence = provenance_evidence_of_plan expected in
+  let actual_evidence = provenance_evidence_of_plan actual in
   same_call_id success.call_id (Exact_output.receipt_call_id success.receipt)
   && String.equal
        observation.call_id
@@ -289,22 +325,7 @@ let success_provenance_matches slot observation (success : Exact_output.success)
   && String.equal
        observation.target_identity_fingerprint
        (Exact_output.target_identity_fingerprint expected.target_identity)
-  && same_schema_fingerprint
-       expected.source_schema_fingerprint
-       actual.source_schema_fingerprint
-  && same_optional_schema_fingerprint
-       expected.effective_schema_fingerprint
-       actual.effective_schema_fingerprint
-  && same_assurance expected.actual_assurance actual.actual_assurance
-  && String.equal
-       (Exact_output.catalog_generation_fingerprint expected.catalog_generation)
-       (Exact_output.catalog_generation_fingerprint actual.catalog_generation)
-  && String.equal
-       (Exact_output.catalog_evidence_sha256 expected.catalog_evidence)
-       (Exact_output.catalog_evidence_sha256 actual.catalog_evidence)
-  && String.equal
-       (Exact_output.target_identity_fingerprint expected.target_identity)
-       (Exact_output.target_identity_fingerprint actual.target_identity)
+  && provenance_evidence_matches expected_evidence actual_evidence
   && (match Exact_output.receipt_phase success.receipt with
       | Exact_output.Terminal -> true
       | Exact_output.Not_started
@@ -664,6 +685,15 @@ module For_testing = struct
     }
 
   type nonrec prepared_lane = prepared_lane
+  type nonrec provenance_evidence = provenance_evidence =
+    { source_schema_fingerprint : string
+    ; effective_schema_fingerprint : string option
+    ; actual_assurance : Exact_output.actual_assurance
+    ; catalog_generation_fingerprint : string
+    ; catalog_evidence_sha256 : string
+    ; target_identity_fingerprint : string
+    }
+
   type nonrec preparation_error = preparation_error =
     | Context_unavailable of context_bundle_error
     | Prompt_unavailable of string
@@ -681,5 +711,6 @@ module For_testing = struct
   let preparation_error_to_string = preparation_error_to_string
   let observations prepared_lane = List.map observe_attempt prepared_lane
   let is_before_dispatch_zero = is_before_dispatch_zero
+  let provenance_evidence_matches = provenance_evidence_matches
 end
 ;;

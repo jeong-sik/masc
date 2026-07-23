@@ -2825,8 +2825,10 @@ let of_yojson json =
       ; "last_settlement"
       ; "transition_outbox"
       ]
-      @ if String.equal schema_value schema then [ "accepted_transfer_projections" ] else []
-      @ if has_exact_execution_bindings then [ "exact_execution_bindings" ] else []
+      @ (if String.equal schema_value schema
+         then [ "accepted_transfer_projections" ]
+         else [])
+      @ (if has_exact_execution_bindings then [ "exact_execution_bindings" ] else [])
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in

@@ -356,6 +356,34 @@ val finalize_exact_source_disposition_result :
   unit ->
   (settle_result, string) result
 
+module For_testing : sig
+  type settlement_followup_failure =
+    | Fail_checkpoint of string
+    | Fail_wal_compaction of string
+
+  val finalize_exact_source_disposition_with_followup_failure_result :
+    failure:settlement_followup_failure ->
+    base_path:string ->
+    keeper_name:string ->
+    settled_at:float ->
+    lease:lease ->
+    disposition_id:string ->
+    unit ->
+    (settle_result, string) result
+
+  val prepare_exact_source_disposition_with_sync_parent_result :
+    sync_parent:(string -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    lease:lease ->
+    source:Keeper_checkpoint_ref.t ->
+    terminal:exact_execution_terminal ->
+    semantic:exact_settlement_semantic ->
+    prepared_at:float ->
+    unit ->
+    (exact_source_disposition * exact_write_outcome, string) result
+end
+
 val settle_bound_exact_nonterminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->

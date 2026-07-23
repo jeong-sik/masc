@@ -272,6 +272,16 @@ module For_testing : sig
     lease:Keeper_registry_event_queue.lease ->
     Keeper_compaction_llm_summarizer.exact_execution_guard
 
+  val settle_claimed_lease_exact :
+    after_exact_disposition_prepare:(unit -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    settled_at:float ->
+    lease:Keeper_registry_event_queue.lease ->
+    settlement:Keeper_registry_event_queue.settlement ->
+    unit ->
+    (Keeper_registry_event_queue.settle_result, string) result
+
   val check_cancellation_after_exact_terminal_settlement :
     Keeper_registry_event_queue.settlement -> unit
 end

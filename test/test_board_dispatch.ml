@@ -1176,6 +1176,52 @@ let test_reaction_toggle_and_summary () =
            Alcotest.(check int) "summary empty after untoggle" 0
              (List.length result.summary))
 
+let test_reaction_persistence_failure_returns_error_without_publish () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"reaction-author"
+        ~content:"reaction persistence boundary"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let keeper_signals = ref 0 in
+  let sse_reactions = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Reaction_changed _ -> incr sse_reactions
+    | _ -> ());
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_reactions"
+    (Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reactor"
+       ~emoji:"🚀");
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "Keeper signal not published" 0 !keeper_signals;
+  Alcotest.(check int) "SSE reaction not published" 0 !sse_reactions;
+  match
+    Board_dispatch.list_reactions
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id:"reactor"
+      ()
+  with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok summaries ->
+    Alcotest.(check int) "failed reaction stays absent in memory" 0 (List.length summaries)
+;;
+
 let test_comment_reaction_survives_restart () =
   match
     Board_dispatch.create_post ~author:"reaction-author"
@@ -2076,6 +2122,8 @@ let () =
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick
         (with_eio test_reaction_toggle_and_summary);
+      Alcotest.test_case "persistence failure returns error without publish" `Quick
+        (with_eio test_reaction_persistence_failure_returns_error_without_publish);
       Alcotest.test_case "comment reaction survives restart" `Quick
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick

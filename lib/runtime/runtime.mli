@@ -165,6 +165,14 @@ module For_testing : sig
 
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
+
+  val save_config_text_with_sync_parent :
+    ?runtime_config_path:string ->
+    sync_parent:(string -> unit) ->
+    string ->
+    (unit, string) result
+  (** Production-equivalent runtime config replacement with an injected
+      parent-directory sync operation. *)
 end
 
 val get_default_runtime : unit -> t option
@@ -370,8 +378,16 @@ val load_config_text :
 
 val save_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
-(** Validate and atomically persist raw runtime.toml source text, then refresh
-    the in-process runtime cache. *)
+(** Validate raw runtime.toml and prepare its exact-output replacement without
+    changing or credential-resolving the active frozen registry. The writer
+    then reserves that exact base and atomically replaces the file. A failure
+    before rename leaves the published registry and runtime cache unchanged.
+    Once rename is visible, the prepared immutable registry and runtime cache
+    are synchronously converged even when parent-directory fsync fails; that
+    durability-uncertain case returns [Error] and is safe to retry. A fully
+    durable replacement returns [Ok ()]. Before exact-output registry bootstrap,
+    the same write-stage rules apply to the runtime cache while the registry
+    remains unpublished. *)
 
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->

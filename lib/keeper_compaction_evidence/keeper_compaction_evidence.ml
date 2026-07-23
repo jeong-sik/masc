@@ -1,5 +1,6 @@
 type t =
-  { selected_target_ref : string
+  { slot_id : string
+  ; call_id : string
   ; target_identity_fingerprint : string
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
@@ -19,7 +20,8 @@ type t =
   }
 
 type field =
-  | Selected_target_ref
+  | Slot_id
+  | Call_id
   | Target_identity_fingerprint
   | Catalog_generation_fingerprint
   | Catalog_evidence_sha256
@@ -69,7 +71,8 @@ type decode_error =
   | No_messages_compacted
 
 let field_name = function
-  | Selected_target_ref -> "selected_target_ref"
+  | Slot_id -> "slot_id"
+  | Call_id -> "call_id"
   | Target_identity_fingerprint -> "target_identity_fingerprint"
   | Catalog_generation_fingerprint -> "catalog_generation_fingerprint"
   | Catalog_evidence_sha256 -> "catalog_evidence_sha256"
@@ -89,7 +92,8 @@ let field_name = function
 ;;
 
 let exact_fields =
-  [ Selected_target_ref
+  [ Slot_id
+  ; Call_id
   ; Target_identity_fingerprint
   ; Catalog_generation_fingerprint
   ; Catalog_evidence_sha256
@@ -211,7 +215,8 @@ let decode_nonnegative_integer fields field =
 ;;
 
 let create
-      ~selected_target_ref
+      ~slot_id
+      ~call_id
       ~target_identity_fingerprint
       ~catalog_generation_fingerprint
       ~catalog_evidence_sha256
@@ -248,7 +253,8 @@ let create
     (match
        List.find_opt
          (fun (_, value) -> String.trim value = "")
-         [ Selected_target_ref, selected_target_ref
+         [ Slot_id, slot_id
+         ; Call_id, call_id
          ; Target_identity_fingerprint, target_identity_fingerprint
          ; Catalog_generation_fingerprint, catalog_generation_fingerprint
          ; Catalog_evidence_sha256, catalog_evidence_sha256
@@ -303,7 +309,8 @@ let create
               })
        else
          Ok
-           { selected_target_ref
+           { slot_id
+           ; call_id
            ; target_identity_fingerprint
            ; catalog_generation_fingerprint
            ; catalog_evidence_sha256
@@ -336,7 +343,8 @@ let of_json = function
     in
     let string = decode_nonblank_string fields in
     let integer = decode_nonnegative_integer fields in
-    let* selected_target_ref = string Selected_target_ref in
+    let* slot_id = string Slot_id in
+    let* call_id = string Call_id in
     let* target_identity_fingerprint = string Target_identity_fingerprint in
     let* catalog_generation_fingerprint = string Catalog_generation_fingerprint in
     let* catalog_evidence_sha256 = string Catalog_evidence_sha256 in
@@ -354,7 +362,8 @@ let of_json = function
     let* before_tool_result_count = integer Before_tool_result_count in
     let* after_tool_result_count = integer After_tool_result_count in
     create
-      ~selected_target_ref
+      ~slot_id
+      ~call_id
       ~target_identity_fingerprint
       ~catalog_generation_fingerprint
       ~catalog_evidence_sha256
@@ -376,7 +385,8 @@ let of_json = function
 
 let to_json evidence =
   `Assoc
-    [ "selected_target_ref", `String evidence.selected_target_ref
+    [ "slot_id", `String evidence.slot_id
+    ; "call_id", `String evidence.call_id
     ; "target_identity_fingerprint", `String evidence.target_identity_fingerprint
     ; "catalog_generation_fingerprint", `String evidence.catalog_generation_fingerprint
     ; "catalog_evidence_sha256", `String evidence.catalog_evidence_sha256

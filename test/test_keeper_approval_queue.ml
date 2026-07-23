@@ -1588,83 +1588,6 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
         | Ok _ -> Alcotest.fail "restart-quarantined attempt was released"))
 ;;
 
-let test_released_before_dispatch_restart_is_durably_quarantined () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let id =
-         submit
-           ~base_path
-           ~keeper_name:"queue-exact-released-restart"
-           ~input:(`Assoc [ "request", `String "released-restart" ])
-       in
-       check_update
-         "mark released restart pending"
-         true
-         (AQ.mark_summary_pending ~id);
-       let identity = exact_identity id in
-       check_exact_update
-         "bind released restart attempt"
-         true
-         (run_exact_transition
-            AQ.bind_summary_exact_attempt
-            identity);
-       check_exact_update
-         "release restart attempt"
-         true
-         (run_exact_transition
-            AQ.release_summary_exact_attempt_before_dispatch
-            identity);
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       (match pending_entry_exn id with
-        | { exact_attempt =
-              AQ.Exact_bound
-                { status =
-                    AQ.Exact_quarantined
-                      AQ.Exact_restart_uncertainty
-                ; slot_id
-                ; call_id
-                ; _
-                }
-          ; _
-          } ->
-          Alcotest.(check string)
-            "released restart keeps slot identity"
-            identity.slot_id_arg
-            slot_id;
-          Alcotest.(check string)
-            "released restart keeps call identity"
-            identity.call_id_arg
-            call_id
-        | _ ->
-          Alcotest.fail
-            "released-before-dispatch restart was not quarantined");
-       let open Yojson.Safe.Util in
-       let exact_attempt =
-         read_pending_snapshot ~base_path
-         |> member "pending"
-         |> to_list
-         |> List.hd
-         |> member "exact_attempt"
-       in
-       Alcotest.(check string)
-         "released restart quarantine is persisted"
-         "quarantined"
-         (exact_attempt |> member "status" |> to_string);
-       Alcotest.(check string)
-         "released restart cause is persisted"
-         "restart_uncertainty"
-         (exact_attempt
-          |> member "quarantine_cause"
-          |> to_string))
-;;
-
 let test_exact_attempt_completion_is_atomic () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1938,6 +1861,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
                 label)
          [ "domain-invalid output", AQ.Exact_domain_invalid_output
          ; "attempt replay", AQ.Exact_attempt_replay
+         ; "restart uncertainty", AQ.Exact_restart_uncertainty
          ];
        assert_status
          "rejected causes preserve release"
@@ -3133,10 +3057,6 @@ let () =
             "dispatch-uncertain restart is quarantined"
             `Quick
             test_dispatch_uncertain_restart_is_durably_quarantined
-        ; Alcotest.test_case
-            "released-before-dispatch restart is quarantined"
-            `Quick
-            test_released_before_dispatch_restart_is_durably_quarantined
         ; Alcotest.test_case
             "exact completion is atomic"
             `Quick

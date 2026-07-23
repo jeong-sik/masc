@@ -898,7 +898,7 @@ let quarantine_restarted_entry (entry : pending_approval) =
   match entry.exact_attempt with
   | Exact_bound
       ( { status =
-            (Exact_dispatch_uncertain | Exact_released_before_dispatch)
+            Exact_dispatch_uncertain
         ; _
         } as binding ) ->
     ( { entry with
@@ -912,7 +912,7 @@ let quarantine_restarted_entry (entry : pending_approval) =
   | Exact_unbound
   | Exact_bound
       { status =
-          (Exact_quarantined _ | Exact_completed)
+          (Exact_released_before_dispatch | Exact_quarantined _ | Exact_completed)
       ; _
       } ->
     entry, false

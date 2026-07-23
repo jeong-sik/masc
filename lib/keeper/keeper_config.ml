@@ -160,22 +160,10 @@ let keeper_unified_max_tokens_rp =
 let keeper_unified_max_tokens () : int =
   Runtime_params.get keeper_unified_max_tokens_rp
 
-(* ── HITL context-summary worker policy ─────────────────────── *)
-(** Temperature for the HITL summary LLM call. Deterministic by default. *)
-let hitl_summary_temperature_rp =
-  _rp_float ~key:"keeper.hitl_summary.temperature"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_HITL_SUMMARY_TEMPERATURE"
-                          ~default:0.0 ~min_v:0.0 ~max_v:2.0)
-    ~min_v:0.0 ~max_v:2.0
-    ~description:"HITL context-summary sampling temperature" ()
-let hitl_summary_temperature () : float =
-  Runtime_params.get hitl_summary_temperature_rp
-
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
   let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
-  let (_ : float) = Runtime_params.get hitl_summary_temperature_rp in
   ()
 
 let keeper_enable_thinking_rp =

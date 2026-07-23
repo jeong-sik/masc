@@ -197,7 +197,6 @@ type runtime_route_lane =
   | Runtime_default
   | Runtime_librarian
   | Runtime_structured_judge
-  | Runtime_hitl_summary
   | Runtime_cross_verifier
   | Runtime_media_failover
 
@@ -205,7 +204,6 @@ let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_librarian -> "librarian"
   | Runtime_structured_judge -> "structured_judge"
-  | Runtime_hitl_summary -> "hitl_summary"
   | Runtime_cross_verifier -> "cross_verifier"
   | Runtime_media_failover -> "media_failover"
 
@@ -213,7 +211,6 @@ let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "librarian" -> Ok Runtime_librarian
   | "structured_judge" -> Ok Runtime_structured_judge
-  | "hitl_summary" -> Ok Runtime_hitl_summary
   | "cross_verifier" -> Ok Runtime_cross_verifier
   | "media_failover" -> Ok Runtime_media_failover
   | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
@@ -842,20 +839,6 @@ let add_routes ~sw ~clock router =
                   respond_runtime_config_reload state agent_name
                     ~operation:
                       (Runtime_config_routing (Runtime_structured_judge, runtime_id))
-                    req reqd)
-             | Ok (Runtime_route_runtime_id (Runtime_hitl_summary, runtime_id)) ->
-               (match Runtime_config_file.set_runtime_hitl_summary ~runtime_id () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_hitl_summary, runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_hitl_summary, runtime_id))
                     req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
                (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with

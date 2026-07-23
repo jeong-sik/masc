@@ -1,44 +1,27 @@
-(** A provider config paired with the exact runtime id selected for judgment. *)
-type summary_provider = private
-  { runtime_id : string
-  ; provider_config : Llm_provider.Provider_config.t
-  }
+(** MASC-owned HITL domain judgment over the provider-neutral OAS exact-output
+    flow. MASC freezes the request and domain schema, validates the returned
+    judgment, and owns approval queue durability. OAS alone owns candidate
+    admission, attempt allocation, execution, failover, receipts, and
+    provenance. *)
 
-val provider_config_for_summary : unit -> summary_provider option
-
-(** Verify that the registry-owned Gate judgment prompt is renderable and that
-    the exact [runtime].hitl_summary runtime is configured and loaded. *)
 val readiness : unit -> (unit, string) result
+(** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
+    lane are currently available. No provider/model/runtime scalar is read. *)
 
-(** Spawn an asynchronous HITL context-summary worker for [runtime_id].
-    The worker is fire-and-forget: it calls [on_summary] only for a validated
-    LLM judgment and [on_failure] for every unavailable, timeout, transport, or
-    parse failure. The caller is responsible for writing the result back to the
-    approval entry (e.g. via [Keeper_approval_queue.attach_summary]). This
-    keeps the worker decoupled from the queue and avoids a module cycle.
-    [on_finish] runs exactly once even when the fiber is cancelled. A persisted
-    request without its exact outer-turn context fails before provider
-    selection and is reported as non-retryable. *)
 val spawn
   :  sw:Eio.Switch.t
-  -> runtime_id:string
-  -> ?provider_config:Llm_provider.Provider_config.t
   -> entry:Keeper_approval_queue.pending_approval
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
-  -> on_failure:(reason:string -> retryable:bool -> unit)
   -> on_finish:(unit -> unit)
   -> unit
-  -> unit
+  -> (unit, string) result
+(** Freeze and admit the whole ordered flow before forking. The production OAS
+    callbacks bind/release the real candidate receipt in the durable approval
+    queue. A summary reaches [on_summary] only after domain validation, exact
+    receipt/provenance verification, and [Fsync_completed] completion. *)
 
 module For_testing : sig
   val system_prompt : unit -> (string, string) result
-
-  (** How the judge is asked to return the summary. [Native_structured] uses
-      provider-native json_schema; [Plain_json_text] is the degradation path for
-      endpoints OAS cannot serve native structured output for. *)
-  type summary_mode =
-    | Native_structured
-    | Plain_json_text
 
   type context_bundle_error = Exact_request_context_unavailable
 
@@ -48,48 +31,32 @@ module For_testing : sig
 
   val context_bundle_error_to_string : context_bundle_error -> string
 
+  val messages_for_summary
+    :  system_prompt:string
+    -> context_bundle:Yojson.Safe.t
+    -> Agent_sdk.Types.message list
+
   val parse_summary
     :  generated_at:float
     -> model_run_id:string
     -> Yojson.Safe.t
     -> (Keeper_approval_queue.hitl_context_summary, string) result
 
-  val summary_of_response
-    :  generated_at:float
-    -> mode:summary_mode
-    -> Agent_sdk.Types.api_response
-    -> (Keeper_approval_queue.hitl_context_summary, string) result
+  type prepared_flow
 
-  (** Returns the clamped config plus the chosen output mode: [Native_structured]
-      when {!Llm_provider.Provider_config.validate_output_schema_request} accepts
-      a json_schema request for this endpoint, else [Plain_json_text]. The
-      runtime.toml temperature for [runtime_id] overrides the subsystem fallback. *)
-  val provider_config_for_summary
-    :  runtime_id:string
-    -> Llm_provider.Provider_config.t
-    -> Llm_provider.Provider_config.t * summary_mode
+  val prepare_flow
+    :  entry:Keeper_approval_queue.pending_approval
+    -> (prepared_flow, string) result
 
-  (** Strict complete-object parsing from model text (plain capability path). *)
-  val extract_json_object : string -> (Yojson.Safe.t, string) result
+  val execute_prepared_flow
+    :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?clock:_ Eio.Time.clock
+    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> prepared_flow
+    -> unit
 
-  (** Metric outcomes emitted when the LLM call fails after [summary_mode] has
-      been selected. Plain-mode failures include [degraded_plain_json] before
-      the terminal failure outcome so degradation is observable even without a
-      model response. *)
-  val summary_llm_error_outcomes
-    :  mode:summary_mode
-    -> Agent_sdk.Error.sdk_error
-    -> string list
-
-  val summary_llm_error_retryable : Agent_sdk.Error.sdk_error -> bool
-
-  val sdk_error_of_http_error
-    : Llm_provider.Http_client.http_error -> Agent_sdk.Error.sdk_error
-
-  val body_timeout_clock
-    : unit -> float Eio.Time.clock_ty Eio.Resource.t option
-  (** Resolve the server root clock only when the non-streaming body timeout is
-      explicitly configured. [None] leaves the body-read deadline disabled. *)
-
+  val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
+  val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
   val summary_version : int
+  val lane_id : string
 end

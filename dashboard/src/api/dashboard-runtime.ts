@@ -1121,7 +1121,6 @@ export type RuntimeRoutingLane =
   | 'default'
   | 'librarian'
   | 'structured_judge'
-  | 'hitl_summary'
   | 'cross_verifier'
 
 export async function patchRuntimeRouting(

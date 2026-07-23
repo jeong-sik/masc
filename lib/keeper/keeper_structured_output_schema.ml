@@ -270,10 +270,6 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
   }
 ;;
 
-let apply_hitl_summary_schema_to_config config =
-  apply_to_provider_config hitl_context_summary_schema config
-;;
-
 (* Ask the provider for no wire response format. The call sites that use this
    state their output contract in the prompt and re-validate it in a total
    parser, so a native schema added no guarantee the parser did not already

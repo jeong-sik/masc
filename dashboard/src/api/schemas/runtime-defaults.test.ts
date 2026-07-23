@@ -21,7 +21,6 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
     model_routing: {
       librarian_runtime_id: 'openai.gpt-4o',
       structured_judge_runtime_id: 'openai.gpt-4o',
-      hitl_summary_runtime_id: 'anthropic.sonnet',
       cross_verifier_runtime_id: null,
       media_failover: ['openai.gpt-4o'],
     },
@@ -37,7 +36,6 @@ describe('parseRuntimeDefaultsResponse', () => {
     expect(out.runtimes).toHaveLength(2)
     expect(out.runtimes[0]!.is_default).toBe(true)
     expect(out.model_routing.structured_judge_runtime_id).toBe('openai.gpt-4o')
-    expect(out.model_routing.hitl_summary_runtime_id).toBe('anthropic.sonnet')
     expect(out.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 
@@ -52,7 +50,6 @@ describe('parseRuntimeDefaultsResponse', () => {
         model_routing: {
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },

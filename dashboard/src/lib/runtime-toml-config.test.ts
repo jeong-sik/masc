@@ -91,7 +91,6 @@ mad-improver = "runpod_mtp.qwen"
 
     expect(environment.librarianRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.structuredJudgeRuntimeId).toBe('runpod_mtp.qwen')
-    expect(environment.hitlSummaryRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.crossVerifierRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.assignments).toEqual({
       sangsu: 'runpod_mtp.qwen',
@@ -364,7 +363,6 @@ sangsu = "runpod_mtp.qwen"
     expect(env.defaultRuntimeId).toBe('openai.gpt')
     expect(env.librarianRuntimeId).toBe('')
     expect(env.structuredJudgeRuntimeId).toBe('')
-    expect(env.hitlSummaryRuntimeId).toBe('')
     expect(env.crossVerifierRuntimeId).toBe('')
     expect(env.assignments).toEqual({})
     expect(env.providers.map(p => p.id)).toEqual(['openai'])
@@ -373,7 +371,6 @@ sangsu = "runpod_mtp.qwen"
     expect(next).not.toContain('[providers.runpod_mtp]')
     expect(next).not.toContain('[runpod_mtp.qwen]')
     expect(next).not.toContain('structured_judge = "runpod_mtp.qwen"')
-    expect(next).not.toContain('hitl_summary = "runpod_mtp.qwen"')
     expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
   })
 

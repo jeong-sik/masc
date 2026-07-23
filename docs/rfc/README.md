@@ -46,7 +46,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|
-| 0000-MASTER-ROADMAP | MASC × OAS Consolidated Master Design (SSOT) | Draft | 5093edd937 2026-07-22 | - |
+| 0000-MASTER-ROADMAP | MASC × OAS Consolidated Master Design (SSOT) | Draft | 34d5da45d5 2026-07-23 | - |
 | 0001-det-nondet-boundary-harness | Withdraw heuristic uncertainty governance | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | 0002-keeper-state-machine | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | 7b62a87d44 2026-07-13 | - |
 | 0003-keeper-composite-lifecycle | Withdraw composite lifecycle projection hierarchy | Withdrawn | 7b62a87d44 2026-07-13 | RFC-0003-phase-2-turn-observation-lifecycle.md |
@@ -360,7 +360,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | connector-deferred-reply-via-chat-queue | Durable Keeper chat receipts and connector delivery settlement | Active | 9d59e83655 2026-07-14 | - |
 | eliminate-substring-destructive-classifier | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | 29300f3f4f 2026-07-22 | - |
-| keeper-credential-device-flow | OAuth Addon Plugin — Keeper별/MASC 전체 외부 서비스 Credential (GitHub, Figma, …) | Draft | a40c2f1fae 2026-07-22 | - |
+| keeper-credential-device-flow | OAuth Addon Plugin — Keeper별/MASC 전체 외부 서비스 Credential (GitHub, Figma, …) | Draft | 7a7dfe6d9f 2026-07-23 | - |
 | keeper-media-degrade-floor | Withdraw silent media degradation | Draft | 7b62a87d44 2026-07-13 | - |
 | keeper-memory-bank-write-reduction | Keeper memory-bank near-dup accumulation — write reduction, not write-boundar... | Draft | 3dd14baa54 2026-07-20 | - |
 | keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Draft | 434a7f5a76 2026-07-10 | - |

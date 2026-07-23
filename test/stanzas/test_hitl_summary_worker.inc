@@ -5,5 +5,6 @@
   alcotest
   compaction_exact_output_fixture
   masc
+  masc.runtime
   masc_test_deps
   eio_main))

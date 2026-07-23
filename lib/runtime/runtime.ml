@@ -936,7 +936,6 @@ let materialize_config
        * string option
        * string option
        * string option
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list

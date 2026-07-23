@@ -151,7 +151,8 @@ let observe_receipt ~slot_id receipt =
   }
 ;;
 
-let observe_attempt slot = observe_receipt ~slot_id:slot.slot_id slot.receipt
+let observe_attempt (slot : admitted_slot) =
+  observe_receipt ~slot_id:slot.slot_id slot.receipt
 
 let prepare_lane ~registry ~(entry : pending_approval) =
   let ( let* ) = Result.bind in
@@ -369,7 +370,7 @@ let execution_error_reason (error : Exact_output.execution_error) =
 
 (* -- Durable queue transitions -------------------------------------------- *)
 
-let bind_attempt entry observation =
+let bind_attempt (entry : pending_approval) observation =
   bind_summary_exact_attempt
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -380,7 +381,7 @@ let bind_attempt entry observation =
     ~request_body_sha256:observation.request_body_sha256
 ;;
 
-let release_attempt entry observation =
+let release_attempt (entry : pending_approval) observation =
   release_summary_exact_attempt_before_dispatch
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -391,7 +392,7 @@ let release_attempt entry observation =
     ~request_body_sha256:observation.request_body_sha256
 ;;
 
-let fail_last_attempt entry observation ~reason =
+let fail_last_attempt (entry : pending_approval) observation ~reason =
   fail_summary_exact_attempt_before_dispatch
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -404,7 +405,7 @@ let fail_last_attempt entry observation ~reason =
     ~retryable:false
 ;;
 
-let quarantine_attempt entry observation cause =
+let quarantine_attempt (entry : pending_approval) observation cause =
   quarantine_summary_exact_attempt
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -416,7 +417,7 @@ let quarantine_attempt entry observation cause =
     ~cause
 ;;
 
-let complete_attempt entry observation summary =
+let complete_attempt (entry : pending_approval) observation summary =
   complete_summary_exact_attempt
     ~id:entry.id
     ~input_hash:entry.input_hash
@@ -727,7 +728,7 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_failure ~on_finish () 
                  continue_owner := result.continue_owner;
                  match result.cancellation with
                  | None -> ()
-                 | Some cancellation -> raise cancellation)))
+                 | Some cancellation -> raise cancellation))))
 ;;
 
 module For_testing = struct

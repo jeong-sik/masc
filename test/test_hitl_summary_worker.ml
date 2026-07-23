@@ -205,17 +205,17 @@ let test_prepares_every_candidate_before_network () =
     observations;
   check int "every attempt has a unique call id" (List.length observations)
     (observations
-     |> List.map (fun observation -> observation.call_id)
+     |> List.map (fun (observation : Worker.For_testing.attempt_observation) -> observation.call_id)
      |> List.sort_uniq String.compare
      |> List.length);
   check int "one frozen catalog generation" 1
     (observations
-     |> List.map (fun observation -> observation.catalog_generation_fingerprint)
+     |> List.map (fun (observation : Worker.For_testing.attempt_observation) -> observation.catalog_generation_fingerprint)
      |> List.sort_uniq String.compare
      |> List.length);
   check int "one frozen catalog evidence document" 1
     (observations
-     |> List.map (fun observation -> observation.catalog_evidence_sha256)
+     |> List.map (fun (observation : Worker.For_testing.attempt_observation) -> observation.catalog_evidence_sha256)
      |> List.sort_uniq String.compare
      |> List.length)
 ;;
@@ -481,7 +481,7 @@ let test_cancellation_before_dispatch_is_terminal_without_failover () =
 let test_readiness_resolves_exact_lane () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
-  ignore (exact_registry () : Masc.Runtime_exact_output_registry.t);
+  ignore (exact_registry () : Runtime_exact_output_registry.t);
   match Worker.readiness () with
   | Ok () -> ()
   | Error detail -> fail detail

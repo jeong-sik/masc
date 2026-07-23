@@ -497,21 +497,25 @@ let test_registry_skips_typed_unavailable_credentials () =
         ~provider_id:"credential-missing-provider"
         ~model_id:"credential-missing-model"
         ~target_id:"credential-missing"
+    ()
     ; catalog_toml
         ~api_key_env:"AVAILABLE_FIXTURE_KEY"
         ~provider_id:"credential-available-provider"
         ~model_id:"credential-available-model"
         ~target_id:"credential-available"
+    ()
     ; catalog_toml
         ~api_key_env:"INVALID_FIXTURE_KEY"
         ~provider_id:"credential-invalid-provider"
         ~model_id:"credential-invalid-model"
         ~target_id:"credential-invalid"
+    ()
     ; catalog_toml
         ~api_key_env:"READ_FAILED_FIXTURE_KEY"
         ~provider_id:"credential-read-failed-provider"
         ~model_id:"credential-read-failed-model"
         ~target_id:"credential-read-failed"
+    ()
     ]
     |> String.concat "\n"
   in

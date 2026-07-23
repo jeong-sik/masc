@@ -1056,7 +1056,7 @@ let binding_identity_equal
 ;;
 
 let validate_bound_settlement binding settlement =
-  let terminal_matches ?cause terminal =
+  let terminal_matches ?cause (terminal : exact_execution_terminal) =
     binding_call_identity_equal binding ~slot_id:terminal.slot_id ~call_id:terminal.call_id
     &&
     match cause with

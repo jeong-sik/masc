@@ -720,7 +720,8 @@ let completed_exact_execution_evidence completed = completed.exact_execution_evi
 let exact_execution_evidence_slot_id (evidence : exact_execution_evidence) = evidence.slot_id
 let exact_execution_evidence_call_id (evidence : exact_execution_evidence) = evidence.call_id
 
-let exact_execution_evidence_target_identity_fingerprint evidence =
+let exact_execution_evidence_target_identity_fingerprint
+      (evidence : exact_execution_evidence) =
   evidence.target_identity_fingerprint
 ;;
 
@@ -729,17 +730,22 @@ let exact_execution_evidence_catalog_generation_fingerprint
   evidence.catalog_generation_fingerprint
 ;;
 
-let exact_execution_evidence_catalog_evidence_sha256 evidence =
+let exact_execution_evidence_catalog_evidence_sha256
+      (evidence : exact_execution_evidence) =
   evidence.catalog_evidence_sha256
 ;;
 
-let exact_execution_evidence_plan_fingerprint evidence = evidence.plan_fingerprint
+let exact_execution_evidence_plan_fingerprint (evidence : exact_execution_evidence) =
+  evidence.plan_fingerprint
+;;
 
-let exact_execution_evidence_receipt_plan_fingerprint evidence =
+let exact_execution_evidence_receipt_plan_fingerprint
+      (evidence : exact_execution_evidence) =
   evidence.receipt_plan_fingerprint
 ;;
 
-let exact_execution_evidence_receipt_request_body_sha256 evidence =
+let exact_execution_evidence_receipt_request_body_sha256
+      (evidence : exact_execution_evidence) =
   evidence.receipt_request_body_sha256
 ;;
 

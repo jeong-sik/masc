@@ -742,7 +742,57 @@ let retry_failed_auto_judge ~base_path ~requested_by approval_id =
        Ok ())
 ;;
 
-let resume_persisted_auto_judges ~base_path =
+let finalize_recovered_judgment
+      ~complete_summary_exact_attempt
+      (entry : Keeper_approval_queue.pending_approval)
+      summary
+  =
+  match entry.exact_attempt with
+  | Keeper_approval_queue.Exact_unbound ->
+    resolve_judgment entry ~approval_id:entry.id summary
+  | Keeper_approval_queue.Exact_bound
+      ({ status = Keeper_approval_queue.Exact_completed; _ } as binding) ->
+    (match
+       complete_summary_exact_attempt
+         ~id:entry.id
+         ~input_hash:entry.input_hash
+         ~sequence:entry.sequence
+         ~slot_id:binding.slot_id
+         ~call_id:binding.call_id
+         ~plan_fingerprint:binding.plan_fingerprint
+         ~request_body_sha256:binding.request_body_sha256
+         ~summary
+     with
+     | Ok
+         { Keeper_approval_queue.write_outcome =
+             Keeper_approval_queue.Fsync_completed
+         ; _
+         } ->
+       resolve_judgment entry ~approval_id:entry.id summary
+     | Ok
+         { write_outcome =
+             Keeper_approval_queue.Visible_sync_unconfirmed detail
+         ; _
+         } ->
+       Error
+         ("exact completion is visible but fsync remains unconfirmed; Gate \
+           finalization withheld: "
+          ^ detail)
+     | Error error ->
+       Error
+         ("exact completion durability confirmation failed; Gate finalization \
+           withheld: "
+          ^ Keeper_approval_queue.exact_attempt_error_to_string error))
+  | Keeper_approval_queue.Exact_bound _
+  | Keeper_approval_queue.Legacy_execution_uncertain ->
+    Error
+      "recovered Auto Judge entry is not an unbound or completed exact judgment"
+;;
+
+let resume_persisted_auto_judges_with
+      ~complete_summary_exact_attempt
+      ~base_path
+  =
   let recovered = recovered_work_for_base_path ~base_path in
   let requested = List.length recovered in
   let started_ids, finalized_ids, skipped_ids, failures =
@@ -753,9 +803,14 @@ let resume_persisted_auto_judges ~base_path =
            | Activate_worker entry ->
              observe_recovered_work `Activate_worker entry;
              entry, `Start (start_auto_judge_entry entry)
-           | Finalize_judgment (entry, summary) ->
-             observe_recovered_work `Finalize_judgment entry;
-             entry, `Finalize (resolve_judgment entry ~approval_id:entry.id summary)
+             | Finalize_judgment (entry, summary) ->
+               observe_recovered_work `Finalize_judgment entry;
+               ( entry
+               , `Finalize
+                   (finalize_recovered_judgment
+                      ~complete_summary_exact_attempt
+                      entry
+                      summary) )
          in
          match result with
          | `Start (Ok Started) ->
@@ -778,6 +833,12 @@ let resume_persisted_auto_judges ~base_path =
   ; skipped_ids = List.rev skipped_ids
   ; failures = List.rev failures
   }
+;;
+
+let resume_persisted_auto_judges =
+  resume_persisted_auto_judges_with
+    ~complete_summary_exact_attempt:
+      Keeper_approval_queue.complete_summary_exact_attempt
 ;;
 
 type operator_recovery_report =
@@ -991,4 +1052,8 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
+
+  let resume_persisted_auto_judges_with_exact_completion =
+    resume_persisted_auto_judges_with
+  ;;
 end

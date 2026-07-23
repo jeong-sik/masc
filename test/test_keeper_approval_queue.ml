@@ -316,9 +316,9 @@ let fail_exact_before_dispatch identity ~reason ~retryable =
 ;;
 
 let check_exact_update label expected = function
-  | Ok { AQ.changed; write_outcome = AQ.Durable } ->
+  | Ok { AQ.changed; write_outcome = AQ.Fsync_completed } ->
     Alcotest.(check bool) label expected changed
-  | Ok { write_outcome = AQ.Visible_durability_unknown detail; _ } ->
+  | Ok { write_outcome = AQ.Visible_sync_unconfirmed detail; _ } ->
     Alcotest.failf "%s returned visible durability uncertainty: %s" label detail
   | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
 ;;
@@ -335,16 +335,25 @@ let run_exact_transition_with_writer transition ~writer identity =
     ~request_body_sha256:identity.request_body_sha256_arg
 ;;
 
-let visible_after_rename_writer path body =
+let visible_after_rename_writer_with exception_ path body =
   match Fs_compat.save_file_atomic path body with
   | Error reason -> Alcotest.failf "visible writer could not replace %s: %s" path reason
   | Ok () ->
     Error
       { Fs_compat.path
       ; stage = Fs_compat.After_rename
-      ; exception_ = Failure "injected parent sync failure"
+      ; exception_
       ; backtrace = Printexc.get_raw_backtrace ()
       }
+;;
+
+let visible_after_rename_writer =
+  visible_after_rename_writer_with (Failure "injected parent sync failure")
+;;
+
+let visible_after_rename_cancellation_writer =
+  visible_after_rename_writer_with
+    (Eio.Cancel.Cancelled (Failure "injected cancellation after rename"))
 ;;
 
 let before_rename_writer path _body =
@@ -356,14 +365,24 @@ let before_rename_writer path _body =
     }
 ;;
 
+let before_rename_cancellation_writer path _body =
+  Error
+    { Fs_compat.path
+    ; stage = Fs_compat.Before_rename
+    ; exception_ =
+        Eio.Cancel.Cancelled (Failure "injected cancellation before rename")
+    ; backtrace = Printexc.get_raw_backtrace ()
+    }
+;;
+
 let check_visible_update label expected = function
   | Ok
       { AQ.changed
-      ; write_outcome = AQ.Visible_durability_unknown detail
+      ; write_outcome = AQ.Visible_sync_unconfirmed detail
       } ->
     Alcotest.(check bool) (label ^ " changed") expected changed;
     Alcotest.(check bool) (label ^ " detail") true (String.trim detail <> "")
-  | Ok { write_outcome = AQ.Durable; _ } ->
+  | Ok { write_outcome = AQ.Fsync_completed; _ } ->
     Alcotest.failf "%s unexpectedly reported durable" label
   | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
 ;;
@@ -1763,9 +1782,42 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
         | Error (AQ.Exact_attempt_storage_error _) -> ()
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "pre-rename binding failure reported success");
-       (match pending_entry_exn before_id with
-        | { exact_attempt = AQ.Exact_unbound; _ } -> ()
-        | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
+         (match pending_entry_exn before_id with
+          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
+         let cancel_before_id, cancel_before_identity =
+           prepare "cancel-before-rename"
+         in
+         (match
+            run_exact_transition_with_writer
+              AQ.For_testing.bind_summary_exact_attempt_with_writer
+              ~writer:before_rename_cancellation_writer
+              cancel_before_identity
+          with
+          | exception Eio.Cancel.Cancelled _ -> ()
+          | Error error ->
+            Alcotest.failf
+              "pre-rename cancellation became an exact error: %s"
+              (AQ.exact_attempt_error_to_string error)
+          | Ok _ ->
+            Alcotest.fail "pre-rename cancellation reported a write outcome");
+         (match pending_entry_exn cancel_before_id with
+          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | _ -> Alcotest.fail "pre-rename cancellation mutated exact memory");
+         let cancel_after_id, cancel_after_identity =
+           prepare "cancel-after-rename"
+         in
+         check_visible_update
+           "post-rename cancellation is visible"
+           true
+           (run_exact_transition_with_writer
+              AQ.For_testing.bind_summary_exact_attempt_with_writer
+              ~writer:visible_after_rename_cancellation_writer
+              cancel_after_identity);
+         assert_status
+           "post-rename cancellation converges memory"
+           cancel_after_id
+           "dispatch_uncertain";
        let release_id, release_identity = prepare "release" in
        check_exact_update
          "bind release fixture"
@@ -1892,6 +1944,146 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          "idempotent completion confirms durability"
          false
          (complete_exact complete_identity summary))
+;;
+
+let test_exact_completed_restart_requires_fsync_confirmation () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-exact-restart-fsync" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "restart-fsync" ])
+       in
+       check_update "mark exact restart pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind exact restart identity"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       let summary = exact_summary identity.call_id_arg in
+       check_exact_update
+         "complete exact restart summary"
+         true
+         (complete_exact identity summary);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let observed_calls = ref 0 in
+       let injected_completion write_outcome
+             ~id:actual_id
+             ~input_hash
+             ~sequence
+             ~slot_id
+             ~call_id
+             ~plan_fingerprint
+             ~request_body_sha256
+             ~summary:actual_summary
+         =
+         incr observed_calls;
+         Alcotest.(check string) "recovery approval identity" id actual_id;
+         Alcotest.(check string)
+           "recovery input identity"
+           identity.input_hash_arg
+           input_hash;
+         Alcotest.(check int)
+           "recovery sequence identity"
+           identity.sequence_arg
+           sequence;
+         Alcotest.(check string)
+           "recovery slot identity"
+           identity.slot_id_arg
+           slot_id;
+         Alcotest.(check string)
+           "recovery call identity"
+           identity.call_id_arg
+           call_id;
+         Alcotest.(check string)
+           "recovery plan identity"
+           identity.plan_fingerprint_arg
+           plan_fingerprint;
+         Alcotest.(check string)
+           "recovery body identity"
+           identity.request_body_sha256_arg
+           request_body_sha256;
+         Alcotest.(check string)
+           "recovery summary identity"
+           summary.model_run_id
+           actual_summary.model_run_id;
+         Ok { AQ.changed = false; write_outcome }
+       in
+       let visible_report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (injected_completion
+                (AQ.Visible_sync_unconfirmed
+                   "injected recovery parent sync failure"))
+           ~base_path
+       in
+       Alcotest.(check int) "visible recovery candidate" 1 visible_report.requested;
+       Alcotest.(check int)
+         "visible recovery finalizes zero"
+         0
+         (List.length visible_report.finalized_ids);
+       Alcotest.(check int)
+         "visible recovery records failure"
+         1
+         (List.length visible_report.failures);
+       Alcotest.(check bool) "visible recovery keeps pending" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       let error_report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (fun
+               ~id:_
+               ~input_hash:_
+               ~sequence:_
+               ~slot_id:_
+               ~call_id:_
+               ~plan_fingerprint:_
+               ~request_body_sha256:_
+               ~summary:_ ->
+              Error
+                (AQ.Exact_attempt_storage_error
+                   { path = "injected"; reason = "before rename" }))
+           ~base_path
+       in
+       Alcotest.(check int)
+         "error recovery finalizes zero"
+         0
+         (List.length error_report.finalized_ids);
+       Alcotest.(check int)
+         "error recovery records failure"
+         1
+         (List.length error_report.failures);
+       Alcotest.(check bool) "error recovery keeps pending" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       let durable_report = Gate.resume_persisted_auto_judges ~base_path in
+       Alcotest.(check (list string))
+         "fsync-confirmed recovery finalizes once"
+         [ id ]
+         durable_report.finalized_ids;
+       Alcotest.(check int)
+         "fsync-confirmed recovery has no failure"
+         0
+         (List.length durable_report.failures);
+       Alcotest.(check int)
+         "injected exact identity confirmations"
+         1
+         !observed_calls;
+       Alcotest.(check bool) "durable recovery removes pending" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       let resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id:id
+         |> require_some "fsync-confirmed recovery did not finalize"
+       in
+       drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
 let test_summary_updates_never_resolve_pending_request () =
@@ -2989,10 +3181,14 @@ let () =
             "operator recovery reopens terminal failures"
             `Quick
             test_operator_recovery_reopens_all_failed_summaries
-        ; Alcotest.test_case
-            "decisive summary finalizes after restart"
-            `Quick
-            test_decisive_summary_finalizes_after_restart
+          ; Alcotest.test_case
+              "decisive summary finalizes after restart"
+              `Quick
+              test_decisive_summary_finalizes_after_restart
+          ; Alcotest.test_case
+              "exact restart finalization requires fsync"
+              `Quick
+              test_exact_completed_restart_requires_fsync_confirmation
         ; Alcotest.test_case
             "v3 in-flight judge becomes legacy quarantine"
             `Quick

@@ -40,8 +40,9 @@ type exact_attempt_error =
   | Exact_attempt_rejected of exact_attempt_rejection
 
 type exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  Keeper_event_queue_persistence.exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type exact_attempt_transition =
   { changed : bool
@@ -359,7 +360,7 @@ let save_snapshot_file_strict_staged_unlocked
       |> Yojson.Safe.pretty_to_string
     in
     match save_file_atomic_strict_staged path body with
-    | Ok () -> Ok Durable
+    | Ok () -> Ok Fsync_completed
     | Error (failure : Fs_compat.atomic_replace_failure) ->
       let reason = Fs_compat.atomic_replace_failure_to_string failure in
       (match failure.stage with
@@ -368,7 +369,7 @@ let save_snapshot_file_strict_staged_unlocked
           | Eio.Cancel.Cancelled _ ->
             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
           | _ -> Error { path; reason })
-       | Fs_compat.After_rename -> Ok (Visible_durability_unknown reason))
+       | Fs_compat.After_rename -> Ok (Visible_sync_unconfirmed reason))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error { path; reason = Printexc.to_string exn }

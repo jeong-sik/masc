@@ -44,13 +44,23 @@ type exact_attempt_error =
   | Exact_attempt_rejected of exact_attempt_rejection
 
 type exact_write_outcome =
-  | Durable
-  | Visible_durability_unknown of string
+  Keeper_event_queue_persistence.exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
 type exact_attempt_transition =
   { changed : bool
   ; write_outcome : exact_write_outcome
   }
+(** Exact writes share the Keeper runtime durability outcome SSOT.
+    [Fsync_completed] is the only outcome that permits an OAS POST, slot
+    failover, or automatic Gate finalization. [Visible_sync_unconfirmed _]
+    means the rename is visible and the process projection has converged, but
+    parent-directory fsync was not confirmed; callers must not cross those
+    boundaries and may idempotently rewrite the same identity. A cancellation
+    before rename is re-raised with memory unchanged. A cancellation observed
+    after rename returns [Visible_sync_unconfirmed _] so visible file and memory
+    remain convergent. *)
 
 type approved_resolution_request =
   { keeper_name : string
@@ -347,9 +357,12 @@ val bind_summary_exact_attempt :
   request_body_sha256:string ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Durably bind one exact OAS attempt before provider dispatch. Repeating the
-    active identity is idempotent. A released attempt may be replaced only by a
-    new identity; every active, quarantined, or completed conflict fails closed. *)
+(** Bind one exact OAS attempt before provider dispatch. Only
+    [Fsync_completed] permits the OAS POST. A visible unconfirmed bind retains
+    the identity but forbids POST and failover. Repeating the active identity
+    strictly rewrites it, allowing durability to be confirmed without changing
+    identity. A released attempt may be replaced only by a new identity; every
+    active, quarantined, or completed conflict fails closed. *)
 
 val release_summary_exact_attempt_before_dispatch :
   id:string ->
@@ -362,7 +375,10 @@ val release_summary_exact_attempt_before_dispatch :
   (exact_attempt_transition, exact_attempt_error) result
 
 (** Mark the matching binding released only after OAS proves the attempt stayed
-    before dispatch. The same release is idempotent. *)
+    before dispatch. Only [Fsync_completed] permits failover. A visible
+    unconfirmed release retains the original identity, forbids a successor, and
+    may be terminalized only with [Exact_terminal_persistence_failure]. The same
+    release is idempotently strict-rewritten. *)
 
 val fail_summary_exact_attempt_before_dispatch :
   id:string ->
@@ -379,7 +395,7 @@ val fail_summary_exact_attempt_before_dispatch :
 (** Atomically release the matching binding and record the final summary
     failure only after OAS proves the attempt stayed before dispatch.
     [retryable] is observation only; execution requires an explicit operator
-    restart. Replaying the same identity and failure is idempotent. *)
+    restart. Replaying the same identity and failure strictly rewrites it. *)
 
 val quarantine_summary_exact_attempt :
   id:string ->
@@ -393,8 +409,10 @@ val quarantine_summary_exact_attempt :
   (exact_attempt_transition, exact_attempt_error) result
 
 (** Terminally quarantine a matching dispatch-uncertain binding with one closed
-    typed cause. The same identity and cause is idempotent. It can never return
-    to the legacy summary mutation path. *)
+    typed cause. A released binding accepts only
+    [Exact_terminal_persistence_failure]. The same identity and cause is
+    idempotently strict-rewritten. It can never return to the legacy summary
+    mutation path. *)
 
 val complete_summary_exact_attempt :
   id:string ->
@@ -408,8 +426,9 @@ val complete_summary_exact_attempt :
   (exact_attempt_transition, exact_attempt_error) result
 
 (** Commit validated MASC summary content and the exact binding's completed
-    status in one durable snapshot transaction. Identical completion is
-    idempotent; different content for the same attempt is a conflict. *)
+    status in one snapshot transaction. Only [Fsync_completed] permits
+    automatic Gate finalization. Identical completion is idempotently
+    strict-rewritten; different content for the same attempt is a conflict. *)
 
 val mark_summary_pending : id:string -> (bool, summary_transition_error) result
 (** Atomically transition [Summary_not_requested] to [Summary_pending]. Returns

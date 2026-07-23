@@ -108,6 +108,27 @@ let test_hook_usage_missing_uses_token_evidence () =
   check bool "cache creation is genuine usage" false
     (H.For_testing.usage_missing_of_usage (Some cache_creation_only))
 
+let test_cost_only_usage_trust_matches_missing () =
+  (* Pricing-observation firewall: a cost-only turn must not serialize the
+     contradictory pair usage_trust=trusted + usage_missing=true.  Trust
+     classification delegates to the same token evidence as
+     [usage_missing_of_usage]. *)
+  let cost_only : Agent_sdk.Types.api_usage =
+    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  in
+  let real_usage : Agent_sdk.Types.api_usage =
+    { Agent_sdk.Types.zero_api_usage with
+      input_tokens = 10;
+      output_tokens = 5;
+    }
+  in
+  check string "cost-only usage is missing, not trusted" "missing"
+    (Keeper_usage_trust.to_string (H.classify_usage_trust ~usage:cost_only ()));
+  check string "token usage stays trusted" "trusted"
+    (Keeper_usage_trust.to_string (H.classify_usage_trust ~usage:real_usage ()));
+  check string "absent usage is missing" "missing"
+    (Keeper_usage_trust.to_string (H.classify_usage_trust ()))
+
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
 let counter_for source =
@@ -164,6 +185,8 @@ let () =
             test_oas_cost_json_preserves_omission;
           test_case "hook usage missing uses token evidence" `Quick
             test_hook_usage_missing_uses_token_evidence;
+          test_case "cost-only usage trust matches missing" `Quick
+            test_cost_only_usage_trust_matches_missing;
         ] );
       ( "counter",
         [

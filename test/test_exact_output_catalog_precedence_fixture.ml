@@ -257,7 +257,11 @@ let current_registry label =
 ;;
 
 let test_closed_registry_transaction () =
-  let snapshot = load_control_snapshot replacement_catalog in
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "<fixture:replacement-catalog>"; contents = replacement_catalog })
+  in
   let baseline =
     match Registry.publish ~lanes:(transaction_lanes "transaction-a") snapshot with
     | Ok registry -> registry
@@ -405,7 +409,13 @@ let test_runtime_after_rename_converges_state () =
     (fun () ->
        with_temp_dir "exact-output-runtime-after-rename" @@ fun root ->
        let path = Filename.concat root "runtime.toml" in
-       let snapshot = load_control_snapshot replacement_catalog in
+       let snapshot =
+         load_control_snapshot
+           (Exact_output.Full_replacement
+              { source = "<fixture:replacement-catalog>"
+              ; contents = replacement_catalog
+              })
+       in
        let config_a =
          transaction_runtime_toml
            ~runtime_name:"replacement"

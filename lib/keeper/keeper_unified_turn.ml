@@ -247,6 +247,8 @@ let recover_provider_context_overflow_in_lane
                ~keeper_name:meta.name
                "provider overflow terminal observation failed without reopening exact request: %s"
                (Printexc.to_string exn));
+          (* fire-and-forget: terminal disposition must not reopen even when
+             lifecycle release fails. *)
           ignore (release_failed_lifecycle reason : (unit, string) result);
           Provider_overflow_no_compaction no_compaction)
              | Error error ->

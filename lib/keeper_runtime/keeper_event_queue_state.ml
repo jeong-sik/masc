@@ -1172,6 +1172,8 @@ let bind_exact_execution
   | _ :: _ :: _ -> Error "event queue state contains multiple exact execution bindings"
 ;;
 
+(* TEL-OK: pure state transition; the persistence boundary and caller own
+   release telemetry. *)
 let release_exact_execution_before_dispatch
       ~(lease : lease)
       ~slot_id

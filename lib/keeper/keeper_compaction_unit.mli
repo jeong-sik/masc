@@ -64,6 +64,11 @@ type partition =
   ; protected_suffix : Agent_sdk.Types.message list
   }
 
+type provider_transcript_error =
+  | Invalid_transcript_structure of structural_error
+  | Unresolved_tool_results of { tool_use_ids : string list }
+[@@deriving show]
+
 val partition
   :  ?quarantine:bool
   -> Agent_sdk.Types.message list
@@ -80,3 +85,10 @@ val partition
 val validate
   :  Agent_sdk.Types.message list
   -> (unit, structural_error) result
+
+(** Provider dispatch requires a fully closed tool protocol. Unlike
+    {!validate}, this rejects the open ToolUse suffix that checkpoint
+    persistence deliberately preserves for crash recovery. *)
+val validate_provider_transcript
+  :  Agent_sdk.Types.message list
+  -> (unit, provider_transcript_error) result

@@ -234,6 +234,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -279,7 +280,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -548,6 +548,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -593,7 +594,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_task_completion_claim
@@ -763,7 +763,7 @@
 (test
  (name test_fusion_delivery_obligation)
  (modules test_fusion_delivery_obligation)
- (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
+ (libraries alcotest masc_test_deps masc.fusion_core))
 
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.

@@ -20,6 +20,7 @@ type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -74,6 +75,10 @@ type escalation_reason = Keeper_event_queue_state.escalation_reason =
       ; detail : string
       }
   | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
       { attempts : int
       ; detail : string
       }

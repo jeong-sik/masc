@@ -69,6 +69,17 @@ let test_masc_config_input_schema_matches () =
     gen.input_schema
 ;;
 
+(* Issue #15257 drift guard: the gen-side SSOT enum must stay identical
+   to the producer-side category list. The gen-vs-hand comparisons above
+   are self-referential (both sides derive from the same SSOT), so they
+   cannot catch drift against the actual config category table. *)
+let test_config_category_ssot () =
+  Alcotest.(check (list string))
+    "SSOT enum matches Env_config_snapshot.valid_config_category_strings"
+    Env_config_snapshot.valid_config_category_strings
+    Tool_schemas_specs_types.config_category_enum_strings
+;;
+
 let test_masc_spawn_is_not_generated () =
   Alcotest.(check bool)
     "masc_spawn absent from generated schemas"
@@ -357,6 +368,9 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_config_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_config_input_schema_matches
         ] )
+    ; ( "config category SSOT"
+      , [ Alcotest.test_case "enum matches producer" `Quick test_config_category_ssot ]
+      )
     ; ( "retired tool exclusion"
       , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
         ] )

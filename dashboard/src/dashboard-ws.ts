@@ -422,10 +422,10 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   // board refreshes through sse-store.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
-    if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
+    if (section === 'observatory' || section === 'journey' || section === 'agents') {
       slices.add('execution')
     }
-    if (section === 'agents' || section === 'cognition') {
+    if (section === 'agents') {
       slices.add('composite')
     }
     if (section === 'fleet-health' && routeState.params.view === 'comparison') {

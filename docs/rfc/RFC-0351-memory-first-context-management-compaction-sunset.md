@@ -40,7 +40,7 @@ evidence: knowledge/research/2026-07-20-memory-first-context-management-adversar
 ## 3. 목표 아키텍처 (5층 ordering)
 
 ```
-L1 Write   librarian 상시 추출 + delivery accounting (drop-not-block → due-backlog)
+L1 Write   모델이 memory tool 로 직접 기록(주 경로) + 예산 게이지 노출; librarian 추출은 보조
 L2 Judge   consolidation = LLM-judged merge/forget (중복 병합의 유일 결정자, RFC-0332 준수)
 L3 Select  검색 기반 recall 주입 (bulk 500/500 전량 주입 은퇴; RFC-0244 계열/pgvector)
 L4 Flush   예산 근접 시 memory flush silent turn (openclaw shape) — 떨어져 나갈 내용의 durable 저장 유도
@@ -48,6 +48,9 @@ L5 Budget  매턴 조립 예산: persona + dynamic + Select 결과 + 최근 창(
            초과 시 결정론적 축소 순서(Select 주입분 → 오래된 최근 창)로 재조립. history 재작성 없음.
 ```
 
+- **L1의 주체는 모델이다 (2026-07-21 개정).** 기록은 `keeper_memory_write` 계열 tool call로 모델이 직접 수행하고, 시스템은 예산 게이지(현재 조립 크기 / 예산)를 프롬프트에 노출한다. librarian의 turn-후 추출은 모델이 놓친 것을 메우는 **보조** 경로로 강등한다. 근거: (a) tool call은 동기 실행이고 결과가 `tool_result`로 모델에 돌아오므로 **드롭이 구조적으로 불가능** — 현행 `Keeper_memory_lane`의 `max_pending`(in-flight 1 + queued 1) 초과 드롭과, 호출부(`keeper_agent_run_post_turn_memory.ml:131,137`)가 `outcome`을 `_`로 폐기하는 조용한 유실 경로가 함께 사라진다. (b) 선례: Letta/MemGPT는 "agents self-edit their memory", Hermes는 게이지를 모델에게 보여주고 메모리 탱크 관리를 맡긴다. (c) §2.1 "판단은 LLM 경계"의 직접 실행 — 무엇을 기억할지의 판단이 LLM 쪽에 놓인다.
+- 게이지 노출은 §2.2가 금지한 "중요도 점수·문자열 분류·휴리스틱 임계값"이 아니라 허용된 **예산 산술(정수 비교)**이다. 시스템은 숫자만 제시하고 임계 판단을 하지 않는다. 게이지가 없으면 모델은 자기 상태를 환각한다 — analyst가 "Memory OS가 턴마다 1500개+ 에피소드 덤프"라고 진단했으나 실측은 268~500(cap)이었고, 그 오진이 fact로 저장돼 매 턴 재주입되며 고착했다(2026-07-21 감사).
+- 모델이 기록을 게을리할 위험은 **L4 Flush가 흡수한다**: 평소 모델 자율, 예산 근접 시 시스템이 flush 턴을 강제. (Hermes 게이지 + openclaw pre-compaction flush 조합)
 - L5의 "최근 창"은 recency 구조이지 중요도 판단이 아니다. keeper는 일직선 타임라인이므로 최근성은 타임라인의 구조 자체다. 의미 보존은 L1-L4가 이미 수행했다.
 - typed provider overflow(`Error.Api (ContextOverflow _)`)는 여전히 도착할 수 있다(GLM/Kimi/DeepSeek 토큰 카운팅 typed-Unsupported → 예산은 직전 턴 api_usage 반응형). 대응은 **더 작은 재조립**(결정론적 degrade)이지 checkpoint 수술이 아니다.
 
@@ -92,6 +95,7 @@ S4 전까지 typed trigger(`Provider_overflow | Manual`)와 partition/evidence/C
 - LLM bulk-summarize의 개선/재작성 (동결 대상에 투자 금지)
 - 결정론적 floor(#25281)의 신규 완성 (assembly가 대체; 열린 PR 처분은 S3 시점 재평가)
 - write-side jaccard/문자열 dedup (RFC-0332 기각 유지)
+- **memory lane 의 delivery accounting / due-backlog 인프라** — L1이 모델 tool call 주도로 바뀌면서 불필요해진다. 배달 보증 계층을 만드는 대신 드롭이 발생할 수 있는 구조 자체를 없앤다. `Keeper_memory_lane`은 librarian 보조 추출 전용으로 축소 유지하되, 그 경로의 유실은 계측(counter)만 하고 인프라 투자는 하지 않는다.
 - OAS에 MASC 개념 유입 (replay 교정은 provider capability 데이터 정정일 뿐)
 
 ## 9. 리스크

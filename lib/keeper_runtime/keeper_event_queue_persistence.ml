@@ -15,6 +15,7 @@ type requeue_reason = State.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -25,12 +26,28 @@ type escalation_reason = State.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
 
 type no_compaction_reason = State.no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = State.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -45,10 +62,34 @@ type accepted_cancellation = State.accepted_cancellation =
   ; reason : string
   }
 
+type accepted_transfer = State.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
+type source_terminal_receipt = State.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = State.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
+
 type settlement = State.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -67,6 +108,10 @@ type settle_result =
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
       }
+
+type transfer_projection_result = State.transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
 
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
@@ -202,12 +247,10 @@ let read_primary_unlocked owner =
   | Ok (Some json) ->
     (match schema_field json with
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
-     | Ok schema when String.equal schema State.schema ->
+     | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message -> Error (Printf.sprintf "%s: %s" path message))
-     | Ok schema ->
-       Error (Printf.sprintf "%s: unsupported snapshot schema %s" path schema))
+        | Error message -> Error (Printf.sprintf "%s: %s" path message)))
 ;;
 
 let reject_unsupported_inflight owner =
@@ -626,6 +669,23 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
+let project_accepted_transfer_result
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      ~transfer
+  =
+  if not (String.equal transfer.to_keeper keeper_name)
+  then Error "target transfer projection owner does not match the durable queue owner"
+  else
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      match State.project_accepted_transfer transfer state with
+      | Error _ as error -> error
+      | Ok (next, result) ->
+        if next == state then after_commit (State.pending next);
+        Ok (next, result))
+;;
+
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
@@ -842,6 +902,78 @@ let cancel_pending_accepted_result
             (Printexc.to_string exn)))
 ;;
 
+let transfer_pending_accepted_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_generation
+      ~settled_at
+      ~transfer
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.transfer_pending_accepted
+                ~current_owner_generation
+                ~settled_at
+                ~transfer)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending accepted transfer raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let settle_pending_from_source_terminal_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~current_owner_generation
+      ~settled_at
+      ~source_terminal
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.settle_pending_from_source_terminal
+                ~current_owner_generation
+                ~settled_at
+                ~source_terminal)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue pending source-terminal settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 let prepare_registration_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -994,8 +1126,14 @@ let age_seconds_json ~now = function
   | Some timestamp -> `Float (Float.max 0.0 (now -. timestamp))
 ;;
 
+type owner_lifecycle =
+  | Runnable
+  | Paused_retained
+  | Lifecycle_unknown of string
+
 type keeper_summary =
   { keeper_name : string
+  ; owner_lifecycle : owner_lifecycle
   ; pending_count : int
   ; inflight_count : int
   ; pending_oldest : float option
@@ -1006,7 +1144,14 @@ type keeper_summary =
   ; read_errors : string list
   }
 
-let keeper_summary ~base_path keeper_name =
+let keeper_summary ~base_path ~owner_lifecycle keeper_name =
+  let owner_lifecycle = owner_lifecycle ~keeper_name in
+  let lifecycle_read_errors =
+    match owner_lifecycle with
+    | Runnable | Paused_retained -> []
+    | Lifecycle_unknown detail ->
+      [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
+  in
   match load_state_result ~base_path ~keeper_name with
   | Ok state ->
     let pending = State.pending state in
@@ -1015,14 +1160,15 @@ let keeper_summary ~base_path keeper_name =
     let inflight_oldest = queue_oldest_arrived_at inflight in
     let outbox = State.transition_outbox state in
     { keeper_name
+    ; owner_lifecycle
     ; pending_count = Keeper_event_queue.length pending
     ; inflight_count = Keeper_event_queue.length inflight
     ; pending_oldest
     ; inflight_oldest
     ; oldest = min_float_opt pending_oldest inflight_oldest
     ; outbox_count = List.length outbox
-    ; counts_complete = true
-    ; read_errors = []
+    ; counts_complete = lifecycle_read_errors = []
+    ; read_errors = lifecycle_read_errors
     }
   | Error message ->
     let read_errors =
@@ -1030,6 +1176,7 @@ let keeper_summary ~base_path keeper_name =
       |> List.map (fun error -> error.message)
     in
     { keeper_name
+    ; owner_lifecycle
     ; pending_count = 0
     ; inflight_count = 0
     ; pending_oldest = None
@@ -1037,13 +1184,20 @@ let keeper_summary ~base_path keeper_name =
     ; oldest = None
     ; outbox_count = 0
     ; counts_complete = false
-    ; read_errors
+    ; read_errors = lifecycle_read_errors @ read_errors
     }
+;;
+
+let owner_lifecycle_wire = function
+  | Runnable -> "runnable"
+  | Paused_retained -> "paused_retained"
+  | Lifecycle_unknown _ -> "unclassified"
 ;;
 
 let keeper_summary_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
+    ; "owner_lifecycle", `String (owner_lifecycle_wire summary.owner_lifecycle)
     ; "pending_count", `Int summary.pending_count
     ; "inflight_count", `Int summary.inflight_count
     ; "total_count", `Int (summary.pending_count + summary.inflight_count)
@@ -1075,9 +1229,51 @@ let compact_inflight_count_json ~now (summary : keeper_summary) =
     ]
 ;;
 
-let fleet_summary_json ~now ~base_path =
+let compact_backlog_count_json ~now (summary : keeper_summary) =
+  `Assoc
+    [ "keeper_name", `String summary.keeper_name
+    ; "pending_count", `Int summary.pending_count
+    ; "inflight_count", `Int summary.inflight_count
+    ; "total_count", `Int (summary.pending_count + summary.inflight_count)
+    ; "oldest_age_seconds", age_seconds_json ~now summary.oldest
+    ]
+;;
+
+type backlog_summary =
+  { pending_count : int
+  ; inflight_count : int
+  ; oldest : float option
+  ; keepers : keeper_summary list
+  }
+
+let backlog_summary ~matches summaries =
+  let keepers = List.filter (fun (summary : keeper_summary) -> matches summary.owner_lifecycle) summaries in
+  let pending_count =
+    List.fold_left
+      (fun total (summary : keeper_summary) -> total + summary.pending_count)
+      0
+      keepers
+  in
+  let inflight_count =
+    List.fold_left
+      (fun total (summary : keeper_summary) -> total + summary.inflight_count)
+      0
+      keepers
+  in
+  let oldest =
+    List.fold_left
+      (fun oldest (summary : keeper_summary) -> min_float_opt oldest summary.oldest)
+      None
+      keepers
+  in
+  { pending_count; inflight_count; oldest; keepers }
+;;
+
+let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let discovery = discover_keeper_names_with_snapshots ~base_path in
-  let summaries = List.map (keeper_summary ~base_path) discovery.keeper_names in
+  let summaries =
+    List.map (keeper_summary ~base_path ~owner_lifecycle) discovery.keeper_names
+  in
   let pending_count =
     List.fold_left
       (fun total (summary : keeper_summary) -> total + summary.pending_count)
@@ -1102,6 +1298,21 @@ let fleet_summary_json ~now ~base_path =
       None
       summaries
   in
+  let runnable =
+    backlog_summary
+      ~matches:(function Runnable -> true | Paused_retained | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let paused_retained =
+    backlog_summary
+      ~matches:(function Paused_retained -> true | Runnable | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let unclassified =
+    backlog_summary
+      ~matches:(function Lifecycle_unknown _ -> true | Runnable | Paused_retained -> false)
+      summaries
+  in
   let read_errors =
     (match discovery.read_error with None -> [] | Some error -> [ `String error ])
     @ List.concat_map
@@ -1118,10 +1329,15 @@ let fleet_summary_json ~now ~base_path =
     | Ok path -> path
     | Error _ -> base_path
   in
+  let operator_action_required =
+    read_errors <> []
+    || outbox_count > 0
+    || paused_retained.pending_count + paused_retained.inflight_count > 0
+  in
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
-    ; "status", `String (if read_errors = [] then "ok" else "degraded")
-    ; "operator_action_required", `Bool (read_errors <> [] || outbox_count > 0)
+    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
+    ; "status", `String (if operator_action_required then "degraded" else "ok")
+    ; "operator_action_required", `Bool operator_action_required
     ; "base_path", `String projection_base_path
     ; ( "keepers_runtime_dir"
       , `String (Common.keepers_runtime_dir_of_base ~base_path:projection_base_path) )
@@ -1134,6 +1350,41 @@ let fleet_summary_json ~now ~base_path =
     ; "counts_complete", `Bool counts_complete
     ; "oldest_arrived_at_unix", json_of_float_opt oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest
+    ; "runnable_pending_count", `Int runnable.pending_count
+    ; "runnable_inflight_count", `Int runnable.inflight_count
+    ; "runnable_backlog_count", `Int (runnable.pending_count + runnable.inflight_count)
+    ; "runnable_oldest_arrived_at_unix", json_of_float_opt runnable.oldest
+    ; "runnable_oldest_age_seconds", age_seconds_json ~now runnable.oldest
+    ; ( "runnable_by_keeper"
+      , `List
+          (runnable.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "paused_retained_pending_count", `Int paused_retained.pending_count
+    ; "paused_retained_inflight_count", `Int paused_retained.inflight_count
+    ; ( "paused_retained_count"
+      , `Int (paused_retained.pending_count + paused_retained.inflight_count) )
+    ; ( "paused_retained_oldest_arrived_at_unix"
+      , json_of_float_opt paused_retained.oldest )
+    ; "paused_retained_oldest_age_seconds", age_seconds_json ~now paused_retained.oldest
+    ; ( "paused_retained_by_keeper"
+      , `List
+          (paused_retained.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "unclassified_pending_count", `Int unclassified.pending_count
+    ; "unclassified_inflight_count", `Int unclassified.inflight_count
+    ; "unclassified_count", `Int (unclassified.pending_count + unclassified.inflight_count)
+    ; "unclassified_oldest_arrived_at_unix", json_of_float_opt unclassified.oldest
+    ; "unclassified_oldest_age_seconds", age_seconds_json ~now unclassified.oldest
+    ; ( "unclassified_by_keeper"
+      , `List
+          (unclassified.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
     ; ( "pending_by_keeper"
       , `List
           (summaries

@@ -240,11 +240,12 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
    until [Runtime.init_default] runs at startup (RFC-0206 §2.1). A module-level
    binding evaluates at load time and crashes boot; defer to call time.
 
-   Prefer [\[runtime\].cross_verifier] when set: the evaluator requests a JSON
-   structured verdict, so it must run on a JSON-capable model independent of the
-   fleet default. When the default runtime cannot emit JSON the evaluator may
-   return empty output; routing it explicitly keeps the gate live and restores
-   cross-model separation. [None] = inherit the global default (legacy). *)
+   Prefer [\[runtime\].cross_verifier] when set: the verdict channel is the
+   [report_review_verdict] tool call, so the evaluator needs a tool-calling
+   model — no wire response format is requested
+   ([Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config]).
+   Explicit routing restores cross-model separation from the generator.
+   [None] = inherit the global default (legacy). *)
 let default_evaluator_runtime () =
   match (Atomic.get Workspace_hooks.get_cross_verifier_runtime_id_fn) () with
   | Some id -> id

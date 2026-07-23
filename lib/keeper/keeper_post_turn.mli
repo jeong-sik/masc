@@ -33,6 +33,7 @@ type compaction_recovery =
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
+  ; projection_target : Keeper_compaction_projection_target.committed
   } [@@warning "-69"]
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -46,6 +47,15 @@ type compaction_recovery_error =
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
+  | Retry_suspended of { consecutive_failures : int }
+      (** RFC-0351 S0 / #25461: the keeper's compaction failure streak reached
+          [Keeper_meta_contract.compaction_retry_escalation_threshold], so a
+          reactive ([Provider_overflow]) prepare is refused before the
+          checkpoint load and the summarizer LLM call — the settlement's
+          per-stimulus escalation already stops the retries, and this gate
+          stops the one bounded LLM attempt each new stimulus still paid.
+          [Manual] prepares bypass the gate: an operator-committed compaction
+          resets the streak and lifts the suspension. *)
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
 val compaction_recovery_error_to_string : compaction_recovery_error -> string
@@ -100,6 +110,7 @@ val prepare_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
+  projection_request:Keeper_compaction_projection_target.request ->
   (prepared_compaction, compaction_recovery_error) result
 
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
@@ -107,6 +118,12 @@ val prepare_compaction :
 val commit_prepared_compaction :
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
+
+(** Terminal source-bound disposition for a prepared exact-output result that
+    cannot enter its commit admission. The provider execution has completed,
+    so the owning stimulus must never be requeued into another exact call. *)
+val no_compaction_of_uncommitted_prepared :
+  prepared_compaction -> no_compaction
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed
@@ -117,4 +134,5 @@ val recover_latest_checkpoint_for_compaction :
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
+  projection_request:Keeper_compaction_projection_target.request ->
   (compaction_recovery, compaction_recovery_error) result

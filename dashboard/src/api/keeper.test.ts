@@ -1303,12 +1303,52 @@ describe('keeper lifecycle', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await resumeKeeper('janitor')
+    const result = await resumeKeeper('janitor', 7, {
+      operatorOperationId: 'dashboard-resume-test-1',
+    })
 
     expect(result.ok).toBe(true)
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/v1/keepers/janitor/directive')
-    expect(JSON.parse(init.body)).toEqual({ action: 'resume' })
+    expect(JSON.parse(init.body)).toEqual({
+      action: 'resume',
+      owner_generation: 7,
+      operator_operation_id: 'dashboard-resume-test-1',
+    })
+  })
+
+  it('reuses the same resume operation ID after an ambiguous failed response', async () => {
+    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'stable-resume-uuid') })
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, action: 'resume', name: 'janitor' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect((await resumeKeeper('janitor', 7)).ok).toBe(false)
+    expect((await resumeKeeper('janitor', 7)).ok).toBe(true)
+
+    const firstInit = fetchMock.mock.calls[0]![1] as RequestInit
+    const secondInit = fetchMock.mock.calls[1]![1] as RequestInit
+    const first = JSON.parse(String(firstInit.body))
+    const second = JSON.parse(String(secondInit.body))
+    expect(first.operator_operation_id).toBe('dashboard-resume-stable-resume-uuid')
+    expect(second.operator_operation_id).toBe(first.operator_operation_id)
+  })
+
+  it('refuses resume when the current owner generation is unavailable', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resumeKeeper('janitor', undefined)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('current owner generation is unavailable')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends POST with action=wakeup via directive endpoint', async () => {

@@ -43,9 +43,6 @@ val board_attention_judgment_batch_output_schema : Yojson.Safe.t
     exact candidate identity. Decision tokens are owned by
     {!Keeper_board_attention_judgment}. *)
 
-val anti_rationalization_verdict_output_schema : Yojson.Safe.t
-(** JSON object the task anti-rationalization reviewer provider must return. *)
-
 val hitl_context_summary_schema : Yojson.Safe.t
 (** JSON object the HITL context-summary worker provider must return. *)
 
@@ -69,6 +66,17 @@ val without_response_format
     out the object shape and whose parser is total — a malformed reply must
     already become a typed error rather than a bad write. Every provider then
     takes one identical request path with no capability branch. *)
+
+val anti_rationalization_reviewer_provider_config
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Provider config for the task anti-rationalization reviewer: clears both
+    OAS structured-output fields. The verdict channel is the
+    [report_review_verdict] tool call (exactly-once, total parser in
+    [Task.Anti_rationalization]); a wire response format constrained only the
+    final assistant text this surface never parses, and its capability branch
+    rejected json_object-only providers, leaving every task nonterminal
+    (2026-07-21 live incident). *)
 
 val apply_schema_json_mode_or_prompt_tier
   :  log_label:string

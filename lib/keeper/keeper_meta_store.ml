@@ -554,6 +554,88 @@ let persist_compaction_decision config ~keeper_name ~decision
     |> Result.map (fun () -> `Persisted)
 ;;
 
+(* RFC-0351 S0 / #25461, #25538: advance the streak that the heartbeat
+   settlement reads to choose requeue-vs-escalate.  Same read/stamp/merge
+   shape as [persist_compaction_decision] so a concurrent CAS re-applies the
+   stamp instead of dropping it.
+
+   Reset semantics (#25538): the streak counts consecutive provider-overflow
+   episodes, and only a turn that completes without overflow — or an
+   operator-committed manual compaction — resets it.  An in-lane (reactive)
+   commit advances the streak instead of resetting it: a committed plan that
+   saves 920B of a checkpoint (0.07%, live measurement) used to reset the
+   counter on every loop iteration, so an incompressible floor never reached
+   the ceiling.
+
+   [`Committed]/[`Overflow_episode_committed] also advance [count].  That
+   field had no writer: it was serialized to meta and rendered by the
+   dashboard while nothing incremented it, so a keeper whose compaction
+   pipeline was committing normally still reported compaction_count=0 — one
+   keeper carried 88 committed [context_compacted] runtime-manifest records
+   against a meta reading 0. *)
+let persist_compaction_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    Keeper_meta_contract.map_compaction_rt
+      (fun rt ->
+        match outcome with
+        | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
+        | `Overflow_episode_committed ->
+          { rt with
+            count = rt.count + 1
+          ; consecutive_failures = rt.consecutive_failures + 1
+          }
+        | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
+        | `Recovered -> { rt with consecutive_failures = 0 })
+      m
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
+(* #25296: advance the transcript-quarantine retry streak on
+   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+   same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+   [`Retried] increments the streak each time a failed turn settles as
+   [Requeue Transcript_quarantine_retry] — including the escalated terminal
+   attempt, so an operator inspecting the meta sees the streak at the
+   ceiling. [`Recovered] resets it on a completed turn: any successful turn
+   proves the keeper is no longer pinned to the poisoned transcript. *)
+let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    let rt = m.runtime in
+    { m with
+      runtime =
+        { rt with
+          transcript_quarantine_consecutive_retries =
+            (match outcome with
+             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
+             | `Recovered -> 0)
+        }
+    }
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed

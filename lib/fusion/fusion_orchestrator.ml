@@ -1,14 +1,6 @@
 (* Fusion — out-of-band 심의 오케스트레이터 (구현).
    계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0252 §4 *)
 
-type outcome =
-  | Denied of Fusion_types.deny_reason
-  | Sink_failed of string
-  | Completed of
-      { panel : Fusion_types.panel_outcome list
-      ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
-      }
-
 type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
@@ -384,24 +376,19 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
 let project
     ~base_dir
     ~topology
+    ~channel
     ~(request : Fusion_types.fusion_request)
     (deliberation : Fusion_types.deliberation_evidence)
   =
   match
-    Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+    Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id ~channel
       ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
       ~judge_usage:deliberation.judge_usage
   with
   | Ok () ->
     Fusion_metrics.record_invocation ~topology `Completed;
-    Completed { panel = deliberation.panel; judge = deliberation.judge }
+    Ok ()
   | Error msg ->
     Fusion_metrics.record_invocation ~topology `Sink_failed;
-    Sink_failed msg
-;;
-
-let run ~sw ~net ~base_dir ~policy ~topology ~request () =
-  match compute ~sw ~net ~policy ~topology ~request () with
-  | Compute_denied reason -> Denied reason
-  | Computed deliberation -> project ~base_dir ~topology ~request deliberation
+    Error msg

@@ -226,12 +226,6 @@ val board_signal_match :
   signal:Board_dispatch.board_signal ->
   board_signal_match
 
-val board_signal_wake_reason :
-  meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
-  Keeper_world_observation_board_signal.wake_reason option
-  Keeper_world_observation_board_signal.board_read
-
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
     event so the woken turn can inspect it as neutral Board context.

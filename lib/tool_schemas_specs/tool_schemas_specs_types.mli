@@ -1,5 +1,8 @@
 (** Tool descriptor generator input types. *)
 
+val config_category_enum_strings : string list
+(** Issue #15257 Phase 1: Canonical SSOT for config category enum strings. *)
+
 type param_type =
   | T_string of
       { enum : string list option

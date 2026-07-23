@@ -54,6 +54,7 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_kind, nullable_enum_schema librarian_claim_kind_tokens
+    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -160,15 +161,6 @@ let board_attention_judgment_batch_output_schema =
   let fields =
     [ "verdicts"
     , array_schema (object_schema ~required:(List.map fst item_fields) item_fields)
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let anti_rationalization_verdict_output_schema =
-  let fields =
-    [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings
-    ; "reason", nullable_string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -307,6 +299,20 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
   ; output_schema = None
   }
 ;;
+
+(* The anti-rationalization reviewer's verdict channel is the
+   [report_review_verdict] tool call: exactly-once dispatch enforced in
+   [Workspace_metric_hooks], args re-validated by the total parser
+   [Task.Anti_rationalization.parse_review_verdict_from_json]. A wire
+   response format constrains only the final assistant text, which this
+   surface never parses — while its capability branch rejected every
+   json_object-only provider (Glm/DeepSeek/Kimi) as
+   [InvalidConfig "task.anti_rationalization.output_schema"], so the gate
+   never ran and every task stayed nonterminal fleet-wide (live incident
+   2026-07-21). Converges with the fusion-judge / failure-judge /
+   consolidation / board-attention / librarian surfaces above: no wire
+   response format; the tool schema carries the verdict enum SSOT. *)
+let anti_rationalization_reviewer_provider_config = without_response_format
 
 (* Capability-aware three-tier response-format selection for a request whose
    prompt already states the exact output shape (#25266). Tier 1: a provider

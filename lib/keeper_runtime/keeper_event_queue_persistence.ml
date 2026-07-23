@@ -39,9 +39,35 @@ type exact_execution_terminal = State.exact_execution_terminal =
   ; call_id : string
   }
 
+type exact_source_action = State.exact_source_action =
+  | Consume_source
+  | Resume_source
+  | Replace_with_successor of Keeper_event_queue.stimulus
+
+type exact_source_outcome = State.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+  | Checkpoint_committed of
+      { intended_ref : Keeper_checkpoint_ref.t
+      }
+
+type exact_source_disposition = State.exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; prepared_at : float
+  }
+
 type exact_execution_lease_status = State.exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
+  | Checkpoint_commit_intent of exact_source_disposition
+  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding = State.exact_execution_binding =
   { lease_id : string
@@ -131,6 +157,7 @@ type settlement = State.settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -980,6 +1007,58 @@ let quarantine_exact_execution_result
   |> Result.map snd
 ;;
 
+let prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~(binding : exact_execution_binding)
+      ~source
+      ~outcome
+      ~action
+      ~prepared_at
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.prepare_exact_source_disposition
+         ~lease
+         ~source
+         ~outcome
+         ~action
+         ~prepared_at
+         ~slot_id:binding.slot_id
+         ~call_id:binding.call_id
+         ~plan_fingerprint:binding.plan_fingerprint
+         ~request_body_sha256:binding.request_body_sha256
+         state
+       |> Result.map (fun (next, disposition) -> next, disposition))
+;;
+
+let observe_exact_checkpoint_commit_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~disposition_id
+      ~current_ref
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.observe_exact_checkpoint_commit
+         ~lease
+         ~disposition_id
+         ~current_ref
+         state
+       |> Result.map (fun next -> next, ()))
+  |> Result.map snd
+;;
+
 let commit_settlement_transition_unlocked owner ~after_commit transition current =
   match transition current with
   | Error _ as error -> error
@@ -1140,6 +1219,42 @@ let settle_exact_execution_result
             (Printexc.to_string exn)))
 ;;
 
+let finalize_exact_source_disposition_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.finalize_exact_source_disposition
+                ~settled_at
+                ~lease
+                ~disposition_id)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "exact source disposition settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 let cancel_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
@@ -1286,11 +1401,12 @@ let settle_pending_from_source_terminal_result
             (Printexc.to_string exn)))
 ;;
 
-let prepare_registration_result
+let prepare_registration_after_exact_recovery_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
       ~settled_at
+      ~current_checkpoint_ref
       ()
   =
   match resolve_owner ~base_path ~keeper_name with
@@ -1301,9 +1417,25 @@ let prepare_registration_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           (match State.active_lease state with
-            | None -> Ok (State.pending state)
-            | Some lease ->
+           let finish_exact lease disposition state =
+             match
+               commit_settlement_transition_unlocked
+                 owner
+                 ~after_commit
+                 (State.finalize_exact_source_disposition
+                    ~settled_at
+                    ~lease
+                    ~disposition_id:disposition.disposition_id)
+                 state
+             with
+             | Error _ as error -> error
+             | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
+             | Ok (Committed_followup_failed { detail; _ }, _) ->
+               Error
+                 ("exact registration settlement committed with follow-up failure: "
+                  ^ detail)
+           in
+           let recover_generic lease =
               (match
                  commit_settlement_transition_unlocked
                    owner
@@ -1317,7 +1449,74 @@ let prepare_registration_result
                | Error _ as error -> error
                | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
                | Ok (Committed_followup_failed { detail; _ }, _) ->
-                 Error ("registration settlement committed with follow-up failure: " ^ detail))))
+                 Error ("registration settlement committed with follow-up failure: " ^ detail))
+           in
+           (match State.active_lease state, State.exact_execution_binding state with
+            | None, None -> Ok (State.pending state)
+            | Some lease, None -> recover_generic lease
+            | None, Some _ ->
+              Error "exact execution binding has no matching active lease"
+            | Some lease, Some { status = Dispatch_uncertain; _ } ->
+              Error
+                (Printf.sprintf
+                   "dispatch-uncertain exact execution remains fail-closed at registration: %s"
+                   lease.lease_id)
+            | Some lease, Some { status = Terminal_quarantined _; _ } ->
+              Error
+                (Printf.sprintf
+                   "v4 cause-only exact quarantine has no source disposition: %s"
+                   lease.lease_id)
+            | Some lease, Some { status = Disposition_prepared disposition; _ } ->
+              (match disposition.outcome with
+               | Terminal _ -> finish_exact lease disposition state
+               | Checkpoint_committed _ ->
+                 Error "terminal disposition status carries a checkpoint outcome")
+            | Some lease, Some { status = Checkpoint_commit_intent disposition; _ } ->
+              (match disposition.outcome, current_checkpoint_ref with
+               | Terminal _, _ ->
+                 Error "checkpoint commit intent carries a terminal disposition"
+               | Checkpoint_committed _, None ->
+                 Error "exact checkpoint commit intent requires a current checkpoint observation"
+               | Checkpoint_committed { intended_ref }, Some current_ref ->
+                 if Keeper_checkpoint_ref.equal current_ref disposition.source
+                 then
+                   Error
+                     "exact checkpoint commit is still at its source; no durable candidate artifact is available for retry"
+                 else if not (Keeper_checkpoint_ref.equal current_ref intended_ref)
+                 then Error "exact checkpoint commit conflicts with a foreign checkpoint"
+                 else
+                   (match
+                      State.observe_exact_checkpoint_commit
+                        ~lease
+                        ~disposition_id:disposition.disposition_id
+                        ~current_ref
+                        state
+                    with
+                    | Error _ as error -> error
+                    | Ok observed ->
+                      (match bump_revision observed with
+                       | Error _ as error -> error
+                       | Ok observed ->
+                         (match save_state_unlocked_strict_staged owner observed with
+                          | Error _ as error -> error
+                          | Ok (Visible_sync_unconfirmed detail) ->
+                            Error
+                              ("exact checkpoint observation became visible with unconfirmed sync; refusing finalization: "
+                               ^ detail)
+                          | Ok Fsync_completed ->
+                            finish_exact lease disposition observed)))
+            | Some lease, Some { status = Checkpoint_commit_observed disposition; _ } ->
+              (match disposition.outcome, current_checkpoint_ref with
+               | Terminal _, _ ->
+                 Error "checkpoint commit observation carries a terminal disposition"
+               | Checkpoint_committed _, None ->
+                 Error "observed exact checkpoint disposition requires current checkpoint reconciliation"
+               | Checkpoint_committed { intended_ref }, Some current_ref ->
+                 if Keeper_checkpoint_ref.equal current_ref intended_ref
+                 then finish_exact lease disposition state
+                 else if Keeper_checkpoint_ref.equal current_ref disposition.source
+                 then Error "observed exact checkpoint disposition regressed to its source"
+                 else Error "observed exact checkpoint disposition conflicts with a foreign checkpoint")))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -1326,6 +1525,22 @@ let prepare_registration_result
             "event queue registration settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let prepare_registration_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ()
+  =
+  prepare_registration_after_exact_recovery_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ~current_checkpoint_ref:None
+    ()
 ;;
 
 let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =

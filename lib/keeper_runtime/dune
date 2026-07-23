@@ -45,6 +45,7 @@
   masc_config
   masc_log
   masc_process
+  digestif
   str
   time_compat
   uri

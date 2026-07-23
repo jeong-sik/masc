@@ -1302,6 +1302,12 @@
   test_keeper_exact_execution_lease_guard_fixture)
  (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
 
+; Source-bound exact disposition schema, WAL replay, and restart reconciliation.
+(test
+ (name test_keeper_exact_disposition_recovery)
+ (modules test_keeper_exact_disposition_recovery)
+ (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref))
+
 ; Process-isolated proof that exact-output bootstrap honors full catalog
 ; replacement precedence over deployment overlays and OAS embedded targets.
 (test

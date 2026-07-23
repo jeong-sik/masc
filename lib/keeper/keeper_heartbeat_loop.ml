@@ -637,6 +637,30 @@ let project_transition_outbox ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+let exact_terminal_source = function
+  | Keeper_registry_event_queue.No_compaction
+      { source
+      ; reason = Keeper_event_queue_state.Exact_execution_terminal terminal
+      } ->
+    Some (source, terminal)
+  | Keeper_registry_event_queue.Escalate
+      { reason =
+          Keeper_registry_event_queue.Compaction_exact_output_terminal
+            { source; terminal }
+      ; successor = None
+      } ->
+    Some (source, terminal)
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.No_compaction _
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _
+  | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact _
+  | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Escalate _ ->
+    None
+;;
+
 let settle_claimed_lease
       ?(exact_execution = false)
       ~base_path
@@ -666,13 +690,42 @@ let settle_claimed_lease
           ~lease
           ~settlement
       | Ok (Some binding) ->
-        Keeper_registry_event_queue.settle_exact_execution_result
-          ~base_path
-          keeper_name
-          ~settled_at
-          ~lease
-          ~binding
-          ~settlement)
+        (match exact_terminal_source settlement with
+         | None ->
+           Keeper_registry_event_queue.settle_exact_execution_result
+             ~base_path
+             keeper_name
+             ~settled_at
+             ~lease
+             ~binding
+             ~settlement
+         | Some (source, terminal) ->
+           (match
+              Keeper_registry_event_queue.prepare_exact_source_disposition_result
+                ~base_path
+                keeper_name
+                ~lease
+                ~binding
+                ~source
+                ~outcome:(Keeper_registry_event_queue.Terminal terminal.cause)
+                ~action:Keeper_registry_event_queue.Consume_source
+                ~prepared_at:settled_at
+            with
+            | Error _ as error -> error
+            | Ok
+                ( _
+                , Keeper_registry_event_queue.Visible_sync_unconfirmed detail )
+              ->
+              Error
+                ("exact source disposition became visible with unconfirmed sync; restart reconciliation required: "
+                 ^ detail)
+            | Ok (disposition, Keeper_registry_event_queue.Fsync_completed) ->
+              Keeper_registry_event_queue.finalize_exact_source_disposition_result
+                ~base_path
+                keeper_name
+                ~settled_at
+                ~lease
+                ~disposition_id:disposition.disposition_id))
 ;;
 
 let exact_execution_guard ~base_path ~keeper_name ~lease =
@@ -735,6 +788,16 @@ let settlement_is_ack = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
+  | Keeper_registry_event_queue.Settle_exact
+      { action = Keeper_registry_event_queue.Consume_source; _ } ->
+    true
+  | Keeper_registry_event_queue.Settle_exact
+      { action =
+          ( Keeper_registry_event_queue.Resume_source
+          | Keeper_registry_event_queue.Replace_with_successor _ )
+      ; _
+      } ->
+    false
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -753,6 +816,11 @@ let settlement_is_exact_output_terminal = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
   | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact
+      { outcome = Keeper_registry_event_queue.Terminal _; _ } ->
+    true
+  | Keeper_registry_event_queue.Settle_exact
+      { outcome = Keeper_registry_event_queue.Checkpoint_committed _; _ }
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -788,6 +856,15 @@ let settlement_is_exact_output_cancellation = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
   | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact
+      { outcome =
+          Keeper_registry_event_queue.Terminal
+            ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+            | Keeper_event_queue_state.Terminal_persistence_failed )
+      ; _
+      } ->
+    true
+  | Keeper_registry_event_queue.Settle_exact _
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false

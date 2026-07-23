@@ -46,9 +46,39 @@ type exact_execution_terminal =
     not to have crossed, the dispatch boundary. Both identities are mandatory
     and survive the queue receipt/WAL codec. *)
 
+type exact_source_action =
+  | Consume_source
+  | Resume_source
+  | Replace_with_successor of Keeper_event_queue.stimulus
+
+type exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+  | Checkpoint_committed of
+      { intended_ref : Keeper_checkpoint_ref.t
+      }
+
+type exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; prepared_at : float
+  }
+(** Immutable source disposition for one exact call. The ID is the SHA-256 of
+    every field in this record except the ID itself. *)
+
 type exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+      (** v4 cause-only migration state. It has no source authority and can
+          never be finalized or registration-requeued. *)
+  | Disposition_prepared of exact_source_disposition
+  | Checkpoint_commit_intent of exact_source_disposition
+  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding =
   { lease_id : string
@@ -188,6 +218,7 @@ type settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -307,6 +338,43 @@ val quarantine_exact_execution :
   (t, string) result
 (** Advance a matching dispatch-uncertain binding to a typed terminal
     quarantine without releasing the lease for replay. *)
+
+val prepare_exact_source_disposition :
+  lease:lease ->
+  source:Keeper_checkpoint_ref.t ->
+  outcome:exact_source_outcome ->
+  action:exact_source_action ->
+  prepared_at:float ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t * exact_source_disposition, string) result
+(** Atomically replace a matching dispatch fence or matching v4 cause-only
+    quarantine with one immutable v5 source disposition. Repeating the exact
+    preparation is idempotent; any timestamp, source, action, outcome, or OAS
+    identity conflict fails closed. *)
+
+val observe_exact_checkpoint_commit :
+  lease:lease ->
+  disposition_id:string ->
+  current_ref:Keeper_checkpoint_ref.t ->
+  t ->
+  (t, string) result
+(** Advance a checkpoint intent to observed only when [current_ref] exactly
+    equals its intended installed reference. Source or foreign refs fail
+    closed; this pure transition performs no checkpoint I/O. *)
+
+val finalize_exact_source_disposition :
+  settled_at:float ->
+  lease:lease ->
+  disposition_id:string ->
+  t ->
+  (t * settle_result, string) result
+(** Finalize only a validated terminal disposition or an observed checkpoint
+    disposition through [Settle_exact]. The disposition's action is applied
+    exactly once by the canonical receipt transition. *)
 
 val settle_exact_execution :
   settled_at:float ->
@@ -448,5 +516,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v4"]. Strict v3 snapshots are read as the sole
+(** ["keeper.event_queue.state.v5"]. Strict v4 snapshots are read as the sole
     supported predecessor and upgraded on their next durable mutation. *)

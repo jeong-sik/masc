@@ -21,10 +21,26 @@ struct
     ; slot_id : string
     ; call_id : string
     }
-  
+
+  type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+    | Consume_source
+    | Resume_source
+    | Replace_with_successor of Keeper_event_queue.stimulus
+
+  type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+    | Terminal of exact_execution_terminal_cause
+    | Checkpoint_committed of
+        { intended_ref : Keeper_checkpoint_ref.t
+        }
+
+  type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
+
   type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
     | Dispatch_uncertain
     | Terminal_quarantined of exact_execution_terminal_cause
+    | Disposition_prepared of exact_source_disposition
+    | Checkpoint_commit_intent of exact_source_disposition
+    | Checkpoint_commit_observed of exact_source_disposition
   
   type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
     { lease_id : string
@@ -97,6 +113,45 @@ struct
       ~terminal
       ~plan_fingerprint
       ~request_body_sha256
+      ()
+  ;;
+
+  let prepare_exact_source_disposition_result
+        ~base_path
+        name
+        ~lease
+        ~binding
+        ~source
+        ~outcome
+        ~action
+        ~prepared_at
+    =
+    Keeper_event_queue_persistence.prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name:name
+      ~lease
+      ~binding
+      ~source
+      ~outcome
+      ~action
+      ~prepared_at
+      ()
+  ;;
+
+  let finalize_exact_source_disposition_result
+        ~base_path
+        name
+        ~settled_at
+        ~lease
+        ~disposition_id
+    =
+    Keeper_event_queue_persistence.finalize_exact_source_disposition_result
+      ~base_path
+      ~keeper_name:name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ~after_commit:(Publish.publish_pending ~base_path name)
       ()
   ;;
   

@@ -41,9 +41,35 @@ type exact_execution_terminal =
   ; call_id : string
   }
 
+type exact_source_action =
+  | Consume_source
+  | Resume_source
+  | Replace_with_successor of Keeper_event_queue.stimulus
+
+type exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+  | Checkpoint_committed of
+      { intended_ref : Keeper_checkpoint_ref.t
+      }
+
+type exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; prepared_at : float
+  }
+
 type exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
+  | Checkpoint_commit_intent of exact_source_disposition
+  | Checkpoint_commit_observed of exact_source_disposition
 
 type exact_execution_binding =
   { lease_id : string
@@ -162,6 +188,7 @@ type settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -209,8 +236,8 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v4"
-let predecessor_schema = "keeper.event_queue.state.v3"
+let schema = "keeper.event_queue.state.v5"
+let predecessor_schema = "keeper.event_queue.state.v4"
 
 let empty =
   { revision = 0L
@@ -784,12 +811,23 @@ let settlement_kind_label = function
   | Cancel_accepted _ -> "cancel_accepted"
   | Transfer_accepted _ -> "transfer_accepted"
   | Settle_from_source_terminal _ -> "settle_from_source_terminal"
+  | Settle_exact _ -> "settle_exact"
   | Requeue _ -> "requeue"
   | Escalate _ -> "escalate"
 ;;
 
 let transition_id (lease : lease) settlement =
-  Printf.sprintf "%s:%s" lease.lease_id (settlement_kind_label settlement)
+  match settlement with
+  | Settle_exact disposition ->
+    Printf.sprintf "%s:settle_exact:%s" lease.lease_id disposition.disposition_id
+  | Ack
+  | No_compaction _
+  | Cancel_accepted _
+  | Transfer_accepted _
+  | Settle_from_source_terminal _
+  | Requeue _
+  | Escalate _ ->
+    Printf.sprintf "%s:%s" lease.lease_id (settlement_kind_label settlement)
 ;;
 
 let event_id_of_transition transition_id =
@@ -814,19 +852,13 @@ let settlement_equal left right =
   | Transfer_accepted left, Transfer_accepted right -> left = right
   | Settle_from_source_terminal left, Settle_from_source_terminal right ->
     left = right
+  | Settle_exact left, Settle_exact right -> left = right
   | Requeue left, Requeue right -> left = right
   | ( Escalate { reason = left_reason; successor = left_successor }
     , Escalate { reason = right_reason; successor = right_successor } ) ->
     left_reason = right_reason
     && successor_equal left_successor right_successor
-  | Ack, (No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
-  | No_compaction _, (Ack | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
-  | Cancel_accepted _, (Ack | No_compaction _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
-  | Transfer_accepted _, (Ack | No_compaction _ | Cancel_accepted _ | Settle_from_source_terminal _ | Requeue _ | Escalate _)
-  | Settle_from_source_terminal _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Requeue _ | Escalate _)
-  | Requeue _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Escalate _)
-  | Escalate _, (Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ | Requeue _) ->
-    false
+  | _ -> false
 ;;
 
 let transition_receipt_equal left right =
@@ -904,6 +936,99 @@ let validate_accepted_source_terminal source_terminal =
     else Error "source-terminal settlement receipt does not match source payload"
 ;;
 
+let checkpoint_ref_identity (reference : Keeper_checkpoint_ref.t) =
+  String.concat
+    "\000"
+    [ Keeper_id.Trace_id.to_string reference.trace_id
+    ; string_of_int reference.generation
+    ; string_of_int reference.turn_count
+    ; reference.sha256
+    ]
+;;
+
+let exact_source_outcome_identity = function
+  | Terminal cause ->
+    "terminal\000" ^ exact_execution_terminal_cause_label cause
+  | Checkpoint_committed { intended_ref } ->
+    "checkpoint_committed\000" ^ checkpoint_ref_identity intended_ref
+;;
+
+let exact_source_action_identity = function
+  | Consume_source -> "consume_source"
+  | Resume_source -> "resume_source"
+  | Replace_with_successor successor ->
+    "replace_with_successor\000"
+    ^ (Keeper_event_queue.stimulus_to_yojson successor
+       |> Yojson.Safe.to_string)
+;;
+
+let exact_source_disposition_id_of_fields
+      ~source
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~outcome
+      ~action
+      ~prepared_at
+  =
+  String.concat
+    "\000"
+    [ "keeper.exact_source_disposition.v1"
+    ; checkpoint_ref_identity source
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; exact_source_outcome_identity outcome
+    ; exact_source_action_identity action
+    ; Printf.sprintf "%.17g" prepared_at
+    ]
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let validate_exact_source_disposition
+      (disposition : exact_source_disposition)
+  =
+  let expected_id =
+    exact_source_disposition_id_of_fields
+      ~source:disposition.source
+      ~slot_id:disposition.slot_id
+      ~call_id:disposition.call_id
+      ~plan_fingerprint:disposition.plan_fingerprint
+      ~request_body_sha256:disposition.request_body_sha256
+      ~outcome:disposition.outcome
+      ~action:disposition.action
+      ~prepared_at:disposition.prepared_at
+  in
+  if String.trim disposition.slot_id = ""
+  then Error "exact source disposition slot id must not be empty"
+  else if String.trim disposition.call_id = ""
+  then Error "exact source disposition call id must not be empty"
+  else if String.trim disposition.plan_fingerprint = ""
+  then Error "exact source disposition plan fingerprint must not be empty"
+  else if String.trim disposition.request_body_sha256 = ""
+  then Error "exact source disposition request body sha256 must not be empty"
+  else if not (Float.is_finite disposition.prepared_at)
+  then Error "exact source disposition preparation time must be finite"
+  else if not (String.equal disposition.disposition_id expected_id)
+  then Error "exact source disposition id does not match its immutable fields"
+  else
+    match disposition.outcome with
+    | Terminal _ -> Ok ()
+    | Checkpoint_committed { intended_ref } ->
+      if
+        not
+          (String.equal
+             (Keeper_id.Trace_id.to_string disposition.source.trace_id)
+             (Keeper_id.Trace_id.to_string intended_ref.trace_id))
+      then Error "exact checkpoint disposition changed trace identity"
+      else if Keeper_checkpoint_ref.equal disposition.source intended_ref
+      then Error "exact checkpoint disposition target must differ from its source"
+      else Ok ()
+;;
+
 let validate_settlement = function
   | Ack | Requeue _ -> Ok ()
   | No_compaction { reason = Exact_execution_terminal terminal; _ } ->
@@ -922,6 +1047,7 @@ let validate_settlement = function
   | Transfer_accepted transfer -> validate_accepted_transfer transfer
   | Settle_from_source_terminal source_terminal ->
     validate_accepted_source_terminal source_terminal
+  | Settle_exact disposition -> validate_exact_source_disposition disposition
   | Escalate
       { reason = Failure_judgment_requested
       ; successor =
@@ -1033,7 +1159,7 @@ let validate_settlement_for_stimuli settlement stimuli =
     Error "source-terminal receipt does not match its exact event stimulus"
   | Settle_from_source_terminal _, _ ->
     Error "source-terminal settlement requires exactly one accepted event stimulus"
-  | (Ack | Requeue _ | Escalate _), _ -> Ok ()
+  | (Ack | Settle_exact _ | Requeue _ | Escalate _), _ -> Ok ()
 ;;
 
 let validate_settlement_for_lease settlement (lease : lease) =
@@ -1114,6 +1240,14 @@ let validate_bound_settlement binding settlement =
     | Some cause -> cause = terminal.cause
   in
   match binding.status, settlement with
+  | Disposition_prepared disposition, Settle_exact requested
+    when disposition = requested -> Ok ()
+  | Checkpoint_commit_observed disposition, Settle_exact requested
+    when disposition = requested -> Ok ()
+  | Checkpoint_commit_intent _, Settle_exact _ ->
+    Error "unobserved exact checkpoint disposition cannot be finalized"
+  | (Disposition_prepared _ | Checkpoint_commit_observed _), Settle_exact _ ->
+    Error "exact source disposition proof conflicts with its durable binding"
   | Dispatch_uncertain, Ack -> Ok ()
   | Dispatch_uncertain, Requeue Context_compaction_retry -> Ok ()
   | Dispatch_uncertain,
@@ -1151,6 +1285,12 @@ let validate_bound_settlement binding settlement =
     Error
       (Printf.sprintf
          "quarantined exact execution lease %s call %s requires its matching terminal settlement"
+         binding.lease_id
+         binding.call_id)
+  | (Disposition_prepared _ | Checkpoint_commit_intent _ | Checkpoint_commit_observed _), _ ->
+    Error
+      (Printf.sprintf
+         "exact execution lease %s call %s requires Settle_exact with its full durable proof"
          binding.lease_id
          binding.call_id)
 ;;
@@ -1230,6 +1370,14 @@ let bind_exact_execution
          (Printf.sprintf
             "exact execution lease %s call %s is already terminally quarantined"
             lease.lease_id
+            call_id)
+     | Disposition_prepared _
+     | Checkpoint_commit_intent _
+     | Checkpoint_commit_observed _ ->
+       Error
+         (Printf.sprintf
+            "exact execution lease %s call %s already owns a source disposition"
+            lease.lease_id
             call_id))
   | [ binding ] ->
     Error
@@ -1274,6 +1422,17 @@ let release_exact_execution_before_dispatch
       (Printf.sprintf
          "terminally quarantined exact execution lease cannot be released: %s"
          lease.lease_id)
+  | Some
+      { status =
+          ( Disposition_prepared _
+          | Checkpoint_commit_intent _
+          | Checkpoint_commit_observed _ )
+      ; _
+      } ->
+    Error
+      (Printf.sprintf
+         "source-disposition exact execution lease cannot be released: %s"
+         lease.lease_id)
   | Some { status = Dispatch_uncertain; _ } ->
     Ok { state with exact_execution_bindings = [] }
 ;;
@@ -1314,6 +1473,187 @@ let quarantine_exact_execution
   | Some { status = Terminal_quarantined cause; _ } when cause = terminal.cause -> Ok state
   | Some { status = Terminal_quarantined _; _ } ->
     Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
+  | Some
+      { status =
+          ( Disposition_prepared disposition
+          | Checkpoint_commit_intent disposition
+          | Checkpoint_commit_observed disposition )
+      ; _
+      } ->
+    (match disposition.outcome with
+     | Terminal cause when cause = terminal.cause -> Ok state
+     | Terminal _ ->
+       Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
+     | Checkpoint_committed _ ->
+       Error
+         (Printf.sprintf
+            "checkpoint disposition cannot be replaced by terminal quarantine: %s"
+            lease.lease_id))
+;;
+
+let prepare_exact_source_disposition
+      ~(lease : lease)
+      ~source
+      ~outcome
+      ~action
+      ~prepared_at
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let* () =
+    if Float.is_finite prepared_at
+    then Ok ()
+    else Error "exact source disposition preparation time must be finite"
+  in
+  let* () =
+    match committed_lease lease state with
+    | Some committed when lease_equal committed lease -> Ok ()
+    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
+  in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some binding ->
+    let disposition_id =
+      exact_source_disposition_id_of_fields
+        ~source
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+        ~outcome
+        ~action
+        ~prepared_at
+    in
+    let disposition =
+      { disposition_id
+      ; source
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      ; outcome
+      ; action
+      ; prepared_at
+      }
+    in
+    let* () = validate_exact_source_disposition disposition in
+    let prepared_status =
+      match outcome with
+      | Terminal _ -> Disposition_prepared disposition
+      | Checkpoint_committed _ -> Checkpoint_commit_intent disposition
+    in
+    (match binding.status with
+     | Dispatch_uncertain ->
+       Ok
+         ( { state with
+             exact_execution_bindings =
+               [ { binding with status = prepared_status } ]
+           }
+         , disposition )
+     | Terminal_quarantined cause ->
+       (match outcome with
+        | Terminal requested when requested = cause ->
+          Ok
+            ( { state with
+                exact_execution_bindings =
+                  [ { binding with status = prepared_status } ]
+              }
+            , disposition )
+        | Terminal _ ->
+          Error
+            (Printf.sprintf
+               "exact execution terminal cause conflict: %s"
+               lease.lease_id)
+        | Checkpoint_committed _ ->
+          Error
+            (Printf.sprintf
+               "legacy terminal quarantine cannot become a checkpoint disposition: %s"
+               lease.lease_id))
+     | Disposition_prepared existing
+     | Checkpoint_commit_intent existing
+     | Checkpoint_commit_observed existing ->
+       if existing = disposition
+       then Ok (state, existing)
+       else
+         Error
+           (Printf.sprintf
+              "exact source disposition conflict: %s"
+              lease.lease_id))
+;;
+
+let observe_exact_checkpoint_commit
+      ~(lease : lease)
+      ~disposition_id
+      ~current_ref
+      state
+  =
+  let* () =
+    match committed_lease lease state with
+    | Some committed when lease_equal committed lease -> Ok ()
+    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
+  in
+  match binding_for_lease lease state with
+  | Some ({ status = Checkpoint_commit_intent disposition; _ } as binding) ->
+    if not (String.equal disposition.disposition_id disposition_id)
+    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
+    else
+      (match disposition.outcome with
+       | Terminal _ ->
+         Error "checkpoint commit intent carries a terminal disposition"
+       | Checkpoint_committed { intended_ref } ->
+         if Keeper_checkpoint_ref.equal current_ref intended_ref
+         then
+           Ok
+             { state with
+               exact_execution_bindings =
+                 [ { binding with status = Checkpoint_commit_observed disposition } ]
+             }
+         else if Keeper_checkpoint_ref.equal current_ref disposition.source
+         then Error "exact checkpoint commit remains at its expected source"
+         else Error "exact checkpoint commit conflicts with a foreign checkpoint")
+  | Some { status = Checkpoint_commit_observed disposition; _ } ->
+    if not (String.equal disposition.disposition_id disposition_id)
+    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
+    else
+      (match disposition.outcome with
+       | Checkpoint_committed { intended_ref }
+         when Keeper_checkpoint_ref.equal current_ref intended_ref ->
+         Ok state
+       | Checkpoint_committed _ ->
+         Error "observed exact checkpoint disposition no longer matches the installed checkpoint"
+       | Terminal _ ->
+         Error "observed checkpoint state carries a terminal disposition")
+  | Some
+      { status =
+          ( Dispatch_uncertain
+          | Terminal_quarantined _
+          | Disposition_prepared _ )
+      ; _
+      } ->
+    Error "exact execution binding has no checkpoint commit intent"
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
 ;;
 
 let settle_committed ~settled_at ~lease ~settlement state =
@@ -1349,6 +1689,11 @@ let settle_committed ~settled_at ~lease ~settlement state =
       match settlement with
       | Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
       | Settle_from_source_terminal _ -> state.pending
+      | Settle_exact { action = Consume_source; _ } -> state.pending
+      | Settle_exact { action = Resume_source; _ } ->
+        append_missing committed.stimuli state.pending
+      | Settle_exact { action = Replace_with_successor successor; _ } ->
+        enqueue_if_missing state.pending successor
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
@@ -1394,7 +1739,8 @@ let settle ~settled_at ~lease ~settlement state =
          binding.call_id)
   | None ->
     (match settlement with
-     | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ ->
+     | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _
+     | Settle_exact _ ->
        Error "accepted disposition requires its owner-fenced boundary"
      | Ack | No_compaction _ | Requeue _ | Escalate _ ->
        settle_committed ~settled_at ~lease ~settlement state)
@@ -1438,6 +1784,43 @@ let settle_exact_execution
      | None -> settle_committed ~settled_at ~lease ~settlement state)
 ;;
 
+let finalize_exact_source_disposition
+      ~settled_at
+      ~(lease : lease)
+      ~disposition_id
+      state
+  =
+  match binding_for_lease lease state with
+  | Some
+      { status =
+          ( Disposition_prepared disposition
+          | Checkpoint_commit_observed disposition )
+      ; _
+      } ->
+    if not (String.equal disposition.disposition_id disposition_id)
+    then Error (Printf.sprintf "exact source disposition identity conflict: %s" lease.lease_id)
+    else
+      settle_committed
+        ~settled_at
+        ~lease
+        ~settlement:(Settle_exact disposition)
+        state
+  | Some { status = Checkpoint_commit_intent _; _ } ->
+    Error "unobserved exact checkpoint disposition cannot be finalized"
+  | Some { status = Dispatch_uncertain; _ } ->
+    Error "dispatch-uncertain exact execution has no source disposition"
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error "legacy cause-only exact quarantine has no source disposition"
+  | None ->
+    (match find_prior_receipt lease.lease_id state with
+     | Some ({ settlement = Settle_exact disposition; _ } as receipt)
+       when String.equal disposition.disposition_id disposition_id ->
+       Ok (state, Already_settled receipt)
+     | Some _ ->
+       Error (Printf.sprintf "exact source disposition replay conflict: %s" lease.lease_id)
+     | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id))
+;;
+
 let cancel_accepted
       ~current_owner_nonce
       ~settled_at
@@ -1478,7 +1861,7 @@ let disposition_operation_id = function
   | Transfer_accepted transfer -> Some transfer.operator_operation_id
   | Settle_from_source_terminal source_terminal ->
     Some source_terminal.operator_operation_id
-  | Ack | No_compaction _ | Requeue _ | Escalate _ -> None
+  | Ack | No_compaction _ | Settle_exact _ | Requeue _ | Escalate _ -> None
 ;;
 
 let prior_disposition_by_operation_id operation_id state =
@@ -1762,11 +2145,36 @@ let replay_transition_receipt receipt state =
   with
   | Some lease ->
     let* state, result =
-      settle_committed
-        ~settled_at:receipt.settled_at
-        ~lease
-        ~settlement:receipt.settlement
-        state
+      match receipt.settlement with
+      | Settle_exact disposition ->
+        settle_exact_execution
+          ~settled_at:receipt.settled_at
+          ~lease
+          ~slot_id:disposition.slot_id
+          ~call_id:disposition.call_id
+          ~plan_fingerprint:disposition.plan_fingerprint
+          ~request_body_sha256:disposition.request_body_sha256
+          ~settlement:receipt.settlement
+          state
+      | Ack
+      | No_compaction _
+      | Cancel_accepted _
+      | Transfer_accepted _
+      | Settle_from_source_terminal _
+      | Requeue _
+      | Escalate _ ->
+        (match binding_for_lease lease state with
+         | Some _ ->
+           Error
+             (Printf.sprintf
+                "generic WAL receipt cannot settle exact execution lease: %s"
+                lease.lease_id)
+         | None ->
+           settle_committed
+             ~settled_at:receipt.settled_at
+             ~lease
+             ~settlement:receipt.settlement
+             state)
     in
     let actual =
       match result with
@@ -1925,7 +2333,7 @@ let replay_transition_outbox_entry entry state =
              Error "pending source-terminal WAL source conflicts with its receipt"
            | Settle_from_source_terminal _, ([] | _ :: _ :: _) ->
              Error "pending source-terminal WAL must carry exactly one source"
-           | (Ack | No_compaction _ | Requeue _ | Escalate _), _ ->
+           | (Ack | No_compaction _ | Settle_exact _ | Requeue _ | Escalate _), _ ->
              Error
                (Printf.sprintf
                   "event queue WAL receipt has no matching active lease: %s"
@@ -2209,6 +2617,119 @@ let checkpoint_source_of_yojson json =
       Printf.sprintf "no-compaction checkpoint digest is invalid: %s" value)
 ;;
 
+let exact_source_disposition_to_yojson disposition =
+  let outcome_kind, terminal_cause, intended_ref =
+    match disposition.outcome with
+    | Terminal cause ->
+      ( "terminal"
+      , `String (exact_execution_terminal_cause_label cause)
+      , `Null )
+    | Checkpoint_committed { intended_ref } ->
+      "checkpoint_committed", `Null, checkpoint_source_to_yojson intended_ref
+  in
+  let action_kind, successor =
+    match disposition.action with
+    | Consume_source -> "consume_source", `Null
+    | Resume_source -> "resume_source", `Null
+    | Replace_with_successor successor ->
+      "replace_with_successor", Keeper_event_queue.stimulus_to_yojson successor
+  in
+  `Assoc
+    [ "disposition_id", `String disposition.disposition_id
+    ; "source", checkpoint_source_to_yojson disposition.source
+    ; "slot_id", `String disposition.slot_id
+    ; "call_id", `String disposition.call_id
+    ; "plan_fingerprint", `String disposition.plan_fingerprint
+    ; "request_body_sha256", `String disposition.request_body_sha256
+    ; "outcome_kind", `String outcome_kind
+    ; "terminal_cause", terminal_cause
+    ; "intended_ref", intended_ref
+    ; "action_kind", `String action_kind
+    ; "successor", successor
+    ; "prepared_at_unix", `Float disposition.prepared_at
+    ]
+;;
+
+let exact_source_disposition_of_yojson json =
+  let context = "exact source disposition" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "disposition_id"
+        ; "source"
+        ; "slot_id"
+        ; "call_id"
+        ; "plan_fingerprint"
+        ; "request_body_sha256"
+        ; "outcome_kind"
+        ; "terminal_cause"
+        ; "intended_ref"
+        ; "action_kind"
+        ; "successor"
+        ; "prepared_at_unix"
+        ]
+      fields
+  in
+  let* disposition_id = string_field ~context "disposition_id" fields in
+  let* source_json = required_field ~context "source" fields in
+  let* source = checkpoint_source_of_yojson source_json in
+  let* slot_id = string_field ~context "slot_id" fields in
+  let* call_id = string_field ~context "call_id" fields in
+  let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
+  let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
+  let* outcome_kind = string_field ~context "outcome_kind" fields in
+  let* terminal_cause_json = required_field ~context "terminal_cause" fields in
+  let* intended_ref_json = required_field ~context "intended_ref" fields in
+  let* outcome =
+    match outcome_kind, terminal_cause_json, intended_ref_json with
+    | "terminal", `String cause, `Null ->
+      let* cause = exact_execution_terminal_cause_of_label cause in
+      Ok (Terminal cause)
+    | "checkpoint_committed", `Null, (`Assoc _ as intended_ref_json) ->
+      let* intended_ref = checkpoint_source_of_yojson intended_ref_json in
+      Ok (Checkpoint_committed { intended_ref })
+    | "terminal", _, _ ->
+      Error "terminal exact source disposition has invalid outcome evidence"
+    | "checkpoint_committed", _, _ ->
+      Error "checkpoint exact source disposition has invalid outcome evidence"
+    | unknown, _, _ ->
+      Error (Printf.sprintf "unknown exact source disposition outcome: %s" unknown)
+  in
+  let* action_kind = string_field ~context "action_kind" fields in
+  let* successor_json = required_field ~context "successor" fields in
+  let* action =
+    match action_kind, successor_json with
+    | "consume_source", `Null -> Ok Consume_source
+    | "resume_source", `Null -> Ok Resume_source
+    | "replace_with_successor", (`Assoc _ as successor_json) ->
+      let* successor = Keeper_event_queue.stimulus_of_yojson successor_json in
+      Ok (Replace_with_successor successor)
+    | "consume_source", _ | "resume_source", _ ->
+      Error "exact source disposition action must not carry a successor"
+    | "replace_with_successor", _ ->
+      Error "replacement exact source disposition requires a successor"
+    | unknown, _ ->
+      Error (Printf.sprintf "unknown exact source disposition action: %s" unknown)
+  in
+  let* prepared_at = float_field ~context "prepared_at_unix" fields in
+  let disposition =
+    { disposition_id
+    ; source
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; outcome
+    ; action
+    ; prepared_at
+    }
+  in
+  let* () = validate_exact_source_disposition disposition in
+  Ok disposition
+;;
+
 let settlement_to_yojson = function
   | Ack -> `Assoc [ "kind", `String "ack" ]
   | No_compaction { source; reason } ->
@@ -2262,7 +2783,12 @@ let settlement_to_yojson = function
       ; "source_revision", int64_json source_terminal.source_revision
       ; "owner_nonce", `Int source_terminal.owner_nonce
       ; "operator_operation_id", `String source_terminal.operator_operation_id
-      ; "source_receipt_kind", `String receipt_kind
+       ; "source_receipt_kind", `String receipt_kind
+       ]
+  | Settle_exact disposition ->
+    `Assoc
+      [ "kind", `String "settle_exact"
+      ; "disposition", exact_source_disposition_to_yojson disposition
       ]
   | Requeue reason ->
     `Assoc
@@ -2425,6 +2951,13 @@ let settlement_of_yojson json =
     in
     let* () = validate_accepted_source_terminal source_terminal in
     Ok (Settle_from_source_terminal source_terminal)
+  | "settle_exact" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "disposition" ] fields
+    in
+    let* disposition_json = required_field ~context "disposition" fields in
+    let* disposition = exact_source_disposition_of_yojson disposition_json in
+    Ok (Settle_exact disposition)
   | "requeue" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason" ] fields in
     let* reason = string_field ~context "reason" fields in
@@ -2466,6 +2999,7 @@ let accepted_transfer_projection_of_yojson json =
   | No_compaction _
   | Cancel_accepted _
   | Settle_from_source_terminal _
+  | Settle_exact _
   | Requeue _
   | Escalate _ -> Error "target transfer projection must contain transfer_accepted"
 ;;
@@ -2506,7 +3040,20 @@ let transition_receipt_of_yojson json =
   let* settlement = settlement_of_yojson settlement_json in
   let expected_lease_id = lease_id_of_sequence lease_sequence in
   let expected_transition_id =
-    Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement)
+    match settlement with
+    | Settle_exact disposition ->
+      Printf.sprintf
+        "%s:settle_exact:%s"
+        expected_lease_id
+        disposition.disposition_id
+    | Ack
+    | No_compaction _
+    | Cancel_accepted _
+    | Transfer_accepted _
+    | Settle_from_source_terminal _
+    | Requeue _
+    | Escalate _ ->
+      Printf.sprintf "%s:%s" expected_lease_id (settlement_kind_label settlement)
   in
   let expected_event_id = event_id_of_transition expected_transition_id in
   if Int64.compare lease_sequence 1L < 0
@@ -2552,11 +3099,19 @@ let outbox_entry_of_yojson json =
 ;;
 
 let exact_execution_binding_to_yojson binding =
-  let status, terminal_cause =
+  let status, terminal_cause, disposition =
     match binding.status with
-    | Dispatch_uncertain -> "dispatch_uncertain", `Null
+    | Dispatch_uncertain -> "dispatch_uncertain", `Null, `Null
     | Terminal_quarantined cause ->
-      "terminal_quarantined", `String (exact_execution_terminal_cause_label cause)
+      ( "terminal_quarantined"
+      , `String (exact_execution_terminal_cause_label cause)
+      , `Null )
+    | Disposition_prepared disposition ->
+      "disposition_prepared", `Null, exact_source_disposition_to_yojson disposition
+    | Checkpoint_commit_intent disposition ->
+      "checkpoint_commit_intent", `Null, exact_source_disposition_to_yojson disposition
+    | Checkpoint_commit_observed disposition ->
+      "checkpoint_commit_observed", `Null, exact_source_disposition_to_yojson disposition
   in
   `Assoc
     [ "lease_id", `String binding.lease_id
@@ -2567,25 +3122,28 @@ let exact_execution_binding_to_yojson binding =
     ; "request_body_sha256", `String binding.request_body_sha256
     ; "status", `String status
     ; "terminal_cause", terminal_cause
+    ; "disposition", disposition
     ]
 ;;
 
 let exact_execution_binding_of_yojson json =
   let context = "exact execution lease binding" in
   let* fields = assoc_fields ~context json in
+  let has_disposition = List.mem_assoc "disposition" fields in
   let* () =
     exact_fields
       ~context
       ~expected:
-        [ "lease_id"
-        ; "lease_sequence"
-        ; "slot_id"
-        ; "call_id"
-        ; "plan_fingerprint"
-        ; "request_body_sha256"
-        ; "status"
-        ; "terminal_cause"
-        ]
+        ([ "lease_id"
+         ; "lease_sequence"
+         ; "slot_id"
+         ; "call_id"
+         ; "plan_fingerprint"
+         ; "request_body_sha256"
+         ; "status"
+         ; "terminal_cause"
+         ]
+         @ if has_disposition then [ "disposition" ] else [])
       fields
   in
   let* lease_id = string_field ~context "lease_id" fields in
@@ -2596,17 +3154,39 @@ let exact_execution_binding_of_yojson json =
   let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
   let* status_label = string_field ~context "status" fields in
   let* terminal_cause_json = required_field ~context "terminal_cause" fields in
+  let disposition_json = List.assoc_opt "disposition" fields in
   let* status =
-    match status_label, terminal_cause_json with
-    | "dispatch_uncertain", `Null -> Ok Dispatch_uncertain
-    | "terminal_quarantined", `String cause ->
+    match status_label, terminal_cause_json, disposition_json with
+    | "dispatch_uncertain", `Null, (None | Some `Null) -> Ok Dispatch_uncertain
+    | "terminal_quarantined", `String cause, (None | Some `Null) ->
       let* cause = exact_execution_terminal_cause_of_label cause in
       Ok (Terminal_quarantined cause)
-    | "dispatch_uncertain", _ ->
+    | "disposition_prepared", `Null, Some disposition_json ->
+      let* disposition = exact_source_disposition_of_yojson disposition_json in
+      (match disposition.outcome with
+       | Terminal _ -> Ok (Disposition_prepared disposition)
+       | Checkpoint_committed _ ->
+         Error "prepared terminal status carries a checkpoint disposition")
+    | "checkpoint_commit_intent", `Null, Some disposition_json ->
+      let* disposition = exact_source_disposition_of_yojson disposition_json in
+      (match disposition.outcome with
+       | Terminal _ ->
+         Error "checkpoint commit intent carries a terminal disposition"
+       | Checkpoint_committed _ -> Ok (Checkpoint_commit_intent disposition))
+    | "checkpoint_commit_observed", `Null, Some disposition_json ->
+      let* disposition = exact_source_disposition_of_yojson disposition_json in
+      (match disposition.outcome with
+       | Terminal _ ->
+         Error "checkpoint commit observation carries a terminal disposition"
+       | Checkpoint_committed _ -> Ok (Checkpoint_commit_observed disposition))
+    | "dispatch_uncertain", _, _ ->
       Error "dispatch-uncertain exact execution binding must not carry a terminal cause"
-    | "terminal_quarantined", _ ->
+    | "terminal_quarantined", _, _ ->
       Error "terminally quarantined exact execution binding requires a terminal cause"
-    | status, _ -> Error (Printf.sprintf "unknown exact execution binding status: %s" status)
+    | ("disposition_prepared" | "checkpoint_commit_intent" | "checkpoint_commit_observed"), _, _ ->
+      Error "v5 exact execution binding status requires one source disposition"
+    | status, _, _ ->
+      Error (Printf.sprintf "unknown exact execution binding status: %s" status)
   in
   if Int64.compare lease_sequence 1L < 0
   then Error "exact execution binding lease sequence must be positive"
@@ -2620,6 +3200,18 @@ let exact_execution_binding_of_yojson json =
   then Error "exact execution binding plan fingerprint must not be empty"
   else if String.trim request_body_sha256 = ""
   then Error "exact execution binding request body sha256 must not be empty"
+  else if
+    match status with
+    | Dispatch_uncertain | Terminal_quarantined _ -> false
+    | Disposition_prepared disposition
+    | Checkpoint_commit_intent disposition
+    | Checkpoint_commit_observed disposition ->
+      not
+        (String.equal disposition.slot_id slot_id
+         && String.equal disposition.call_id call_id
+         && String.equal disposition.plan_fingerprint plan_fingerprint
+         && String.equal disposition.request_body_sha256 request_body_sha256)
+  then Error "exact source disposition does not match its full execution binding"
   else
     Ok
       { lease_id
@@ -2709,6 +3301,38 @@ let validate_state state =
   else if
     List.exists
       (fun (binding : exact_execution_binding) ->
+         match binding.status with
+         | Dispatch_uncertain | Terminal_quarantined _ -> false
+         | Disposition_prepared disposition
+         | Checkpoint_commit_intent disposition
+         | Checkpoint_commit_observed disposition ->
+           Result.is_error (validate_exact_source_disposition disposition)
+           || not
+                (String.equal binding.slot_id disposition.slot_id
+                 && String.equal binding.call_id disposition.call_id
+                 && String.equal
+                      binding.plan_fingerprint
+                      disposition.plan_fingerprint
+                 && String.equal
+                      binding.request_body_sha256
+                      disposition.request_body_sha256)
+           ||
+           match binding.status, disposition.outcome with
+           | Disposition_prepared _, Terminal _
+           | Checkpoint_commit_intent _, Checkpoint_committed _
+           | Checkpoint_commit_observed _, Checkpoint_committed _ ->
+             false
+           | ( Dispatch_uncertain
+             | Terminal_quarantined _
+             | Disposition_prepared _
+             | Checkpoint_commit_intent _
+             | Checkpoint_commit_observed _ ), _ ->
+             true)
+      state.exact_execution_bindings
+  then Error "event queue state contains an invalid exact source disposition"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
          not
            (List.exists
               (fun (lease : lease) ->
@@ -2787,8 +3411,14 @@ let of_yojson json =
        || String.equal schema_value predecessor_schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
+    let is_current = String.equal schema_value schema in
     let has_exact_execution_bindings =
-      String.equal schema_value schema && List.mem_assoc "exact_execution_bindings" fields
+      List.mem_assoc "exact_execution_bindings" fields
+    in
+    let* () =
+      if is_current && not has_exact_execution_bindings
+      then Error "v5 keeper event queue state requires exact_execution_bindings"
+      else Ok ()
     in
     let expected_fields =
       [ "schema"
@@ -2799,7 +3429,7 @@ let of_yojson json =
       ; "last_settlement"
       ; "transition_outbox"
       ]
-      @ if String.equal schema_value schema then [ "accepted_transfer_projections" ] else []
+      @ [ "accepted_transfer_projections" ]
       @ if has_exact_execution_bindings then [ "exact_execution_bindings" ] else []
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
@@ -2818,14 +3448,11 @@ let of_yojson json =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
     let* accepted_transfer_projections =
-      if String.equal schema_value predecessor_schema
-      then Ok []
-      else
-        list_field
-          ~context
-          "accepted_transfer_projections"
-          accepted_transfer_projection_of_yojson
-          fields
+      list_field
+        ~context
+        "accepted_transfer_projections"
+        accepted_transfer_projection_of_yojson
+        fields
     in
     let* () =
       if has_exact_execution_bindings || leases = []
@@ -2837,11 +3464,32 @@ let of_yojson json =
     let* exact_execution_bindings =
       if has_exact_execution_bindings
       then
-        list_field
-          ~context
-          "exact_execution_bindings"
-          exact_execution_binding_of_yojson
-          fields
+        let* bindings_json =
+          match List.assoc_opt "exact_execution_bindings" fields with
+          | Some (`List bindings) -> Ok bindings
+          | Some _ ->
+            Error "keeper event queue state exact_execution_bindings must be a list"
+          | None ->
+            Error "keeper event queue state missing exact_execution_bindings"
+        in
+        let* () =
+          if
+            is_current
+            && List.exists
+                 (function
+                   | `Assoc fields -> not (List.mem_assoc "disposition" fields)
+                   | _ -> true)
+                 bindings_json
+          then Error "v5 exact execution binding requires disposition evidence field"
+          else Ok ()
+        in
+        let rec decode acc = function
+          | [] -> Ok (List.rev acc)
+          | binding_json :: rest ->
+            let* binding = exact_execution_binding_of_yojson binding_json in
+            decode (binding :: acc) rest
+        in
+        decode [] bindings_json
       else
         match leases with
         | [] -> Ok []

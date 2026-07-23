@@ -22,10 +22,26 @@ module Make (Publish : sig
     ; call_id : string
     }
 
+  type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+    | Consume_source
+    | Resume_source
+    | Replace_with_successor of Keeper_event_queue.stimulus
+
+  type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+    | Terminal of exact_execution_terminal_cause
+    | Checkpoint_committed of
+        { intended_ref : Keeper_checkpoint_ref.t
+        }
+
+  type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
+
   type exact_execution_lease_status =
     Keeper_event_queue_persistence.exact_execution_lease_status =
     | Dispatch_uncertain
     | Terminal_quarantined of exact_execution_terminal_cause
+    | Disposition_prepared of exact_source_disposition
+    | Checkpoint_commit_intent of exact_source_disposition
+    | Checkpoint_commit_observed of exact_source_disposition
 
   type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
     { lease_id : string
@@ -69,6 +85,25 @@ module Make (Publish : sig
     plan_fingerprint:string ->
     request_body_sha256:string ->
     (exact_write_outcome, string) result
+
+  val prepare_exact_source_disposition_result :
+    base_path:string ->
+    string ->
+    lease:Keeper_event_queue_persistence.lease ->
+    binding:exact_execution_binding ->
+    source:Keeper_checkpoint_ref.t ->
+    outcome:exact_source_outcome ->
+    action:exact_source_action ->
+    prepared_at:float ->
+    (exact_source_disposition * exact_write_outcome, string) result
+
+  val finalize_exact_source_disposition_result :
+    base_path:string ->
+    string ->
+    settled_at:float ->
+    lease:Keeper_event_queue_persistence.lease ->
+    disposition_id:string ->
+    (Keeper_event_queue_persistence.settle_result, string) result
 
   val active_lease_result :
     base_path:string ->

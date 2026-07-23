@@ -1892,7 +1892,7 @@ let validate_exact_attempt_candidate
        ())
 ;;
 
-let exact_attempt_entry_unlocked map candidate =
+let exact_attempt_entry_unlocked map (candidate : exact_attempt_binding) =
   match SMap.find_opt candidate.approval_id map with
   | None ->
     Error

@@ -38,8 +38,10 @@ type publication_error =
       }
 
 type prepared_replacement
-type reservation
-type reservation_error = Reservation_inactive
+
+type ('not_committed, 'committed) replacement_effect =
+  | Not_committed of 'not_committed
+  | Committed of 'committed
 
 type selected_slot =
   { slot_id : string
@@ -87,20 +89,18 @@ val prepare_replacement
     This performs no credential resolution, global mutation, or publication
     fence. When no registry exists, only an empty lane set can be prepared. *)
 
-val reserve_replacement
+val transact_replacement
   :  prepared_replacement
-  -> (reservation, publication_error) result
-(** Atomically verify that the candidate's exact base registry is still
-    current, then install its opaque one-shot publication reservation. A stale
-    candidate fails with [Replacement_base_changed]; an active reservation
-    fails with [Publication_busy]. *)
-
-val finish_replacement : reservation -> (unit, reservation_error) result
-(** Consume the active reservation and publish its prepared candidate. An empty
-    pre-publication candidate leaves the registry unpublished. *)
-
-val abort_replacement : reservation -> (unit, reservation_error) result
-(** Consume the active reservation without changing the published registry. *)
+  -> effect:(unit -> ('not_committed, 'committed) replacement_effect)
+  -> (('not_committed, 'committed) replacement_effect, publication_error) result
+(** Reserve the candidate's exact base, run [effect] outside the publication
+    mutex while all acquisitions observe [Publication_busy], then close the
+    private reservation. [Not_committed] preserves the published registry;
+    [Committed] publishes the immutable candidate exactly once. The opaque
+    reservation never escapes to [effect], so it cannot be finished or aborted
+    by another caller. An exception clears the fence and is re-raised with its
+    original backtrace; effects that made an external commit visible must
+    therefore return [Committed] rather than raise. *)
 
 val current : unit -> (t, publication_error) result
 (** Return the currently published registry. Returns [Publication_busy] while
@@ -119,4 +119,16 @@ val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error)
 val publication_error_to_string : publication_error -> string
 val unavailable_slot_to_string : unavailable_slot -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
-val reservation_error_to_string : reservation_error -> string
+
+module For_testing : sig
+  type reservation
+  type reservation_error = Reservation_inactive
+
+  val reserve_replacement
+    :  prepared_replacement
+    -> (reservation, publication_error) result
+
+  val finish_replacement : reservation -> (unit, reservation_error) result
+  val abort_replacement : reservation -> (unit, reservation_error) result
+  val reservation_error_to_string : reservation_error -> string
+end

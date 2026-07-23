@@ -82,6 +82,10 @@ type prepared_replacement =
   ; candidate : t option
   }
 
+type ('not_committed, 'committed) replacement_effect =
+  | Not_committed of 'not_committed
+  | Committed of 'committed
+
 type reservation =
   { identity : unit ref
   ; candidate : t option
@@ -290,6 +294,35 @@ let reserve_replacement prepared =
 
 let same_reservation left right = left.identity == right.identity
 
+let close_private_transaction reservation ~publish =
+  with_publication_lock
+  @@ fun () ->
+  (* [reservation] never leaves [transact_replacement]'s closure. Other
+     publication operations can only observe the active fence, so no external
+     caller can consume or replace this exact token while [effect] runs. *)
+  active_reservation := None;
+  if publish
+  then
+    Option.iter
+      (fun registry -> Atomic.set published (Some registry))
+      reservation.candidate
+;;
+
+let transact_replacement prepared ~effect =
+  let* reservation = reserve_replacement prepared in
+  match effect () with
+  | Not_committed _ as outcome ->
+    close_private_transaction reservation ~publish:false;
+    Ok outcome
+  | Committed _ as outcome ->
+    close_private_transaction reservation ~publish:true;
+    Ok outcome
+  | exception exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    close_private_transaction reservation ~publish:false;
+    Printexc.raise_with_backtrace exception_ backtrace
+;;
+
 let finish_replacement reservation =
   with_publication_lock
   @@ fun () ->
@@ -435,3 +468,13 @@ let lane_resolution_error_to_string = function
 let reservation_error_to_string = function
   | Reservation_inactive -> "exact-output registry reservation is inactive"
 ;;
+
+module For_testing = struct
+  type nonrec reservation = reservation
+  type nonrec reservation_error = reservation_error = Reservation_inactive
+
+  let reserve_replacement = reserve_replacement
+  let finish_replacement = finish_replacement
+  let abort_replacement = abort_replacement
+  let reservation_error_to_string = reservation_error_to_string
+end

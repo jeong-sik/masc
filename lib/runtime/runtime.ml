@@ -1707,59 +1707,71 @@ let with_runtime_config_write_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
 ;;
 
-let abort_exact_output_replacement reservation =
-  Runtime_exact_output_registry.abort_replacement reservation
-  |> Result.map_error (fun error ->
-    "exact-output registry reservation abort failed: "
-    ^ Runtime_exact_output_registry.reservation_error_to_string error)
+let runtime_config_atomic_failure ~replacement_visible failure =
+  match failure.Fs_compat.exception_ with
+  | Eio.Cancel.Cancelled _ ->
+    Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+  | _ ->
+    let detail = Fs_compat.atomic_replace_failure_to_string failure in
+    if replacement_visible
+    then
+      Error
+        ("runtime config replacement is visible, but parent-directory durability \
+          is unconfirmed; retry the same update: "
+         ^ detail)
+    else Error detail
 ;;
 
-exception Runtime_config_commit_invariant_violation of string
+let runtime_config_write_effect ~path content () =
+  match Fs_compat.save_file_atomic_strict_staged path content with
+  | Ok () -> Runtime_exact_output_registry.Committed `Durable
+  | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
+    Runtime_exact_output_registry.Not_committed failure
+  | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
+    Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure)
+;;
 
 let commit_runtime_config_text ~path content =
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
-  let* prepared_replacement =
+  match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
-    |> Result.map_error (fun error ->
-      "exact-output registry replacement rejected: "
-      ^ Runtime_exact_output_registry.publication_error_to_string error)
-  in
-  let* reservation =
-    Runtime_exact_output_registry.reserve_replacement prepared_replacement
-    |> Result.map_error (fun error ->
-      "exact-output registry replacement reservation rejected: "
-      ^ Runtime_exact_output_registry.publication_error_to_string error)
-  in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () ->
-    (match Runtime_exact_output_registry.finish_replacement reservation with
-     | Ok () ->
+  with
+  | Error Runtime_exact_output_registry.Registry_not_published ->
+    (match Fs_compat.save_file_atomic_strict_staged path content with
+     | Ok () -> Ok ()
+     | Error failure ->
+       runtime_config_atomic_failure
+         ~replacement_visible:
+           (match failure.stage with
+            | Fs_compat.Before_rename -> false
+            | Fs_compat.After_rename -> true)
+         failure)
+  | Error error ->
+    Error
+      ("exact-output registry replacement rejected: "
+       ^ Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok prepared_replacement ->
+    (match
+       Runtime_exact_output_registry.transact_replacement
+         prepared_replacement
+         ~effect:(runtime_config_write_effect ~path content)
+     with
+     | Error error ->
+       Error
+         ("exact-output registry replacement reservation rejected: "
+          ^ Runtime_exact_output_registry.publication_error_to_string error)
+     | Ok (Runtime_exact_output_registry.Not_committed failure) ->
+       runtime_config_atomic_failure ~replacement_visible:false failure
+     | Ok (Runtime_exact_output_registry.Committed `Durable) ->
        set_loaded ~config_path:path loaded;
        Ok ()
-     | Error error ->
-       raise
-         (Runtime_config_commit_invariant_violation
-            ("runtime config file committed but the exact-output registry \
-              reservation was inactive; restart is required: "
-             ^ Runtime_exact_output_registry.reservation_error_to_string error)))
-  | Error detail ->
-    (match abort_exact_output_replacement reservation with
-     | Ok () -> Error detail
-     | Error abort_detail -> Error (detail ^ "; " ^ abort_detail))
-  | exception exn ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    (match abort_exact_output_replacement reservation with
-     | Ok () -> Printexc.raise_with_backtrace exn backtrace
-     | Error abort_detail ->
-       Printexc.raise_with_backtrace
-         (Failure
-            (Printf.sprintf
-               "runtime config commit raised %s; %s"
-               (Printexc.to_string exn)
-               abort_detail))
-         backtrace)
+     | Ok
+         (Runtime_exact_output_registry.Committed
+           (`Durability_unconfirmed failure)) ->
+       set_loaded ~config_path:path loaded;
+       runtime_config_atomic_failure ~replacement_visible:true failure)
 ;;
 
 let save_config_text ?runtime_config_path content =

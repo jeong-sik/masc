@@ -1,5 +1,8 @@
 module Exact_output = Agent_sdk.Exact_output
-module Registry = Runtime_exact_output_registry
+module Registry = struct
+  include Runtime_exact_output_registry
+  include Runtime_exact_output_registry.For_testing
+end
 
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
@@ -193,4 +196,3 @@ let require_replacement_base_changed label ~expected_generation ~actual_generati
       (Registry.publication_error_to_string error)
   | Ok _ -> Alcotest.failf "%s accepted a stale prepared replacement" label
 ;;
-

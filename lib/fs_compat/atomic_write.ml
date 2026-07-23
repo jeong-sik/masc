@@ -2509,63 +2509,106 @@ module Capability_write_for_testing = struct
   let sync_directory_capability = sync_directory_capability_with
 end
 
+type atomic_replace_failure_stage =
+  | Before_rename
+  | After_rename
+
+type atomic_replace_failure =
+  { path : string
+  ; stage : atomic_replace_failure_stage
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+let atomic_replace_failure_to_string failure =
+  Printf.sprintf
+    "save_file_atomic %s: %s"
+    failure.path
+    (Printexc.to_string failure.exception_)
+;;
+
 let save_file_atomic_with_parent_sync
-  ~strict_parent_sync
+  ~sync_parent
   ~(save_file : string -> string -> unit)
   (path : string)
   (content : string)
-  : (unit, string) Result.t
+  : (unit, atomic_replace_failure) Result.t
   =
   let dir = Stdlib.Filename.dirname path in
-  let error exn =
-    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+  let stage = ref Before_rename in
+  let failure ~backtrace exception_ =
+    Error { path; stage = !stage; exception_; backtrace }
   in
-  try
-    let tmp =
-      Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
-    in
+  match
+    try
+      Ok
+        (Stdlib.Filename.temp_file
+           ~temp_dir:dir
+           atomic_tmp_prefix
+           atomic_tmp_suffix)
+    with
+    (* Filename.temp_file's only documented failure is Sys_error; anything
+       else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
+       rather than collapse into the staged error channel. *)
+    | Sys_error _ as exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      failure ~backtrace exception_
+  with
+  | Error _ as error -> error
+  | Ok tmp ->
     (try
        save_file tmp content;
        fsync_path tmp;
        Stdlib.Sys.rename tmp path;
-       (if strict_parent_sync
-        then fsync_path_strict dir
-        else
-          try fsync_path dir with
-          | Unix.Unix_error _ -> ());
+       stage := After_rename;
+       sync_parent dir;
        Ok ()
      with
-     | Eio.Cancel.Cancelled _ as exn ->
+     | exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
        (try Stdlib.Sys.remove tmp with
         | Sys_error _ -> ());
-       raise exn
-     | exn ->
-       (try Stdlib.Sys.remove tmp with
-        | Sys_error _ -> ());
-       error exn)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  (* Filename.temp_file's only documented failure is Sys_error; anything
-     else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
-     rather than collapse into the string error channel. *)
-  | Sys_error _ as exn -> error exn
+       failure ~backtrace exception_)
+;;
+
+let legacy_atomic_replace_result = function
+  | Ok () -> Ok ()
+  | Error failure ->
+    (match failure.exception_ with
+     | Eio.Cancel.Cancelled _ ->
+       Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+     | _ -> Error (atomic_replace_failure_to_string failure))
 ;;
 
 let save_file_atomic ~save_file path content =
   save_file_atomic_with_parent_sync
-    ~strict_parent_sync:false
+    ~sync_parent:(fun dir ->
+      try fsync_path dir with
+      | Unix.Unix_error _ -> ())
+    ~save_file
+    path
+    content
+  |> legacy_atomic_replace_result
+;;
+
+let save_file_atomic_strict_staged ~save_file path content =
+  save_file_atomic_with_parent_sync
+    ~sync_parent:fsync_path_strict
     ~save_file
     path
     content
 ;;
 
 let save_file_atomic_strict ~save_file path content =
-  save_file_atomic_with_parent_sync
-    ~strict_parent_sync:true
-    ~save_file
-    path
-    content
+  save_file_atomic_strict_staged ~save_file path content
+  |> legacy_atomic_replace_result
 ;;
+
+module Atomic_replace_for_testing = struct
+  let save_file_atomic_strict_staged ~sync_parent ~save_file path content =
+    save_file_atomic_with_parent_sync ~sync_parent ~save_file path content
+  ;;
+end
 
 let has_atomic_temp_shape ~prefix name =
   let n = String.length name in

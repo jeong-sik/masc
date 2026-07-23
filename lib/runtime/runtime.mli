@@ -372,10 +372,12 @@ val save_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
     changing or credential-resolving the active frozen registry. The writer
-    then reserves that exact base, durably commits the file, publishes the
-    prepared registry, and finally refreshes the in-process runtime cache.
-    Failed validation, reservation, or file persistence leaves the published
-    registry and runtime cache unchanged. *)
+    then reserves that exact base and atomically replaces the file. A failure
+    before rename leaves the published registry and runtime cache unchanged.
+    Once rename is visible, the prepared immutable registry and runtime cache
+    are synchronously converged even when parent-directory fsync fails; that
+    durability-uncertain case returns [Error] and is safe to retry. A fully
+    durable replacement returns [Ok ()]. *)
 
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->

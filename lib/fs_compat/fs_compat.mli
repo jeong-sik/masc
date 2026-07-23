@@ -150,8 +150,39 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+type atomic_replace_failure_stage =
+  Atomic_write.atomic_replace_failure_stage =
+  | Before_rename
+  | After_rename
+
+type atomic_replace_failure =
+  Atomic_write.atomic_replace_failure =
+  { path : string
+  ; stage : atomic_replace_failure_stage
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+val atomic_replace_failure_to_string : atomic_replace_failure -> string
+
+val save_file_atomic_strict_staged
+  :  string
+  -> string
+  -> (unit, atomic_replace_failure) Result.t
+(** Strict replacement retaining whether a failure preceded or followed the
+    target rename. Transaction owners must converge any dependent in-memory
+    publication before propagating an [After_rename] failure. *)
+
 (** Atomic replacement whose parent-directory fsync is mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
+
+module Atomic_replace_for_testing : sig
+  val save_file_atomic_strict_staged
+    :  sync_parent:(string -> unit)
+    -> string
+    -> string
+    -> (unit, atomic_replace_failure) Result.t
+end
 
 (** [open_atomic_temp_file ~temp_dir ()] creates and opens a fresh
     temp file in [temp_dir] using the canonical [.atomic_*.tmp]

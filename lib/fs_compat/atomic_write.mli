@@ -29,6 +29,29 @@ val save_file_atomic
   -> string
   -> (unit, string) Result.t
 
+type atomic_replace_failure_stage =
+  | Before_rename
+  | After_rename
+
+type atomic_replace_failure =
+  { path : string
+  ; stage : atomic_replace_failure_stage
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+val atomic_replace_failure_to_string : atomic_replace_failure -> string
+
+val save_file_atomic_strict_staged
+  :  save_file:(string -> string -> unit)
+  -> string
+  -> string
+  -> (unit, atomic_replace_failure) Result.t
+(** Strict atomic replacement that preserves whether failure occurred before
+    or after the target rename became visible. Unlike the compatibility
+    wrapper below, cancellation is returned with its original backtrace so a
+    transaction owner can repair publication state before re-raising it. *)
+
 (** Strict sibling of {!save_file_atomic}. Parent-directory descriptor or
     fsync failure is returned as [Error] after the rename instead of being
     treated as best effort. *)
@@ -37,6 +60,15 @@ val save_file_atomic_strict
   -> string
   -> string
   -> (unit, string) Result.t
+
+module Atomic_replace_for_testing : sig
+  val save_file_atomic_strict_staged
+    :  sync_parent:(string -> unit)
+    -> save_file:(string -> string -> unit)
+    -> string
+    -> string
+    -> (unit, atomic_replace_failure) Result.t
+end
 
 (** [open_atomic_temp_file ~temp_dir ()] creates and opens a fresh
     temp file in [temp_dir] using the canonical [.atomic_*.tmp]

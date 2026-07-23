@@ -832,8 +832,6 @@ module For_testing = struct
     apply_runtime_model_input_capabilities
   let select_agent_result = select_agent_result
   let stop_reason_of_cooperative_yield = stop_reason_of_cooperative_yield
-  let cooperative_boundary_callback = cooperative_boundary_callback
-  let prefer_cooperative_probe_error = prefer_cooperative_probe_error
 end
 
 (* ================================================================ *)

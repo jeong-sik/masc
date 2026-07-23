@@ -2682,6 +2682,140 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
+let terminal_surface_post tools =
+  match find_tool_by_name tools "keeper_surface_post" with
+  | Some tool -> tool
+  | None -> fail "keeper_surface_post missing from Keeper tool bundle"
+;;
+
+let test_invalid_surface_post_input_stays_correction_capable () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "surface_post_invalid_input"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let surface_post = terminal_surface_post bundle.tools in
+       (match
+          Agent_sdk.Tool.execute
+            surface_post
+            (`Assoc [ "surface", `String "dashboard" ])
+        with
+        | Error _ -> ()
+        | Ok _ -> fail "invalid terminal input unexpectedly succeeded");
+       (match bundle.terminal_effect_state () with
+        | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
+        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+          fail "invalid terminal input completed the terminal effect"
+        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+          fail "invalid terminal input poisoned the terminal effect");
+       (match
+          Agent_sdk.Tool.execute
+            surface_post
+            (`Assoc
+               [ "surface", `String "dashboard"
+               ; "content", `String "corrected terminal delivery"
+               ])
+        with
+        | Ok _ -> ()
+        | Error error ->
+          failf "corrected terminal input failed: %s" error.Agent_sdk.Types.message);
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
+       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+         fail "corrected terminal input left the terminal effect open"
+       | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+         fail "corrected terminal input failed the terminal effect")
+;;
+
+let with_openai_tool_call_server ~tool_name ~tool_input f =
+  let sw =
+    match Eio_context.get_switch_opt () with
+    | Some sw -> sw
+    | None -> fail "test Eio switch missing"
+  in
+  let net =
+    match Eio_context.get_net_opt () with
+    | Some net -> net
+    | None -> fail "test Eio net missing"
+  in
+  let provider_call_count = ref 0 in
+  let tool_arguments = Yojson.Safe.to_string tool_input in
+  let response_body =
+    `Assoc
+      [ "id", `String "surface-post-failure-tool-use"
+      ; "object", `String "chat.completion"
+      ; "created", `Int 0
+      ; "model", `String "surface-post-failure-model"
+      ; ( "choices"
+        , `List
+            [ `Assoc
+                [ "index", `Int 0
+                ; ( "message"
+                  , `Assoc
+                      [ "role", `String "assistant"
+                      ; "content", `Null
+                      ; ( "tool_calls"
+                        , `List
+                            [ `Assoc
+                                [ "id", `String "surface-post-failure-call"
+                                ; "type", `String "function"
+                                ; ( "function"
+                                  , `Assoc
+                                      [ "name", `String tool_name
+                                      ; "arguments", `String tool_arguments
+                                      ] )
+                                ] ] )
+                      ] )
+                ; "finish_reason", `String "tool_calls"
+                ] ] )
+      ; ( "usage"
+        , `Assoc
+            [ "prompt_tokens", `Int 1
+            ; "completion_tokens", `Int 1
+            ; "total_tokens", `Int 2
+            ] )
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let handler _conn _request body =
+    ignore Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all);
+    incr provider_call_count;
+    if !provider_call_count = 1
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Internal_server_error
+        ~body:{|{"error":"terminal failure re-entered the provider"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> fail "loopback completion fixture did not expose a TCP port"
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, !provider_call_count
+;;
+
 let test_surface_post_append_failure_does_not_complete_terminal_effect () =
   with_exec_fixture
     ~bind_eio_context:true
@@ -2765,28 +2899,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "failed surface delivery left the terminal effect open"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "failed surface delivery set terminal completion");
-            let boundary_error =
-              match
-                Masc.Keeper_agent_run.For_testing
-                .terminal_effect_boundary_decision terminal_state
-              with
-              | Error (Agent_sdk.Error.Internal diagnostic as error) ->
-                check bool
-                  "agent terminal error retains the exact full chat target"
-                  true
-                  (contains_substring diagnostic chat_path);
-                error
-              | Error _ -> fail "terminal failure became a different Agent error"
-              | Ok Runtime_agent.Continue ->
-                fail "terminal failure continued the ordinary model loop"
-              | Ok (Runtime_agent.Yield _) ->
-                fail "terminal failure became ordinary terminal completion"
-            in
-            check bool
-              "terminal delivery failure is not provider-failover recoverable"
-              false
-              (Masc.Keeper_error_classify.is_auto_recoverable_turn_error
-                 boundary_error);
             let runtime_bundle =
               Masc.Keeper_tools_oas_bundle.make_tool_bundle
                 ~config
@@ -2795,120 +2907,64 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                 ~ctx_snapshot:ctx_work
                 ()
             in
-            let runtime_surface_post =
-              match find_tool_by_name runtime_bundle.tools "keeper_surface_post" with
-              | Some tool -> tool
-              | None -> fail "runtime keeper_surface_post missing from tool bundle"
-            in
-            let provider_call_count = ref 0 in
-            let provider_response : Agent_sdk.Types.api_response =
-              { id = "surface-post-failure-tool-use"
-              ; model = "surface-post-failure-model"
-              ; stop_reason = Agent_sdk.Types.StopToolUse
-              ; content =
-                  [ Agent_sdk.Types.ToolUse
-                      { id = "surface-post-failure-call"
-                      ; name = "keeper_surface_post"
-                      ; input =
-                          `Assoc
-                            [ "surface", `String "dashboard"
-                            ; "content", `String "must remain undelivered"
-                            ]
-                      }
-                  ]
-              ; usage = None
-              ; telemetry = None
-              }
-            in
-            let transport : Llm_provider.Llm_transport.t =
-              { complete_sync =
-                  (fun _request ->
-                     incr provider_call_count;
-                     if !provider_call_count <> 1
-                     then fail "terminal failure re-entered the provider";
-                     { Llm_provider.Llm_transport.response = Ok provider_response
-                     ; latency_ms = Some 0
-                     })
-              ; complete_stream =
-                  (fun ?on_telemetry:_ ~on_event:_ _request ->
-                     fail "unexpected streaming provider call")
-              }
-            in
-            let mock_provider : Agent_sdk.Provider.config =
-              { provider =
-                  Agent_sdk.Provider.Local { base_url = "http://mock.invalid" }
-              ; model_id = "surface-post-failure-model"
-              ; api_key_env = ""
-              }
-            in
-            let options =
-              { Agent_sdk.Agent.default_options with
-                provider = Some mock_provider
-              ; transport = Some transport
-              }
-            in
-            let agent =
-              Agent_sdk.Agent.create
-                ~net:
-                  (match Eio_context.get_net_opt () with
-                   | Some net -> net
-                   | None -> fail "test Eio net missing")
-                ~config:
-                  { (Agent_sdk.Types.default_config
-                       ~model:"surface-post-failure-model") with
-                    name = "surface-post-failure-agent"
-                  }
-                ~tools:[ runtime_surface_post ]
-                ~options
-                ()
-            in
-            let probe_error = ref None in
-            let yield_decision = ref None in
-            let advanced_result =
-              Agent_sdk.Agent.Advanced.run_blocks
-                ~sw:
-                  (match Eio_context.get_switch_opt () with
-                   | Some sw -> sw
-                   | None -> fail "test Eio switch missing")
-                ~api_strategy:Agent_sdk.Agent.Sync
-                ~on_tool_boundary:
-                  (Runtime_agent.For_testing.cooperative_boundary_callback
-                     ~probe_error
-                     ~yield_decision
-                     (fun _boundary ->
-                        Masc.Keeper_agent_run.For_testing
-                        .terminal_effect_boundary_decision
-                          (runtime_bundle.terminal_effect_state ())))
-                agent
-                [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
-            in
-            let runtime_result =
-              Runtime_agent.For_testing.prefer_cooperative_probe_error
-                !probe_error
-                advanced_result
-            in
-            let runtime_error =
-              match runtime_result with
-              | Error (Agent_sdk.Error.Internal diagnostic as error) ->
-                check bool
-                  "Runtime_agent error retains the exact full chat target"
-                  true
-                  (contains_substring diagnostic chat_path);
-                error
-              | Error _ -> fail "Runtime_agent changed the terminal failure class"
-              | Ok (Agent_sdk.Agent.Advanced.Completed _) ->
-                fail "terminal failure reached ordinary provider completion"
-              | Ok (Agent_sdk.Agent.Advanced.Yielded _) ->
-                fail "Runtime_agent did not project the boundary failure"
+            let runtime_error, provider_call_count =
+              with_openai_tool_call_server
+                ~tool_name:"keeper_surface_post"
+                ~tool_input:
+                  (`Assoc
+                     [ "surface", `String "dashboard"
+                     ; "content", `String "must remain undelivered"
+                     ])
+              @@ fun ~sw ~net ~base_url ->
+              let provider_cfg =
+                Llm_provider.Provider_config.make
+                  ~kind:Llm_provider.Provider_config.OpenAI_compat
+                  ~model_id:"surface-post-failure-model"
+                  ~base_url
+                  ~api_key:"test-key"
+                  ~request_path:"/chat/completions"
+                  ~tool_stream:false
+                  ()
+              in
+              let runtime_config =
+                Runtime_agent.default_config
+                  ~name:"surface-post-failure-runtime"
+                  ~provider_cfg
+                  ~system_prompt:"Deliver the requested dashboard reply."
+                  ~tools:runtime_bundle.tools
+              in
+              match
+                Runtime_agent.run_blocks
+                  ~sw
+                  ~net
+                  ~config:runtime_config
+                  ~cooperative_yield_probe:(fun _boundary ->
+                    Masc.Keeper_agent_run.terminal_effect_boundary_decision
+                      (runtime_bundle.terminal_effect_state ()))
+                  [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
+              with
+              | Error error -> error
+              | Ok _ -> fail "terminal failure reached ordinary provider completion"
             in
             check int
               "terminal failure makes exactly one provider call"
               1
-              !provider_call_count;
-            check bool
-              "terminal failure does not become a successful yield"
-              true
-              (Option.is_none !yield_decision);
+              provider_call_count;
+            (match
+               Keeper_internal_error.classify_masc_internal_error runtime_error
+             with
+             | Some
+                 (Keeper_internal_error.Terminal_effect_failed
+                    { failure_class = Tool_result.Runtime_failure; diagnostic }) ->
+               check bool
+                 "Runtime_agent error retains the exact full chat target"
+                 true
+                 (contains_substring diagnostic chat_path)
+             | Some other ->
+               failf
+                 "Runtime_agent returned %s instead of terminal_effect_failed"
+                 (Keeper_internal_error.kind_of_masc_internal_error other)
+             | None -> fail "Runtime_agent flattened the typed terminal failure");
             (match runtime_bundle.terminal_effect_state () with
              | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
                check bool
@@ -2927,49 +2983,42 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               "runtime failure emits no keeper chat broadcast"
               0
               !chat_broadcast_count;
+            check bool
+              "runtime terminal delivery failure is not auto-recoverable"
+              false
+              (Masc.Keeper_error_classify.is_auto_recoverable_turn_error
+                 runtime_error);
             let exact_route =
               Keeper_runtime_failure_route.route_of_error
                 ~boundary:Keeper_runtime_failure_route.Oas_execution
                 runtime_error
             in
-            let failure =
-              Masc.Keeper_unified_turn.For_testing.turn_failure_of_error
-                ~runtime_id:"forbidden-fallback-runtime"
-                ~fallback_boundary:Keeper_runtime_failure_route.Masc_execution
-                ~exact_failure_execution:
-                  (Some
-                     ( "opaque-runtime"
-                     , exact_route
-                     , Masc.Keeper_unified_turn.Follow_failure_route ))
-                runtime_error
-            in
-            check string
-              "unified failure keeps the exact execution runtime"
-              "opaque-runtime"
-              failure.runtime_id;
-            check bool
-              "unified failure keeps the exact OAS execution route"
-              true
-              (failure.route = exact_route);
-            (match failure.route with
+            (match exact_route with
              | Keeper_runtime_failure_route.Escalate_judgment
-                 { provenance = Keeper_runtime_failure_route.Oas_internal_error; _ } ->
+                 { judgment =
+                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure
+                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
+                 ; _
+                 } ->
                ()
-             | _ -> fail "unified failure fell back from the exact OAS route");
-            let settlement =
+             | _ -> fail "typed terminal failure did not reach its exact route");
+            let failure : Masc.Keeper_unified_turn.turn_failure =
+              { error = runtime_error
+              ; runtime_id = "surface-post-failure-runtime"
+              ; route = exact_route
+              ; source_lease_disposition =
+                  Masc.Keeper_unified_turn.Follow_failure_route
+              }
+            in
+            match
               Masc.Keeper_heartbeat_loop.settlement_of_failure
                 ~settled_at:0.
                 ~compaction_consecutive_failures:0
                 failure
-            in
-            let source_ack_count = ref 0 in
-            (match settlement with
-             | Masc.Keeper_registry_event_queue.Ack -> incr source_ack_count
-             | _ -> ());
-            check int
-              "failed terminal delivery invokes no source success Ack"
-              0
-              !source_ack_count))
+            with
+            | Masc.Keeper_registry_event_queue.Ack ->
+              fail "failed terminal delivery produced a source success Ack"
+            | _ -> ())
 ;;
 
 let () =
@@ -3038,6 +3087,8 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
+      test_case "invalid surface input stays correction-capable" `Quick
+        test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
     ]);

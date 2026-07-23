@@ -210,19 +210,6 @@ type turn_failure =
     The heartbeat queue settles from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
-module For_testing : sig
-  val turn_failure_of_error
-    :  runtime_id:string
-    -> fallback_boundary:Keeper_runtime_failure_route.error_boundary
-    -> exact_failure_execution:
-         (string
-          * Keeper_runtime_failure_route.route
-          * source_lease_disposition)
-         option
-    -> Agent_sdk.Error.sdk_error
-    -> turn_failure
-end
-
 type turn_success =
   | Turn_completed of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta

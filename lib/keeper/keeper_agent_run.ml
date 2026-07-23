@@ -164,8 +164,11 @@ let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Terminal_effect_completed ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
-  | Keeper_tools_oas.Terminal_effect_failed { diagnostic; _ } ->
-    Error (Agent_sdk.Error.Internal diagnostic)
+  | Keeper_tools_oas.Terminal_effect_failed { failure_class; diagnostic } ->
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; diagnostic }))
 ;;
 
 module For_testing = struct
@@ -180,7 +183,6 @@ module For_testing = struct
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let runtime_yield_reason = runtime_yield_reason
-  let terminal_effect_boundary_decision = terminal_effect_boundary_decision
   let provider_transcript_admission = provider_transcript_admission
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission

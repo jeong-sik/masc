@@ -7,6 +7,7 @@ type retry_class =
   | Server_error
   | Network_transient
   | Provider_timeout
+  | Terminal_effect_transient
 
 type rotate_class =
   | Auth_failed
@@ -24,6 +25,9 @@ type judgment_class =
   | Protocol_error
   | Config_mismatch
   | Provider_integration
+  | Terminal_effect_policy_rejection
+  | Terminal_effect_runtime_failure
+  | Terminal_effect_workflow_rejection
   | Internal_opaque
 
 type judgment_provenance =
@@ -118,6 +122,12 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
     judge Internal_opaque
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     judge Contract_violation
+  | Keeper_internal_error.Terminal_effect_failed { failure_class; _ } ->
+    (match failure_class with
+     | Tool_result.Transient_error -> observe_retry Terminal_effect_transient
+     | Tool_result.Policy_rejection -> judge Terminal_effect_policy_rejection
+     | Tool_result.Runtime_failure -> judge Terminal_effect_runtime_failure
+     | Tool_result.Workflow_rejection -> judge Terminal_effect_workflow_rejection)
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     judge Internal_opaque
@@ -213,12 +223,14 @@ let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
 ;;
 
 let route_of_error ~boundary (err : Agent_sdk.Error.sdk_error) : route =
-  match boundary with
-  | Oas_execution -> route_of_error_family ~boundary err
-  | Masc_execution ->
-    (match Keeper_internal_error.classify_masc_internal_error err with
-     | Some internal -> route_of_masc_internal ~err internal
-     | None -> route_of_error_family ~boundary err)
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some (Keeper_internal_error.Terminal_effect_failed _ as internal) ->
+    route_of_masc_internal ~err internal
+  | Some internal ->
+    (match boundary with
+     | Masc_execution -> route_of_masc_internal ~err internal
+     | Oas_execution -> route_of_error_family ~boundary err)
+  | None -> route_of_error_family ~boundary err
 
 let retry_after_of_route = function
   | Retry_after_observed { retry_after; _ } -> retry_after
@@ -237,6 +249,7 @@ let retry_class_label = function
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
+  | Terminal_effect_transient -> "terminal_effect_transient"
 
 let retry_class_of_label = function
   | "rate_limited" -> Some Rate_limited
@@ -245,6 +258,7 @@ let retry_class_of_label = function
   | "server_error" -> Some Server_error
   | "network_transient" -> Some Network_transient
   | "provider_timeout" -> Some Provider_timeout
+  | "terminal_effect_transient" -> Some Terminal_effect_transient
   | _ -> None
 
 let rotate_class_label = function
@@ -273,6 +287,9 @@ let judgment_class_label = function
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
+  | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
+  | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
+  | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
   | Internal_opaque -> "internal_opaque"
 
 let judgment_provenance_label = function
@@ -403,5 +420,11 @@ let judgment_class_of_label = function
   | "protocol_error" -> Some Protocol_error
   | "config_mismatch" -> Some Config_mismatch
   | "provider_integration" -> Some Provider_integration
+  | "terminal_effect_policy_rejection" ->
+    Some Terminal_effect_policy_rejection
+  | "terminal_effect_runtime_failure" ->
+    Some Terminal_effect_runtime_failure
+  | "terminal_effect_workflow_rejection" ->
+    Some Terminal_effect_workflow_rejection
   | "internal_opaque" -> Some Internal_opaque
   | _ -> None

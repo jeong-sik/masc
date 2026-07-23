@@ -82,10 +82,6 @@ let turn_failure_of_error
     }
 ;;
 
-module For_testing = struct
-  let turn_failure_of_error = turn_failure_of_error
-end
-
 let transcript_corruption error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
@@ -98,6 +94,7 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
     None

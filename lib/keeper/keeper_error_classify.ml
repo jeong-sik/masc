@@ -662,25 +662,37 @@ let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
   | _ ->
     let msg = Agent_sdk.Error.to_string err in
-    String.contains msg 'B' && String.contains msg 'a' && String.contains msg 'd'
-    || String.contains msg 'I' && String.contains msg 'n' && String.contains msg 'v'
+    let has_prefix str prefix =
+      let len_p = String.length prefix in
+      String.length str >= len_p && String.sub str 0 len_p = prefix
+    in
+    has_prefix msg "Invalid request"
+    || has_prefix msg "Bad Request"
+    || has_prefix msg "oas-ollama_cloud" && String.contains msg '4'
 
 (** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
+  | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
   | _ ->
     let msg = Agent_sdk.Error.to_string err in
-    (String.length msg > 0
-     && (let contains s sub =
-           try
-             let _ = Str.search_forward (Str.regexp_string sub) s 0 in
-             true
-           with Not_found -> false
-         in
-         contains msg "context_window_exceeded"
-         || contains msg "Context overflow"
-         || contains msg "model_context_window_exceeded"))
+    (match String.split_on_char ':' msg with
+     | "Context overflow" :: _ -> true
+     | _ ->
+       let contains_substring str sub =
+         let len_s = String.length str in
+         let len_sub = String.length sub in
+         if len_sub > len_s then false
+         else
+           let found = ref false in
+           for i = 0 to len_s - len_sub do
+             if not !found && String.sub str i len_sub = sub then found := true
+           done;
+           !found
+       in
+       contains_substring msg "model_context_window_exceeded"
+       || contains_substring msg "Context overflow")
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err

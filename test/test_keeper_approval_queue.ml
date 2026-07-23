@@ -1143,7 +1143,7 @@ let test_exact_binding_codec_validates_entry_identity () =
             | Error _ -> ()
             | Ok _ ->
               Alcotest.failf
-                "v4 binding with mismatched %s installed"
+                "current binding with mismatched %s installed"
                 field)
          [ "approval_id", `String "different-approval"
          ; "input_hash", `String "different-input-hash"
@@ -2530,7 +2530,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
                ])))
 ;;
 
-let test_unreadable_json_snapshot_is_not_quarantined () =
+let test_unreadable_snapshot_fails_closed_and_is_preserved () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2546,9 +2546,7 @@ let test_unreadable_json_snapshot_is_not_quarantined () =
         | Ok _ -> Alcotest.fail "unreadable snapshot must not install"
         | Error _ -> ());
        Alcotest.(check bool) "file left in place" true
-         (Sys.file_exists store_path);
-       Alcotest.(check bool) "no quarantine created" false
-         (Sys.file_exists (store_path ^ ".v2.quarantine")))
+         (Sys.file_exists store_path))
 ;;
 
 let test_persisted_delivery_replays_before_origin_wake () =
@@ -3014,9 +3012,9 @@ let () =
             `Quick
             test_unsupported_version_snapshot_requires_runtime_reset
         ; Alcotest.test_case
-            "unreadable json is not quarantined"
+            "unreadable current snapshot is preserved"
             `Quick
-            test_unreadable_json_snapshot_is_not_quarantined
+            test_unreadable_snapshot_fails_closed_and_is_preserved
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick

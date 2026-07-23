@@ -2,6 +2,34 @@
 
 module EC = Keeper_error_classify
 
+(* Compensating accounting for deterministic [InvalidRequest] failures (see
+   the invariant note in [Keeper_error_classify] above
+   [is_auto_recoverable_turn_error]). That class is exempt from the crash
+   counter, so without its own bound a poisoned checkpoint would re-emit the
+   same 400 every cycle with [consecutive] pinned at 0 — the same shape as
+   the 2026-07-21 provider-parse-rejection incident. The counter is
+   process-local, which is where the unbounded loop lives; once the bound is
+   exceeded the observation degrades to ordinary (durable) crash accounting,
+   so restarts cannot reset the bound either. *)
+let max_consecutive_invalid_request_failures = 3
+
+let invalid_request_consecutive : (string, int) Hashtbl.t = Hashtbl.create 8
+
+let note_invalid_request_failure ~keeper_name =
+  let n =
+    (match Hashtbl.find_opt invalid_request_consecutive keeper_name with
+     | Some n -> n
+     | None -> 0)
+    + 1
+  in
+  Hashtbl.replace invalid_request_consecutive keeper_name n;
+  n > max_consecutive_invalid_request_failures
+;;
+
+let reset_invalid_request_failures ~keeper_name =
+  Hashtbl.remove invalid_request_consecutive keeper_name
+;;
+
 (** Bounded compensating accounting for the empty-completion exemption in
     [EC.is_auto_recoverable_turn_error].  The exemption skips
     [increment_turn_failures], so without a bound a model that
@@ -34,13 +62,35 @@ let empty_completion_exemption_exhausted ~keeper_name err =
     used > empty_completion_exemption_budget)
 ;;
 
+(* Consume one [InvalidRequest] budget unit for [keeper_name] when [err] is
+   in that class; returns [true] once the consecutive bound is exceeded.
+   Separate counter from the empty-completion budget above — the two
+   exemption classes never share units. *)
+let invalid_request_budget_exhausted ~keeper_name err =
+  if not (EC.is_invalid_request_error err)
+  then false
+  else (
+    let exhausted = note_invalid_request_failure ~keeper_name in
+    if exhausted
+    then
+      Log.Keeper.warn
+        "%s: deterministic invalid-request failures exceeded %d consecutive \
+         attempts; degrading to ordinary crash accounting: %s"
+        keeper_name
+        max_consecutive_invalid_request_failures
+        (Keeper_types_profile.short_preview (Agent_sdk.Error.to_string err));
+    exhausted)
+;;
+
 (** Compute whether this failure observation advances the crash counter,
-    consuming empty-completion exemption budget when applicable.  Call exactly
-    once per failure observation, before {!record_failure_observation}. *)
+    consuming empty-completion exemption budget or invalid-request budget
+    when applicable.  Call exactly once per failure observation, before
+    {!record_failure_observation}. *)
 let account_failure_counting ~keeper_name ~is_auto_recoverable err =
   (not is_auto_recoverable)
   || EC.is_runtime_exhausted_error err
   || empty_completion_exemption_exhausted ~keeper_name err
+  || invalid_request_budget_exhausted ~keeper_name err
 ;;
 
 let record_failure_observation

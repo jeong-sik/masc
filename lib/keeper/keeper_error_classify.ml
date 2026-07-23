@@ -708,7 +708,10 @@ let degraded_rotation_after_recoverable_error
             a fresh attempt; this boundary never invents a timed retry cycle. *)
          None)
 
-(** [true] when a structured error indicates context overflow. *)
+(** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
+    provider refused the request body itself (malformed payload, orphan
+    tool-call residues), so same-turn retry is futile.  Also matches legacy
+    string-rendered ["Invalid request"] / ["Bad Request"] messages. *)
 let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
@@ -765,9 +768,14 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
      shapes are exempt via [is_empty_completion_error]; the unmodeled
      stop_reason shape that OAS reports as [InvalidRequest] is NOT an
      empty-completion exemption — it falls under the [InvalidRequest] class
-     (#25592), whose compensating accounting is the per-keeper consecutive
-     counter in [Keeper_unified_turn_failure] (companion change), not this
-     budget.
+     below.
+   - deterministic invalid request (400): bounded by the per-keeper
+     consecutive counter in
+     [Keeper_unified_turn_failure.note_invalid_request_failure]; after
+     [max_consecutive_invalid_request_failures] rejections without an
+     intervening success the observation degrades to ordinary crash
+     accounting, so a poisoned checkpoint cannot retry forever with the
+     counter pinned at 0.
 
    Provider parse rejections used to be listed here and had no such accounting.
    A provider that keeps emitting a malformed stream (for example a tool_call

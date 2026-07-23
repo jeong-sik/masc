@@ -42,6 +42,12 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     [InvalidRequest]. *)
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
+    provider refused the request body itself (malformed payload, orphan
+    tool-call residues), so same-turn retry is futile.  Also matches legacy
+    string-rendered ["Invalid request"] / ["Bad Request"] messages. *)
+val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] for a 0-byte empty completion: the provider ended the turn with a
     modeled, non-overflow stop_reason but returned no content.  Only the two
     typed OAS shapes for this condition match (see the .ml); the unmodeled
@@ -63,9 +69,6 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     ["keeper cycle FAILED"] line as WARN instead of ERROR. This controls log
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
-
-(** [true] when a structured error indicates invalid request or bad request. *)
-val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool

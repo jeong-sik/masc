@@ -440,6 +440,8 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Keeper_registry.reset_turn_failures
       ~base_path:config.Workspace.base_path
       updated_meta.name;
+    Keeper_unified_turn_failure.reset_invalid_request_failures
+      ~keeper_name:updated_meta.name;
     Keeper_unified_turn_failure.note_turn_success updated_meta.name;
     Health.record_success ~agent_name:updated_meta.name
   in

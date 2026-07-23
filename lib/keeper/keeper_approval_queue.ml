@@ -2185,9 +2185,9 @@ let quarantine_summary_exact_attempt_with
                 | Exact_released_recovery_required
                 | Exact_restart_quarantined
                 | Exact_completed ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_status_conflict existing))))
+            Error
+              (Exact_attempt_rejected
+                 (Exact_attempt_status_conflict existing)))))
   in
   publish_exact_attempt_transition ~id result
 ;;

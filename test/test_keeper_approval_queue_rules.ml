@@ -511,7 +511,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
                model_run_id = identity.call_id
              }))
   in
-  let with_exact_status entry status =
+let with_exact_status (entry : AQ.pending_approval) status =
     match entry.exact_attempt with
     | AQ.Exact_bound binding ->
       { entry with

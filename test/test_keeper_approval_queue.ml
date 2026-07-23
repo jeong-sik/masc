@@ -416,6 +416,12 @@ let read_pending_snapshot ~base_path =
   Yojson.Safe.from_file (AQ.For_testing.pending_store_path ~base_path)
 ;;
 
+let read_pending_snapshot_bytes ~base_path =
+  In_channel.with_open_bin
+    (AQ.For_testing.pending_store_path ~base_path)
+    In_channel.input_all
+;;
+
 let write_pending_snapshot ~base_path json =
   let path = AQ.For_testing.pending_store_path ~base_path in
   ensure_dir (Filename.dirname path);
@@ -1611,15 +1617,11 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
        assert_restart_states "first install";
-       let first_snapshot =
-         read_pending_snapshot ~base_path |> Yojson.Safe.to_string
-       in
+       let first_snapshot = read_pending_snapshot_bytes ~base_path in
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
        assert_restart_states "second install";
-       let second_snapshot =
-         read_pending_snapshot ~base_path |> Yojson.Safe.to_string
-       in
+       let second_snapshot = read_pending_snapshot_bytes ~base_path in
        Alcotest.(check string)
          "second install does not rewrite stable exact states"
          first_snapshot
@@ -2613,7 +2615,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 6
+            [ "version", `Int 7
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2644,7 +2646,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 6
+               [ "version", `Int 7
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2673,6 +2675,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
+       let original = read_pending_snapshot_bytes ~base_path in
        (match AQ.install_persistence ~base_path with
         | Ok _ -> Alcotest.fail "unsupported version must fail install"
         | Error
@@ -2690,15 +2693,8 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        let store_path = AQ.For_testing.pending_store_path ~base_path in
        Alcotest.(check bool) "original remains for operator reset" true
          (Sys.file_exists store_path);
-       let preserved = Yojson.Safe.from_file store_path in
-       Alcotest.(check bool) "content preserved verbatim" true
-         (Yojson.Safe.equal
-            preserved
-            (`Assoc
-               [ "version", `Int 6
-               ; "pending", `List []
-               ; "deliveries", `List []
-               ])))
+       let preserved = read_pending_snapshot_bytes ~base_path in
+       Alcotest.(check string) "content preserved byte-for-byte" original preserved)
 ;;
 
 let test_unreadable_snapshot_fails_closed_and_is_preserved () =

@@ -145,6 +145,17 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
+;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
+;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
+;; default; --apply backs up then saves through the locked validated store.
+
+(executable
+ (name masc_checkpoint_purge)
+ (modules masc_checkpoint_purge)
+ (public_name masc-checkpoint-purge)
+ (package masc)
+ (libraries masc masc_core masc.config_dir_resolver agent_sdk unix))
+
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
 
@@ -254,7 +265,7 @@
 (executable
  (name gen_tool_descriptors)
  (modules gen_tool_descriptors)
- (libraries tool_schemas_specs yojson))
+ (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —

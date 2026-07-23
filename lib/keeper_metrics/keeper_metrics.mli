@@ -65,6 +65,8 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalRoutedTotal
+  | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -187,6 +189,7 @@ type t =
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
   | MemoryOsEpisodeRetentionPruned
+  | MemoryOsConsolidationGroupRejected
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts

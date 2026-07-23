@@ -18,6 +18,7 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -28,7 +29,17 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
       { attempts : int
       ; detail : string
       }
@@ -38,6 +49,8 @@ type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason 
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = Keeper_event_queue_persistence.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -319,16 +332,17 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
-let enqueue_exact_stimulus_durable_result ~base_path name stimulus =
+let project_accepted_transfer_durable_result ~base_path name ~transfer =
   match
-    Keeper_event_queue_persistence.enqueue_exact_stimulus_if_absent_result
+    Keeper_event_queue_persistence.project_accepted_transfer_result
       ~base_path
       ~keeper_name:name
       ~after_commit:(publish_pending ~base_path name)
-      stimulus
+      ~transfer
   with
-  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
-  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
+    Stimulus_already_present
   | Error detail -> Stimulus_storage_error detail
 ;;
 

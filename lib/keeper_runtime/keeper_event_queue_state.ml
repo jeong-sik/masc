@@ -12,8 +12,14 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
+    (* The two approval arms are no longer produced: the approval-wake
+       settlement follows the completed turn since the 2026-07-21
+       delivery-not-consumption amendment (#25539, RFC
+       keeper-conversation-hitl-flow). Kept for decoding persisted
+       receipts/WAL rows written before the amendment. *)
 
 type escalation_reason =
   | Failure_judgment_requested
@@ -22,6 +28,8 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -33,12 +41,37 @@ type escalation_reason =
        [compaction_retry_escalation_threshold] consecutive failures the
        settlement escalates instead, surfacing the blocker rather than
        re-firing. *)
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+    (* RFC-0351 S0 / #25538: consecutive provider-overflow episodes reached
+       the threshold even though compactions were committing — the committed
+       savings cannot bring the context under the provider window (an
+       incompressible floor; measured: an LLM plan committing 920B, 0.07% of
+       the checkpoint, reset the streak forever). Distinct from
+       [Compaction_retry_exhausted] so the operator can tell "compaction keeps
+       failing" from "compaction succeeds but cannot help". *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+    (* #25296: a quarantined poisoned checkpoint is preserved unmodified by
+       design, so every re-lease reloads the same incomplete transcript and
+       the admission rejects it again — an unbounded
+       [Requeue Transcript_quarantine_retry] loop. After
+       [transcript_quarantine_retry_escalation_threshold] consecutive
+       quarantine settlements the settlement escalates instead, surfacing the
+       suspended lane to the operator rather than re-firing the full turn
+       pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -79,7 +112,11 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
-  | Compaction_retry_exhausted _ -> false
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
+  | Compaction_retry_exhausted _
+  | Compaction_floor_exceeded _
+  | Transcript_quarantine_retry_exhausted _ -> false
 ;;
 
 type settlement =
@@ -123,13 +160,19 @@ type t =
   ; leases : lease list
   ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
+  ; accepted_transfer_projections : accepted_transfer list
   }
 
 type settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
 
-let schema = "keeper.event_queue.state.v3"
+type transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
+
+let schema = "keeper.event_queue.state.v4"
+let predecessor_schema = "keeper.event_queue.state.v3"
 
 let empty =
   { revision = 0L
@@ -138,6 +181,7 @@ let empty =
   ; leases = []
   ; last_settlement = None
   ; transition_outbox = []
+  ; accepted_transfer_projections = []
   }
 ;;
 
@@ -147,11 +191,63 @@ let pending state = state.pending
 let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
+let accepted_transfer_projections state = state.accepted_transfer_projections
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
   | [] -> None
   | lease :: _ -> Some lease
+;;
+
+let accounted_stimuli state =
+  Keeper_event_queue.to_list state.pending
+  @ List.concat_map (fun (lease : lease) -> lease.stimuli) state.leases
+  @ List.concat_map
+      (fun (entry : outbox_entry) -> entry.stimuli)
+      state.transition_outbox
+;;
+
+let project_accepted_transfer (transfer : accepted_transfer) state =
+  let same_operation (candidate : accepted_transfer) =
+    String.equal candidate.operator_operation_id transfer.operator_operation_id
+  in
+  match List.find_opt same_operation state.accepted_transfer_projections with
+  | Some existing when existing = transfer -> Ok (state, Transfer_already_projected)
+  | Some _ -> Error "target transfer operation ID conflicts with its durable projection"
+  | None ->
+    let same_source (candidate : accepted_transfer) =
+      Keeper_event_queue.stimulus_identity_equal candidate.source transfer.source
+    in
+    (match List.find_opt same_source state.accepted_transfer_projections with
+     | Some _ ->
+       Error "target transfer source identity was already projected by another operation"
+     | None ->
+       let matching =
+         accounted_stimuli state
+         |> List.filter (fun candidate ->
+           Keeper_event_queue.stimulus_identity_equal candidate transfer.source)
+       in
+       (match matching with
+        | [] ->
+          let pending = Keeper_event_queue.enqueue state.pending transfer.source in
+          Ok
+            ( { state with
+                pending
+              ; accepted_transfer_projections =
+                  state.accepted_transfer_projections @ [ transfer ]
+              }
+            , Transfer_projected )
+        | [ existing ] when existing = transfer.source ->
+          Ok
+            ( { state with
+                accepted_transfer_projections =
+                  state.accepted_transfer_projections @ [ transfer ]
+              }
+            , Transfer_already_projected )
+        | [ _ ] ->
+          Error "target transfer source identity has a different durable snapshot"
+        | _ :: _ :: _ ->
+          Error "target transfer source identity is duplicated in durable state"))
 ;;
 
 let mark_transition_projected ~transition_id state =
@@ -299,6 +395,7 @@ let requeue_reason_label = function
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
   | Context_compaction_retry -> "context_compaction_retry"
+  | Transcript_quarantine_retry -> "transcript_quarantine_retry"
   | Approval_grant_unconsumed -> "approval_grant_unconsumed"
   | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
@@ -312,6 +409,7 @@ let requeue_reason_of_label = function
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
   | "context_compaction_retry" -> Ok Context_compaction_retry
+  | "transcript_quarantine_retry" -> Ok Transcript_quarantine_retry
   | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
   | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
@@ -324,7 +422,13 @@ let escalation_reason_label = function
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
+  | Compaction_execution_may_have_dispatched ->
+    "compaction_execution_may_have_dispatched"
+  | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
+  | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
+  | Transcript_quarantine_retry_exhausted _ ->
+    "transcript_quarantine_retry_exhausted"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -336,7 +440,13 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output -> `Null
   | Compaction_retry_exhausted { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Compaction_floor_exceeded { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Transcript_quarantine_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
 ;;
 
@@ -368,6 +478,10 @@ let exact_reason_fields ~context expected fields =
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
   | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
+  | "compaction_execution_may_have_dispatched", `Null ->
+    Ok Compaction_execution_may_have_dispatched
+  | "compaction_domain_invalid_output", `Null ->
+    Ok Compaction_domain_invalid_output
   | "failure_judgment_boundary_failed", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -404,6 +518,52 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_retry_exhausted { attempts; detail })
+  | "compaction_floor_exceeded", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"compaction_floor_exceeded"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "compaction_floor_exceeded.attempts must be positive"
+      | Some _ -> Error "compaction_floor_exceeded.attempts must be an int"
+      | None -> Error "compaction_floor_exceeded.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"compaction_floor_exceeded"
+        "detail"
+        fields
+    in
+    Ok (Compaction_floor_exceeded { attempts; detail })
+  | "transcript_quarantine_retry_exhausted", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"transcript_quarantine_retry_exhausted"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be positive"
+      | Some _ ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be an int"
+      | None ->
+        Error "transcript_quarantine_retry_exhausted.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"transcript_quarantine_retry_exhausted"
+        "detail"
+        fields
+    in
+    Ok (Transcript_quarantine_retry_exhausted { attempts; detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -425,6 +585,9 @@ let escalation_reason_of_wire ~label ~detail_json =
     in
     Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
   | "failure_judgment_requested", _ ->
+    Error (Printf.sprintf "%s reason_detail must be null" label)
+  | ( "compaction_execution_may_have_dispatched"
+    | "compaction_domain_invalid_output" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
   | ( "failure_judgment_boundary_failed"
     | "failure_judgment_external_input_requested" ), _ ->
@@ -611,6 +774,29 @@ let validate_settlement = function
   | Escalate { reason = Compaction_retry_exhausted _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_retry_exhausted _; successor = Some _ } ->
     Error "compaction retry exhaustion must not enqueue a successor"
+  | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> Ok ()
+  | Escalate { reason = Compaction_floor_exceeded _; successor = Some _ } ->
+    Error "compaction floor exhaustion must not enqueue a successor"
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = None
+      } ->
+    Ok ()
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = Some _
+      } ->
+    Error "terminal exact-output compaction must not enqueue a successor"
+  | Escalate { reason = Transcript_quarantine_retry_exhausted _; successor = None }
+    ->
+    Ok ()
+  | Escalate
+      { reason = Transcript_quarantine_retry_exhausted _; successor = Some _ } ->
+    Error "transcript quarantine retry exhaustion must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
@@ -724,11 +910,12 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
+          | Transcript_quarantine_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, a completed context-compaction handoff,
-           and a durable one-shot grant retain the exact leased stimuli
-           without monopolizing the FIFO front. *)
+        (* Retryable provider work, context repair handoffs, and a durable
+           one-shot grant retain the exact leased stimuli without monopolizing
+           the FIFO front. *)
         append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending
@@ -1439,6 +1626,8 @@ let no_compaction_reason_label = function
   | Invalid_structural_source -> "invalid_structural_source"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Execution_may_have_dispatched -> "execution_may_have_dispatched"
+  | Domain_invalid_output -> "domain_invalid_output"
 ;;
 
 let no_compaction_reason_of_label = function
@@ -1446,6 +1635,8 @@ let no_compaction_reason_of_label = function
   | "invalid_structural_source" -> Ok Invalid_structural_source
   | "structurally_unchanged" -> Ok Structurally_unchanged
   | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
+  | "execution_may_have_dispatched" -> Ok Execution_may_have_dispatched
+  | "domain_invalid_output" -> Ok Domain_invalid_output
   | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
 ;;
 
@@ -1695,6 +1886,22 @@ let settlement_of_yojson json =
   | kind -> Error (Printf.sprintf "unknown event queue settlement kind: %s" kind)
 ;;
 
+let accepted_transfer_projection_to_yojson (transfer : accepted_transfer) =
+  settlement_to_yojson (Transfer_accepted transfer)
+;;
+
+let accepted_transfer_projection_of_yojson json =
+  let* settlement = settlement_of_yojson json in
+  match settlement with
+  | Transfer_accepted transfer -> Ok transfer
+  | Ack
+  | No_compaction _
+  | Cancel_accepted _
+  | Settle_from_source_terminal _
+  | Requeue _
+  | Escalate _ -> Error "target transfer projection must contain transfer_accepted"
+;;
+
 let transition_receipt_to_yojson receipt =
   `Assoc
     [ "transition_id", `String receipt.transition_id
@@ -1789,6 +1996,11 @@ let to_yojson state =
         | Some receipt -> transition_receipt_to_yojson receipt )
     ; ( "transition_outbox"
       , `List (List.map outbox_entry_to_yojson state.transition_outbox) )
+    ; ( "accepted_transfer_projections"
+      , `List
+          (List.map
+             accepted_transfer_projection_to_yojson
+             state.accepted_transfer_projections) )
     ]
 ;;
 
@@ -1802,6 +2014,25 @@ let duplicate_by key values =
       else loop (key :: seen) rest
   in
   loop [] values
+;;
+
+let duplicate_transfer_source (transfers : accepted_transfer list) =
+  let rec loop seen (l : accepted_transfer list) =
+    match l with
+    | [] -> None
+    | transfer :: rest ->
+      (match
+         List.find_opt
+           (fun (prior : accepted_transfer) ->
+              Keeper_event_queue.stimulus_identity_equal
+                prior.source
+                transfer.source)
+           seen
+       with
+       | Some prior -> Some (prior, transfer)
+       | None -> loop (transfer :: seen) rest)
+  in
+  loop [] transfers
 ;;
 
 let validate_state state =
@@ -1833,37 +2064,66 @@ let validate_state state =
        | Some transition_id ->
          Error (Printf.sprintf "duplicate event queue transition id: %s" transition_id)
        | None ->
-         let max_sequence =
-           List.fold_left
-             (fun acc (lease : lease) -> Int64.max acc lease.sequence)
-             0L
-             state.leases
-         in
-         let max_sequence =
-           List.fold_left
-             (fun acc entry -> Int64.max acc entry.receipt.lease_sequence)
-             max_sequence
-             state.transition_outbox
-         in
-         let max_sequence =
-           match state.last_settlement with
-           | None -> max_sequence
-           | Some receipt -> Int64.max max_sequence receipt.lease_sequence
-         in
-         if Int64.compare state.next_lease_sequence max_sequence <= 0
-         then
-           Error
-             "event queue next lease sequence must exceed every lease and receipt sequence"
-         else Ok state)
+         (match
+            duplicate_by
+              (fun (transfer : accepted_transfer) -> transfer.operator_operation_id)
+              state.accepted_transfer_projections
+          with
+          | Some operation_id ->
+            Error
+              (Printf.sprintf
+                 "duplicate target transfer projection operation id: %s"
+                 operation_id)
+          | None ->
+            (match duplicate_transfer_source state.accepted_transfer_projections with
+             | Some _ -> Error "duplicate target transfer projection source identity"
+             | None ->
+               let max_sequence =
+                 List.fold_left
+                   (fun acc (lease : lease) -> Int64.max acc lease.sequence)
+                   0L
+                   state.leases
+               in
+               let max_sequence =
+                 List.fold_left
+                   (fun acc entry -> Int64.max acc entry.receipt.lease_sequence)
+                   max_sequence
+                   state.transition_outbox
+               in
+               let max_sequence =
+                 match state.last_settlement with
+                 | None -> max_sequence
+                 | Some receipt -> Int64.max max_sequence receipt.lease_sequence
+               in
+               if Int64.compare state.next_lease_sequence max_sequence <= 0
+               then
+                 Error
+                   "event queue next lease sequence must exceed every lease and receipt sequence"
+               else Ok state)))
 ;;
 
 let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  if not (String.equal schema_value schema)
+  if
+    not
+      (String.equal schema_value schema
+       || String.equal schema_value predecessor_schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
+    let expected_fields =
+      [ "schema"
+      ; "revision"
+      ; "next_lease_sequence"
+      ; "pending"
+      ; "leases"
+      ; "last_settlement"
+      ; "transition_outbox"
+      ]
+      @ if String.equal schema_value schema then [ "accepted_transfer_projections" ] else []
+    in
+    let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
     let* next_lease_sequence = int64_field ~context "next_lease_sequence" fields in
     let* pending_json = required_field ~context "pending" fields in
@@ -1878,6 +2138,16 @@ let of_yojson json =
     let* transition_outbox =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
+    let* accepted_transfer_projections =
+      if String.equal schema_value predecessor_schema
+      then Ok []
+      else
+        list_field
+          ~context
+          "accepted_transfer_projections"
+          accepted_transfer_projection_of_yojson
+          fields
+    in
     validate_state
       { revision
       ; next_lease_sequence
@@ -1885,5 +2155,6 @@ let of_yojson json =
       ; leases
       ; last_settlement
       ; transition_outbox
+      ; accepted_transfer_projections
       }
 ;;

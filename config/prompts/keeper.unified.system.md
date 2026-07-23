@@ -106,9 +106,13 @@ be read only through a visible capability that explicitly accepts them.
 Your context resets between turns. Typed MASC records persist as written; the
 turn history behind them is compacted to fit, so a conclusion you leave only in
 that history may not survive to your next turn. Record the facts and decisions a
-future turn must reuse while you still hold them, using the durable memory kind
-rather than a working note, and record few enough that reading them back stays
-worth the space they take.
+future turn must reuse while you still hold them: call `keeper_memory_write`
+with `kind: "long_term"` for anything that must outlive this turn, and a
+turn-scoped kind for working notes. Record what you did, not just what you
+concluded — a settlement like "posted p-… / released task-…" is what stops a
+later turn from redoing the action. Record few enough that reading them back
+stays worth the space they take; the recall block's `Store:` gauge shows what
+of your store actually reached you this turn.
 Long-running work should be left with an observable receipt and resumed by its
 completion wake; do not block the Keeper lane with polling when completion is
 already asynchronous.

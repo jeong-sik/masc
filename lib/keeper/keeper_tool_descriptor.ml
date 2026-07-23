@@ -328,9 +328,17 @@ let read_file_schema =
          repos/masc. This is explicit only; Read never inherits the previous \
          Execute cwd."
     ; property
+        "offset"
+        "integer"
+        "1-based line number to start reading from (default 1). To continue a \
+         truncated read, pass the next_offset value from the previous response."
+    ; property
         "limit"
         "integer"
-        "Approximate maximum bytes to return. Line offsets are not supported."
+        "Maximum number of LINES to return, counted from offset. The response \
+         is additionally bounded by a byte budget; when more content remains, \
+         the payload sets truncated=true and next_offset for the follow-up \
+         call."
     ]
 ;;
 
@@ -450,6 +458,10 @@ let fetch_web_schema =
 
 let translate_identity input = input
 
+(* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
+   line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
+   [limit] used to be renamed to [max_bytes] here, which silently turned "200
+   lines" into "512 bytes" (the min byte clamp) and starved every code read. *)
 let translate_read_file input =
   match input with
   | `Assoc fields ->
@@ -458,7 +470,6 @@ let translate_read_file input =
       (fun (k, v) ->
          match k with
          | "file_path" -> out := ("path", v) :: !out
-         | "limit" -> out := ("max_bytes", v) :: !out
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)

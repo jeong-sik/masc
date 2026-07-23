@@ -80,6 +80,7 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         | Keeper_turn_driver.Internal_unhandled_exception _
         | Keeper_turn_driver.Internal_bridge_exception _
         | Keeper_turn_driver.Internal_contract_rejected _
+        | Keeper_turn_driver.Incomplete_tool_transcript _
         | Keeper_turn_driver.Receipt_persistence_failed _ ) ->
       of_disposition
         ~source:"typed_error"

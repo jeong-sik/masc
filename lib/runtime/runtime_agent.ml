@@ -225,11 +225,6 @@ let observed_http_transport
       | None -> request.messages
       | Some project -> project request.messages
     in
-    (* #25278: never emit a request whose assistant tool_calls lack matching
-       tool results — the provider rejects it and the keeper wedges every turn.
-       No-op on well-formed lists; applied at the single outgoing-request
-       chokepoint so no assembly path can leak an orphan. *)
-    let messages = Runtime_orphan_tool_calls.drop messages in
     { request with messages }
   in
   provider_http_observation_transport
@@ -457,12 +452,41 @@ let supported_modalities_of_capabilities
   @ (if caps.supports_multimodal_inputs then [ "document" ] else [])
   @ (if caps.supports_audio_input then [ "audio" ] else [])
 
+(* The modality a content block demands of a runtime. The producers
+   ([block_required_modality], [required_modalities_of_content_blocks]) match
+   exhaustively over [content_block], so the set is closed — it travels as a
+   string only because the capability count list and the public
+   [strip_unsupported_modality_blocks] surface are keyed by string. Parsing it
+   back here keeps the decision below exhaustive: the catch-all lives at the
+   parse boundary, not in the capability logic. *)
+type required_modality =
+  | Modality_text
+  | Modality_image
+  | Modality_document
+  | Modality_audio
+
+let required_modality_of_string = function
+  | "text" -> Some Modality_text
+  | "image" -> Some Modality_image
+  | "document" -> Some Modality_document
+  | "audio" -> Some Modality_audio
+  | _ -> None
+
+(* An unrecognised modality reports unsupported rather than supported. The
+   previous [_ -> true] was the permissive-default shape: a string the
+   producers never emit could only arrive through producer/consumer drift, and
+   answering "supported" would send a block the runtime cannot handle to the
+   provider. Answering "unsupported" routes it into the media reroute and
+   degrade paths that already exist, so the drift is visible. Unreachable
+   today — every producer emits one of the four above. *)
 let supports_required_modality
-    (caps : Llm_provider.Capabilities.capabilities) = function
-  | "image" -> caps.supports_image_input
-  | "document" -> caps.supports_multimodal_inputs
-  | "audio" -> caps.supports_audio_input
-  | _ -> true
+    (caps : Llm_provider.Capabilities.capabilities) modality =
+  match required_modality_of_string modality with
+  | Some Modality_text -> true
+  | Some Modality_image -> caps.supports_image_input
+  | Some Modality_document -> caps.supports_multimodal_inputs
+  | Some Modality_audio -> caps.supports_audio_input
+  | None -> false
 
 let supported_non_text_capability_count
     (caps : Llm_provider.Capabilities.capabilities) =
@@ -938,6 +962,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~provider_config:config.provider_cfg
+           ~context_fit_admission:prepared_resume.context_fit_admission
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ()))

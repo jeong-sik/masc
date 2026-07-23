@@ -54,7 +54,8 @@ const PRESENCE_CONFIG: Record<PresenceVisualState, PresenceConfig> = {
   offline: {
     colorClass: 'bg-[var(--color-bg-hover)]',
     pulse: false,
-    label: '오프라인',
+    // Canonical KEEPER_STATUS_LABEL_KO.offline — same word as the band chip.
+    label: '중지',
   },
 }
 
@@ -110,6 +111,10 @@ interface AgentPresenceProps {
   detail?: string | null
   size?: AgentPresenceSize
   testId?: string
+  /** Render the dot (and optional detail) without the text label. Used by
+   *  surfaces that already show a canonical status chip for the same row,
+   *  so the presence label would be a second status text. */
+  showLabel?: boolean
 }
 
 const SIZE_CLASSES = {
@@ -122,6 +127,7 @@ export function AgentPresence({
   detail,
   size = 'sm',
   testId,
+  showLabel = true,
 }: AgentPresenceProps) {
   const summary = summarizeAgentPresence(status, detail, size)
   const config = PRESENCE_CONFIG[summary.state]
@@ -153,7 +159,9 @@ export function AgentPresence({
           aria-label=${config.label}
         ></span>
       </span>
-      <span class="text-xs text-[var(--color-fg-secondary)]">${config.label}</span>
+      ${showLabel
+        ? html`<span class="text-xs text-[var(--color-fg-secondary)]">${config.label}</span>`
+        : null}
       ${summary.detailPresent
         ? html`<span
             class="min-w-0 max-w-[12rem] truncate text-xs text-[var(--color-fg-muted)]"

@@ -724,7 +724,8 @@ let test_read_public_validation_translates_supported_fields () =
     `Assoc
       [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
       ; "cwd", `String "repos/masc"
-      ; "limit", `Int 4096
+      ; "offset", `Int 100
+      ; "limit", `Int 200
       ]
   in
   match
@@ -749,12 +750,26 @@ let test_read_public_validation_translates_supported_fields () =
       (match List.assoc_opt "cwd" fields with
        | Some (`String cwd) -> Some cwd
        | _ -> None);
+    (* The line window passes through untouched: the runtime owns line
+       semantics. Renaming limit to max_bytes here is what turned "200
+       lines" into "512 bytes" and starved every code read (2026-07-21
+       executor loop). *)
     Alcotest.(check (option int))
-      "limit translates to max_bytes"
-      (Some 4096)
-      (match List.assoc_opt "max_bytes" fields with
-       | Some (`Int max_bytes) -> Some max_bytes
-       | _ -> None)
+      "limit passes through as a line cap"
+      (Some 200)
+      (match List.assoc_opt "limit" fields with
+       | Some (`Int limit) -> Some limit
+       | _ -> None);
+    Alcotest.(check (option int))
+      "offset passes through as a line offset"
+      (Some 100)
+      (match List.assoc_opt "offset" fields with
+       | Some (`Int offset) -> Some offset
+       | _ -> None);
+    Alcotest.(check bool)
+      "no max_bytes is synthesized from limit"
+      true
+      (List.assoc_opt "max_bytes" fields = None)
   | Some (Ok (_, other)) ->
     Alcotest.failf "Read translated input is not an object: %s" (Yojson.Safe.to_string other)
   | Some (Error validation_result) ->

@@ -470,8 +470,27 @@ let inventory ~base_path =
       }
 ;;
 
+let cleanup_staging_for_startup ~base_path =
+  let* base_path = canonical_base_path base_path in
+  let staging = staging_dir ~base_path in
+  let report =
+    Eio_guard.run_in_systhread (fun () ->
+      Fs_compat.cleanup_atomic_orphans
+        ~ownership_root:base_path
+        ~base_path:staging
+        ~scope:Fs_compat.Directory_only
+        ())
+  in
+  Eio_guard.check_if_ready ();
+  Ok report
+;;
+
 module For_testing = struct
   let active_directory ~base_path =
     canonical_base_path base_path |> Result.map (fun base_path -> active_dir ~base_path)
+  ;;
+
+  let staging_directory ~base_path =
+    canonical_base_path base_path |> Result.map (fun base_path -> staging_dir ~base_path)
   ;;
 end

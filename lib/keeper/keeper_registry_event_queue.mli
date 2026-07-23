@@ -17,6 +17,7 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -27,7 +28,17 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
       { attempts : int
       ; detail : string
       }
@@ -37,6 +48,8 @@ type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason 
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = Keeper_event_queue_persistence.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -218,13 +231,14 @@ val enqueue_stimulus_durable_result :
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)
 
-val enqueue_exact_stimulus_durable_result :
+val project_accepted_transfer_durable_result :
   base_path:string
   -> string
-  -> Keeper_event_queue.stimulus
+  -> transfer:accepted_transfer
   -> enqueue_stimulus_durable_result
-(** Strict transfer projection: replay succeeds only for the exact full source
-    snapshot. Same identity with changed arrival/payload is a storage conflict. *)
+(** Strict target transfer projection. The exact source and operation identity
+    are durably accounted in the target queue state before the pending
+    projection becomes visible. Accounting survives consumption. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

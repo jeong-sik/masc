@@ -15,6 +15,7 @@ type requeue_reason = State.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -25,7 +26,17 @@ type escalation_reason = State.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
       { attempts : int
       ; detail : string
       }
@@ -35,6 +46,8 @@ type no_compaction_reason = State.no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = State.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -95,6 +108,10 @@ type settle_result =
       ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
       ; detail : string
       }
+
+type transfer_projection_result = State.transfer_projection_result =
+  | Transfer_projected
+  | Transfer_already_projected
 
 let lease_stimuli (lease : lease) = lease.stimuli
 let lease_kind = State.lease_kind
@@ -230,12 +247,10 @@ let read_primary_unlocked owner =
   | Ok (Some json) ->
     (match schema_field json with
      | Error message -> Error (Printf.sprintf "%s: %s" path message)
-     | Ok schema when String.equal schema State.schema ->
+     | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message -> Error (Printf.sprintf "%s: %s" path message))
-     | Ok schema ->
-       Error (Printf.sprintf "%s: unsupported snapshot schema %s" path schema))
+        | Error message -> Error (Printf.sprintf "%s: %s" path message)))
 ;;
 
 let reject_unsupported_inflight owner =
@@ -654,33 +669,21 @@ let enqueue_stimulus_if_absent_result
       Ok (State.with_pending pending state, Enqueued))
 ;;
 
-let accounted_stimuli state =
-  Keeper_event_queue.to_list (State.pending state)
-  @ List.concat_map (fun (lease : lease) -> lease.stimuli) (State.leases state)
-  @ List.concat_map
-      (fun (entry : outbox_entry) -> entry.stimuli)
-      (State.transition_outbox state)
-;;
-
-let enqueue_exact_stimulus_if_absent_result
-      ?(after_commit = fun _ -> ())
+let project_accepted_transfer_result
+      ~after_commit
       ~base_path
       ~keeper_name
-      stimulus
+      ~transfer
   =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    let matching =
-      accounted_stimuli state
-      |> List.filter (fun candidate ->
-        Keeper_event_queue.stimulus_identity_equal candidate stimulus)
-    in
-    match matching with
-    | [] ->
-      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued)
-    | [ existing ] when existing = stimulus -> Ok (state, Already_present)
-    | [ _ ] -> Error "exact stimulus identity exists with a different source snapshot"
-    | _ :: _ :: _ -> Error "exact stimulus identity is duplicated in durable target state")
+  if not (String.equal transfer.to_keeper keeper_name)
+  then Error "target transfer projection owner does not match the durable queue owner"
+  else
+    commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+      match State.project_accepted_transfer transfer state with
+      | Error _ as error -> error
+      | Ok (next, result) ->
+        if next == state then after_commit (State.pending next);
+        Ok (next, result))
 ;;
 
 let update_result ?after_commit ~base_path ~keeper_name f =

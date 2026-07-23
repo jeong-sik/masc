@@ -802,9 +802,6 @@ describe('AgentRoster live-only cards', () => {
 
     expect(container.textContent).toContain('live runtime output preview')
     expect(container.textContent).toContain('keeper_task_claim')
-    expect(container.textContent).toContain('Cognition')
-    expect(container.textContent).toContain('Tool Access')
-    expect(container.textContent).toContain('Runtime Trace')
     expect(container.textContent).not.toContain('stale mission preview')
     expect(container.textContent).not.toContain('stale keeper brief work')
     expect(container.textContent).not.toContain('stale_tool')
@@ -1080,10 +1077,45 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('rondo')
     expect(text).toContain('qa-king')
     expect(text).toContain('일시정지')
-    expect(text).toContain('재개 대기')
-    expect(text).toContain('오프라인')
+    expect(text).not.toContain('재개 대기')
+    expect(text).toContain('중지')
     expect(text).toContain('기동 필요')
     expect(text).not.toContain('상세 상태 부분 동기화')
+  })
+
+  it('renders exactly one status text per keeper row (band chip owns the label)', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'paused',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        paused: true,
+        registered: false,
+        keepalive_running: false,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    expect(row).not.toBeNull()
+    const rowText = row.textContent ?? ''
+    // The canonical band chip is the single status text: no presence label,
+    // no '재개 대기' hint, no restated gloss duplicating '일시정지'.
+    expect(rowText.split('일시정지').length - 1).toBe(1)
+    expect(rowText).not.toContain('재개 대기')
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence).not.toBeNull()
+    expect(presence.textContent).not.toContain('일시정지')
+    // The band chip still carries the canonical label.
+    const chip = row.querySelector('.fl-chip') as HTMLElement
+    expect(chip.textContent).toContain('일시정지')
   })
 
   it('paints a per-row tone rail keyed to runtime band (keeper-v2 Fleet)', async () => {
@@ -1152,7 +1184,7 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('일시정지 rows 2')
     expect(text).toContain('전이 rows 3')
     expect(text).toContain('transient')
-    expect(text).toContain('오프라인 rows 1')
+    expect(text).toContain('중지 rows 1')
   })
 
   it('does not show keeper boot hints on offline non-keeper agent rows', async () => {
@@ -1171,7 +1203,7 @@ describe('AgentRoster live-only cards', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('mission-shadow')
-    expect(text).toContain('오프라인')
+    expect(text).toContain('중지')
     expect(text).toContain('연결 없음')
     expect(text).not.toContain('기동 필요')
   })

@@ -12,6 +12,15 @@ let require_some label = function
   | None -> Alcotest.failf "%s: expected Some" label
 ;;
 
+(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
+   reproduces its unit projection over [resolve_with_policy] so these
+   assertions keep exercising the production resolution path. *)
+let aq_resolve ~base_path ~id ~decision =
+  match Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as error -> error
+;;
+
 let stimulus ?(payload = Queue.Bootstrap) post_id arrived_at : Queue.stimulus =
   { post_id; urgency = Queue.Normal; arrived_at; payload }
 ;;
@@ -1743,7 +1752,7 @@ let test_approved_wake_settles_on_delivery_not_consumption () =
         (Masc.Keeper_approval_queue.storage_error_to_string error)
   in
   (match
-     Masc.Keeper_approval_queue.resolve
+     aq_resolve
        ~base_path
        ~id:approval_id
        ~decision:Masc.Keeper_approval_queue.Decision.Approve

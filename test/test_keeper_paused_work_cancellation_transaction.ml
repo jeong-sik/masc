@@ -724,31 +724,62 @@ let test_transcript_corruption_pause_precedes_settlement () =
 ;;
 
 let test_transcript_corruption_pause_failure_preserves_lease () =
-  let stop = Atomic.make false in
-  let settlement_called = ref false in
-  let result =
-    Heartbeat_testing.commit_transcript_corruption
-      ~stop
-      ~persist_pause:(fun () -> Ok `No_durable_meta)
-      ~settle:(fun () ->
-        settlement_called := true;
-        Ok ())
-      ()
-  in
-  Alcotest.(check bool) "corrupted fiber remains stopped" true (Atomic.get stop);
-  Alcotest.(check bool)
-    "terminal settlement stays locked"
-    false
-    !settlement_called;
-  Alcotest.(check bool)
-    "pause failure is typed"
-    true
-    (match result with
-     | Heartbeat_testing.Transcript_pause_persistence_failed _ -> true
-     | Heartbeat_testing.Transcript_pause_persisted
-     | Heartbeat_testing.Transcript_pause_and_settlement_persisted
-     | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
-       false)
+  with_lane ~registered:false ~paused:false ~generation:24
+    (fun config keeper_name request ->
+       let stop = Atomic.make false in
+       let result =
+         Heartbeat_testing.commit_transcript_corruption
+           ~stop
+           ~persist_pause:(fun () -> Error "injected pause CAS failure")
+           ~settle:(fun () ->
+             Registry_queue.settle_result
+               ~base_path:config.Workspace.base_path
+               keeper_name
+               ~settled_at:4.0
+               ~lease:request.lease
+               ~settlement:
+                 (Registry_queue.Escalate
+                    { reason =
+                        Registry_queue.Transcript_corruption_requires_reset
+                          { detail = "fixture transcript corruption" }
+                    ; successor = None
+                    })
+             |> Result.map (fun _ -> ()))
+           ()
+       in
+       Alcotest.(check bool)
+         "corrupted fiber remains stopped"
+         true
+         (Atomic.get stop);
+       Alcotest.(check bool)
+         "pause CAS failure is typed"
+         true
+         (match result with
+          | Heartbeat_testing.Transcript_pause_persistence_failed _ -> true
+          | Heartbeat_testing.Transcript_pause_persisted
+          | Heartbeat_testing.Transcript_pause_and_settlement_persisted
+          | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
+            false);
+       let state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load lease after pause CAS failure"
+       in
+       (match State.leases state with
+        | [ lease ] ->
+          Alcotest.(check string)
+            "pause CAS failure preserves the exact durable lease"
+            request.lease.lease_id
+            lease.lease_id
+        | leases ->
+          Alcotest.failf
+            "pause CAS failure changed durable lease count: expected 1, got %d"
+            (List.length leases));
+       Alcotest.(check int)
+         "pause CAS failure creates no terminal outbox receipt"
+         0
+         (List.length (State.transition_outbox state)))
 ;;
 
 let test_unleased_transcript_corruption_only_persists_pause () =

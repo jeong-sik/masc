@@ -329,8 +329,8 @@ let () =
 
 let () =
   with_temp_dir "transcript-corruption-pause" (fun base_path ->
-    let config = Workspace.default_config base_path in
-    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let config = Masc.Workspace.default_config base_path in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
     let meta =
       meta_fixture_exn
         (`Assoc
@@ -361,7 +361,7 @@ let () =
            | Keeper_latched_reason.Dead_tombstone )
        | None ->
          false);
-    let generic_resume = Keeper_meta_contract.mark_resumed paused in
+    let generic_resume = KMC.mark_resumed paused in
     check
       "generic resume cannot clear transcript reset-required latch"
       (generic_resume.paused

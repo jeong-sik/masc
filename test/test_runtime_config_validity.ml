@@ -2385,6 +2385,23 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check (list string) "invalid save preserves registry slots" [ "slot-a" ]
       (slots_exn after_invalid);
     let replacement = content ~default:"local.libr" "slot-b" in
+    let failed_path = path ^ ".directory" in
+    Unix.mkdir failed_path 0o755;
+    Fun.protect
+      ~finally:(fun () -> Unix.rmdir failed_path)
+      (fun () ->
+         (match Runtime.save_config_text ~runtime_config_path:failed_path replacement with
+          | Ok () -> fail "directory target must reject atomic runtime save"
+          | Error detail ->
+            check bool "write failure is surfaced" true
+              (String_util.contains_substring detail "save_file_atomic"));
+         check string "write failure preserves runtime cache" "local.chat"
+           (Runtime.get_default_runtime_id ());
+         let after_write_failure = registry_exn () in
+         check int64 "write failure preserves registry generation" stable_generation
+           (Runtime_exact_output_registry.generation after_write_failure);
+         check (list string) "write failure preserves registry slots" [ "slot-a" ]
+           (slots_exn after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());

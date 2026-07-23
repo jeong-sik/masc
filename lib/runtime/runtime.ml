@@ -1718,24 +1718,27 @@ let commit_runtime_config_text ~path content =
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path:path content
   in
-  let commit () =
-    let* () = Fs_compat.save_file_atomic path content in
-    set_loaded ~config_path:path loaded;
-    Ok ()
-  in
-  let* reservation =
+  let* prepared_replacement =
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
     |> Result.map_error (fun error ->
       "exact-output registry replacement rejected: "
       ^ Runtime_exact_output_registry.publication_error_to_string error)
   in
-  match commit () with
+  let* reservation =
+    Runtime_exact_output_registry.reserve_replacement prepared_replacement
+    |> Result.map_error (fun error ->
+      "exact-output registry replacement reservation rejected: "
+      ^ Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  match Fs_compat.save_file_atomic path content with
   | Ok () ->
     (match Runtime_exact_output_registry.finish_replacement reservation with
-     | Ok () -> Ok ()
+     | Ok () ->
+       set_loaded ~config_path:path loaded;
+       Ok ()
      | Error error ->
        failwith
-         ("invariant violation: runtime config file/cache committed but the \
+         ("invariant violation: runtime config file committed but the \
            exact-output registry reservation was inactive; restart is required: "
           ^ Runtime_exact_output_registry.reservation_error_to_string error))
   | Error detail ->

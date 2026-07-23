@@ -162,21 +162,15 @@ let exact_output_snapshot_error_to_string = function
   | Exact_output.Target_binding_missing { target_ref; component } ->
     Printf.sprintf
       "target %S is missing its %s binding"
-      (Exact_output.target_ref_id target_ref)
+      target_ref
       (exact_output_binding_component_to_string component)
   | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
     Printf.sprintf
       "target %S endpoint is invalid: %s"
-      (Exact_output.target_ref_id target_ref)
+      target_ref
       (exact_output_endpoint_error_to_string cause)
   | Exact_output.Environment_read_failed { environment_variable } ->
     Printf.sprintf "failed to read environment variable %s" environment_variable
-  | Exact_output.Target_credential_invalid
-      { target_ref; environment_variable } ->
-    Printf.sprintf
-      "target %S has an invalid credential in environment variable %s"
-      (Exact_output.target_ref_id target_ref)
-      environment_variable
 ;;
 
 let read_exact_output_overlay path =

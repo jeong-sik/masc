@@ -162,6 +162,94 @@ let test_empty_tool_use_id_omitted_from_payload () =
   check bool "empty provider id is omitted" true
     (payload_member "tool_use_id" json = None)
 
+let terminal_projection_string_field ~label key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> value
+     | Some value ->
+       Alcotest.failf
+         "%s field %s expected string, got %s"
+         label
+         key
+         (Yojson.Safe.to_string value)
+     | None -> Alcotest.failf "%s field %s missing" label key)
+  | value ->
+    Alcotest.failf
+      "%s error_detail expected object, got %s"
+      label
+      (Yojson.Safe.to_string value)
+;;
+
+let check_terminal_projection
+      ~label
+      ~secret
+      ~expected_variant
+      ~expected_tool_use_id
+      error
+  =
+  let projection = Error_json.agent_failed_error_projection error in
+  let fields = Error_json.agent_failed_error_fields error in
+  let full_projection = Yojson.Safe.to_string (`Assoc fields) in
+  Alcotest.(check string) (label ^ " summary") expected_variant projection.error;
+  Alcotest.(check bool)
+    (label ^ " top-level summary hides raw detail")
+    false
+    (String_util.contains_substring_ci projection.error secret);
+  Alcotest.(check bool)
+    (label ^ " full fields hide raw detail")
+    false
+    (String_util.contains_substring_ci full_projection secret);
+  Alcotest.(check string)
+    (label ^ " typed variant")
+    expected_variant
+    (terminal_projection_string_field
+       ~label
+       "variant"
+       projection.error_detail);
+  Alcotest.(check string)
+    (label ^ " safe tool use id")
+    expected_tool_use_id
+    (terminal_projection_string_field
+       ~label
+       "tool_use_id"
+       projection.error_detail);
+  Alcotest.(check string)
+    (label ^ " detail digest")
+    Digestif.SHA256.(digest_string secret |> to_hex)
+    (terminal_projection_string_field
+       ~label
+       "detail_digest"
+       projection.error_detail)
+;;
+
+let test_terminal_agent_failure_projection_redacts_detail () =
+  let effect_secret = "terminal-effect-secret-7fe8c90d" in
+  check_terminal_projection
+    ~label:"terminal effect"
+    ~secret:effect_secret
+    ~expected_variant:"terminal_tool_effect_failed"
+    ~expected_tool_use_id:"tool-terminal-safe"
+    (Agent_sdk.Error.Agent
+       (Agent_sdk.Error.TerminalToolEffectFailed
+          { tool_use_id = "tool-terminal-safe"
+          ; effect_disposition = Agent_sdk.Error.proven_post_terminal_effect
+          ; detail = effect_secret
+          }));
+  let durability_secret = "terminal-durability-secret-2cc19a31" in
+  check_terminal_projection
+    ~label:"terminal durability"
+    ~secret:durability_secret
+    ~expected_variant:"terminal_tool_durability_failed"
+    ~expected_tool_use_id:"tool-durable-safe"
+    (Agent_sdk.Error.Agent
+       (Agent_sdk.Error.TerminalToolDurabilityFailed
+          { invocation =
+              invocation ~turn:9 ~planned_index:4 "tool-durable-safe"
+          ; effect_disposition = Agent_sdk.Error.unknown_terminal_effect
+          ; detail = durability_secret
+          }))
+;;
+
 let test_agent_failed_matches_typed_sse_event () =
   let agent_name = "oas-r1" in
   let task_id = "task-failed-1" in
@@ -251,6 +339,8 @@ let () =
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "agent_failed matches typed constructor" `Quick
             test_agent_failed_matches_typed_sse_event
+        ; test_case "terminal agent failures redact raw detail" `Quick
+            test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick
             test_authorization_errors_have_typed_projection
         ] )

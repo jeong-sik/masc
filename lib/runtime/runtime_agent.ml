@@ -1206,8 +1206,10 @@ let run_blocks
                | Error e -> Error e
                | Ok (Agent_sdk.Agent.Advanced.Completed response) ->
                  Ok (`Completed response)
-               | Ok (Agent_sdk.Agent.Advanced.Terminal_tool_completed completion) ->
-                 Ok (`Completed completion.receipt.response)
+               | Ok (Agent_sdk.Agent.Advanced.Terminal_tool_completed _) ->
+                 Error
+                   (Agent_sdk.Error.Internal
+                      "runtime_agent_terminal_tool_completion_unsupported")
                | Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
                  (match !yield_decision, !boundary_response with
                   | Some decision, Some response ->

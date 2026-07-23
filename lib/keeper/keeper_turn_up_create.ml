@@ -190,7 +190,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          session_id above), so pass the raw [trace_id] string, not the typed
          [trace_id_t]. Reuse the reservation for metadata and checkpoint
          creation so they cannot diverge. *)
-      let generation =
+      let nonce =
         Keeper_memory_os_io.next_generation_for_base_path
           ~base_path:ctx.config.base_path
           ~keeper_id:p.name
@@ -255,7 +255,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          generation;
+          nonce;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
@@ -271,7 +271,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           transcript_quarantine_consecutive_retries = 0;
 	          last_blocker = None;
 	          last_runtime_attempt = None;
-	          last_turn_tool_calls = [];
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       oas_env = p.profile_defaults.oas_env;
@@ -286,7 +285,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation
+            ~generation:nonce
           |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -358,7 +357,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("name", `String meta.name);
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.generation);
+          ("generation", `Int meta.runtime.nonce);
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);

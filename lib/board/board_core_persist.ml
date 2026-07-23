@@ -553,7 +553,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 ;;
 
 (** {1 Post Operations} *)
-let create_post
+let create_post_with_audience
       store
       ~author
       ~content
@@ -567,7 +567,7 @@ let create_post
   ?thread_id
   ?origin
   ()
-  : (post, board_error) Result.t
+  : (post_creation, board_error) Result.t
   =
   maybe_sweep store;
   match Agent_id.of_string author with
@@ -596,7 +596,15 @@ let create_post
       ->
     if String.length normalized_body = 0
     then Error (Validation_error "Content cannot be empty")
-    else (
+    else
+      match
+        Board_audience.audience_for_post
+          ~visibility
+          ~title:normalized_title
+          ~content:normalized_body
+      with
+      | Error _ as error -> error
+      | Ok audience ->
       let board_result =
         with_lock store (fun () ->
           match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
@@ -633,11 +641,31 @@ let create_post
       match board_result with
       | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () -> Ok post
+         | Ok () -> Ok { post; audience }
          | Error e ->
            rollback_fresh_post store post;
            Error e)
-      | Error _ as e -> e)
+      | Error _ as e -> e
+;;
+
+let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
+      ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+  =
+  create_post_with_audience
+    store
+    ~author
+    ~content
+    ?title
+    ?body
+    ~post_kind
+    ?meta_json
+    ?visibility
+    ?ttl_hours
+    ?hearth
+    ?thread_id
+    ?origin
+    ()
+  |> Result.map (fun creation -> creation.post)
 ;;
 
 type create_post_once_result =

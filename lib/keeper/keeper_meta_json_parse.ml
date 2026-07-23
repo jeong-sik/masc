@@ -223,7 +223,12 @@ let parse_keeper_state
          ; "site", "retired_auto_resume_field_migration_needed"
          ]
        ());
-  let generation = Safe_ops.json_int ~default:0 "generation" json in
+  (* The OCaml field is [nonce]; the persisted JSON key stays ["generation"] for
+     backward compatibility with existing on-disk meta files (every other JSON
+     surface — keeper status, dashboard — already keeps this key while reading
+     [rt.nonce]). Renaming the key here would load every pre-rename meta file
+     as [nonce = 0] and silently reset the fencing counter. *)
+  let nonce = Safe_ops.json_int ~default:0 "generation" json in
   let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
   let ps_created_at_raw = Safe_ops.json_string ~default:"" "created_at" json in
   let ps_updated_at_raw = Safe_ops.json_string ~default:"" "updated_at" json in
@@ -257,20 +262,6 @@ let parse_keeper_state
     | Some `Null -> None
     | Some (`Assoc _ as json) -> blocker_info_of_json json
     | _ -> None
-	  in
-	  let last_turn_tool_calls =
-	    match json with
-	    | `Assoc fields ->
-	      (match List.assoc_opt "last_turn_tool_calls" fields with
-	       | Some (`List items) ->
-	         List.filter_map
-	           (function
-	            | `Assoc [ ("tool_name", `String n); ("outcome", `String o) ] ->
-	              Some { Keeper_meta_contract.tool_name = n; outcome = o }
-	            | _ -> None)
-	           items
-	       | _ -> [])
-	    | _ -> []
 	  in
 	  let last_runtime_attempt =
 	    match json with
@@ -326,7 +317,7 @@ let parse_keeper_state
       { usage = parse_usage_metrics json
       ; compaction_rt = parse_compaction_runtime json
       ; proactive_rt = parse_proactive_runtime json
-      ; generation
+      ; nonce
       ; trace_id
       ; trace_history
       ; last_handoff_ts
@@ -346,7 +337,6 @@ let parse_keeper_state
             json
 	      ; last_blocker
 	      ; last_runtime_attempt
-	      ; last_turn_tool_calls
 	      }
   }
 ;;

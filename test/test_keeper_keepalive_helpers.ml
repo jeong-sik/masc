@@ -313,6 +313,30 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match route ~audience:targeted_audience ~meta:beta targeted with
      | KBA.Ignore -> true
      | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  (* W1: a non-Keeper target mixed into the audience must not fail the whole
+     classification — the valid Keeper target keeps live routing, and both
+     audience consumers (routing [classify] and structural
+     [mention_ids_of_signal]) project the exact same Keeper id set.
+     [Keeper_id.of_string] mints a raw-fallback id for non-Keeper names
+     (RFC-0232 §3.4), so this also pins that behavior against regressions. *)
+  let mixed_audience =
+    audience_signal ~author:"external-author" "@alpha @human-b inspect"
+  in
+  let mixed_classified = classified mixed_audience in
+  check bool "mixed Keeper and non-Keeper targets still classify" true
+    (match mixed_classified with KBA.Targets _ -> true | _ -> false);
+  check bool "valid Keeper target keeps direct delivery with a mixed audience" true
+    (match route ~audience:mixed_classified ~meta:alpha mixed_audience with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  check bool "both audience consumers project the same Keeper id set" true
+    (match mixed_classified with
+     | KBA.Targets targets ->
+       List.equal
+         Keeper_identity.Keeper_id.equal
+         targets
+         (KWOBS.mention_ids_of_signal mixed_audience)
+     | KBA.Broadcast | KBA.Thread_participants | KBA.Discoverable -> false);
   let discoverable = audience_signal ~author:"external-author" "new research" in
   let discoverable_audience = classified discoverable in
   check bool "new unaddressed post is discoverable" true
@@ -321,6 +345,11 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match route ~audience:discoverable_audience ~meta:alpha discoverable with
      | KBA.Judge_discoverable -> true
      | KBA.Deliver _ | KBA.Ignore -> false);
+  let hearth_only = { discoverable with hearth = Some "@alpha" } in
+  check bool "Board category cannot become recipient authority" true
+    (match classified hearth_only with KBA.Discoverable -> true | _ -> false);
+  check bool "Board category is absent from mention metrics" false
+    (KWOBS.match_signal ~meta:alpha ~signal:hearth_only).explicit_mention;
   let self_authored = audience_signal ~author:"keeper-alpha" "new research" in
   check bool "author lane never judges its own post" true
     (match route ~audience:(classified self_authored) ~meta:alpha self_authored with
@@ -372,21 +401,21 @@ let test_closed_board_audience_routes_only_its_authority () =
   let unsupported = audience_signal ~author:"external-author" "@@analyst inspect" in
   check bool "unsupported broadcast fails closed" true
     (match KBA.classify ~visibility:Board.Internal unsupported with
-     | Error (KBA.Unsupported_broadcast [ "analyst" ]) -> true
+     | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "Direct without targets fails closed" true
     (match KBA.classify ~visibility:Board.Direct discoverable with
-     | Error (KBA.Direct_without_targets "post-audience") -> true
+     | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let mixed = audience_signal ~author:"external-author" "@alpha @@analyst inspect" in
   check bool "mixed direct target and unsupported selector fails closed" true
     (match KBA.classify ~visibility:Board.Internal mixed with
-     | Error (KBA.Unsupported_broadcast [ "analyst" ]) -> true
+     | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   let direct_broadcast = audience_signal ~author:"external-author" "@@all inspect" in
   check bool "@@all on a Direct post fails closed" true
     (match KBA.classify ~visibility:Board.Direct direct_broadcast with
-     | Error (KBA.Broadcast_on_direct "post-audience") -> true
+     | Error (KBA.Invalid_board_audience (Board.Validation_error _)) -> true
      | Error _ | Ok _ -> false);
   check bool "@@all on a non-Direct post still broadcasts" true
     (match KBA.classify ~visibility:Board.Internal direct_broadcast with
@@ -434,7 +463,18 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
   with
   | Error error -> fail (Board.show_board_error error)
   | Ok post ->
-    { signal with post_id = Board.Post_id.to_string post.id }
+    let signal = { signal with post_id = Board.Post_id.to_string post.id } in
+    let audience =
+      match
+        Board.audience_for_post
+          ~visibility:post.visibility
+          ~title:post.title
+          ~content:post.content
+      with
+      | Ok audience -> audience
+      | Error error -> fail (Board.show_board_error error)
+    in
+    { Board_dispatch.signal; audience }
 ;;
 
 let overwrite_file path contents =
@@ -456,7 +496,7 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
        persist_and_register_board_lane config alpha;
        persist_and_register_board_lane config beta;
        persist_and_register_board_lane config gamma;
-       let signal : Board_dispatch.board_signal =
+       let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-multi-lane"
          ; author = "external-author"
@@ -489,25 +529,27 @@ let test_mixed_address_signal_is_dropped_at_routing () =
   Fun.protect
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
-       (* Policy pin (P2-1): a signal mixing a valid [@keeper] target with an
-          unsupported [@@] selector is dropped whole at routing — the valid
-          target is NOT partially routed. *)
+       (* Policy pin (P2-1): a post mixing a valid [@keeper] target with an
+          unsupported [@@] selector is rejected whole — the valid target is
+          NOT partially routed.  #25378 pinned this at routing; the write
+          boundary now rejects the post before any signal exists, which is
+          the same fail-closed policy enforced one layer earlier. *)
        let alpha = make_board_resume_meta "alpha" in
        let beta = make_board_resume_meta "beta" in
        persist_and_register_board_lane config alpha;
        persist_and_register_board_lane config beta;
-       let signal : Board_dispatch.board_signal =
-         { kind = Board_dispatch.Board_post_created
-         ; post_id = "post-mixed-address"
-         ; author = "external-author"
-         ; title = "mixed address"
-         ; content = "@alpha @@analyst inspect"
-         ; hearth = None
-         ; updated_at = Some 125.0
-         }
-         |> persist_board_signal
-       in
-       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       (match
+          Board_dispatch.create_post
+            ~author:"external-author"
+            ~content:"@alpha @@analyst inspect"
+            ~title:"mixed address"
+            ~post_kind:Board.Human_post
+            ~visibility:Board.Internal
+            ()
+        with
+        | Ok _ -> fail "mixed-address post must be rejected at the write boundary"
+        | Error (Board.Validation_error _) -> ()
+        | Error error -> fail (Board.show_board_error error));
        check int "mixed-address target durable queue" 0
          (board_queue_length config "alpha");
        check int "mixed-address non-target durable queue" 0
@@ -535,7 +577,7 @@ let test_paused_exact_mention_is_durable_without_wake () =
         with
         | Ok _ -> ()
         | Error _ -> fail "failed to pause Keeper fixture");
-       let signal : Board_dispatch.board_signal =
+       let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-paused-lane"
          ; author = "external-author"
@@ -573,7 +615,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
         with
         | Ok _ -> ()
         | Error _ -> fail "failed to register Restarting Keeper fixture");
-       let signal : Board_dispatch.board_signal =
+       let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-restarting-lane"
          ; author = "external-author"
@@ -611,7 +653,7 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
        overwrite_file
          (Keeper_types_profile.keeper_meta_path config broken.name)
          "{ malformed Keeper metadata";
-       let signal : Board_dispatch.board_signal =
+       let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-lane-isolation"
          ; author = "external-author"

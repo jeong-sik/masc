@@ -5,10 +5,12 @@ REMOTE="origin"
 HEAD_BRANCH=""
 EXPECTED_HEAD_SHA=""
 PR_NUMBER=""
+BASE_REF=""
 
 usage() {
   cat <<'EOF'
 Usage: scripts/check-pr-sync.sh --head-branch <branch> --expected-head-sha <sha> [--pr-number <num>] [--remote <remote>]
+or --base-ref <ref>
 
 Checks that the current pull-request run is still aligned with the latest remote branch head.
 Fails when the branch has advanced since the workflow payload was created.
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
       PR_NUMBER="${2:-}"
       shift 2
       ;;
+    --base-ref)
+      BASE_REF="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -50,6 +56,22 @@ if [[ -z "$HEAD_BRANCH" || -z "$EXPECTED_HEAD_SHA" ]]; then
   usage >&2
   exit 2
 fi
+
+extract_dune_project_version() {
+  local ref="$1"
+  local pkg
+  pkg="$(git show "${ref}:dune-project" 2>/dev/null \
+    | grep -oE '^[[:space:]]*\(version[[:space:]]+[^)]*\)' \
+    | head -n1 \
+    | sed -E 's/^[[:space:]]*\(version[[:space:]]+//; s/[[:space:]]*\)$//' )"
+  printf '%s\n' "${pkg}"
+}
+
+version_gt() {
+  local left="$1" right="$2"
+  [[ -n "${left}" && -n "${right}" ]] || return 1
+  [[ "${left}" != "${right}" ]] && [[ "$(printf '%s\n%s\n' "${left}" "${right}" | sort -V | tail -n1)" == "${left}" ]]
+}
 
 resolve_remote_head_sha() {
   local remote="$1"
@@ -132,6 +154,47 @@ if [[ "$REMOTE_HEAD_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
     } >> "$GITHUB_STEP_SUMMARY"
   fi
   exit 1
+fi
+
+if [[ -n "$BASE_REF" ]]; then
+  # PRs can be built from a stale base. If base has already moved to a newer
+  # package floor, fail fast with a clear remediation instead of letting
+  # later guard stages decide the outcome.
+  BASE_VERSION="$(extract_dune_project_version "$BASE_REF")"
+  HEAD_VERSION="$(extract_dune_project_version "$EXPECTED_HEAD_SHA")"
+
+  # Fail loud instead of warning-only: with a shallow checkout (default
+  # actions/checkout depth 1) neither origin/<base> nor the head commit
+  # exists locally, both versions come back empty, and the drift gate below
+  # would silently never evaluate. A gate that cannot read its inputs must
+  # fail, not pass.
+  if [[ -z "$BASE_VERSION" ]]; then
+    echo "::error title=PR base package version unreadable::Could not read version from ${BASE_REF}:dune-project. Ensure the base branch is fetched locally (checkout fetch-depth)."
+    exit 1
+  fi
+
+  if [[ -z "$HEAD_VERSION" ]]; then
+    echo "::error title=PR head package version unreadable::Could not read version from ${EXPECTED_HEAD_SHA}:dune-project. Ensure the PR head commit is fetched locally."
+    exit 1
+  fi
+
+  if version_gt "$BASE_VERSION" "$HEAD_VERSION"; then
+    echo "::error title=PR base package version drift::Base (${BASE_REF}) is on package ${BASE_VERSION} but PR head ${EXPECTED_HEAD_SHA} is still ${HEAD_VERSION}."
+    echo "  Rebase this branch onto ${BASE_REF}, then re-run CI."
+
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "## PR Sync Check"
+        echo ""
+        echo "- Branch: \`${HEAD_BRANCH}\`"
+        echo "- PR base reference: \`${BASE_REF}\` (${BASE_VERSION})"
+        echo "- PR head: \`${EXPECTED_HEAD_SHA}\` (${HEAD_VERSION})"
+        echo "- Failure: package version in PR head is behind base"
+        echo "- Recommended fix: rebase branch onto ${BASE_REF}"
+      } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    exit 1
+  fi
 fi
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

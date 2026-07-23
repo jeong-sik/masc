@@ -1448,7 +1448,8 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
   match !seen with
-  | Some signal ->
+  | Some addressed ->
+    let signal = addressed.Board_dispatch.signal in
     (match signal.Board_dispatch.kind with
      | Board_dispatch.Board_reaction_changed
          { target_type; target_id; user_id; emoji; reacted } ->
@@ -1462,6 +1463,9 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
       Alcotest.(check bool) "reacted" true reacted;
       Alcotest.(check string) "parent title" "Reaction parent title" signal.title;
       Alcotest.(check string) "parent content" "reaction parent content @keeper-alpha" signal.content
+      ; (match addressed.audience with
+         | Board.Thread_participants -> ()
+         | _ -> Alcotest.fail "reaction audience must be thread participants")
      | _ -> Alcotest.fail "expected reaction_changed board signal")
   | None -> Alcotest.fail "expected reaction_changed board signal"
 
@@ -1604,6 +1608,65 @@ let test_invalid_author () =
   with
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
+
+let expect_validation_error label = function
+  | Error (Board.Validation_error _) -> ()
+  | Error error -> Alcotest.failf "%s: %s" label (Board.show_board_error error)
+  | Ok _ -> Alcotest.failf "%s: expected Validation_error" label
+;;
+
+let test_direct_post_requires_exact_targets () =
+  expect_validation_error
+    "targetless Direct post"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"private but unaddressed"
+       ~visibility:Board.Direct
+       ~post_kind:Board.Human_post
+       ());
+  expect_validation_error
+    "Direct broadcast"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"@@all private broadcast is contradictory"
+       ~visibility:Board.Direct
+       ~post_kind:Board.Human_post
+       ())
+;;
+
+let test_malformed_target_fails_closed () =
+  expect_validation_error
+    "malformed target"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"please inspect @!"
+       ~post_kind:Board.Human_post
+       ())
+;;
+
+let test_write_boundary_emits_typed_audience () =
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun addressed -> seen := Some addressed);
+  (match
+     Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"@MiXeD-Agent inspect this"
+       ~post_kind:Board.Human_post
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match !seen with
+  | None -> Alcotest.fail "typed Board signal was not emitted"
+  | Some addressed ->
+    (match addressed.Board_dispatch.audience with
+     | Board.Targets [ target ] ->
+       Alcotest.(check string)
+         "Board target retains the typed source identity"
+         "MiXeD-Agent"
+         (Board.Agent_id.to_string target)
+     | _ -> Alcotest.fail "expected one exact Board target")
+;;
 
 (** {1 SubBoard CRUD} *)
 
@@ -2044,6 +2107,12 @@ let () =
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
+      Alcotest.test_case "Direct requires exact targets" `Quick
+        (with_eio test_direct_post_requires_exact_targets);
+      Alcotest.test_case "malformed target fails closed" `Quick
+        (with_eio test_malformed_target_fails_closed);
+      Alcotest.test_case "write emits typed audience" `Quick
+        (with_eio test_write_boundary_emits_typed_audience);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

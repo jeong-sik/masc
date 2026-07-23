@@ -2987,7 +2987,6 @@ module For_testing = struct
       Hashtbl.clear recent_audit_cache)
   ;;
 
-  let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
   let with_pending_store_lock = with_pending_store_lock
 
   let reset_runtime_state () =
@@ -3074,24 +3073,6 @@ let resolve_with_policy
               else Error (Already_resolved id)))
 ;;
 
-(** Resolve a pending approval. Returns [Ok ()] if found and resolved,
-    [Error (Not_found _)] if the id is not in the queue, or
-    [Error (Already_resolved _)] if another concurrent resolution owns the
-    approval claim. A delivery failure leaves the entry pending for retry.
-    Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]) and MCP runtime.
-
-    [base_path] is the authenticated caller workspace. The pending or
-    in-progress delivery entry must belong to it exactly before any resolution
-    claim or journal mutation is attempted. *)
-let resolve ~base_path ~id ~(decision : decision)
-  : (unit, resolve_error) result
-  =
-  match resolve_with_policy ~base_path ~id ~decision () with
-  | Ok _ -> Ok ()
-  | Error _ as error -> error
-;;
-
 (* ── Query ────────────────────────────────────────────────── *)
 
 (** List all pending approvals as JSON. *)
@@ -3117,33 +3098,10 @@ let list_pending_entries () : pending_approval list =
   pending_entries_in_sequence_order ()
 ;;
 
-let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
-  `Assoc
-    (pending_entry_json_fields
-       ~include_input:true
-       entry)
-;;
-
-let get_pending_json ~id : Yojson.Safe.t option =
-  match SMap.find_opt id (Atomic.get pending) with
-  | None -> None
-  | Some entry -> Some (pending_entry_detail_json entry)
-;;
-
-let pending_count () : int = SMap.cardinal (Atomic.get pending)
-
 let pending_count_for_keeper ~keeper_name : int =
   SMap.fold
     (fun _ (entry : pending_approval) count ->
        if String.equal entry.keeper_name keeper_name then count + 1 else count)
     (Atomic.get pending)
     0
-;;
-
-let has_pending_for_keeper ~keeper_name : bool =
-  SMap.fold
-    (fun _ (entry : pending_approval) acc ->
-       acc || String.equal entry.keeper_name keeper_name)
-    (Atomic.get pending)
-    false
 ;;

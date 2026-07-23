@@ -72,14 +72,14 @@ let test_strict_request_codec () =
   let resume =
     common
       "resume_owner"
-      [ "owner_generation", `Int 7
+      [ "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-resume"
       ]
   in
   (match Operator.request_of_yojson resume with
    | Ok
        (Operator.Resume_owner
-         { owner_generation = 7; operator_operation_id = "operator-resume" }) ->
+         { owner_nonce = 7; operator_operation_id = "operator-resume" }) ->
      ()
    | Ok _ -> Alcotest.fail "resume request decoded to the wrong operation"
    | Error detail -> Alcotest.fail detail);
@@ -97,7 +97,7 @@ let test_strict_request_codec () =
       [ "source_state", `String "pending"
       ; "source", Queue.stimulus_to_yojson board_source
       ; "source_revision", int64_json 11L
-      ; "owner_generation", `Int 7
+      ; "owner_nonce", `Int 7
       ; "operator_operation_id", `String "operator-cancel"
       ; "reason", `String "operator rejected retained work"
       ; "settled_at", `Float 3.0
@@ -115,7 +115,7 @@ let test_strict_request_codec () =
       "transfer_owner"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_revision", int64_json 12L
-      ; "owner_generation", `Int 7
+      ; "owner_nonce", `Int 7
       ; "target_generation", `Int 8
       ; "to_keeper", `String "successor"
       ; ( "continuation_binding"
@@ -137,7 +137,7 @@ let test_strict_request_codec () =
       "settle_from_source_terminal"
       [ "source", Queue.stimulus_to_yojson terminal_source
       ; "source_revision", int64_json 13L
-      ; "owner_generation", `Int 7
+      ; "owner_nonce", `Int 7
       ; "source_receipt_kind", `String "hitl_terminal"
       ; "operator_operation_id", `String "operator-source-terminal"
       ; "settled_at", `Float 5.0
@@ -194,7 +194,7 @@ let test_inventory_exposes_exact_durable_fences () =
             Some
               (Keeper_latched_reason.Operator_paused
                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-        ; runtime = { meta.runtime with generation = 17 }
+        ; runtime = { meta.runtime with nonce = 17 }
         }
       in
       Keeper_meta_store.write_meta config meta |> require_ok "persist inventory metadata";
@@ -250,7 +250,7 @@ let test_inventory_exposes_exact_durable_fences () =
           [ "source_state", `String "active_lease"
           ; "lease", lease_json
           ; "source_revision", int64_json (State.revision active_state)
-          ; "owner_generation", `Int 17
+          ; "owner_nonce", `Int 17
           ; "operator_operation_id", `String "operator-cancel-active"
           ; "reason", `String "operator cancelled active retained work"
           ; "settled_at", `Float 4.0

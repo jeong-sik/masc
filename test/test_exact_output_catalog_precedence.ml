@@ -1,5 +1,25 @@
 include Test_exact_output_catalog_precedence_fixture
 
+let require_lane_slots label ~lane_id ~expected registry =
+  match Registry.resolve_lane registry ~lane_id with
+  | Error error ->
+    Alcotest.failf
+      "%s: %s"
+      label
+      (Registry.lane_resolution_error_to_string error)
+  | Ok { selected_slots; unavailable_slots } ->
+    Alcotest.(check int)
+      (label ^ " unavailable")
+      0
+      (List.length unavailable_slots);
+    Alcotest.(check (list string))
+      label
+      expected
+      (List.map
+         (fun (slot : Registry.selected_slot) -> slot.slot_id)
+         selected_slots)
+;;
+
 let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   with_temp_dir "exact-output-catalog-precedence" @@ fun root ->
   let config_root = Filename.concat root "config" in
@@ -399,6 +419,53 @@ let test_registry_skips_typed_unavailable_credentials () =
   | Ok _ -> Alcotest.fail "all-unavailable lane must fail closed"
 ;;
 
+let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs () =
+  with_temp_dir "exact-output-hitl-lane-bootstrap" @@ fun root ->
+  let config_root = Filename.concat root "config" in
+  let base_path = Filename.concat root "workspace" in
+  mkdir_p config_root;
+  mkdir_p base_path;
+  List.iter
+    (fun name -> mkdir_p (Filename.concat config_root name))
+    [ "keepers"; "personas"; "prompts" ];
+  let replacement_path = Filename.concat root "replacement-models.toml" in
+  let runtime_path = Filename.concat config_root "runtime.toml" in
+  write_file replacement_path replacement_catalog;
+  Unix.putenv "MASC_CONFIG_DIR" config_root;
+  Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
+  let create_server_state () =
+    Eio.Switch.run @@ fun sw ->
+    ignore
+      (Server_runtime_bootstrap.create_server_state
+         ~sw
+         ~base_path
+         ~clock
+         ~mono_clock
+         ~net
+         ~proc_mgr
+         ~fs
+         ())
+  in
+  write_file runtime_path (runtime_toml replacement_target);
+  create_server_state ();
+  let default_registry = current_registry "default HITL lane bootstrap" in
+  require_lane_slots
+    "missing HITL lane synthesizes the opaque structured-judge runtime"
+    ~lane_id:"hitl_auto_judge"
+    ~expected:[ Runtime.runtime_id_for_structured_judge () ]
+    default_registry;
+  let explicit_slots = [ replacement_secondary_target; replacement_target ] in
+  write_file
+    runtime_path
+    (runtime_toml ~hitl_slots:explicit_slots replacement_target);
+  create_server_state ();
+  require_lane_slots
+    "explicit HITL lane preserves configured slot order"
+    ~lane_id:"hitl_auto_judge"
+    ~expected:explicit_slots
+    (current_registry "explicit HITL lane bootstrap")
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -416,6 +483,15 @@ let () =
             "full replacement suppresses overlay and embedded targets"
             `Quick
             (test_full_replacement_precedence
+               ~clock
+               ~mono_clock
+               ~net
+               ~proc_mgr
+               ~fs)
+        ; Alcotest.test_case
+            "HITL lane synthesizes an opaque default and preserves explicit order"
+            `Quick
+            (test_hitl_auto_judge_lane_bootstrap
                ~clock
                ~mono_clock
                ~net

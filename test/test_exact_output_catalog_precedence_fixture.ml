@@ -38,11 +38,21 @@ let with_temp_dir prefix f =
 
 let overlay_target = "overlay-only-target"
 let replacement_target = "replacement-only-target"
+let replacement_structured_judge_target = "replacement_provider.replacement"
+let replacement_secondary_target = "replacement-secondary-target"
 let embedded_target = "ollama-cloud-minimax-m3-json"
 
-let catalog_toml ?(api_key_env = "") ~provider_id ~model_id ~target_id () =
-  Printf.sprintf
-    {|[[providers]]
+let catalog_toml
+      ?(api_key_env = "")
+      ?(additional_target_ids = [])
+      ~provider_id
+      ~model_id
+      ~target_id
+      ()
+  =
+  let primary =
+    Printf.sprintf
+      {|[[providers]]
 id = %S
 kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
@@ -70,6 +80,22 @@ model_id = %S
     target_id
     provider_id
     model_id
+  in
+  let additional =
+    List.map
+      (fun target_id ->
+         Printf.sprintf
+           {|[[targets]]
+id = %S
+provider_ref = %S
+model_id = %S
+|}
+           target_id
+           provider_id
+           model_id)
+      additional_target_ids
+  in
+  String.concat "\n" (primary :: additional)
 ;;
 
 let overlay_catalog =
@@ -82,15 +108,18 @@ let overlay_catalog =
 
 let replacement_catalog =
   catalog_toml
+    ~additional_target_ids:
+      [ replacement_structured_judge_target; replacement_secondary_target ]
     ~provider_id:"replacement_provider"
     ~model_id:"replacement-model"
     ~target_id:replacement_target
     ()
 ;;
 
-let runtime_toml lane_target =
-  Printf.sprintf
-    {|[providers.replacement_provider]
+let runtime_toml ?hitl_slots lane_target =
+  let base =
+    Printf.sprintf
+      {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
 
@@ -107,6 +136,14 @@ default = "replacement_provider.replacement"
 slots = [%S]
 |}
     lane_target
+  in
+  match hitl_slots with
+  | None -> base
+  | Some slot_ids ->
+    Printf.sprintf
+      "%s\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\n"
+      base
+      (slot_ids |> List.map (Printf.sprintf "%S") |> String.concat ", ")
 ;;
 
 let failed_runtime_toml =

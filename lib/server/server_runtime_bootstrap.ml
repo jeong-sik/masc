@@ -196,6 +196,24 @@ let load_exact_output_lane_declarations () =
                (List.length errors))))
 ;;
 
+let hitl_auto_judge_lane_id = "hitl_auto_judge"
+
+let ensure_hitl_auto_judge_lane lanes =
+  if
+    List.exists
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id hitl_auto_judge_lane_id)
+      lanes
+  then
+    lanes
+  else
+    lanes
+    @ [ { Runtime_schema.id = hitl_auto_judge_lane_id
+        ; slot_ids = [ Runtime.runtime_id_for_structured_judge () ]
+        }
+      ]
+;;
+
 let configure_exact_output_registry ?config_root () =
   let catalog, catalog_description =
     match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
@@ -227,7 +245,9 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes = load_exact_output_lane_declarations () in
+    let lanes =
+      load_exact_output_lane_declarations () |> ensure_hitl_auto_judge_lane
+    in
     (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
      | Error detail ->
        raise

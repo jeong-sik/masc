@@ -60,8 +60,16 @@ let build_context_bundle ~(entry : pending_approval) =
 
 let message role text = Agent_sdk.Types.text_message role text
 
+let canonical_output_contract =
+  Printf.sprintf
+    "Return exactly one JSON object matching this canonical JSON Schema. Do not \
+     add fields.\n%s"
+    (Yojson.Safe.to_string Schema.hitl_context_summary_schema)
+;;
+
 let messages_for_summary ~system_prompt ~context_bundle =
   [ message Agent_sdk.Types.System system_prompt
+  ; message Agent_sdk.Types.User canonical_output_contract
   ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
   ]
 ;;
@@ -370,6 +378,12 @@ let log_exact_error (entry : pending_approval) operation detail =
     detail
 ;;
 
+let exact_attempt_source_resolved (entry : pending_approval) = function
+  | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
+    String.equal approval_id entry.id
+  | Exact_attempt_storage_error _ | Exact_attempt_rejected _ -> false
+;;
+
 exception Exact_terminalization_persistence_failed of string
 
 let signal_terminalization_persistence_failure
@@ -432,6 +446,9 @@ let quarantine_identity_result
   | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
   | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
     Error ("quarantine durability confirmation failed: " ^ detail)
+  | Error error when exact_attempt_source_resolved entry error ->
+    record_outcome "exact_source_resolved";
+    Ok ()
   | Error error ->
     Error (Keeper_approval_queue.exact_attempt_error_to_string error)
 ;;
@@ -456,7 +473,9 @@ let quarantine_candidate (entry : pending_approval) candidate cause =
 
 let settle_current (entry : pending_approval) ~reason ~cause =
   match Keeper_approval_queue.get_pending_entry ~id:entry.id with
-  | None -> Ok ()
+  | None ->
+    record_outcome "exact_source_resolved";
+    Ok ()
   | Some { exact_attempt = Exact_unbound; _ } ->
     mark_unbound_failure entry reason
   | Some { exact_attempt = Exact_bound binding; _ } ->
@@ -584,6 +603,8 @@ let handle_success
            entry
            "completion sync"
            detail
+       | Error error when exact_attempt_source_resolved entry error ->
+         record_outcome "exact_source_resolved"
        | Error error ->
          record_outcome "exact_terminal_persistence_failure";
          log_exact_error

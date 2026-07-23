@@ -245,6 +245,68 @@ let test_schema_is_closed_nonhierarchical_contract () =
     (schema |> member "additionalProperties" |> to_bool)
 ;;
 
+let test_json_mode_request_carries_canonical_domain_schema () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-json-mode-contract" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-json-mode-contract" ]
+         (F.resolver_snapshot
+            ~supports_structured_output:false
+            ~source:"hitl-json-mode-contract"
+            [ { id = "hitl-json-mode-contract"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path () in
+       Worker.For_testing.execute_prepared_flow
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> ())
+         (prepare_exn entry);
+       let request_body =
+         match F.request_bodies server with
+         | [ body ] -> Yojson.Safe.from_string body
+         | bodies ->
+           failf "expected one JSON-mode request, got %d" (List.length bodies)
+       in
+       let open Yojson.Safe.Util in
+       check
+         string
+         "JSON-only target receives JsonMode"
+         "json_object"
+         (request_body |> member "response_format" |> member "type" |> to_string);
+       let message_text =
+         request_body
+         |> member "messages"
+         |> to_list
+         |> List.map (fun message -> message |> member "content" |> to_string)
+         |> String.concat "\n"
+       in
+       List.iter
+         (fun field ->
+            check bool
+              ("request contains canonical field " ^ field)
+              true
+              (Astring.String.is_infix ~affix:field message_text))
+         [ "context_summary"; "key_questions"; "judgment"; "rationale" ];
+       check bool
+         "request contains closed-schema constraint"
+         true
+         (Astring.String.is_infix
+            ~affix:{|"additionalProperties":false|}
+            message_text))
+;;
+
 let admission_id = function
   | EO.Candidate_admitted candidate -> candidate.identity.candidate_id
   | EO.Candidate_rejected { identity; _ } -> identity.candidate_id
@@ -649,6 +711,74 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
        | _ -> fail "quarantined owner did not preserve its unbound successor")
 ;;
 
+let test_manual_resolution_race_is_conclusive () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-manual-resolution-race" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let in_flight_entry = ref None in
+       let server =
+         F.start_server
+           ~on_request_before_reply:(fun () ->
+             match !in_flight_entry with
+             | None -> fail "manual resolution raced before entry publication"
+             | Some entry ->
+               (match
+                  Q.resolve_with_policy
+                    ~base_path
+                    ~id:entry.id
+                    ~decision:(Q.Decision.Reject "manual operator resolution")
+                    ()
+                with
+                | Ok _ -> ()
+                | Error error -> fail (Q.resolve_error_to_string error)))
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-manual-resolution-race" ]
+         (F.resolver_snapshot
+            ~source:"hitl-manual-resolution-race"
+            [ { id = "hitl-manual-resolution-race"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path () in
+       in_flight_entry := Some entry;
+       let delivered = ref false in
+       let finish_outcome = ref None in
+       (match
+          Worker.For_testing.spawn_with_writers
+            ~sw
+            ~entry
+            ~on_summary:(fun _ -> delivered := true)
+            ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+            ()
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"manual resolution race did not finish"
+         (fun () -> Option.is_some !finish_outcome);
+       check int "in-flight request dispatched exactly once" 1 (F.post_count server);
+       check bool "late Auto Judge summary was not delivered" false !delivered;
+       check bool
+         "manual resolution is conclusive for owner cleanup"
+         true
+         (match !finish_outcome with
+          | Some Worker.Conclusive_terminalization -> true
+          | Some Worker.Terminalization_persistence_uncertain | None -> false);
+       check bool
+         "manually resolved source left pending queue"
+         true
+         (Option.is_none (Q.get_pending_entry ~id:entry.id)))
+;;
+
 let test_cancellation_after_dispatch_is_terminal () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-cancellation" @@ fun base_path ->
@@ -884,6 +1014,10 @@ let () =
             `Quick
             test_schema_is_closed_nonhierarchical_contract
         ; test_case
+            "JSON-mode request carries canonical schema"
+            `Quick
+            test_json_mode_request_carries_canonical_domain_schema
+        ; test_case
             "prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
@@ -917,6 +1051,10 @@ let () =
             "flow execution failure quarantines and blocks owner"
             `Quick
             test_flow_execution_failure_quarantines_and_blocks_owner
+        ; test_case
+            "manual resolution race is conclusive"
+            `Quick
+            test_manual_resolution_race_is_conclusive
         ; test_case
             "post-dispatch cancellation is terminal"
             `Quick

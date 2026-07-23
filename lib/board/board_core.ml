@@ -638,7 +638,16 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
               in
               (match save_reactions_jsonl_result current_snapshot with
                | Ok () -> Error commit_error
-               | Error _ as persistence_error -> persistence_error))))
+               | Error persistence_error ->
+                 (* The durable rollback write also failed, so [persistence_error]
+                    is the error returned to the caller.  Log the superseded
+                    [commit_error] here — otherwise the divergence between the
+                    staged write and the in-memory commit is lost entirely. *)
+                 Log.BoardLog.warn
+                   "reaction commit error superseded by durable rollback failure: commit_error=%s persistence_error=%s"
+                   (Board_types.show_board_error commit_error)
+                   (Board_types.show_board_error persistence_error);
+                 Error persistence_error))))
 ;;
 
 (** {1 SubBoard Operations} *)

@@ -65,41 +65,7 @@ let register_record_pre_compact
   Atomic.set record_pre_compact_callback_atomic f
 ;;
 
-type compaction_rejection =
-  | Exact_target_selection_failed
-  | Exact_admission_failed
-  | Exact_execution_context_unavailable
-  | Exact_execution_failed_before_dispatch
-  | Exact_execution_failed_after_dispatch
-  | Invalid_compaction_plan
-  | Invalid_structure of Keeper_compaction_unit.structural_error
-  | No_eligible_history
-  | Structurally_unchanged
-  | Checkpoint_not_reduced
-  | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
-
-let compaction_rejection_to_tag = function
-  | Exact_target_selection_failed -> "exact_target_selection_failed"
-  | Exact_admission_failed -> "exact_admission_failed"
-  | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
-  | Exact_execution_failed_before_dispatch -> "exact_execution_failed_before_dispatch"
-  | Exact_execution_failed_after_dispatch -> "exact_execution_failed_after_dispatch"
-  | Invalid_compaction_plan -> "invalid_compaction_plan"
-  | Invalid_structure error ->
-    "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
-  | No_eligible_history -> "no_eligible_history"
-  | Structurally_unchanged -> "structurally_unchanged"
-  | Checkpoint_not_reduced -> "checkpoint_not_reduced"
-  | Invalid_structural_evidence _ -> "invalid_structural_evidence"
-;;
-
-let compaction_rejection_to_string = function
-  | Invalid_structural_evidence error ->
-    compaction_rejection_to_tag (Invalid_structural_evidence error)
-    ^ ":"
-    ^ Keeper_compaction_evidence.decode_error_to_string error
-  | reason -> compaction_rejection_to_tag reason
-;;
+include Keeper_compact_rejection
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
@@ -112,6 +78,8 @@ type compaction_preparation =
   { context : working_context
   ; decision : compaction_decision
   ; evidence : Keeper_compaction_evidence.t option
+  ; post_success_terminalizer :
+      Keeper_compaction_llm_summarizer.post_success_terminalizer option
   }
 
 let compaction_decision_to_string = function
@@ -192,6 +160,8 @@ type requested_compaction =
   { messages : Agent_sdk.Types.message list
   ; exact_execution_evidence :
       Keeper_compaction_llm_summarizer.exact_execution_evidence
+  ; post_success_terminalizer :
+      Keeper_compaction_llm_summarizer.post_success_terminalizer
   ; summarized_message_count : int
   ; dropped_message_count : int
   }
@@ -208,24 +178,10 @@ let selected_message_count units selected =
     0
     selected
 ;;
-let summarization_rejection = function
-  | Keeper_compaction_llm_summarizer.Exact_target_selection_failed ->
-    Exact_target_selection_failed
-  | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed
-  | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
-    Exact_execution_context_unavailable
-  | Keeper_compaction_llm_summarizer.Exact_execution_failed_before_dispatch ->
-    Exact_execution_failed_before_dispatch
-  | Keeper_compaction_llm_summarizer.Exact_execution_failed_after_dispatch ->
-    Exact_execution_failed_after_dispatch
-  | Keeper_compaction_llm_summarizer.Invalid_plan -> Invalid_compaction_plan
-;;
-
 let requested_messages_with_plan
       ~(plan_for_units :
          units:Keeper_compaction_unit.closed_unit list ->
-         ( Keeper_compaction_llm_summarizer.compaction_plan
-           * Keeper_compaction_llm_summarizer.exact_execution_evidence
+         ( Keeper_compaction_llm_summarizer.completed_plan
          , Keeper_compaction_llm_summarizer.summarization_failure )
            result)
       messages
@@ -286,14 +242,29 @@ let requested_messages_with_plan
     else
       (match plan_for_units ~units with
        | Error failure -> Error (summarization_rejection failure)
-       | Ok (plan, exact_execution_evidence) ->
+       | Ok completed ->
+         let plan = Keeper_compaction_llm_summarizer.completed_plan completed in
+         let exact_execution_evidence =
+           Keeper_compaction_llm_summarizer.completed_exact_execution_evidence
+             completed
+         in
+         let post_success_terminalizer =
+           Keeper_compaction_llm_summarizer.completed_post_success_terminalizer
+             completed
+         in
             if not (Keeper_compaction_llm_summarizer.has_changes plan)
-            then Error Structurally_unchanged
+            then
+              Error
+                (Exact_execution_terminal
+                   (Keeper_compaction_llm_summarizer.terminalize_post_success
+                      post_success_terminalizer
+                      Keeper_event_queue_state.Domain_invalid_output))
             else
               Ok
                 { messages =
                     Keeper_compaction_llm_summarizer.apply plan @ protected_suffix
                 ; exact_execution_evidence
+                ; post_success_terminalizer
                 ; summarized_message_count =
                     selected_message_count
                       units
@@ -305,16 +276,17 @@ let requested_messages_with_plan
                 }))
 ;;
 
-let requested_messages (meta : keeper_meta) messages =
+let requested_messages ?exact_execution_guard (meta : keeper_meta) messages =
   requested_messages_with_plan
     ~plan_for_units:(fun ~units ->
-      match Keeper_compaction_llm_summarizer.make ~keeper_name:meta.name () with
+      match
+        Keeper_compaction_llm_summarizer.make
+          ?exact_execution_guard
+          ~keeper_name:meta.name
+          ()
+      with
       | None -> Error Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable
-      | Some summarize ->
-        summarize ~units
-        |> Result.map (fun completed ->
-          ( Keeper_compaction_llm_summarizer.completed_plan completed
-          , Keeper_compaction_llm_summarizer.completed_exact_execution_evidence completed )))
+      | Some summarize -> summarize ~units)
     messages
 ;;
 
@@ -387,7 +359,11 @@ let compact_for_request_typed_with
       ~reason
       ~checkpoint_bytes:before_bytes
       ~message_count:before_messages;
-    { context = ctx; decision = Rejected (trigger, reason); evidence = None }
+    { context = ctx
+    ; decision = Rejected (trigger, reason)
+    ; evidence = None
+    ; post_success_terminalizer = None
+    }
   | Ok requested ->
     let checkpoint =
       { (checkpoint_of_context ctx) with messages = requested.messages }
@@ -403,12 +379,26 @@ let compact_for_request_typed_with
         ~reason
         ~checkpoint_bytes:before_bytes
         ~message_count:before_messages;
-      { context = ctx; decision = Rejected (trigger, reason); evidence = None }
+      { context = ctx
+      ; decision = Rejected (trigger, reason)
+      ; evidence = None
+      ; post_success_terminalizer = None
+      }
+    in
+    let terminal cause =
+      Keeper_compaction_llm_summarizer.terminalize_post_success
+        requested.post_success_terminalizer
+        cause
+    in
+    let reject_post_dispatch_domain_output () =
+      reject
+        (Exact_execution_terminal
+           (terminal Keeper_event_queue_state.Domain_invalid_output))
     in
     if after_bytes = before_bytes
-    then reject Structurally_unchanged
+    then reject_post_dispatch_domain_output ()
     else if after_bytes > before_bytes
-    then reject Checkpoint_not_reduced
+    then reject_post_dispatch_domain_output ()
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =
@@ -420,8 +410,10 @@ let compact_for_request_typed_with
       match
         let exact = requested.exact_execution_evidence in
         Keeper_compaction_evidence.create
-          ~selected_target_ref:
-            (Keeper_compaction_llm_summarizer.exact_execution_evidence_selected_target_ref exact)
+          ~slot_id:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_slot_id exact)
+          ~call_id:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_call_id exact)
           ~target_identity_fingerprint:
             (Keeper_compaction_llm_summarizer.exact_execution_evidence_target_identity_fingerprint exact)
           ~catalog_generation_fingerprint:
@@ -445,7 +437,11 @@ let compact_for_request_typed_with
           ~before_tool_result_count
           ~after_tool_result_count
       with
-      | Error error -> reject (Invalid_structural_evidence error)
+      | Error error ->
+        reject
+          (Invalid_structural_evidence
+             ( error
+             , terminal Keeper_event_queue_state.Invalid_structural_evidence ))
       | Ok evidence ->
         let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit
@@ -468,13 +464,31 @@ let compact_for_request_typed_with
         { context = compacted_ctx
         ; decision = Prepared trigger
         ; evidence = Some evidence
+        ; post_success_terminalizer = Some requested.post_success_terminalizer
         })
 ;;
 
-let compact_for_request_typed ~meta ~trigger ctx =
+let compact_for_request_typed ?exact_execution_guard ~meta ~trigger ctx =
   compact_for_request_typed_with
-    ~requested_messages:(requested_messages meta)
+    ~requested_messages:(requested_messages ?exact_execution_guard meta)
     ~meta
     ~trigger
     ctx
 ;;
+
+module For_testing = struct
+  let compact_for_request_typed_with_accounting
+        ~plan_for_units
+        ~summarized_message_count_override
+        ~meta
+        ~trigger
+        ctx
+    =
+    let requested_messages messages =
+      requested_messages_with_plan ~plan_for_units messages
+      |> Result.map (fun requested ->
+        { requested with summarized_message_count = summarized_message_count_override })
+    in
+    compact_for_request_typed_with ~requested_messages ~meta ~trigger ctx
+  ;;
+end

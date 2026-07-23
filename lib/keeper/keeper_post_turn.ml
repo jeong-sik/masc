@@ -190,7 +190,7 @@ let compaction_recovery_error_to_string = function
       source.generation
       source.turn_count
       source.sha256
-      (Keeper_event_queue_state.no_compaction_reason_label reason)
+      (Keeper_event_queue_state.no_compaction_reason_to_string reason)
   | Retry_suspended { consecutive_failures } ->
     Printf.sprintf
       "compaction retry suspended after %d consecutive failures; reactive \
@@ -491,24 +491,22 @@ let apply_post_turn_lifecycle_with_resilience_handles
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
-let commit_prepared_after_save ~trigger ~save =
-  match save () with
-  | Error _ as error -> error
-  | Ok checkpoint -> Ok (checkpoint, trigger)
-;;
-
 let terminal_reason_of_rejection = function
   | Keeper_compact_policy.No_eligible_history ->
     Some Keeper_event_queue_state.No_eligible_history
   | Invalid_structure _ -> Some Invalid_structural_source
   | Structurally_unchanged -> Some Structurally_unchanged
   | Checkpoint_not_reduced -> Some Checkpoint_not_reduced
-  | Invalid_compaction_plan -> Some Domain_invalid_output
-  | Exact_execution_failed_after_dispatch ->
-    Some Execution_may_have_dispatched
-  | Invalid_structural_evidence _
+  | Exact_execution_terminal terminal ->
+    Some (Keeper_event_queue_state.Exact_execution_terminal terminal)
+  | Invalid_structural_evidence (_, terminal) ->
+    Some (Keeper_event_queue_state.Exact_execution_terminal terminal)
+  | Exact_lane_unconfigured ->
+    Some Keeper_event_queue_state.Exact_lane_unconfigured
+  | Invalid_compaction_plan
   | Exact_target_selection_failed
   | Exact_admission_failed
+  | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
   | Exact_execution_failed_before_dispatch -> None
 ;;
@@ -522,10 +520,21 @@ type prepared_compaction =
   ; projection_target : Keeper_compaction_projection_target.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
+  ; post_success_terminalizer :
+      Keeper_compaction_llm_summarizer.post_success_terminalizer
   }
 
-let no_compaction_of_uncommitted_prepared prepared =
-  { source = prepared.source_ref; reason = Execution_may_have_dispatched }
+let no_compaction_of_uncommitted_prepared
+      ?(cause = Keeper_event_queue_state.Commit_admission_unavailable)
+      prepared
+  =
+  { source = prepared.source_ref
+  ; reason =
+      Exact_execution_terminal
+        (Keeper_compaction_llm_summarizer.terminalize_post_success
+           prepared.post_success_terminalizer
+           cause)
+  }
 ;;
 
 let prepare_compaction_admitted
@@ -587,8 +596,13 @@ let prepare_compaction_admitted
         ~trigger
         ctx
     in
-    (match preparation.decision, preparation.evidence with
-     | Keeper_compact_policy.Prepared _, None ->
+    (match
+       preparation.decision,
+       preparation.evidence,
+       preparation.post_success_terminalizer
+     with
+     | Keeper_compact_policy.Prepared _, None, _
+     | Keeper_compact_policy.Prepared _, _, None ->
        (* Prepared-without-evidence is a planner invariant violation (a bug),
           not a deterministic no-op: it must surface as a visible failure,
           never settle as a durable terminal no-compaction. *)
@@ -596,7 +610,9 @@ let prepare_compaction_admitted
          (Checkpoint_candidate_failed
             "compaction preparation completed without structural evidence \
              (planner invariant violation)")
-     | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
+     | Keeper_compact_policy.Prepared prepared_trigger,
+       Some evidence,
+       Some post_success_terminalizer ->
        Ok
          { session
          ; source_ref
@@ -606,14 +622,15 @@ let prepare_compaction_admitted
          ; projection_target
          ; context = preparation.context
          ; evidence
+         ; post_success_terminalizer
          }
-     | Keeper_compact_policy.Rejected (_, reason), _ ->
+     | Keeper_compact_policy.Rejected (_, reason), _, _ ->
        (match terminal_reason_of_rejection reason with
         | Some reason -> Error (No_compaction { source = source_ref; reason })
         | None -> Error (Compaction_rejected reason))
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
-       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
+       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _, _ ->
        (* Reaching recovery with a non-preparation decision is an invariant
           violation: surface it as a visible failure with the decision
           detail, never as a hidden terminal no-compaction. *)
@@ -658,9 +675,21 @@ let prepare_compaction_with
       ~projection_request
 ;;
 
-let prepare_compaction =
+let prepare_compaction
+      ?exact_execution_guard
+      ~base_dir
+      ~meta
+      ~trigger
+      ~projection_request
+      ()
+  =
   prepare_compaction_with
-    ~compact_for_request:Keeper_compact_policy.compact_for_request_typed
+    ~compact_for_request:
+      (Keeper_compact_policy.compact_for_request_typed ?exact_execution_guard)
+    ~base_dir
+    ~meta
+    ~trigger
+    ~projection_request
 ;;
 
 let commit_prepared_compaction (prepared : prepared_compaction)
@@ -676,38 +705,34 @@ let commit_prepared_compaction (prepared : prepared_compaction)
       ; projection_target
       ; context
       ; evidence
+      ; post_success_terminalizer = _
       } =
     prepared
   in
+  let terminal cause =
+    Error
+      (No_compaction
+         (no_compaction_of_uncommitted_prepared ~cause prepared))
+  in
   (try
      match
-       commit_prepared_after_save
-         ~trigger:prepared_trigger
-         ~save:(fun () ->
-           save_oas_checkpoint_if_source
-             ~multimodal_policy:retry_meta.multimodal_policy
-             ~keeper_name:retry_meta.name
-             ~session
-             ~agent_name:retry_meta.agent_name
-             ~ctx:context
-             ~generation:turn_generation
-             ~expected_source_ref:source_ref
-           |> Result.map_error (function
-             | Tool_history_invalid _ ->
-               No_compaction
-                 { source = source_ref
-                 ; reason = Keeper_event_queue_state.Invalid_structural_source
-                 }
-             | Persistence_error error -> Checkpoint_cas_failed error))
+       save_oas_checkpoint_if_source
+         ~multimodal_policy:retry_meta.multimodal_policy
+         ~keeper_name:retry_meta.name
+         ~session
+         ~agent_name:retry_meta.agent_name
+         ~ctx:context
+         ~generation:turn_generation
+         ~expected_source_ref:source_ref
      with
-     | Ok ((saved_checkpoint, installed_ref), trigger) ->
+     | Ok (saved_checkpoint, installed_ref) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
          ();
        Ok
          { checkpoint = saved_checkpoint
-         ; trigger
+         ; trigger = prepared_trigger
          ; evidence
          ; turn_generation
          ; projection_target =
@@ -715,13 +740,12 @@ let commit_prepared_compaction (prepared : prepared_compaction)
                installed_ref
                projection_target
          }
-     | Error
-         (Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed actual) as error) ->
+     | Error (Persistence_error (Keeper_checkpoint_store.Source_changed actual)) ->
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
-       Error error
-     | Error (Checkpoint_cas_failed cas_error as error) ->
+       terminal Keeper_event_queue_state.Checkpoint_source_changed
+     | Error (Persistence_error cas_error) ->
        let detail = checkpoint_cas_error_detail cas_error in
        Log.Keeper.error "compaction checkpoint save failed: %s" detail;
        Otel_metric_store.inc_counter
@@ -730,25 +754,38 @@ let commit_prepared_compaction (prepared : prepared_compaction)
            [ "keeper", retry_meta.agent_name
            ; ( "operation"
              , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
-           ]
+         ]
          ();
-       Error error
-     | Error error -> Error error
+       terminal Keeper_event_queue_state.Checkpoint_persistence_failed
+     | Error (Tool_history_invalid _) ->
+       terminal Keeper_event_queue_state.Invalid_structural_source_after_dispatch
    with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | Eio.Cancel.Cancelled _ ->
+     terminal Keeper_event_queue_state.Execution_cancelled_after_dispatch
    | exn ->
      let detail = Printexc.to_string exn in
      log_keeper_exn ~label:"compaction checkpoint save exception" exn;
-     Error (Checkpoint_candidate_failed detail))
+     Log.Keeper.error "compaction checkpoint save exception became terminal: %s" detail;
+     terminal Keeper_event_queue_state.Checkpoint_persistence_failed)
 ;;
 
 let recover_latest_checkpoint_for_compaction
+    ?exact_execution_guard
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
     ~projection_request
+    ()
   : (compaction_recovery, compaction_recovery_error) result =
-  match prepare_compaction ~base_dir ~meta ~trigger ~projection_request with
+  match
+    prepare_compaction
+      ?exact_execution_guard
+      ~base_dir
+      ~meta
+      ~trigger
+      ~projection_request
+      ()
+  with
   | Error _ as error -> error
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

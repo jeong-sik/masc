@@ -202,6 +202,7 @@ let prepare_failure_judgment_turn
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
+      ?exact_execution_guard
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -236,6 +237,7 @@ let run_keeper_cycle_admitted
       | `Run observation ->
         `Turn
           (Keeper_unified_turn.run_keeper_cycle
+             ?exact_execution_guard
              ~config:ctx.config
              ~meta:meta_after_triage
              ~publication_recovery_provider:ctx.publication_recovery_provider
@@ -316,6 +318,7 @@ let run_keeper_cycle_admitted
 
 let run_keeper_cycle_with
       ~run_manual_compaction
+      ?exact_execution_guard
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -370,6 +373,7 @@ let run_keeper_cycle_with
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (run_keeper_cycle_admitted
+           ?exact_execution_guard
            ~ctx
            ~meta_after_triage
            ~stop
@@ -398,8 +402,10 @@ let run_keeper_cycle_with
        stimulus as Ack, so a yielded follow-up does not replay compaction. *)
     (match
        run_manual_compaction
+         ?exact_execution_guard
          ~config:ctx.config
          ~meta:meta_after_triage
+         ()
      with
      | `Busy block -> busy_outcome block
      | `Compaction_failed failure ->
@@ -418,6 +424,7 @@ let run_keeper_cycle_with
 ;;
 
 let run_keeper_cycle
+      ?exact_execution_guard
       ?event_bus
       ?hitl_resolution
       ?continuation_delivery_channel
@@ -434,6 +441,7 @@ let run_keeper_cycle
   =
   run_keeper_cycle_with
     ~run_manual_compaction:Keeper_manual_compaction.run_admitted
+    ?exact_execution_guard
     ?event_bus
     ?hitl_resolution
     ?continuation_delivery_channel

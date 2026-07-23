@@ -3,7 +3,7 @@
 > Status: **Draft / Candidate SSOT** — `main` 병합 전에는 정본이 아님
 > Consolidates: ~65 design/audit sources (see §10 Evidence Source Index); 이 PR은 원문을 archive하지 않음
 > Last-updated: **2026-07-23**
-> OAS pin snapshot: **agent_sdk 0.220.5** at `5851df2e276872d640769813f2000642f7bd56d3`. 값의 정본은 `scripts/oas-agent-sdk-pin.sh`와 lockfile이며 이 문서가 아님. See §2.6.
+> OAS pin snapshot: **agent_sdk 0.221.0** at `0f1df2a423d487e854af5b8559c6d1e2daec6de9`. 값의 정본은 `scripts/oas-agent-sdk-pin.sh`와 lockfile이며 이 문서가 아님. See §2.6.
 > Scope: MASC (Multi-Agent Streaming Coordination) + OAS (OCaml Agent SDK) product line.
 
 ---
@@ -13,7 +13,7 @@
 - [0. Meta — how agents use this doc](#0-meta)
 - [1. North Star & Non-Goals](#1-north-star--non-goals)
 - [2. The Boundary Law (+ crossover findings)](#2-the-boundary-law)
-- [2.6 OAS Version Pin & Current 0.220.5 Contract](#26-oas-version-pin)
+- [2.6 OAS Version Pin & Current 0.221.0 Contract](#26-oas-version-pin)
 - [3. Subsystem cards (direction + audited snapshot)](#3-subsystem-ssot)
   - [3.1 Board](#31-board) · [3.2 Legacy Goal (retired)](#32-goal) · [3.3 Task](#33-task) · [3.4 Effect Permission Boundary](#34-hitlgate) · [3.5 Scheduler](#35-scheduler) · [3.6 Connector](#36-connector) · [3.7 Fusion](#37-fusion) · [3.8 Keeper (Lane-Per-Keeper)](#38-keeper-lane-per-keeper) · [3.9 Memory](#39-memory) · [3.10 Runtime (Provider/Model catalog)](#310-runtime-providermodel-catalog) · [3.11 Dashboard-Chat](#311-dashboard-chat)
   - [3.12 OAS Internals (pure library)](#312-oas-internals) · [3.13 Keeper-as-a-Tool (cross-model invocation)](#313-keeper-as-a-tool) · [3.14 IDE Observation Plane v2](#314-ide-observation-plane-v2) · [3.15 Keeper-Config SSOT](#315-keeper-config-ssot)
@@ -208,23 +208,23 @@ consumer ──▶ MASC (workspace collaboration / orchestration) ──depends 
 상세 근거는 §4.13에 보존한다. §4.13은 별도 first-class goal 묶음이 아니라 이 표의 설명 appendix다.
 
 <a name="26-oas-version-pin"></a>
-### 2.6 OAS Version Pin & Current 0.220.5 Contract
+### 2.6 OAS Version Pin & Current 0.221.0 Contract
 
 MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치**로 고정한다. 과거 crossover 버전 서술은 pin 값이 아니다 — 아래가 현재 pin 값이다.
 
 | 위치 | 내용 | 의미 |
 |------|------|------|
-| `dune-project:62` | `(agent_sdk (>= 0.220.5))` | 빌드 제약(하한) |
-| `masc.opam:33` | `"agent_sdk" {>= "0.220.5"}` | opam 제약(하한) |
-| `masc.opam.locked:14` | `"agent_sdk" {= "0.220.5"}` | **정확 pin (= 0.220.5)** |
-| `masc.opam.locked:220-221` | `agent_sdk.0.220.5` @ `git+https://github.com/jeong-sik/oas.git#5851df2e276872d640769813f2000642f7bd56d3` | 소스 SHA 고정 |
+| `dune-project:62` | `(agent_sdk (>= 0.221.0))` | 빌드 제약(하한) |
+| `masc.opam:33` | `"agent_sdk" {>= "0.221.0"}` | opam 제약(하한) |
+| `masc.opam.locked:14` | `"agent_sdk" {= "0.221.0"}` | **정확 pin (= 0.221.0)** |
+| `masc.opam.locked:220-221` | `agent_sdk.0.221.0` @ `git+https://github.com/jeong-sik/oas.git#0f1df2a423d487e854af5b8559c6d1e2daec6de9` | 소스 SHA 고정 |
 | `scripts/oas-agent-sdk-pin.sh` | pin SHA + rationale | **pin SSOT** (dune-project:60 주석이 이 스크립트를 정본으로 지목) |
 
-- **현재 pinned = agent_sdk 0.220.5** (release SHA `5851df2e276872d640769813f2000642f7bd56d3`). MASC는 `Tool.WithExecutionEnv`의 exact invocation occurrence와 exact `Tool_attempt` child binding을 소비할 수 있다.
-- pin된 `v0.220.5`에서 `Durable_event`는 legacy journal/idempotency surface이며 append는 명시적으로 `save_to_file`을 호출하지 않으면 in-memory에 머문다. `Journal_bridge`는 append 이후의 `Event_bus` projection이고, `Raw_trace`는 별도로 구성하는 JSONL observation sink이지 두 번째 canonical execution-history writer가 아니다. 이 세 surface는 하나의 atomic commit도 아니다(oas@`5851df2e276872d640769813f2000642f7bd56d3`, 2026-07-23 KST 감사). 따라서 production single-writer hard cut과 Goal의 Journal sole-writer acceptance는 아직 미충족이다.
+- **현재 pinned = agent_sdk 0.221.0** (release SHA `0f1df2a423d487e854af5b8559c6d1e2daec6de9`). MASC는 `Tool.WithExecutionEnv`의 exact invocation occurrence와 exact `Tool_attempt` child binding을 소비할 수 있다.
+- pin된 `v0.221.0`에서 `Durable_event`는 legacy journal/idempotency surface이며 append는 명시적으로 `save_to_file`을 호출하지 않으면 in-memory에 머문다. `Journal_bridge`는 append 이후의 `Event_bus` projection이고, `Raw_trace`는 별도로 구성하는 JSONL observation sink이지 두 번째 canonical execution-history writer가 아니다. 이 세 surface는 하나의 atomic commit도 아니다(oas@`0f1df2a423d487e854af5b8559c6d1e2daec6de9`, 2026-07-23 KST 감사). 따라서 production single-writer hard cut과 Goal의 Journal sole-writer acceptance는 아직 미충족이다.
 - OAS main은 pin 뒤로도 계속 전진한다(2026-07-20 확인 시 upstream main `658a910911` — `check-oas-pin.sh`가 drift warning으로 보고). 미발행 main을 MASC pin으로 간주하지 않으며, 다음 pin은 release artifact와 surface drift 검증 뒤 별도 slice로 진행한다.
 
-> [근거] `scripts/oas-agent-sdk-pin.sh:4,65-66`, `scripts/oas-api-surface.json:2-3`; 2026-07-23 KST 확인; 신뢰도 High. 이후 값은 pin script/release 상태가 정본이다.
+> [근거] `scripts/oas-agent-sdk-pin.sh:4,18,22`, `scripts/oas-api-surface.json:2-3`; 2026-07-23 KST 확인; 신뢰도 High. 이후 값은 pin script/release 상태가 정본이다.
 
 ---
 
@@ -338,7 +338,7 @@ MASC가 소비하는 OAS(agent_sdk) 버전을 **정확한 값**과 **핀 위치*
 - **경계 계약:** MASC policy code는 logical use/declared capability/profile order/health/capacity/receipt state로 라우팅 — vendor/model 리터럴에 branch 안 함. `max_tokens` synthesis 금지(oas 0.211.0 + #24098): override 없으면 omit, provider default 사용. capability = serving-runtime × model(WHAT), NOT host/URL(WHERE). unknown host/provider/model/label → Unknown/None/fail-closed. path→wire-protocol(Responses vs Chat)은 exact-string exhaustive match만. cache key는 FULL contract에서 재구성. 각 streaming retry attempt buffered, 정확히 하나의 committed attempt만 consumer에 visible. OAS pricing은 telemetry-only, execution gate 아님.
 - **불변식:** provider failover는 ordered candidate lane. 첫 provider 500 → 두 번째 성공; 전부 소진 → typed "runtime lane exhausted" error; attempt당 manifest row 1개. unknown model pricing → typed Unknown/option(silent $0 금지).
 - **결정론↔LLM:** 라우팅/failover는 전부 결정론(라우팅에 의미 판단 없음). whole-run lifetime은 caller-owned Eio scope이며 implicit watchdog·timeout·LLM re-task 예외를 만들지 않는다(§4.13 CF-2).
-- **현재 상태:** provider failover machinery는 **존재+테스트됨**(문서의 "삭제/fallback 없음"은 오류) — `keeper_turn_driver.attempt_runtime_candidates`(`:122`, `run_named` `:504`에서 호출)가 `candidate::rest`를 순회하며 `Error` 시 다음 candidate 시도, 소진 시 `"runtime lane exhausted all candidates"`; 회귀 `test/test_keeper_turn_driver_failover.ml`(**17 case**, 2026-07-20 `rg -c 'Alcotest.test_case'` — 옛 "6 case"는 stale). **단 SSOT 우회는 사실**: `Runtime_attempt_fsm.decide`는 0-caller이고 driver는 inline `should_try_next`를 씀. RFC-0153 saturation signal은 삭제 완료(2026-07-21: `OllamaSaturationSkip` variant + `ollama_saturated` 분류기 + 고아 주석 제거, delete 분기 선택); voice_bridge가 model/voice ID 하드코딩(`voice_bridge.ml:42/143/154/830` scribe_v2/Sarah/eleven_multilingual_v2, silent `Error _ ->` swallow); pinned OAS(`9fef71ded`) pricing은 **fail-closed** — `pricing_for_model_opt`이 `pricing option`을 반환하고 unknown model은 `None`(`pricing.mli:1-5` "never classified as free", inline test `pricing.ml:217`; 옛 "unknown model→$0, RFC-OAS-018 Phase 2 deferred"는 stale).
+- **현재 상태:** provider failover machinery는 **존재+테스트됨**(문서의 "삭제/fallback 없음"은 오류) — `keeper_turn_driver.attempt_runtime_candidates`(`:122`, `run_named` `:504`에서 호출)가 `candidate::rest`를 순회하며 `Error` 시 다음 candidate 시도, 소진 시 `"runtime lane exhausted all candidates"`; 회귀 `test/test_keeper_turn_driver_failover.ml`(**17 case**, 2026-07-20 `rg -c 'Alcotest.test_case'` — 옛 "6 case"는 stale). **단 SSOT 우회는 사실**: `Runtime_attempt_fsm.decide`는 0-caller이고 driver는 inline `should_try_next`를 씀. RFC-0153 saturation signal은 삭제 완료(2026-07-21: `OllamaSaturationSkip` variant + `ollama_saturated` 분류기 + 고아 주석 제거, delete 분기 선택); voice_bridge가 model/voice ID 하드코딩(`voice_bridge.ml:42/143/154/830` scribe_v2/Sarah/eleven_multilingual_v2, silent `Error _ ->` swallow); pinned OAS v0.221.0 (`0f1df2a`) pricing은 **fail-closed** — `pricing_for_model_opt`이 `pricing option`을 반환하고 unknown model은 `None`(`pricing.mli:1-5` "never classified as free", inline test `pricing.ml:217`; 옛 "unknown model→$0, RFC-OAS-018 Phase 2 deferred"는 stale).
 - **open goals:** Goal 2(saturation은 삭제로 종결(2026-07-21); driver의 inline try-next를 `Runtime_attempt_fsm.decide` SSOT 경유로 정합; voice choice를 catalog/config declaration+Result로 전환; ~~unknown model pricing typed Unknown~~ **[LANDED 2026-07-20]** — pinned OAS `pricing_for_model_opt`이 unknown→`None` fail-closed), Goal 3 **[REFRAME]**(failover는 이미 배선됨 → "복원"이 아니라 candidate loop를 `decide` SSOT로 통합 + `[runtime.lanes.<id>]` candidates/strategy='ordered' 선언 배선). Crossover는 §2.5 판정대로 CF-1/2를 폐기하고 CF-3 orphan을 삭제하며 CF-4 typed behavior만 검증한다.
 
 <a name="311-dashboard-chat"></a>
@@ -362,7 +362,7 @@ OAS repo 구현자를 위한 카드다. MASC consumer는 OAS 내부를 복제하
 - **경계 계약:** OAS lib에 MASC 어휘 0건(§2.2 grep 확정). pricing은 telemetry-only(execution gate 아님). `max_tokens` synthesis 금지(override 없으면 omit → provider default). capability = serving-runtime × model(WHAT), NOT host/URL(WHERE).
 - **불변식:** 각 streaming retry attempt는 buffered, 정확히 하나의 committed attempt만 consumer에 visible. unknown host/provider/model → typed Unknown/None/fail-closed. **production `assert false`를 control flow로 쓰지 않는다** — unreachable proof arm에만 허용(OAS `.ci/hardening-baseline.json`이 assert false를 ratchet에서 제외하는 근거와 동일). control-flow용 실패는 `` `Internal `` 등 typed error로 반환.
 - **결정론↔LLM:** **OAS는 순수 라이브러리 = 전부 결정론.** 유일한 LLM 호출은 provider adapter의 **opaque forward** — provider가 반환하는 바이트는 OAS에게 불투명하고, OAS는 그 내용에 판단을 하지 않는다(파싱/재직렬화만).
-- **현재 상태:** pinned OAS(현재 0.220.5 @ `5851df2e276872d640769813f2000642f7bd56d3`, 2026-07-23 KST 감사)는 `Agent.execution_store`와 recovery, immutable reconciliation, unknown Tool effect의 fail-closed 처리를 통해 crash-durable execution journal/WAL-store 기반과 exact Tool occurrence/attempt-owned child edge를 제공한다. `Agent.execution_runtime`은 재시작 뒤 재생성하는 process-lifetime CPU capability이며 crash-durable state가 아니다. production Agent path에는 legacy `Durable_event`가 남고 `Raw_trace`는 별도 JSONL observation sink이므로 sole-writer activation과 old-writer deletion이 남아 있다. OAS lib의 MASC product 어휘 부재는 유지된다.
+- **현재 상태:** pinned OAS(현재 0.221.0 @ `0f1df2a423d487e854af5b8559c6d1e2daec6de9`, 2026-07-23 KST 감사)는 `Agent.execution_store`와 recovery, immutable reconciliation, unknown Tool effect의 fail-closed 처리를 통해 crash-durable execution journal/WAL-store 기반과 exact Tool occurrence/attempt-owned child edge를 제공한다. `Agent.execution_runtime`은 재시작 뒤 재생성하는 process-lifetime CPU capability이며 crash-durable state가 아니다. production Agent path에는 legacy `Durable_event`가 남고 `Raw_trace`는 별도 JSONL observation sink이므로 sole-writer activation과 old-writer deletion이 남아 있다. OAS lib의 MASC product 어휘 부재는 유지된다.
 - **open goals:** DS-3(§4.14 OAS Eio-mutex + assert-false 하드닝), ~~Goal 2(`pricing_for_model` unknown→typed Unknown, RFC-OAS-018 Phase 2)~~ **[LANDED 2026-07-20]** — pinned OAS `pricing_for_model_opt`이 unknown model에 `None`을 반환하는 fail-closed(`pricing.mli:1-5`, inline test `pricing.ml:217`).
 
 <a name="313-keeper-as-a-tool"></a>

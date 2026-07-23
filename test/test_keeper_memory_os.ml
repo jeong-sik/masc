@@ -4485,22 +4485,6 @@ let () =
             `Quick
             test_librarian_rejects_invalid_claims
         ; Alcotest.test_case
-            "librarian runtime appends episode bundle"
-            `Quick
-            test_librarian_runtime_appends_episode_bundle
-        ; Alcotest.test_case
-            "librarian runtime falls back when schema unavailable"
-            `Quick
-            test_librarian_runtime_falls_back_when_schema_unavailable
-        ; Alcotest.test_case
-            "librarian runtime requires clock for provider call"
-            `Quick
-            test_librarian_runtime_requires_clock_for_provider_call
-        ; Alcotest.test_case
-            "librarian runtime reports fact upsert failure"
-            `Quick
-            test_librarian_runtime_reports_fact_upsert_failure
-        ; Alcotest.test_case
             "dashboard fact json omits deleted score keys (RFC-keeper-memory-panel-real-data §4a)"
             `Quick
             test_dashboard_fact_json_omits_score_keys

@@ -2584,7 +2584,6 @@ let exact_source_disposition_to_yojson disposition =
     ; "request_body_sha256", `String disposition.request_body_sha256
     ; "terminal_cause", terminal_cause
     ; "action_kind", `String action_kind
-    ; "successor", `Null
     ; ( "settlement_semantic"
       , `String (exact_settlement_semantic_label disposition.semantic) )
     ; "prepared_at_unix", `Float disposition.prepared_at
@@ -2606,7 +2605,6 @@ let exact_source_disposition_of_yojson json =
         ; "request_body_sha256"
         ; "terminal_cause"
         ; "action_kind"
-        ; "successor"
         ; "settlement_semantic"
         ; "prepared_at_unix"
         ]
@@ -2628,13 +2626,10 @@ let exact_source_disposition_of_yojson json =
     | _ -> Error "terminal exact source disposition requires one terminal cause"
   in
   let* action_kind = string_field ~context "action_kind" fields in
-  let* successor_json = required_field ~context "successor" fields in
   let* action =
-    match action_kind, successor_json with
-    | "consume_source", `Null -> Ok Consume_source
-    | "consume_source", _ ->
-      Error "exact source disposition action must not carry a successor"
-    | unknown, _ ->
+    match action_kind with
+    | "consume_source" -> Ok Consume_source
+    | unknown ->
       Error (Printf.sprintf "unknown exact source disposition action: %s" unknown)
   in
   let* semantic_label =

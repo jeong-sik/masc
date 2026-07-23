@@ -11,8 +11,9 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_types = Keeper_types
 
-(* [Keeper_tool_filesystem_runtime.handle_file_write] (the bare
-   string-returning wrapper) was retired: it had zero production callers
+(* The bare string-returning wrapper handle_file_write (formerly exported
+   from [Keeper_tool_filesystem_runtime]) was retired: it had zero
+   production callers
    ([keeper_tool_runtime.ml] calls [handle_file_write_with_outcome]
    directly). This test-local shim reproduces its [.raw_output] projection
    so the assertions below keep exercising the real production entry

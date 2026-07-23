@@ -150,6 +150,9 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+(** Atomic replacement whose parent-directory fsync is mandatory. *)
+val save_file_atomic_strict : string -> string -> (unit, string) Result.t
+
 (** [open_atomic_temp_file ~temp_dir ()] creates and opens a fresh
     temp file in [temp_dir] using the canonical [.atomic_*.tmp]
     filename shape. The caller owns the returned channel and file. *)

@@ -32,11 +32,26 @@ type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execu
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
 
 type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  }
+
+type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
@@ -136,6 +151,9 @@ val active_lease_result :
 val transition_outbox_result :
   base_path:string -> string -> (outbox_entry list, string) result
 
+val exact_execution_binding_result :
+  base_path:string -> string -> (exact_execution_binding option, string) result
+
 val mark_transition_projected_result :
   base_path:string -> string -> transition_id:string -> (unit, string) result
 
@@ -156,6 +174,44 @@ val settle_result :
   lease:lease ->
   settlement:settlement ->
   (settle_result, string) result
+
+val settle_exact_execution_result :
+  base_path:string ->
+  string ->
+  settled_at:float ->
+  lease:lease ->
+  binding:exact_execution_binding ->
+  settlement:settlement ->
+  (settle_result, string) result
+
+val bind_exact_execution_result :
+  base_path:string ->
+  string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  (unit, string) result
+
+val release_exact_execution_before_dispatch_result :
+  base_path:string ->
+  string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  (unit, string) result
+
+val quarantine_exact_execution_result :
+  base_path:string ->
+  string ->
+  lease:lease ->
+  terminal:exact_execution_terminal ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  (unit, string) result
 
 val cancel_accepted_result :
   base_path:string ->

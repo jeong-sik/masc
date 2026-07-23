@@ -32,11 +32,26 @@ type exact_execution_terminal_cause =
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
 
 type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  }
+
+type exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type escalation_reason =
@@ -169,6 +184,7 @@ type t =
   ; last_settlement : transition_receipt option
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
+  ; exact_execution_bindings : exact_execution_binding list
   }
 
 type settle_result =
@@ -190,6 +206,7 @@ let empty =
   ; last_settlement = None
   ; transition_outbox = []
   ; accepted_transfer_projections = []
+  ; exact_execution_bindings = []
   }
 ;;
 
@@ -200,6 +217,7 @@ let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
+let exact_execution_binding state = List.hd_opt state.exact_execution_bindings
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
@@ -437,6 +455,7 @@ let exact_execution_terminal_cause_label = function
     "lifecycle_transition_failed_after_dispatch"
   | Checkpoint_source_changed -> "checkpoint_source_changed"
   | Checkpoint_persistence_failed -> "checkpoint_persistence_failed"
+  | Terminal_persistence_failed -> "terminal_persistence_failed"
 ;;
 
 let exact_execution_terminal_cause_of_label = function
@@ -454,6 +473,7 @@ let exact_execution_terminal_cause_of_label = function
     Ok Lifecycle_transition_failed_after_dispatch
   | "checkpoint_source_changed" -> Ok Checkpoint_source_changed
   | "checkpoint_persistence_failed" -> Ok Checkpoint_persistence_failed
+  | "terminal_persistence_failed" -> Ok Terminal_persistence_failed
   | label -> Error (Printf.sprintf "unknown exact execution terminal cause: %s" label)
 ;;
 
@@ -1007,6 +1027,225 @@ let lease_equal (left : lease) (right : lease) =
   && List.for_all2 Keeper_event_queue.stimulus_identity_equal left.stimuli right.stimuli
 ;;
 
+let binding_for_lease (lease : lease) state =
+  List.find_opt
+    (fun (binding : exact_execution_binding) ->
+       String.equal binding.lease_id lease.lease_id
+       && Int64.equal binding.lease_sequence lease.sequence)
+    state.exact_execution_bindings
+;;
+
+let binding_call_identity_equal binding ~slot_id ~call_id =
+  String.equal binding.slot_id slot_id && String.equal binding.call_id call_id
+;;
+
+let binding_identity_equal
+      binding
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  binding_call_identity_equal binding ~slot_id ~call_id
+  && String.equal binding.plan_fingerprint plan_fingerprint
+  && String.equal binding.request_body_sha256 request_body_sha256
+;;
+
+let validate_bound_settlement binding settlement =
+  let terminal_matches ?cause terminal =
+    binding_call_identity_equal binding ~slot_id:terminal.slot_id ~call_id:terminal.call_id
+    &&
+    match cause with
+    | None -> true
+    | Some cause -> cause = terminal.cause
+  in
+  match binding.status, settlement with
+  | Dispatch_uncertain, Ack -> Ok ()
+  | Dispatch_uncertain, No_compaction { reason = Exact_execution_terminal terminal; _ }
+    when terminal_matches terminal -> Ok ()
+  | Dispatch_uncertain,
+    Escalate
+      { reason = Compaction_exact_output_terminal { terminal; _ }; successor = None }
+    when terminal_matches terminal -> Ok ()
+  | Terminal_quarantined cause, No_compaction { reason = Exact_execution_terminal terminal; _ }
+    when terminal_matches ~cause terminal -> Ok ()
+  | Terminal_quarantined cause,
+    Escalate
+      { reason = Compaction_exact_output_terminal { terminal; _ }; successor = None }
+    when terminal_matches ~cause terminal -> Ok ()
+  | Dispatch_uncertain, _ ->
+    Error
+      (Printf.sprintf
+         "exact execution lease %s call %s requires an identity-bound terminal or ack settlement"
+         binding.lease_id
+         binding.call_id)
+  | Terminal_quarantined _, _ ->
+    Error
+      (Printf.sprintf
+         "quarantined exact execution lease %s call %s requires its matching terminal settlement"
+         binding.lease_id
+         binding.call_id)
+;;
+
+let validate_binding_arguments
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  if String.trim slot_id = ""
+  then Error "exact execution slot id must not be empty"
+  else if String.trim call_id = ""
+  then Error "exact execution call id must not be empty"
+  else if String.trim plan_fingerprint = ""
+  then Error "exact execution plan fingerprint must not be empty"
+  else if String.trim request_body_sha256 = ""
+  then Error "exact execution request body sha256 must not be empty"
+  else if Int64.compare lease.sequence 1L < 0
+  then Error "exact execution lease sequence must be positive"
+  else if not (String.equal lease.lease_id (lease_id_of_sequence lease.sequence))
+  then Error "exact execution lease id does not match its sequence"
+  else Ok ()
+;;
+
+let bind_exact_execution
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let* () =
+    match committed_lease lease state with
+    | Some committed when lease_equal committed lease -> Ok ()
+    | Some _ -> Error (Printf.sprintf "event queue lease payload conflict: %s" lease.lease_id)
+    | None -> Error (Printf.sprintf "event queue lease not found: %s" lease.lease_id)
+  in
+  match state.exact_execution_bindings with
+  | [] ->
+    Ok
+      { state with
+        exact_execution_bindings =
+          [ { lease_id = lease.lease_id
+            ; lease_sequence = lease.sequence
+            ; slot_id
+            ; call_id
+            ; plan_fingerprint
+            ; request_body_sha256
+            ; status = Dispatch_uncertain
+            }
+          ]
+      }
+  | [ binding ]
+    when String.equal binding.lease_id lease.lease_id
+         && Int64.equal binding.lease_sequence lease.sequence
+         && binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256 ->
+    (match binding.status with
+     | Dispatch_uncertain -> Ok state
+     | Terminal_quarantined _ ->
+       Error
+         (Printf.sprintf
+            "exact execution lease %s call %s is already terminally quarantined"
+            lease.lease_id
+            call_id))
+  | [ binding ] ->
+    Error
+      (Printf.sprintf
+         "exact execution binding conflict: lease %s call %s is already bound"
+         binding.lease_id
+         binding.call_id)
+  | _ :: _ :: _ -> Error "event queue state contains multiple exact execution bindings"
+;;
+
+let release_exact_execution_before_dispatch
+      ~(lease : lease)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id
+              ~call_id
+              ~plan_fingerprint
+              ~request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error
+      (Printf.sprintf
+         "terminally quarantined exact execution lease cannot be released: %s"
+         lease.lease_id)
+  | Some { status = Dispatch_uncertain; _ } ->
+    Ok { state with exact_execution_bindings = [] }
+;;
+
+let quarantine_exact_execution
+      ~(lease : lease)
+      ~terminal
+      ~plan_fingerprint
+      ~request_body_sha256
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id:terminal.slot_id
+      ~call_id:terminal.call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let* () = validate_exact_execution_terminal terminal in
+  match binding_for_lease lease state with
+  | None -> Error (Printf.sprintf "exact execution lease is not bound: %s" lease.lease_id)
+  | Some binding
+    when not
+           (binding_identity_equal
+              binding
+              ~slot_id:terminal.slot_id
+              ~call_id:terminal.call_id
+              ~plan_fingerprint
+              ~request_body_sha256) ->
+    Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | Some ({ status = Dispatch_uncertain; _ } as binding) ->
+    Ok
+      { state with
+        exact_execution_bindings =
+          [ { binding with status = Terminal_quarantined terminal.cause } ]
+      }
+  | Some { status = Terminal_quarantined cause; _ } when cause = terminal.cause -> Ok state
+  | Some { status = Terminal_quarantined _; _ } ->
+    Error (Printf.sprintf "exact execution terminal cause conflict: %s" lease.lease_id)
+;;
+
 let settle_committed ~settled_at ~lease ~settlement state =
   let* () =
     if Float.is_finite settled_at
@@ -1014,6 +1253,11 @@ let settle_committed ~settled_at ~lease ~settlement state =
     else Error "event queue settlement time must be finite"
   in
   let* () = validate_settlement settlement in
+  let* () =
+    match binding_for_lease lease state with
+    | None -> Ok ()
+    | Some binding -> validate_bound_settlement binding settlement
+  in
   match committed_lease lease state with
   | None ->
     (match find_prior_receipt lease.lease_id state with
@@ -1060,16 +1304,67 @@ let settle_committed ~settled_at ~lease ~settlement state =
           pending
         ; leases = remove_lease committed.lease_id state.leases
         ; transition_outbox = [ outbox_entry ]
+        ; exact_execution_bindings =
+            List.filter
+              (fun (binding : exact_execution_binding) ->
+                 not (String.equal binding.lease_id committed.lease_id))
+              state.exact_execution_bindings
         }
       , Settled receipt )
 ;;
 
 let settle ~settled_at ~lease ~settlement state =
-  match settlement with
-  | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ ->
-    Error "accepted disposition requires its owner-fenced boundary"
-  | Ack | No_compaction _ | Requeue _ | Escalate _ ->
+  match binding_for_lease lease state with
+  | Some binding ->
+    Error
+      (Printf.sprintf
+         "exact execution lease %s call %s requires identity-bound settlement"
+         binding.lease_id
+         binding.call_id)
+  | None ->
+    (match settlement with
+     | Cancel_accepted _ | Transfer_accepted _ | Settle_from_source_terminal _ ->
+       Error "accepted disposition requires its owner-fenced boundary"
+     | Ack | No_compaction _ | Requeue _ | Escalate _ ->
+       settle_committed ~settled_at ~lease ~settlement state)
+;;
+
+let settle_exact_execution
+      ~settled_at
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~settlement
+      state
+  =
+  let* () =
+    validate_binding_arguments
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  match binding_for_lease lease state with
+  | Some binding
+    when binding_identity_equal
+           binding
+           ~slot_id
+           ~call_id
+           ~plan_fingerprint
+           ~request_body_sha256 ->
     settle_committed ~settled_at ~lease ~settlement state
+  | Some _ -> Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
+  | None ->
+    (match committed_lease lease state with
+     | Some _ ->
+       Error
+         (Printf.sprintf
+            "active exact execution lease is not durably bound: %s"
+            lease.lease_id)
+     | None -> settle_committed ~settled_at ~lease ~settlement state)
 ;;
 
 let cancel_accepted
@@ -1590,17 +1885,20 @@ let remove_by_post_id post_id state =
   let removed_leases, leases =
     List.fold_right
       (fun (lease : lease) (removed, kept) ->
-         let matched, remaining =
-           List.partition
-             (fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id post_id)
-             lease.stimuli
-         in
-         let kept =
-           match remaining with
-           | [] -> kept
-           | _ -> { lease with stimuli = remaining } :: kept
-         in
-         matched @ removed, kept)
+         match binding_for_lease lease state with
+         | Some _ -> removed, lease :: kept
+         | None ->
+           let matched, remaining =
+             List.partition
+               (fun stimulus -> String.equal stimulus.Keeper_event_queue.post_id post_id)
+               lease.stimuli
+           in
+           let kept =
+             match remaining with
+             | [] -> kept
+             | _ -> { lease with stimuli = remaining } :: kept
+           in
+           matched @ removed, kept)
       state.leases
       ([], [])
   in
@@ -1617,10 +1915,15 @@ let release_legacy_inflight stimuli state =
   let leases =
     List.filter_map
       (fun (lease : lease) ->
-         let remaining = List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli in
-         match remaining with
-         | [] -> None
-         | _ :: _ -> Some { lease with stimuli = remaining })
+         match binding_for_lease lease state with
+         | Some _ -> Some lease
+         | None ->
+           let remaining =
+             List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli
+           in
+           (match remaining with
+            | [] -> None
+            | _ :: _ -> Some { lease with stimuli = remaining }))
       state.leases
   in
   { state with leases }
@@ -2177,6 +2480,87 @@ let outbox_entry_of_yojson json =
   Ok { receipt; stimuli }
 ;;
 
+let exact_execution_binding_to_yojson binding =
+  let status, terminal_cause =
+    match binding.status with
+    | Dispatch_uncertain -> "dispatch_uncertain", `Null
+    | Terminal_quarantined cause ->
+      "terminal_quarantined", `String (exact_execution_terminal_cause_label cause)
+  in
+  `Assoc
+    [ "lease_id", `String binding.lease_id
+    ; "lease_sequence", int64_json binding.lease_sequence
+    ; "slot_id", `String binding.slot_id
+    ; "call_id", `String binding.call_id
+    ; "plan_fingerprint", `String binding.plan_fingerprint
+    ; "request_body_sha256", `String binding.request_body_sha256
+    ; "status", `String status
+    ; "terminal_cause", terminal_cause
+    ]
+;;
+
+let exact_execution_binding_of_yojson json =
+  let context = "exact execution lease binding" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:
+        [ "lease_id"
+        ; "lease_sequence"
+        ; "slot_id"
+        ; "call_id"
+        ; "plan_fingerprint"
+        ; "request_body_sha256"
+        ; "status"
+        ; "terminal_cause"
+        ]
+      fields
+  in
+  let* lease_id = string_field ~context "lease_id" fields in
+  let* lease_sequence = int64_field ~context "lease_sequence" fields in
+  let* slot_id = string_field ~context "slot_id" fields in
+  let* call_id = string_field ~context "call_id" fields in
+  let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
+  let* request_body_sha256 = string_field ~context "request_body_sha256" fields in
+  let* status_label = string_field ~context "status" fields in
+  let* terminal_cause_json = required_field ~context "terminal_cause" fields in
+  let* status =
+    match status_label, terminal_cause_json with
+    | "dispatch_uncertain", `Null -> Ok Dispatch_uncertain
+    | "terminal_quarantined", `String cause ->
+      let* cause = exact_execution_terminal_cause_of_label cause in
+      Ok (Terminal_quarantined cause)
+    | "dispatch_uncertain", _ ->
+      Error "dispatch-uncertain exact execution binding must not carry a terminal cause"
+    | "terminal_quarantined", _ ->
+      Error "terminally quarantined exact execution binding requires a terminal cause"
+    | status, _ -> Error (Printf.sprintf "unknown exact execution binding status: %s" status)
+  in
+  if Int64.compare lease_sequence 1L < 0
+  then Error "exact execution binding lease sequence must be positive"
+  else if not (String.equal lease_id (lease_id_of_sequence lease_sequence))
+  then Error "exact execution binding lease id does not match its sequence"
+  else if String.trim slot_id = ""
+  then Error "exact execution binding slot id must not be empty"
+  else if String.trim call_id = ""
+  then Error "exact execution binding call id must not be empty"
+  else if String.trim plan_fingerprint = ""
+  then Error "exact execution binding plan fingerprint must not be empty"
+  else if String.trim request_body_sha256 = ""
+  then Error "exact execution binding request body sha256 must not be empty"
+  else
+    Ok
+      { lease_id
+      ; lease_sequence
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      ; status
+      }
+;;
+
 let to_yojson state =
   `Assoc
     [ "schema", `String schema
@@ -2195,6 +2579,8 @@ let to_yojson state =
           (List.map
              accepted_transfer_projection_to_yojson
              state.accepted_transfer_projections) )
+    ; ( "exact_execution_bindings"
+      , `List (List.map exact_execution_binding_to_yojson state.exact_execution_bindings) )
     ]
 ;;
 
@@ -2236,6 +2622,30 @@ let validate_state state =
   then Error "event queue next lease sequence must be positive"
   else if List.length state.leases > 1
   then Error "event queue state must contain at most one active lease"
+  else if List.length state.exact_execution_bindings > 1
+  then Error "event queue state must contain at most one exact execution binding"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
+         Int64.compare binding.lease_sequence 1L < 0
+         || not (String.equal binding.lease_id (lease_id_of_sequence binding.lease_sequence))
+         || String.trim binding.slot_id = ""
+         || String.trim binding.call_id = ""
+         || String.trim binding.plan_fingerprint = ""
+         || String.trim binding.request_body_sha256 = "")
+      state.exact_execution_bindings
+  then Error "event queue state contains an invalid exact execution binding"
+  else if
+    List.exists
+      (fun (binding : exact_execution_binding) ->
+         not
+           (List.exists
+              (fun (lease : lease) ->
+                 String.equal lease.lease_id binding.lease_id
+                 && Int64.equal lease.sequence binding.lease_sequence)
+              state.leases))
+      state.exact_execution_bindings
+  then Error "exact execution binding has no matching active lease"
   else if List.length state.transition_outbox > 1
   then Error "event queue state must contain at most one unprojected transition"
   else if state.leases <> [] && state.transition_outbox <> []
@@ -2306,6 +2716,9 @@ let of_yojson json =
        || String.equal schema_value predecessor_schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
+    let has_exact_execution_bindings =
+      String.equal schema_value schema && List.mem_assoc "exact_execution_bindings" fields
+    in
     let expected_fields =
       [ "schema"
       ; "revision"
@@ -2316,6 +2729,7 @@ let of_yojson json =
       ; "transition_outbox"
       ]
       @ if String.equal schema_value schema then [ "accepted_transfer_projections" ] else []
+      @ if has_exact_execution_bindings then [ "exact_execution_bindings" ] else []
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
@@ -2342,6 +2756,16 @@ let of_yojson json =
           accepted_transfer_projection_of_yojson
           fields
     in
+    let* exact_execution_bindings =
+      if has_exact_execution_bindings
+      then
+        list_field
+          ~context
+          "exact_execution_bindings"
+          exact_execution_binding_of_yojson
+          fields
+      else Ok []
+    in
     validate_state
       { revision
       ; next_lease_sequence
@@ -2350,5 +2774,6 @@ let of_yojson json =
       ; last_settlement
       ; transition_outbox
       ; accepted_transfer_projections
+      ; exact_execution_bindings
       }
 ;;

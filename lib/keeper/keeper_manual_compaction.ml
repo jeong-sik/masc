@@ -251,6 +251,16 @@ let observe_manifest ~keeper_name = function
       ()
 ;;
 
+let preserve_no_compaction_after_final_admission_busy = function
+  | Keeper_event_queue_state.Exact_execution_terminal _ -> true
+  | Keeper_event_queue_state.Exact_lane_unconfigured
+  | Keeper_event_queue_state.No_eligible_history
+  | Keeper_event_queue_state.Invalid_structural_source
+  | Keeper_event_queue_state.Structurally_unchanged
+  | Keeper_event_queue_state.Checkpoint_not_reduced ->
+    false
+;;
+
 let run_admitted_with
       ~prepare_compaction
       ~(config : Workspace.config)
@@ -305,7 +315,8 @@ let run_admitted_with
         | Ok prepared ->
           `No_compaction
             (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
-        | Error (Keeper_post_turn.No_compaction no_compaction) ->
+        | Error (Keeper_post_turn.No_compaction no_compaction)
+          when preserve_no_compaction_after_final_admission_busy no_compaction.reason ->
           `No_compaction no_compaction
         | Error _ -> `Busy block)
      | `Ran (Error failure) -> `Compaction_failed failure
@@ -316,8 +327,10 @@ let run_admitted_with
 ;;
 
 
-let run_admitted =
-  run_admitted_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
+let run_admitted ?exact_execution_guard =
+  run_admitted_with
+    ~prepare_compaction:
+      (Keeper_context_runtime.prepare_compaction ?exact_execution_guard)
 ;;
 
 let lifecycle_stage_to_string = function
@@ -353,3 +366,9 @@ let failure_to_string = function
       (Keeper_post_turn.compaction_recovery_error_to_string error)
       (failure_dispatch_to_string failure_dispatch)
 ;;
+
+module For_testing = struct
+  let preserve_no_compaction_after_final_admission_busy =
+    preserve_no_compaction_after_final_admission_busy
+  ;;
+end

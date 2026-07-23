@@ -246,3 +246,14 @@ val record_keepalive_stage_timing :
 val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> unit
+
+module For_testing : sig
+  val exact_execution_guard :
+    base_path:string ->
+    keeper_name:string ->
+    lease:Keeper_registry_event_queue.lease ->
+    Keeper_compaction_llm_summarizer.exact_execution_guard
+
+  val check_cancellation_after_exact_terminal_settlement :
+    Keeper_registry_event_queue.settlement -> unit
+end

@@ -1,8 +1,8 @@
 (** Durable per-Keeper Event Layer state.
 
     [event-queue.json] keeps the v4 envelope containing pending stimuli, active
-    typed leases, the monotonic lease sequence, transition outbox, and durable
-    accepted-transfer target accounting. Strict v3 is the only supported
+    typed leases, exact-execution dispatch fences, the monotonic lease
+    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v3 is the only supported
     predecessor. [event-queue-inflight.json] is rejected explicitly rather
     than migrated or treated as a second authority. *)
 
@@ -35,11 +35,26 @@ type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_t
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
 
 type exact_execution_terminal = Keeper_event_queue_state.exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  }
+
+type exact_execution_lease_status = Keeper_event_queue_state.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding = Keeper_event_queue_state.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
@@ -146,6 +161,9 @@ val transition_outbox_result :
 (** Read the single pending projection entry for this Keeper lane.  The state
     machine blocks new claims until this list is drained. *)
 
+val exact_execution_binding_result :
+  base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
+
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
     New live registry code should use {!load_pending} after explicitly
@@ -235,6 +253,54 @@ val settle_result :
     rather than retained by an arbitrary size policy. A post-commit checkpoint,
     WAL-compaction or pending-projection failure is returned as a committed
     outcome, never relabelled as an uncommitted error. *)
+
+val bind_exact_execution_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (unit, string) result
+(** Durably bind the affine call identity before dispatch. An [Error] means the
+    provider call must not start. *)
+
+val release_exact_execution_before_dispatch_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (unit, string) result
+
+val quarantine_exact_execution_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  terminal:exact_execution_terminal ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (unit, string) result
+
+val settle_exact_execution_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  settled_at:float ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  settlement:settlement ->
+  unit ->
+  (settle_result, string) result
 
 val cancel_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

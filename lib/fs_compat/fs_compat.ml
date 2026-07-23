@@ -255,6 +255,10 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
+let save_file_atomic_strict path content =
+  Atomic_write.save_file_atomic_strict ~save_file path content
+;;
+
 let open_atomic_temp_file ~temp_dir () =
   Atomic_write.open_atomic_temp_file ~temp_dir ()
 ;;

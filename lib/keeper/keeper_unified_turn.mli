@@ -215,7 +215,8 @@ type turn_success =
     durable source lease cannot be acknowledged as completed work. *)
 
 val run_keeper_cycle
-  :  config:Workspace.config
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider

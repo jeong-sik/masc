@@ -2,6 +2,15 @@ open Masc
 
 module EO = Agent_sdk.Exact_output
 
+let permissive_exact_execution_guard :
+  Keeper_compaction_llm_summarizer.exact_execution_guard
+  =
+  { before_dispatch = (fun _ -> Ok ())
+  ; release_before_dispatch = (fun _ -> Ok ())
+  ; quarantine = (fun _ _ -> Ok ())
+  }
+;;
+
 type server_behavior =
   | Reply of string
   | Abort_after_request

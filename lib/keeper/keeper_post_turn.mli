@@ -107,6 +107,7 @@ type prepared_compaction
     Admission-free by contract; the caller must not hold the keeper's turn
     slot while this runs. *)
 val prepare_compaction :
+  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
@@ -133,6 +134,7 @@ val no_compaction_of_uncommitted_prepared :
     typed [Error].  Composition of {!prepare_compaction} and
     {!commit_prepared_compaction} for callers that stay synchronous. *)
 val recover_latest_checkpoint_for_compaction :
+  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->

@@ -1707,12 +1707,6 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
           (Masc.Keeper_unified_turn.Compaction_attempt_failed
              { reason = "test-induced recovery failure" })));
   check
-    "in-lane terminal no-compaction advances the streak"
-    "failed"
-    (failed
-       (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          (no_compaction ~turn_count:17 State.Checkpoint_not_reduced)));
-  check
     "post-dispatch terminal records failure without retry"
     "failed"
     (failed

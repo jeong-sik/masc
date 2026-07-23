@@ -33,11 +33,26 @@ type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execu
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
 
 type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  }
+
+type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
   }
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
@@ -131,6 +146,64 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
 
+let bind_exact_execution_result
+      ~base_path
+      name
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  Keeper_event_queue_persistence.bind_exact_execution_result
+    ~base_path
+    ~keeper_name:name
+    ~lease
+    ~slot_id
+    ~call_id
+    ~plan_fingerprint
+    ~request_body_sha256
+    ()
+;;
+
+let release_exact_execution_before_dispatch_result
+      ~base_path
+      name
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  Keeper_event_queue_persistence.release_exact_execution_before_dispatch_result
+    ~base_path
+    ~keeper_name:name
+    ~lease
+    ~slot_id
+    ~call_id
+    ~plan_fingerprint
+    ~request_body_sha256
+    ()
+;;
+
+let quarantine_exact_execution_result
+      ~base_path
+      name
+      ~lease
+      ~terminal
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  Keeper_event_queue_persistence.quarantine_exact_execution_result
+    ~base_path
+    ~keeper_name:name
+    ~lease
+    ~terminal
+    ~plan_fingerprint
+    ~request_body_sha256
+    ()
+;;
+
 let active_lease_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
@@ -142,6 +215,12 @@ let active_lease_result ~base_path name =
 
 let transition_outbox_result ~base_path name =
   Keeper_event_queue_persistence.transition_outbox_result
+    ~base_path
+    ~keeper_name:name
+;;
+
+let exact_execution_binding_result ~base_path name =
+  Keeper_event_queue_persistence.exact_execution_binding_result
     ~base_path
     ~keeper_name:name
 ;;
@@ -439,6 +518,28 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~keeper_name:name
     ~settled_at
     ~lease
+    ~settlement
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let settle_exact_execution_result
+      ~base_path
+      name
+      ~settled_at
+      ~lease
+      ~binding
+      ~settlement
+  =
+  Keeper_event_queue_persistence.settle_exact_execution_result
+    ~base_path
+    ~keeper_name:name
+    ~settled_at
+    ~lease
+    ~slot_id:binding.slot_id
+    ~call_id:binding.call_id
+    ~plan_fingerprint:binding.plan_fingerprint
+    ~request_body_sha256:binding.request_body_sha256
     ~settlement
     ~after_commit:(publish_pending ~base_path name)
     ()

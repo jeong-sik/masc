@@ -171,14 +171,16 @@ val dispatch_post_turn_lifecycle_events
   -> unit
 
 val recover_latest_checkpoint_for_compaction
-  :  base_dir:string
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
   -> projection_request:Keeper_compaction_projection_target.request
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 val prepare_compaction
-  :  base_dir:string
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> projection_request:Keeper_compaction_projection_target.request

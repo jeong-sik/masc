@@ -566,6 +566,7 @@ let project_transition_outbox ~base_path ~keeper_name =
 ;;
 
 let settle_claimed_lease
+      ?(exact_execution = false)
       ~base_path
       ~keeper_name
       ~settled_at
@@ -573,12 +574,86 @@ let settle_claimed_lease
       ~settlement
   =
   Eio.Cancel.protect (fun () ->
-    Keeper_registry_event_queue.settle_result
+    if not exact_execution
+    then
+      Keeper_registry_event_queue.settle_result
+        ~base_path
+        keeper_name
+        ~settled_at
+        ~lease
+        ~settlement
+    else
+      match Keeper_registry_event_queue.exact_execution_binding_result ~base_path keeper_name with
+      | Error _ as error -> error
+      | Ok None ->
+        Keeper_registry_event_queue.settle_result
+          ~base_path
+          keeper_name
+          ~settled_at
+          ~lease
+          ~settlement
+      | Ok (Some binding) ->
+        Keeper_registry_event_queue.settle_exact_execution_result
+          ~base_path
+          keeper_name
+          ~settled_at
+          ~lease
+          ~binding
+          ~settlement)
+;;
+
+let exact_execution_guard ~base_path ~keeper_name ~lease =
+  let binding_arguments
+        (observation : Keeper_compaction_llm_summarizer.attempt_observation)
+    =
+    ( observation.slot_id
+    , observation.call_id
+    , observation.receipt_plan_fingerprint
+    , observation.receipt_request_body_sha256 )
+  in
+  let before_dispatch observation =
+    let slot_id, call_id, plan_fingerprint, request_body_sha256 =
+      binding_arguments observation
+    in
+    Keeper_registry_event_queue.bind_exact_execution_result
       ~base_path
       keeper_name
-      ~settled_at
       ~lease
-      ~settlement)
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let release_before_dispatch observation =
+    let slot_id, call_id, plan_fingerprint, request_body_sha256 =
+      binding_arguments observation
+    in
+    Keeper_registry_event_queue.release_exact_execution_before_dispatch_result
+      ~base_path
+      keeper_name
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  let quarantine cause observation =
+    let slot_id, call_id, plan_fingerprint, request_body_sha256 =
+      binding_arguments observation
+    in
+    let terminal : Keeper_registry_event_queue.exact_execution_terminal =
+      { cause; slot_id; call_id }
+    in
+    Keeper_registry_event_queue.quarantine_exact_execution_result
+      ~base_path
+      keeper_name
+      ~lease
+      ~terminal
+      ~plan_fingerprint
+      ~request_body_sha256
+  in
+  Keeper_compaction_llm_summarizer.
+    { before_dispatch; release_before_dispatch; quarantine }
 ;;
 
 let settlement_is_ack = function
@@ -609,6 +684,53 @@ let settlement_is_exact_output_terminal = function
   | Keeper_registry_event_queue.Escalate _ ->
     false
 ;;
+
+let settlement_is_exact_output_cancellation = function
+  | Keeper_registry_event_queue.No_compaction
+      { reason =
+          Keeper_event_queue_state.Exact_execution_terminal
+            { cause =
+                ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                | Keeper_event_queue_state.Terminal_persistence_failed )
+            ; _
+            }
+      ; _
+      }
+  | Keeper_registry_event_queue.Escalate
+      { reason =
+          Keeper_registry_event_queue.Compaction_exact_output_terminal
+            { terminal =
+                { cause =
+                    ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                    | Keeper_event_queue_state.Terminal_persistence_failed )
+                ; _
+                }
+            ; _
+            }
+      ; successor = None
+      } ->
+    true
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.No_compaction _
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _
+  | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Escalate _ ->
+    false
+;;
+
+let check_cancellation_after_exact_terminal_settlement settlement =
+  if settlement_is_exact_output_cancellation settlement then Eio.Fiber.check ()
+;;
+
+module For_testing = struct
+  let exact_execution_guard = exact_execution_guard
+
+  let check_cancellation_after_exact_terminal_settlement =
+    check_cancellation_after_exact_terminal_settlement
+  ;;
+end
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -723,6 +845,7 @@ let run_keepalive_unified_turn
           Eio.Cancel.protect (fun () ->
             match
               settle_claimed_lease
+                ~exact_execution:true
                 ~base_path:ctx.config.base_path
                 ~keeper_name:meta_after_triage.name
                 ~settled_at
@@ -1012,8 +1135,19 @@ let run_keepalive_unified_turn
                    !consumed_stimuli)
             else Keeper_registry.Proactive_tick
           in
-          let cycle_outcome =
+          let dispatch_guard =
+            match !claimed_lease with
+            | None -> None
+            | Some lease ->
+              Some
+                (exact_execution_guard
+                   ~base_path:ctx.config.base_path
+                   ~keeper_name:meta_after_triage.name
+                   ~lease)
+          in
+          let run_cycle () =
             run_keeper_cycle
+              ?exact_execution_guard:dispatch_guard
               ?event_bus
               ?hitl_resolution
               ?continuation_delivery_channel
@@ -1028,6 +1162,7 @@ let run_keepalive_unified_turn
               ~manual_compaction_requested
               ()
           in
+          let cycle_outcome = run_cycle () in
           cycle_outcome_ref := Some cycle_outcome;
           Cycle.meta cycle_outcome)
         else meta_after_triage
@@ -1133,6 +1268,7 @@ let run_keepalive_unified_turn
                  message));
          (match
             settle_claimed_lease
+              ~exact_execution:true
               ~base_path:ctx.config.base_path
               ~keeper_name:meta_after_triage.name
               ~settled_at
@@ -1156,6 +1292,7 @@ let run_keepalive_unified_turn
              with
              | Error message -> raise (Event_queue_settlement_failed message)
              | Ok () -> ());
+            check_cancellation_after_exact_terminal_settlement settlement;
             if settlement_is_ack settlement
             then
               mark_connector_attention_ignored_after_turn
@@ -1168,7 +1305,8 @@ let run_keepalive_unified_turn
               "registry: settlement committed with follow-up failure keeper=%s: %s"
               meta_after_triage.name
               detail;
-            record_settlement_failure detail));
+            record_settlement_failure detail;
+            check_cancellation_after_exact_terminal_settlement settlement));
       { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
     with
     | Eio.Cancel.Cancelled _ as e ->

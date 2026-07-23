@@ -246,6 +246,9 @@ let summarization_rejection = function
   | Keeper_compaction_llm_summarizer.Exact_execution_cancelled_after_dispatch observation ->
     Exact_execution_terminal
       (exact_terminal_of_observation Execution_cancelled_after_dispatch observation)
+  | Keeper_compaction_llm_summarizer.Exact_terminal_persistence_failed observation ->
+    Exact_execution_terminal
+      (exact_terminal_of_observation Terminal_persistence_failed observation)
   | Keeper_compaction_llm_summarizer.Exact_execution_provenance_mismatch observation ->
     Exact_execution_terminal
       (exact_terminal_of_observation Execution_provenance_mismatch observation)
@@ -339,10 +342,15 @@ let requested_messages_with_plan
                 }))
 ;;
 
-let requested_messages (meta : keeper_meta) messages =
+let requested_messages ?exact_execution_guard (meta : keeper_meta) messages =
   requested_messages_with_plan
     ~plan_for_units:(fun ~units ->
-      match Keeper_compaction_llm_summarizer.make ~keeper_name:meta.name () with
+      match
+        Keeper_compaction_llm_summarizer.make
+          ?exact_execution_guard
+          ~keeper_name:meta.name
+          ()
+      with
       | None -> Error Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable
       | Some summarize ->
         summarize ~units
@@ -439,10 +447,26 @@ let compact_for_request_typed_with
         ~message_count:before_messages;
       { context = ctx; decision = Rejected (trigger, reason); evidence = None }
     in
-    if after_bytes = before_bytes
-    then reject Structurally_unchanged
-    else if after_bytes > before_bytes
-    then reject Checkpoint_not_reduced
+        let reject_post_dispatch_domain_output () =
+          let exact = requested.exact_execution_evidence in
+          reject
+            (Exact_execution_terminal
+               Keeper_event_queue_state.
+                 { cause = Domain_invalid_output
+                 ; slot_id =
+                     Keeper_compaction_llm_summarizer
+                     .exact_execution_evidence_slot_id
+                       exact
+                 ; call_id =
+                     Keeper_compaction_llm_summarizer
+                     .exact_execution_evidence_call_id
+                       exact
+                 })
+        in
+        if after_bytes = before_bytes
+        then reject_post_dispatch_domain_output ()
+        else if after_bytes > before_bytes
+        then reject_post_dispatch_domain_output ()
     else (
       let after_messages = message_count compacted_ctx in
       let before_tool_use_count, before_tool_result_count =
@@ -518,9 +542,9 @@ let compact_for_request_typed_with
         })
 ;;
 
-let compact_for_request_typed ~meta ~trigger ctx =
+let compact_for_request_typed ?exact_execution_guard ~meta ~trigger ctx =
   compact_for_request_typed_with
-    ~requested_messages:(requested_messages meta)
+    ~requested_messages:(requested_messages ?exact_execution_guard meta)
     ~meta
     ~trigger
     ctx

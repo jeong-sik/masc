@@ -20,6 +20,17 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
+type exact_execution_guard =
+  { before_dispatch : attempt_observation -> (unit, string) result
+  ; release_before_dispatch : attempt_observation -> (unit, string) result
+  ; quarantine :
+      Keeper_event_queue_state.exact_execution_terminal_cause ->
+      attempt_observation ->
+      (unit, string) result
+  }
+(** Explicit lease-scoped durable dispatch authority. [before_dispatch] must
+    commit before returning [Ok]; none of these callbacks may perform POST. *)
+
 type summarization_failure =
   | Exact_lane_unconfigured
   | Exact_target_selection_failed
@@ -30,6 +41,7 @@ type summarization_failure =
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation
+  | Exact_terminal_persistence_failed of attempt_observation
   | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
   | Invalid_plan_after_dispatch of attempt_observation
@@ -59,6 +71,7 @@ val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
+  -> ?exact_execution_guard:exact_execution_guard
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
 
@@ -68,7 +81,7 @@ val execute_prepared_lane
     enforces the MASC-owned compaction schema and domain rules. Invalid domain
     output is terminal and never advances to another slot. Only a receipt still
     at [Before_dispatch] with dispatch count zero permits advancing. *)
-val make : keeper_name:string -> unit -> summarizer option
+val make : ?exact_execution_guard:exact_execution_guard -> keeper_name:string -> unit -> summarizer option
 
 val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
 

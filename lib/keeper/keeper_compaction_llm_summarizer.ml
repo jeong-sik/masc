@@ -55,6 +55,15 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
+type exact_execution_guard =
+  { before_dispatch : attempt_observation -> (unit, string) result
+  ; release_before_dispatch : attempt_observation -> (unit, string) result
+  ; quarantine :
+      Keeper_event_queue_state.exact_execution_terminal_cause ->
+      attempt_observation ->
+      (unit, string) result
+  }
+
 type summarization_failure =
   | Exact_lane_unconfigured
   | Exact_target_selection_failed
@@ -65,6 +74,7 @@ type summarization_failure =
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation
+  | Exact_terminal_persistence_failed of attempt_observation
   | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
   | Invalid_plan_after_dispatch of attempt_observation
@@ -395,6 +405,60 @@ let is_before_dispatch_zero observation =
   && observation.dispatch_count = 0
 ;;
 
+let release_exact_execution_before_dispatch
+      ~keeper_name
+      ~exact_execution_guard
+      observation
+  =
+  match exact_execution_guard with
+  | None -> false
+  | Some guard ->
+    (match guard.release_before_dispatch observation with
+     | Ok () -> true
+     | Error detail ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact pre-dispatch fence release failed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       false)
+;;
+
+let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observation =
+  match exact_execution_guard with
+  | None -> Error "exact execution guard is unavailable"
+  | Some guard ->
+    (match guard.quarantine cause observation with
+     | Ok () -> Ok ()
+     | Error detail ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact terminal quarantine failed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Error detail)
+;;
+
+let terminal_failure_after_quarantine
+      ~keeper_name
+      ~exact_execution_guard
+      ~cause
+      ~failure
+      observation
+  =
+  match
+    quarantine_exact_execution
+      ~keeper_name
+      ~exact_execution_guard
+      ~cause
+      observation
+  with
+  | Ok () -> Error failure
+  | Error _ -> Error (Exact_terminal_persistence_failed observation)
+;;
+
 let exact_execution_evidence ~slot_id ready_plan (success : Exact_output.success) =
   let provenance = success.provenance in
   let identity = provenance.target_identity in
@@ -493,7 +557,7 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
        | Ok admitted_slots -> Ok { units; admitted_slots })
 ;;
 
-let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
+let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
   let rec execute = function
     | [] -> Error Exact_execution_failed_before_dispatch
     | ({ slot_id; ready_plan; attempt; receipt = _ } as slot) :: rest ->
@@ -507,7 +571,12 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
             "compaction exact attempt already consumed slot=%s call_id=%s"
             slot_id
             observation.call_id;
-          Error (Exact_attempt_already_started observation)
+          terminal_failure_after_quarantine
+            ~keeper_name
+            ~exact_execution_guard
+            ~cause:Keeper_event_queue_state.Attempt_already_started
+            ~failure:(Exact_attempt_already_started observation)
+            observation
         | Error ({ receipt; _ } : Exact_output.execution_error) ->
           let observation = observe_receipt ~slot_id receipt in
           if is_before_dispatch_zero observation
@@ -517,8 +586,20 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
               "compaction exact slot failed before dispatch slot=%s call_id=%s"
               slot_id
               observation.call_id;
-            execute rest)
-          else Error (Exact_execution_failed_after_dispatch observation)
+            if
+              release_exact_execution_before_dispatch
+                ~keeper_name
+                ~exact_execution_guard
+                observation
+            then execute rest
+            else Error Exact_execution_failed_before_dispatch)
+          else (
+            terminal_failure_after_quarantine
+              ~keeper_name
+              ~exact_execution_guard
+              ~cause:Keeper_event_queue_state.Execution_failed_after_dispatch
+              ~failure:(Exact_execution_failed_after_dispatch observation)
+              observation)
         | Ok success ->
           let observation = observe_attempt slot in
           let success_call_id = call_id_to_string success.call_id in
@@ -531,7 +612,13 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
             not
               (String.equal success_call_id success_receipt_call_id
                && String.equal success_call_id observation.call_id)
-          then Error (Exact_execution_provenance_mismatch observation)
+          then (
+            terminal_failure_after_quarantine
+              ~keeper_name
+              ~exact_execution_guard
+              ~cause:Keeper_event_queue_state.Execution_provenance_mismatch
+              ~failure:(Exact_execution_provenance_mismatch observation)
+              observation)
           else
             (match plan_of_json ~units:prepared_lane.units success.output with
              | Error detail ->
@@ -541,7 +628,12 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
                  slot_id
                  observation.call_id
                  detail;
-               Error (Invalid_plan_after_dispatch observation)
+               terminal_failure_after_quarantine
+                 ~keeper_name
+                 ~exact_execution_guard
+                 ~cause:Keeper_event_queue_state.Domain_invalid_output
+                 ~failure:(Invalid_plan_after_dispatch observation)
+                 observation
              | Ok plan ->
                Ok
                  { plan
@@ -549,25 +641,50 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
                      exact_execution_evidence ~slot_id ready_plan success
                  })
       in
-      (try handle_result (Exact_output.execute_once ~net ?clock attempt) with
-       | Eio.Cancel.Cancelled _ as cancellation ->
-         Eio.Cancel.protect
-         @@ fun () ->
-         let observation = observe_attempt slot in
-         if is_before_dispatch_zero observation
-         then raise cancellation
-         else (
-           Log.Keeper.warn
-             ~keeper_name
-             "compaction exact cancellation became terminal slot=%s call_id=%s"
-             slot_id
-             observation.call_id;
-           Error (Exact_execution_cancelled_after_dispatch observation)))
+      let initial_observation = observe_attempt slot in
+      (match exact_execution_guard with
+       | Some guard ->
+         (match guard.before_dispatch initial_observation with
+          | Error detail ->
+            Log.Keeper.error
+              ~keeper_name
+              "compaction exact pre-dispatch fence commit failed slot=%s call_id=%s: %s"
+              slot_id
+              initial_observation.call_id
+              detail;
+            Error Exact_execution_failed_before_dispatch
+          | Ok () ->
+            (try handle_result (Exact_output.execute_once ~net ?clock attempt) with
+             | Eio.Cancel.Cancelled _ as cancellation ->
+               Eio.Cancel.protect
+               @@ fun () ->
+               let observation = observe_attempt slot in
+               if is_before_dispatch_zero observation
+               then (
+                 ignore
+                   (release_exact_execution_before_dispatch
+                      ~keeper_name
+                      ~exact_execution_guard
+                      observation);
+                 raise cancellation)
+               else (
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "compaction exact cancellation became terminal slot=%s call_id=%s"
+                   slot_id
+                   observation.call_id;
+                 terminal_failure_after_quarantine
+                   ~keeper_name
+                   ~exact_execution_guard
+                   ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                   ~failure:(Exact_execution_cancelled_after_dispatch observation)
+                   observation)))
+       | None -> Error Exact_execution_failed_before_dispatch)
   in
   execute prepared_lane.admitted_slots
 ;;
 
-let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
+let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -581,18 +698,22 @@ let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
           ~lane_id:"compaction_exact"
           ~units
       in
-      execute_prepared_lane ~keeper_name ~net ?clock prepared_lane
+      execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane
 ;;
 
-let make_resolved ~(keeper_name : string) () : summarizer option =
+let make_resolved ?exact_execution_guard ~(keeper_name : string) () : summarizer option =
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
-    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ~clock ~units)
+    Some
+      (fun ~units ->
+         run_exact ?exact_execution_guard ~keeper_name ~sw ~net ~clock ~units)
   | _ -> None
 ;;
 
-let make ~keeper_name () = make_resolved ~keeper_name ()
+let make ?exact_execution_guard ~keeper_name () =
+  make_resolved ?exact_execution_guard ~keeper_name ()
+;;
 
 let completed_plan completed = completed.plan
 let completed_exact_execution_evidence completed = completed.exact_execution_evidence

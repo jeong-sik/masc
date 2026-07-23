@@ -4,7 +4,7 @@
    Without the fsync pair, a crash between the rename and the kernel's
    dirty-page flush can leave the target truncated or zero-length —
    observed on backlog.json after an abrupt shutdown (2026-04-18). *)
-let fsync_path path =
+let fsync_path_with ~allow_unsupported path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
   Stdlib.Fun.protect
     ~finally:(fun () ->
@@ -16,11 +16,15 @@ let fsync_path path =
           (Printexc.to_string exn))
     (fun () ->
       try Unix.fsync fd with
-      | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
+      | Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _)
+        when allow_unsupported ->
         (* Some filesystems (tmpfs on some kernels) reject fsync. The data
            is still durable to the extent the underlying FS offers. *)
         ())
 ;;
+
+let fsync_path = fsync_path_with ~allow_unsupported:true
+let fsync_path_strict = fsync_path_with ~allow_unsupported:false
 
 (* #10205 finding 2: keep the atomic-tmp filename shape in one place
    so the writer ([save_file_atomic]) and the orphan-sweep matcher
@@ -2505,7 +2509,8 @@ module Capability_write_for_testing = struct
   let sync_directory_capability = sync_directory_capability_with
 end
 
-let save_file_atomic
+let save_file_atomic_with_parent_sync
+  ~strict_parent_sync
   ~(save_file : string -> string -> unit)
   (path : string)
   (content : string)
@@ -2523,8 +2528,11 @@ let save_file_atomic
        save_file tmp content;
        fsync_path tmp;
        Stdlib.Sys.rename tmp path;
-       (try fsync_path dir with
-        | Unix.Unix_error _ -> ());
+       (if strict_parent_sync
+        then fsync_path_strict dir
+        else
+          try fsync_path dir with
+          | Unix.Unix_error _ -> ());
        Ok ()
      with
      | Eio.Cancel.Cancelled _ as exn ->
@@ -2541,6 +2549,22 @@ let save_file_atomic
      else (Out_of_memory, Assert_failure, ...) is fatal and must stay loud
      rather than collapse into the string error channel. *)
   | Sys_error _ as exn -> error exn
+;;
+
+let save_file_atomic ~save_file path content =
+  save_file_atomic_with_parent_sync
+    ~strict_parent_sync:false
+    ~save_file
+    path
+    content
+;;
+
+let save_file_atomic_strict ~save_file path content =
+  save_file_atomic_with_parent_sync
+    ~strict_parent_sync:true
+    ~save_file
+    path
+    content
 ;;
 
 let has_atomic_temp_shape ~prefix name =

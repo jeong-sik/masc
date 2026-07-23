@@ -29,6 +29,15 @@ val save_file_atomic
   -> string
   -> (unit, string) Result.t
 
+(** Strict sibling of {!save_file_atomic}. Parent-directory descriptor or
+    fsync failure is returned as [Error] after the rename instead of being
+    treated as best effort. *)
+val save_file_atomic_strict
+  :  save_file:(string -> string -> unit)
+  -> string
+  -> string
+  -> (unit, string) Result.t
+
 (** [open_atomic_temp_file ~temp_dir ()] creates and opens a fresh
     temp file in [temp_dir] using the canonical [.atomic_*.tmp]
     filename shape. The caller owns the returned channel and file. *)

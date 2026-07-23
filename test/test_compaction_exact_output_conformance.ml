@@ -12,6 +12,8 @@ module S = Keeper_structured_output_schema
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
 module F = Compaction_exact_output_fixture
+module P = Keeper_event_queue_persistence
+module Q = Keeper_event_queue
 
 exception Cancel_after_request_arrived
 
@@ -26,6 +28,74 @@ let run_eio f =
     ~sw
     ~net:(Eio.Stdenv.net env)
     ~clock:(Eio.Stdenv.clock env)
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+;;
+
+let claim_manual_lease ~base_path ~keeper_name =
+  let stimulus : Q.stimulus =
+    { post_id = "manual-compaction"
+    ; urgency = Q.Immediate
+    ; arrived_at = 1.0
+    ; payload = Q.Manual_compaction_requested
+    }
+  in
+  (match
+     P.update_checked_result
+       ~base_path
+       ~keeper_name
+       (fun pending -> Ok (Q.enqueue pending stimulus))
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "manual stimulus persist failed: %s" detail);
+  match
+    P.claim_when_result
+      ~base_path
+      ~keeper_name
+      ~claimed_at:2.0
+      ~ready:(fun _ -> true)
+      ()
+  with
+  | Ok (Some lease) -> lease
+  | Ok None -> Alcotest.fail "manual lease was not claimed"
+  | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
+;;
+
+let permissive_exact_execution_guard : C.exact_execution_guard =
+  { before_dispatch = (fun _ -> Ok ())
+  ; release_before_dispatch = (fun _ -> Ok ())
+  ; quarantine = (fun _ _ -> Ok ())
+  }
+;;
+
+let execute_prepared_lane
+      ~keeper_name
+      ~net
+      ?clock
+      ?(exact_execution_guard = permissive_exact_execution_guard)
+      prepared_lane
+  =
+  C.execute_prepared_lane
+    ~keeper_name
+    ~net
+    ?clock
+    ~exact_execution_guard
+    prepared_lane
 ;;
 
 let message role text : T.message =
@@ -276,7 +346,7 @@ let test_unavailable_slots_are_skipped_in_both_orders () =
       [ usable_id ]
       (C.For_testing.admitted_slot_ids prepared);
     ignore
-      (C.execute_prepared_lane
+      (execute_prepared_lane
          ~keeper_name:"keeper-mixed"
          ~net
          ~clock
@@ -406,7 +476,7 @@ let test_published_snapshot_replacement_cannot_mix_prepared_lane () =
     [ "replacement-slot" ]
     (C.For_testing.admitted_slot_ids prepared_b);
   let completed =
-    C.execute_prepared_lane
+    execute_prepared_lane
       ~keeper_name:"keeper-frozen-a"
       ~net
       ~clock
@@ -455,7 +525,7 @@ let test_before_dispatch_zero_advances_exactly_once () =
       ~registry
   in
   ignore
-    (C.execute_prepared_lane
+    (execute_prepared_lane
        ~keeper_name:"keeper-before-dispatch"
        ~net
        prepared
@@ -503,7 +573,7 @@ let test_post_dispatch_failure_is_terminal () =
       ~keeper_name:"keeper-post-dispatch"
       ~registry
   in
-  (match C.execute_prepared_lane ~keeper_name:"keeper-post-dispatch" ~net prepared with
+  (match execute_prepared_lane ~keeper_name:"keeper-post-dispatch" ~net prepared with
    | Error (C.Exact_execution_failed_after_dispatch observation) ->
      Alcotest.(check string)
        "post-dispatch failure retains slot"
@@ -551,7 +621,7 @@ let test_domain_invalid_json_is_terminal () =
       ~keeper_name:"keeper-domain-invalid"
       ~registry
   in
-  (match C.execute_prepared_lane ~keeper_name:"keeper-domain-invalid" ~net prepared with
+  (match execute_prepared_lane ~keeper_name:"keeper-domain-invalid" ~net prepared with
    | Error (C.Invalid_plan_after_dispatch observation) ->
      Alcotest.(check string)
        "domain-invalid output retains slot"
@@ -612,7 +682,7 @@ let test_post_dispatch_cancellation_is_typed_terminal () =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Cancel.sub (fun context ->
         Eio.Promise.resolve resolve_cancel_context context;
-        C.execute_prepared_lane
+        execute_prepared_lane
           ~keeper_name:"keeper-cancelled"
           ~net
           ~clock
@@ -695,9 +765,9 @@ let test_keeper_preparations_do_not_share_attempt_state () =
   let result_a, result_b =
     Eio.Fiber.pair
       (fun () ->
-         C.execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
+         execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
       (fun () ->
-         C.execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
+         execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
   in
   ignore (completed_exn result_a : C.completed_plan);
   ignore (completed_exn result_b : C.completed_plan);
@@ -731,7 +801,7 @@ let test_prepared_lane_replay_is_terminal_without_second_post () =
   let prepared = prepare_exn ~keeper_name:"keeper-affine-replay" ~registry in
   let retained_call_id = (observation_exn prepared slot_id).call_id in
   ignore
-    (C.execute_prepared_lane
+    (execute_prepared_lane
        ~keeper_name:"keeper-affine-replay"
        ~net
        ~clock
@@ -739,7 +809,7 @@ let test_prepared_lane_replay_is_terminal_without_second_post () =
      |> completed_exn
       : C.completed_plan);
   (match
-     C.execute_prepared_lane
+     execute_prepared_lane
        ~keeper_name:"keeper-affine-replay"
        ~net
        ~clock
@@ -773,13 +843,13 @@ let test_prepared_lane_concurrency_is_affine () =
   let first, second =
     Eio.Fiber.pair
       (fun () ->
-         C.execute_prepared_lane
+         execute_prepared_lane
            ~keeper_name:"keeper-affine-concurrent-a"
            ~net
            ~clock
            prepared)
       (fun () ->
-         C.execute_prepared_lane
+         execute_prepared_lane
            ~keeper_name:"keeper-affine-concurrent-b"
            ~net
            ~clock
@@ -798,6 +868,160 @@ let test_prepared_lane_concurrency_is_affine () =
     "concurrent reuse cannot issue a second POST"
     1
     (F.post_count server)
+;;
+
+let test_dispatch_guard_failure_prevents_post () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let slot_id = "durable-guard-failure" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc durable guard failure"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-durable-guard-failure" ~registry in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Error "injected durable binding failure")
+    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
+    ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
+    }
+  in
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-durable-guard-failure"
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+   with
+   | Error C.Exact_execution_failed_before_dispatch -> ()
+   | Error _ -> Alcotest.fail "guard failure returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "guard failure must prevent exact-output execution");
+  Alcotest.(check int) "binding failure prevents POST" 0 (F.post_count server)
+;;
+
+let test_missing_dispatch_guard_prevents_post () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let slot_id = "missing-dispatch-guard" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc missing durable dispatch guard"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-missing-dispatch-guard" ~registry in
+  (match
+     C.execute_prepared_lane
+       ~keeper_name:"keeper-missing-dispatch-guard"
+       ~net
+       ~clock
+       prepared
+   with
+   | Error C.Exact_execution_failed_before_dispatch -> ()
+   | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "missing guard must prevent exact-output execution");
+  Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
+;;
+
+let test_quarantine_persistence_failure_is_typed_terminal () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server = F.start_server ~sw ~net ~clock F.Abort_after_request in
+  let slot_id = "quarantine-persistence-failure" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc terminal quarantine persistence failure"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-quarantine-persistence-failure" ~registry in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Ok ())
+    ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
+    ; quarantine = (fun _ _ -> Error "injected terminal persistence failure")
+    }
+  in
+  (match
+     execute_prepared_lane
+       ~keeper_name:"keeper-quarantine-persistence-failure"
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+   with
+   | Error (C.Exact_terminal_persistence_failed observation) ->
+     Alcotest.(check string) "terminal persistence slot" slot_id observation.slot_id
+   | Error _ -> Alcotest.fail "quarantine failure returned the wrong typed terminal"
+   | Ok _ -> Alcotest.fail "quarantine persistence failure unexpectedly succeeded");
+  Alcotest.(check int) "terminal persistence failure never retries" 1 (F.post_count server)
+;;
+
+let test_heartbeat_guard_binds_before_post () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-heartbeat-bind-before-post" @@ fun base_path ->
+  let keeper_name = "keeper-heartbeat-bind-before-post" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  let slot_id = "heartbeat-bind-before-post" in
+  let expected_observation = ref None in
+  let durable_binding_seen = Atomic.make false in
+  let server =
+    F.start_server
+      ~on_request_before_reply:(fun () ->
+        match
+          !expected_observation,
+          P.exact_execution_binding_result ~base_path ~keeper_name
+        with
+        | Some (observation : C.attempt_observation),
+          Ok (Some (binding : P.exact_execution_binding))
+          when binding.status = P.Dispatch_uncertain
+               && String.equal binding.slot_id observation.slot_id
+               && String.equal binding.call_id observation.call_id
+               && String.equal
+                    binding.plan_fingerprint
+                    observation.receipt_plan_fingerprint
+               && String.equal
+                    binding.request_body_sha256
+                    observation.receipt_request_body_sha256 ->
+          Atomic.set durable_binding_seen true
+        | _ -> ())
+      ~sw
+      ~net
+      ~clock
+      (F.Reply valid_response)
+  in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc heartbeat durable bind order"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  expected_observation := Some (observation_exn prepared slot_id);
+  let guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  ignore
+    (execute_prepared_lane
+       ~keeper_name
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
+     |> completed_exn
+      : C.completed_plan);
+  Alcotest.(check bool)
+    "durable heartbeat binding exists when POST arrives"
+    true
+    (Atomic.get durable_binding_seen);
+  Alcotest.(check int) "heartbeat guarded request posts once" 1 (F.post_count server)
 ;;
 
 let () =
@@ -850,6 +1074,22 @@ let () =
             "post-dispatch cancellation is typed and terminal"
             `Quick
             test_post_dispatch_cancellation_is_typed_terminal
+        ; Alcotest.test_case
+            "durable dispatch guard failure prevents POST"
+            `Quick
+            test_dispatch_guard_failure_prevents_post
+        ; Alcotest.test_case
+            "missing dispatch guard prevents POST"
+            `Quick
+            test_missing_dispatch_guard_prevents_post
+        ; Alcotest.test_case
+            "quarantine persistence failure is typed terminal"
+            `Quick
+            test_quarantine_persistence_failure_is_typed_terminal
+        ; Alcotest.test_case
+            "heartbeat durable bind precedes POST"
+            `Quick
+            test_heartbeat_guard_binds_before_post
         ] )
     ; ( "Keeper isolation"
       , [ Alcotest.test_case

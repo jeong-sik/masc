@@ -34,6 +34,7 @@ type exact_execution_terminal_cause =
   | Lifecycle_transition_failed_after_dispatch
   | Checkpoint_source_changed
   | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
 
 type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
@@ -43,6 +44,22 @@ type exact_execution_terminal =
 (** One OAS-owned affine call that crossed, or can no longer safely be assumed
     not to have crossed, the dispatch boundary. Both identities are mandatory
     and survive the queue receipt/WAL codec. *)
+
+type exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
+  }
+(** Durable pre-dispatch fence for one OAS exact-output attempt. A bound lease
+    cannot pass through generic settlement or registration recovery. *)
 
 type escalation_reason =
   | Failure_judgment_requested
@@ -246,6 +263,52 @@ val settle :
     [Manual_compaction_requested] stimulus; it cannot retire product work whose
     provider turn failed. Non-finite settlement times are rejected. *)
 
+val exact_execution_binding : t -> exact_execution_binding option
+
+val bind_exact_execution :
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Bind one exact-output identity before provider dispatch. Repeating the same
+    binding is idempotent; every conflicting identity fails closed. *)
+
+val release_exact_execution_before_dispatch :
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Remove a dispatch-uncertain binding only after OAS proves zero dispatches. *)
+
+val quarantine_exact_execution :
+  lease:lease ->
+  terminal:exact_execution_terminal ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Advance a matching dispatch-uncertain binding to a typed terminal
+    quarantine without releasing the lease for replay. *)
+
+val settle_exact_execution :
+  settled_at:float ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  settlement:settlement ->
+  t ->
+  (t * settle_result, string) result
+(** Finalize a bound lease through its exact OAS identity. Generic {!settle}
+    rejects bound leases. *)
+
 val cancel_accepted :
   current_owner_generation:int ->
   settled_at:float ->
@@ -336,8 +399,9 @@ val replay_transition_receipt : transition_receipt -> t -> (t, string) result
     lease is an explicit conflict. *)
 
 val recover_leases : settled_at:float -> t -> (t, string) result
-(** Requeue every active lease with [Registration_recovery], preserving claim
-    and stimulus order and emitting stable transition receipts. *)
+(** Requeue ordinary active leases with [Registration_recovery]. Any durable
+    exact-execution binding makes recovery fail closed instead of replaying a
+    provider call. *)
 
 val active_lease : t -> lease option
 (** Oldest unsettled lease, if any.  A restarted lane resumes this lease before

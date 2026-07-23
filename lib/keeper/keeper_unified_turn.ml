@@ -167,6 +167,7 @@ type provider_overflow_recovery =
       }
 
 let recover_provider_context_overflow_in_lane
+      ?exact_execution_guard
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
@@ -231,17 +232,23 @@ let recover_provider_context_overflow_in_lane
           (try
              match
                recover_latest_checkpoint_for_compaction
+                 ?exact_execution_guard
                  ~base_dir
                  ~meta
                  ~trigger
                  ~projection_request
              with
-             | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-               let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
-               record_overflow_failure ~config ~meta ~reason;
-               (match release_failed_lifecycle reason with
-                | Ok () -> Provider_overflow_no_compaction no_compaction
-                | Error _ -> Provider_overflow_retry_without_checkpoint { trigger; reason })
+      | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+        Eio.Cancel.protect (fun () ->
+          let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
+          (try record_overflow_failure ~config ~meta ~reason with
+           | exn ->
+             Log.Keeper.error
+               ~keeper_name:meta.name
+               "provider overflow terminal observation failed without reopening exact request: %s"
+               (Printexc.to_string exn));
+          ignore (release_failed_lifecycle reason : (unit, string) result);
+          Provider_overflow_no_compaction no_compaction)
              | Error error ->
                retry_after_started
                  (Keeper_post_turn.compaction_recovery_error_to_string error)
@@ -402,6 +409,7 @@ let append_provider_overflow_manifest
 ;;
 
 let run_keeper_cycle
+      ?exact_execution_guard
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery_provider :
@@ -1150,8 +1158,9 @@ dominant source of the observed CAS race exhaustion after
                        compacted checkpoint is durably saved. The heartbeat
                        settles the owning lease after this cycle returns, so
                        no source stimulus is acknowledged ahead of it. *)
-                    recover_provider_context_overflow_in_lane
-                      ~config
+                      recover_provider_context_overflow_in_lane
+                        ?exact_execution_guard
+                        ~config
                       ~base_dir
                       ~meta
                       ~projection_request:

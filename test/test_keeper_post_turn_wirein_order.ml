@@ -117,13 +117,31 @@ let test_compaction_rejection_tag_is_stable () =
     "categorical tag excludes evidence detail"
     "invalid_structural_evidence"
     (Post_turn.compaction_recovery_error_to_tag error);
-  check string
+  check
+    string
     "diagnostic detail remains observable"
-    "compaction rejected: invalid_structural_evidence:no_messages_compacted"
-    (Post_turn.compaction_recovery_error_to_string error
-     |> fun value ->
-     String.sub value 0
-       (String.length "compaction rejected: invalid_structural_evidence:no_messages_compacted"))
+    "compaction rejected: invalid_structural_evidence:no_messages_compacted:\
+     invalid_structural_evidence:slot_id=compaction-slot:call_id=call-compaction"
+    (Post_turn.compaction_recovery_error_to_string error)
+
+let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
+  let preserves =
+    Masc.Keeper_manual_compaction.For_testing
+    .preserve_no_compaction_after_final_admission_busy
+  in
+  check
+    bool
+    "No_eligible_history remains replayable after final admission Busy"
+    false
+    (preserves Keeper_event_queue_state.No_eligible_history);
+  check
+    bool
+    "post-dispatch exact terminal remains source-bound after final admission Busy"
+    true
+    (preserves
+       (Keeper_event_queue_state.Exact_execution_terminal
+          (exact_terminal Keeper_event_queue_state.Execution_failed_after_dispatch)))
+;;
 
 let test_empty_projection_target_is_typed () =
   let resolver_called = ref false in
@@ -425,6 +443,12 @@ let test_manual_compaction_serializes_owner_lane () =
         ; since_last_scheduled_autonomous = None
         }
       in
+      let exact_execution_guard =
+        Masc.Keeper_heartbeat_loop.For_testing.exact_execution_guard
+          ~base_path
+          ~keeper_name:meta.name
+          ~lease
+      in
       let run_cycle () =
         Cycle.run_keeper_cycle
           ~ctx
@@ -435,6 +459,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~shared_context:(Agent_sdk.Context.create_sync ())
           ~wake:(Masc.Keeper_registry.Woken [ Manual_compaction_requested ])
           ~manual_compaction_requested:true
+          ~exact_execution_guard
           ()
       in
       let busy_outcome = run_cycle () in
@@ -555,6 +580,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
           ~meta
           ~trigger:Compaction_trigger.Manual
+          ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
           ~projection_request:(projection_request_of_meta meta)
       in
       check int
@@ -642,6 +668,7 @@ let test_manual_compaction_serializes_owner_lane () =
         Masc.Keeper_manual_compaction.run_admitted
           ~config
           ~meta
+          ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
       in
       check int
         "planning-admission race performs one exact dispatch"
@@ -934,6 +961,7 @@ let test_prepare_commit_source_cas () =
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
       ~trigger:Compaction_trigger.Manual
+      ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
       ~projection_request:(projection_request_of_meta meta)
   with
   | Error error ->
@@ -997,7 +1025,12 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
         make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
       in
       let plan_for_units ~units =
-        match Summarizer.make ~keeper_name:meta.name () with
+        match
+          Summarizer.make
+            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+            ~keeper_name:meta.name
+            ()
+        with
         | None -> Error Summarizer.Exact_execution_context_unavailable
         | Some summarize ->
           summarize ~units
@@ -1123,6 +1156,9 @@ let () =
     "durable compaction", [
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
+      test_case
+        "final-admission Busy distinguishes pre-dispatch from exact terminal"
+        `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
       test_case "empty projection target is typed"
         `Quick test_empty_projection_target_is_typed;
       test_case "regular post-turn does not auto-compact"

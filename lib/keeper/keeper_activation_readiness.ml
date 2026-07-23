@@ -8,6 +8,7 @@ type pause_kind =
   | Operator_paused
   | Unclassified_paused
   | Dead_tombstone
+  | Transcript_corruption_reset_required
 
 let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -23,6 +24,9 @@ let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
          (Keeper_latched_reason.Operator_paused _) -> Operator_paused
      | Keeper_lifecycle_admission.Classified Keeper_latched_reason.Dead_tombstone ->
        Dead_tombstone
+     | Keeper_lifecycle_admission.Classified
+         Keeper_latched_reason.Transcript_corruption_reset_required ->
+       Transcript_corruption_reset_required
      | Keeper_lifecycle_admission.Unclassified -> Unclassified_paused)
 ;;
 
@@ -31,6 +35,8 @@ let pause_kind_to_wire = function
   | Operator_paused -> "operator_paused"
   | Unclassified_paused -> "unclassified_paused"
   | Dead_tombstone -> "dead_tombstone"
+  | Transcript_corruption_reset_required ->
+    "transcript_corruption_reset_required"
 ;;
 
 type autonomous_activation =
@@ -78,6 +84,14 @@ let autonomous_blocker_to_wire = function
    from a per-keeper flag without parsing the boundary string projection. *)
 let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
   | None -> None
+  | Some
+      (Lifecycle_denied
+        (Keeper_lifecycle_admission.Autonomous_paused
+          (Keeper_lifecycle_admission.Classified
+            Keeper_latched_reason.Transcript_corruption_reset_required))) ->
+    Some
+      "reset the corrupted Keeper checkpoint before starting a new lane; \
+       generic resume is intentionally denied"
   | Some
       (Lifecycle_denied (Keeper_lifecycle_admission.Autonomous_paused _)) ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"

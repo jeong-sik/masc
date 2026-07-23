@@ -1190,7 +1190,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        retry_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -1209,7 +1208,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        judgment_failure
    with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -1231,7 +1229,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
@@ -1247,7 +1244,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:7.0
        ~compaction_consecutive_failures:0
-       ~transcript_quarantine_consecutive_retries:0
        compacted_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -1257,20 +1253,27 @@ let test_failed_cycle_route_mapping () =
   let quarantined_failure =
     { judgment_failure with
       source_lease_disposition =
-        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+        Masc.Keeper_unified_turn.Pause_after_transcript_corruption
+          { detail = "fixture transcript corruption" }
     }
   in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:8.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       quarantined_failure
   with
-  | Masc.Keeper_registry_event_queue.Requeue
-      Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
-    ()
-  | _ -> Alcotest.fail "unprocessed source stimulus was acknowledged after quarantine"
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason =
+          Masc.Keeper_registry_event_queue.Transcript_corruption_requires_reset
+            { detail }
+      ; successor = None
+      } ->
+    Alcotest.(check string)
+      "terminal corruption detail"
+      "fixture transcript corruption"
+      detail
+  | _ -> Alcotest.fail "transcript corruption did not require operator reset"
 ;;
 
 let cycle_meta () =
@@ -1316,7 +1319,6 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
        ~settled_at:2.0
        ~stop_requested:false
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        ~lease
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
@@ -1335,7 +1337,6 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:3.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       overflow_failure
   with
   | Masc.Keeper_registry_event_queue.Escalate
@@ -1361,7 +1362,6 @@ let test_applied_compaction_settles_followup_atomically () =
       ~settled_at:8.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
@@ -1420,7 +1420,6 @@ let test_compaction_retry_escalates_after_threshold () =
       ~settled_at:2.0
       ~stop_requested:false
       ~compaction_consecutive_failures:streak
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some failed)
   in
@@ -1466,7 +1465,6 @@ let test_in_lane_compaction_streak_bounds_retries () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:4.0
       ~compaction_consecutive_failures:streak
-      ~transcript_quarantine_consecutive_retries:0
       (failure disposition)
   in
   let attempt_failed =
@@ -1552,7 +1550,6 @@ let test_in_lane_compaction_streak_bounds_retries () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:5.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       { (turn_failure route) with
         source_lease_disposition =
           Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
@@ -1773,13 +1770,7 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
   check "no outcome leaves the streak untouched" "none" None
 ;;
 
-(* #25296: a transcript-quarantine disposition requeues while the streak is
-   under the ceiling and settles terminally at it. The poisoned checkpoint is
-   preserved unmodified by design, so every re-lease rejects the same
-   transcript again — without the ceiling the same stimulus re-enters the full
-   turn pipeline on every heartbeat cycle, because [Requeue] is not an ack
-   (2026-07-21 lesson: every exempt retry class needs its own accounting). *)
-let test_transcript_quarantine_retry_escalates_after_threshold () =
+let test_transcript_corruption_requires_reset_immediately () =
   let judgment_route =
     Keeper_runtime_failure_route.Escalate_judgment
       { judgment = Keeper_runtime_failure_route.Contract_violation
@@ -1790,86 +1781,29 @@ let test_transcript_quarantine_retry_escalates_after_threshold () =
   let quarantined_failure =
     { (turn_failure judgment_route) with
       source_lease_disposition =
-        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+        Masc.Keeper_unified_turn.Pause_after_transcript_corruption
+          { detail = "overlapping tool cycle" }
     }
   in
-  let settlement ~streak =
+  match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:5.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:streak
       quarantined_failure
-  in
-  let expect_requeue ~streak label =
-    match settlement ~streak with
-    | Masc.Keeper_registry_event_queue.Requeue
-        Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
-      ()
-    | _ -> Alcotest.fail label
-  in
-  expect_requeue ~streak:0 "first transcript quarantine did not requeue";
-  expect_requeue ~streak:1 "second transcript quarantine did not requeue";
-  match settlement ~streak:2 with
+  with
   | Masc.Keeper_registry_event_queue.Escalate
       { reason =
-          Masc.Keeper_registry_event_queue.Transcript_quarantine_retry_exhausted
-            { attempts; _ }
+          Masc.Keeper_registry_event_queue.Transcript_corruption_requires_reset
+            { detail }
       ; successor = None
       } ->
-    Alcotest.(check int) "escalation reports the attempt count" 3 attempts
+    Alcotest.(check string)
+      "first rejection preserves typed detail"
+      "overlapping tool cycle"
+      detail
   | _ ->
     Alcotest.fail
-      "third consecutive transcript quarantine requeued instead of escalating"
-;;
-
-(* #25296: the settlement decides from the streak; this mapping is what
-   advances and resets it. A quarantine disposition must count, a completed
-   turn must reset, and outcomes with no quarantine involvement must leave the
-   streak untouched. *)
-let test_transcript_quarantine_outcome_mapping () =
-  let meta = cycle_meta () in
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Contract_violation
-      ; provenance = Keeper_runtime_failure_route.Oas_agent_error
-      ; detail = "typed transcript quarantine"
-      }
-  in
-  let failed disposition =
-    Some
-      (Masc.Keeper_heartbeat_loop_cycle.Failed
-         { meta
-         ; failure =
-             { (turn_failure judgment_route) with
-               source_lease_disposition = disposition
-             }
-         })
-  in
-  let check label expected outcome =
-    let actual =
-      match
-        Masc.Keeper_heartbeat_loop.transcript_quarantine_outcome_of_cycle_outcome
-          outcome
-      with
-      | Some `Retried -> "retried"
-      | Some `Recovered -> "recovered"
-      | None -> "none"
-    in
-    Alcotest.(check string) label expected actual
-  in
-  check
-    "a quarantine disposition advances the streak"
-    "retried"
-    (failed Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine);
-  check
-    "a generic turn failure leaves the streak untouched"
-    "none"
-    (failed Masc.Keeper_unified_turn.Follow_failure_route);
-  check
-    "a completed turn resets the streak"
-    "recovered"
-    (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
-  check "no outcome leaves the streak untouched" "none" None
+      "first transcript corruption did not settle terminally without successor"
 ;;
 
 let test_cancelled_and_skipped_cycles_requeue () =
@@ -1881,7 +1815,6 @@ let test_cancelled_and_skipped_cycles_requeue () =
       ~settled_at:2.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some outcome)
   in
@@ -2032,7 +1965,6 @@ let test_approved_wake_settles_on_delivery_not_consumption () =
       ~settled_at:4.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       outcome
   in
@@ -2370,239 +2302,40 @@ let test_pending_cancellation_wal_replays_before_removal () =
     | Error detail -> Alcotest.failf "committed pending cancellation did not replay: %s" detail)
 ;;
 
-let test_legacy_settlement_wal_v1_remains_replayable () =
-  with_temp_dir "keeper-event-queue-legacy-settlement-wal" (fun base_path ->
-    let keeper_name = "legacy_wal_owner" in
+let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
+  with_temp_dir "keeper-event-queue-incompatible-settlement-wal-hardcut" (fun base_path ->
+    let keeper_name = "incompatible_wal_hardcut_owner" in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending (stimulus "legacy-wal-source" 1.0))
-    |> require_ok "seed legacy WAL owner";
-    let lease =
-      Persistence.claim_when_result
-        ~base_path
-        ~keeper_name
-        ~claimed_at:2.0
-        ~ready:(fun _ -> true)
-        ()
-      |> require_ok "claim legacy WAL source"
-      |> require_some "legacy WAL lease"
-    in
-    let claimed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load legacy WAL pre-settlement state"
-    in
-    let receipt =
-      match
-        State.settle ~settled_at:3.0 ~lease ~settlement:State.Ack claimed
-        |> require_ok "construct legacy WAL receipt"
-      with
-      | _, State.Settled receipt -> receipt
-      | _, State.Already_settled _ -> Alcotest.fail "legacy WAL fixture replayed early"
-    in
+      Queue.enqueue pending (stimulus "incompatible-wal-source" 1.0))
+    |> require_ok "seed current primary for incompatible WAL hard cut";
     let wal_path =
       Filename.concat
         (keeper_dir ~base_path ~keeper_name)
         "event-queue-settlements.jsonl"
     in
-    let row =
-      `Assoc
-        [ "schema", `String "masc.keeper_event_queue.settlement.v1"
-        ; "base_path", `String (Unix.realpath base_path)
-        ; "keeper_name", `String keeper_name
-        ; "receipt", State.transition_receipt_to_yojson receipt
-        ]
+    let incompatible_wal_schema = "masc.keeper_event_queue.settlement.incompatible" in
+    let incompatible_wal_bytes =
+      `Assoc [ "schema", `String incompatible_wal_schema ]
       |> Yojson.Safe.to_string
       |> fun row -> row ^ "\n"
     in
-    Fs_compat.save_file_atomic wal_path row |> require_ok "write legacy WAL row";
-    let replayed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "replay legacy WAL row"
-    in
-    Alcotest.(check int) "legacy WAL settles active lease" 0 (List.length (State.leases replayed));
-    Alcotest.(check int)
-      "legacy WAL recreates transition outbox"
-      1
-      (List.length (State.transition_outbox replayed));
+    Fs_compat.save_file_atomic wal_path incompatible_wal_bytes
+    |> require_ok "write incompatible WAL";
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error message ->
+       Alcotest.(check string)
+         "incompatible WAL requires an explicit reset"
+         (Printf.sprintf
+            "settlement WAL at %s is incompatible (reset required): unsupported settlement \
+             WAL schema: %s"
+            wal_path
+            incompatible_wal_schema)
+         message
+     | Ok _ -> Alcotest.fail "incompatible settlement WAL was replayed");
     Alcotest.(check string)
-      "legacy WAL is compacted after checkpoint"
-      ""
+      "hard cut does not rewrite incompatible WAL"
+      incompatible_wal_bytes
       (Fs_compat.load_file wal_path))
-;;
-
-(* Regression (#25599): #25535 renamed the persisted fencing-counter wire key
-   ["owner_generation"] -> ["owner_nonce"] with no reader fallback, so replay
-   of any pre-rename snapshot / settlement WAL row carrying a source-bearing
-   settlement failed with "row fields are not exact". The reader must accept
-   the legacy key (new key wins when both are present) while the writer keeps
-   emitting only ["owner_nonce"]. *)
-let rec rename_owner_nonce_to_legacy = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (name, value) ->
-           ( (if String.equal name "owner_nonce" then "owner_generation" else name)
-           , rename_owner_nonce_to_legacy value ))
-         fields)
-  | `List items -> `List (List.map rename_owner_nonce_to_legacy items)
-  | other -> other
-;;
-
-let test_legacy_owner_generation_wire_key_replays () =
-  let accepted = stimulus "legacy-owner-key-source" 1.0 in
-  let claimed, lease =
-    State.empty
-    |> State.with_pending (queue [ accepted ])
-    |> State.with_revision 7L
-    |> State.claim_when ~claimed_at:3.0 ~ready:(fun _ -> true)
-    |> require_ok "claim legacy owner-key fixture"
-  in
-  let lease = require_some "legacy owner-key lease" lease in
-  let cancellation =
-    accepted_cancellation
-      ~source:accepted
-      ~source_revision:7L
-      ~owner_nonce:4
-      "op-legacy-owner-key"
-  in
-  let settled, receipt =
-    match
-      State.cancel_accepted
-        ~current_owner_nonce:4
-        ~settled_at:4.0
-        ~lease
-        ~cancellation
-        claimed
-      |> require_ok "cancel legacy owner-key source"
-    with
-    | state, State.Settled receipt -> state, receipt
-    | _, State.Already_settled _ ->
-      Alcotest.fail "legacy owner-key fixture replayed early"
-  in
-  (* 1) Receipt codec: a pre-rename receipt decodes to the same value. *)
-  let legacy_receipt_json =
-    rename_owner_nonce_to_legacy (State.transition_receipt_to_yojson receipt)
-  in
-  let decoded =
-    State.transition_receipt_of_yojson legacy_receipt_json
-    |> require_ok "legacy owner_generation receipt decode"
-  in
-  Alcotest.(check bool)
-    "legacy-key receipt roundtrips"
-    true
-    (State.transition_receipt_equal receipt decoded);
-  (* 2) Snapshot codec: a pre-rename snapshot (last_settlement + outbox carry
-     the settlement) loads. *)
-  let legacy_snapshot = rename_owner_nonce_to_legacy (State.to_yojson settled) in
-  let restored =
-    State.of_yojson legacy_snapshot
-    |> require_ok "legacy owner_generation snapshot decode"
-  in
-  Alcotest.(check int)
-    "legacy snapshot keeps the outbox transition"
-    1
-    (List.length (State.transition_outbox restored));
-  (* 3) New key wins when a row carries both keys. *)
-  let both_keys_json =
-    match State.transition_receipt_to_yojson receipt with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-             match name, value with
-             | "settlement", `Assoc settlement_fields ->
-               name, `Assoc (("owner_generation", `Int 99) :: settlement_fields)
-             | _ -> name, value)
-           fields)
-    | other -> other
-  in
-  let decoded_both =
-    State.transition_receipt_of_yojson both_keys_json
-    |> require_ok "both-keys receipt decode"
-  in
-  (match decoded_both.State.settlement with
-   | State.Cancel_accepted decoded_cancellation ->
-     Alcotest.(check int)
-       "owner_nonce wins over legacy owner_generation"
-       4
-       decoded_cancellation.owner_nonce
-   | _ -> Alcotest.fail "both-keys decode changed the settlement kind");
-  (* 4) WAL replay: a pre-rename settlement row replays through persistence. *)
-  with_temp_dir "keeper-event-queue-legacy-owner-key" (fun base_path ->
-    let keeper_name = "legacy_owner_key_owner" in
-    Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending (stimulus "legacy-owner-key-wal-source" 1.0))
-    |> require_ok "seed legacy owner-key WAL owner";
-    let lease =
-      Persistence.claim_when_result
-        ~base_path
-        ~keeper_name
-        ~claimed_at:2.0
-        ~ready:(fun _ -> true)
-        ()
-      |> require_ok "claim legacy owner-key WAL source"
-      |> require_some "legacy owner-key WAL lease"
-    in
-    let claimed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load legacy owner-key WAL pre-settlement state"
-    in
-    let source =
-      match Persistence.lease_stimuli lease with
-      | [ source ] -> source
-      | _ -> Alcotest.fail "legacy owner-key WAL lease lost its source"
-    in
-    let cancellation =
-      accepted_cancellation
-        ~source
-        ~source_revision:(State.revision claimed)
-        ~owner_nonce:4
-        "op-legacy-owner-key-wal"
-    in
-    let receipt =
-      match
-        State.cancel_accepted
-          ~current_owner_nonce:4
-          ~settled_at:3.0
-          ~lease
-          ~cancellation
-          claimed
-        |> require_ok "construct legacy owner-key WAL receipt"
-      with
-      | _, State.Settled receipt -> receipt
-      | _, State.Already_settled _ ->
-        Alcotest.fail "legacy owner-key WAL fixture replayed early"
-    in
-    let wal_path =
-      Filename.concat
-        (keeper_dir ~base_path ~keeper_name)
-        "event-queue-settlements.jsonl"
-    in
-    let row =
-      `Assoc
-        [ "schema", `String "masc.keeper_event_queue.settlement.v1"
-        ; "base_path", `String (Unix.realpath base_path)
-        ; "keeper_name", `String keeper_name
-        ; ( "receipt"
-          , rename_owner_nonce_to_legacy
-              (State.transition_receipt_to_yojson receipt) )
-        ]
-      |> Yojson.Safe.to_string
-      |> fun row -> row ^ "\n"
-    in
-    Fs_compat.save_file_atomic wal_path row
-    |> require_ok "write legacy owner-key WAL row";
-    let replayed =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "replay legacy owner-key WAL row"
-    in
-    Alcotest.(check int)
-      "legacy owner-key WAL settles active lease"
-      0
-      (List.length (State.leases replayed));
-    Alcotest.(check int)
-      "legacy owner-key WAL recreates transition outbox"
-      1
-      (List.length (State.transition_outbox replayed)))
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
@@ -2741,7 +2474,7 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
 ;;
 
 let test_unsupported_snapshots_fail_closed () =
-  with_temp_dir "keeper-event-queue-v3-hardcut" (fun base_path ->
+  with_temp_dir "keeper-event-queue-schema-hardcut" (fun base_path ->
     let keeper_name = "hardcut_keeper" in
     let dir = keeper_dir ~base_path ~keeper_name in
     let primary = Filename.concat dir "event-queue.json" in
@@ -2763,9 +2496,21 @@ let test_unsupported_snapshots_fail_closed () =
       (Sys.file_exists unsupported);
     Sys.remove unsupported;
     write_queue primary (queue [ stimulus "old-schema" 3.0 ]);
+    let unsupported_bytes = Fs_compat.load_file primary in
     (match Persistence.load_state_result ~base_path ~keeper_name with
-     | Error _ -> ()
-    | Ok _ -> Alcotest.fail "old primary schema was migrated"))
+     | Error message ->
+       Alcotest.(check string)
+         "incompatible snapshot requires an explicit reset"
+         (Printf.sprintf
+            "event queue snapshot at %s is incompatible (reset required): unsupported keeper \
+             event queue state schema: keeper.event_queue.v2"
+            primary)
+         message
+     | Ok _ -> Alcotest.fail "old primary schema was migrated");
+    Alcotest.(check string)
+      "hard cut does not rewrite unsupported state"
+      unsupported_bytes
+      (Fs_compat.load_file primary))
 ;;
 
 let test_current_state_codec_reads_its_own_output () =
@@ -2777,57 +2522,33 @@ let test_current_state_codec_reads_its_own_output () =
     (Yojson.Safe.equal encoded (State.to_yojson decoded))
 ;;
 
-let test_v3_snapshot_upgrades_only_without_active_lease () =
-  with_temp_dir "keeper-event-queue-v3-upgrade" (fun base_path ->
-    let keeper_name = "v3_upgrade_keeper" in
-    let path = Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json" in
-    let v3_of_state state =
-      match State.to_yojson state with
-      | `Assoc fields ->
-        `Assoc
-          (("schema", `String "keeper.event_queue.state.v3")
-           :: List.filter
-                (fun (name, _) ->
-                   not
-                     (String.equal name "schema"
-                      || String.equal name "accepted_transfer_projections"
-                      || String.equal name "exact_execution_bindings"))
-                fields)
-      | _ -> Alcotest.fail "current event queue state codec is not an object"
-    in
-    let v3 = v3_of_state State.empty in
-    Fs_compat.mkdir_p (Filename.dirname path);
-    Fs_compat.save_file_atomic path (Yojson.Safe.to_string v3)
-    |> require_ok "write strict v3 predecessor";
-    let upgraded =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load strict v3 predecessor"
-    in
-    Alcotest.(check int)
-      "v3 starts with no target transfer accounting"
-      0
-      (List.length (State.accepted_transfer_projections upgraded));
+let test_current_state_fresh_write_read_restart () =
+  with_temp_dir "keeper-event-queue-current-restart" (fun base_path ->
+    let keeper_name = "current_restart_keeper" in
+    let source = stimulus "current-restart-source" 1.0 in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending (stimulus "upgrade" 1.0))
-    |> require_ok "mutate upgraded queue";
+      Queue.enqueue pending source)
+    |> require_ok "write fresh current queue";
+    let first =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "read fresh current queue"
+    in
+    let path = Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json" in
     let persisted =
-      Safe_ops.read_json_file_safe path |> require_ok "read upgraded queue"
+      Safe_ops.read_json_file_safe path |> require_ok "read current queue envelope"
     in
-    let open Yojson.Safe.Util in
     Alcotest.(check string)
-      "next durable write uses v4"
-      "keeper.event_queue.state.v4"
-      (persisted |> member "schema" |> to_string);
-    let claimed, lease =
-      State.with_pending (queue [ stimulus "possibly-dispatched" 2.0 ]) State.empty
-      |> claim_head
+      "fresh writer emits only current schema"
+      State.schema
+      Yojson.Safe.Util.(persisted |> member "schema" |> to_string);
+    let restarted =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload current queue after restart"
     in
-    ignore (require_some "legacy active lease" lease : State.lease);
-    match State.of_yojson (v3_of_state claimed) with
-    | Error _ -> ()
-    | Ok _ ->
-      Alcotest.fail
-        "legacy active lease was promoted without exact execution bindings")
+    Alcotest.(check bool)
+      "fresh current state survives write/read/restart"
+      true
+      (Yojson.Safe.equal (State.to_yojson first) (State.to_yojson restarted)))
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -3093,13 +2814,9 @@ let () =
             `Quick
             test_compaction_outcome_mapping_covers_in_lane_dispositions
         ; Alcotest.test_case
-            "transcript quarantine retry escalates after threshold"
+            "transcript corruption requires immediate reset"
             `Quick
-            test_transcript_quarantine_retry_escalates_after_threshold
-        ; Alcotest.test_case
-            "transcript quarantine outcome mapping"
-            `Quick
-            test_transcript_quarantine_outcome_mapping
+            test_transcript_corruption_requires_reset_immediately
         ; Alcotest.test_case
             "approved wake settles on delivery not consumption"
             `Quick
@@ -3131,21 +2848,17 @@ let () =
             `Quick
             test_pending_cancellation_wal_replays_before_removal
         ; Alcotest.test_case
-            "legacy settlement WAL v1 remains replayable"
+            "incompatible settlement WAL requires reset without rewrite"
             `Quick
-            test_legacy_settlement_wal_v1_remains_replayable
-        ; Alcotest.test_case
-            "legacy owner_generation wire key replays"
-            `Quick
-            test_legacy_owner_generation_wire_key_replays
+            test_incompatible_settlement_wal_requires_reset_without_rewrite
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick
             test_unsupported_snapshots_fail_closed
         ; Alcotest.test_case
-            "v3 upgrades only without an active lease"
+            "current state fresh write/read/restart"
             `Quick
-            test_v3_snapshot_upgrades_only_without_active_lease
+            test_current_state_fresh_write_read_restart
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

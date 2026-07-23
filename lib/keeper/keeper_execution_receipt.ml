@@ -59,6 +59,7 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
+  | Disp_operator_reset_required
   | Disp_unknown
 
 let operator_disposition_kind_to_string = function
@@ -67,6 +68,7 @@ let operator_disposition_kind_to_string = function
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
+  | Disp_operator_reset_required -> "operator_reset_required"
   | Disp_unknown -> "unknown"
 ;;
 
@@ -76,6 +78,7 @@ let operator_disposition_kind_of_string = function
   | "pass_next_model" -> Some Disp_pass_next_model
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
+  | "operator_reset_required" -> Some Disp_operator_reset_required
   | "unknown" -> Some Disp_unknown
   | _ -> None
 ;;
@@ -93,6 +96,7 @@ type operator_disposition_reason =
   | Reason_input_required
   | Reason_cancelled
   | Reason_phase_skipped
+  | Reason_transcript_corruption
   | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
@@ -108,6 +112,7 @@ let operator_disposition_reason_to_string = function
   | Reason_input_required -> "input_required"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
+  | Reason_transcript_corruption -> "transcript_corruption"
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
@@ -151,6 +156,8 @@ let operator_disposition (receipt : t)
      branch via [terminal_reason="runtime_exhausted"]. *)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
+  | Keeper_terminal_reason.Transcript_corruption _ ->
+    Disp_operator_reset_required, Reason_transcript_corruption
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
@@ -217,6 +224,7 @@ let operator_disposition (receipt : t)
        | Capacity_backpressure _
        | Config_or_auth _
        | Provider_runtime_failure _
+       | Transcript_corruption _
        | Internal_error _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy
@@ -445,6 +453,7 @@ let to_json receipt =
    (StaleRunning watchdog + emit_stale_keeper_broadcast) is deferred to
    a separate cycle. *)
 let needs_operator_broadcast = function
+  | Disp_operator_reset_required
   | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime

@@ -83,12 +83,6 @@ val compaction_retry_suspended : compaction_runtime -> bool
     retrying compaction for this keeper and each further stimulus escalates
     after a single bounded attempt, pending operator inspection. *)
 
-val transcript_quarantine_retry_escalation_threshold : int
-(** #25296: consecutive transcript-quarantine requeues tolerated before the
-    settlement escalates ([Transcript_quarantine_retry_exhausted]) instead of
-    retrying.  Single definition shared by the heartbeat settlement and
-    tests. *)
-
 type proactive_runtime = {
   count_total : int;
   last_ts : float;
@@ -257,11 +251,6 @@ type agent_runtime_state = {
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
       completed Keeper turn. *)
-  transcript_quarantine_consecutive_retries : int;
-  (** #25296: consecutive transcript-quarantine requeue settlements for this
-      keeper.  Reset to 0 on a completed turn; the heartbeat settlement
-      escalates instead of requeuing once it reaches
-      {!transcript_quarantine_retry_escalation_threshold}. *)
 }
 
 (** {1 Keeper meta record} *)
@@ -290,9 +279,10 @@ type keeper_meta = {
   active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
-      (** Typed companion to [paused]. Only explicit operator pause and terminal
-          dead-tombstone paths may write it. [None] while paused is an
-          unclassified legacy state requiring operator action. *)
+      (** Typed companion to [paused]. Explicit operator pause, terminal
+          dead-tombstone, and transcript-corruption reset-required paths may
+          write it. [None] while paused is a fail-closed unclassified state
+          requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set
@@ -310,18 +300,18 @@ type keeper_meta = {
   meta_version : int;
 }
 
-(** Sanctioned unpause transform: sets [paused = false] while clearing the
-    typed latch ([Dead_tombstone] included) and [runtime.last_blocker], so a
-    resumed keeper can never retain a terminal latch. Callers set [updated_at]
-    themselves. Dead-tombstone revival still runs the crash-recoverable
-    transaction at its call site; this only normalizes the meta fields. *)
+(** Stamp the current Keeper state as structurally corrupted and requiring
+    checkpoint reset. This is current-state persistence, not a migration. *)
+val mark_transcript_corruption_reset_required : keeper_meta -> keeper_meta
+
+(** Sanctioned generic unpause transform. Clears ordinary/operator/dead
+    latches with the pause bit and [runtime.last_blocker]. A
+    [Transcript_corruption_reset_required] latch is returned unchanged, so
+    generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
-(** [dead_tombstone_pause_violation m] is [Some detail] when [m] has
-    [paused = false] together with a [Dead_tombstone] latch — the
-    un-recoverable, out-of-invariant state. Used by the meta store to reject
-    such writes at the boundary. [None] when the meta is consistent. *)
-val dead_tombstone_pause_violation : keeper_meta -> string option
+(** Reject [paused = false] paired with a terminal or reset-required latch. *)
+val terminal_latch_pause_violation : keeper_meta -> string option
 
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits

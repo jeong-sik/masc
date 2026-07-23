@@ -23,6 +23,7 @@ let runtime_id_to_string (s : string) = s
    producer codec, receipt terminal projection, and consumer decoder share
    this value so recoverability cannot drift through duplicated literals. *)
 let capacity_backpressure_kind = "capacity_backpressure"
+let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
 
 type provider_rejection = {
   provider_label : string;
@@ -450,7 +451,7 @@ let masc_internal_error_to_json = function
   | Incomplete_tool_transcript { reason; detail; tool_use_ids } ->
     `Assoc
       [
-        ("kind", `String "incomplete_tool_transcript");
+        ("kind", `String incomplete_tool_transcript_kind);
         ("reason", `String (transcript_quarantine_reason_to_string reason));
         ("detail", `String detail);
         ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
@@ -589,7 +590,7 @@ let kind_of_masc_internal_error = function
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
-  | Incomplete_tool_transcript _ -> "incomplete_tool_transcript"
+  | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
 
 let runtime_id_of_masc_internal_error = function

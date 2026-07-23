@@ -191,6 +191,7 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
+  | Disp_operator_reset_required
   | Disp_unknown
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
@@ -220,6 +221,7 @@ type operator_disposition_reason =
   | Reason_input_required
   | Reason_cancelled
   | Reason_phase_skipped
+  | Reason_transcript_corruption
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string

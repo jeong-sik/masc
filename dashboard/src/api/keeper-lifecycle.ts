@@ -308,7 +308,7 @@ export async function resumeKeeper(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     {
       action: 'resume',
-      owner_generation: intent.ownerGeneration,
+      owner_nonce: intent.ownerGeneration,
       operator_operation_id: intent.operatorOperationId,
     },
     `Failed to resume ${name}`,
@@ -404,7 +404,7 @@ export async function bulkKeeperDirective(
         action,
         targets: resumeIntents.map(({ name, intent }) => ({
           name,
-          owner_generation: intent.ownerGeneration,
+          owner_nonce: intent.ownerGeneration,
           operator_operation_id: intent.operatorOperationId,
         })),
       }

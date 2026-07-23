@@ -784,36 +784,9 @@ let () =
       assert (String.equal only.post_id "bootstrap");
       assert (is_empty rest));
 
-  (* --- durable in-flight store: ack removes only consumed stimuli --- *)
-  let base_path = temp_dir "keeper-event-queue-inflight-partial-ack" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-event-queue-inflight-partial-ack-test" in
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
-      Keeper_event_queue_persistence.ack_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim ];
-      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
-      assert (length restored = 1);
-      let remaining, rest =
-        match dequeue restored with
-        | Some item -> item
-        | None -> Alcotest.fail "partial ack should leave unrelated in-flight stimulus"
-      in
-      assert (String.equal remaining.post_id "bootstrap");
-      assert (is_empty rest));
-
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
-         is drained from pending and inflight snapshots on the genuine-ack path.
-         [ack_inflight] clears the inflight file only (it is shared with
-         [requeue_front], which must leave the requeued stimulus in pending -
-         covered by the requeue-front test below). Here the stimulus lives in
-         the pending snapshot (event-queue.json), mirroring a bootstrap enqueued
+         is drained from the current queue state on the genuine-ack path. Here
+         the stimulus lives in event-queue.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
@@ -854,10 +827,17 @@ let () =
         |> fun q -> enqueue q board_stim
       in
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name pending;
-      Keeper_event_queue_persistence.record_inflight
-        ~base_path
-        ~keeper_name
-        [ board_stim; bootstrap_stim ];
+      (match
+         Keeper_event_queue_persistence.claim_when_result
+           ~base_path
+           ~keeper_name
+           ~claimed_at:3.0
+           ~ready:(fun stimulus -> stimulus_identity_equal stimulus board_stim)
+           ()
+       with
+       | Ok (Some _) -> ()
+       | Ok None -> Alcotest.fail "current queue fixture did not claim board stimulus"
+       | Error detail -> Alcotest.fail detail);
       (match
          Keeper_event_queue_persistence.ack_consumed
            ~base_path
@@ -894,10 +874,21 @@ let () =
         ~base_path
         ~keeper_name:pending_keeper
         (empty |> fun q -> enqueue q old_pending |> fun q -> enqueue q newer_pending);
-      Keeper_event_queue_persistence.record_inflight
+      Keeper_event_queue_persistence.persist
         ~base_path
         ~keeper_name:inflight_keeper
-        [ inflight ];
+        (enqueue empty inflight);
+      (match
+         Keeper_event_queue_persistence.claim_when_result
+           ~base_path
+           ~keeper_name:inflight_keeper
+           ~claimed_at:6.0
+           ~ready:(fun _ -> true)
+           ()
+       with
+       | Ok (Some _) -> ()
+       | Ok None -> Alcotest.fail "current queue fixture did not claim inflight stimulus"
+       | Error detail -> Alcotest.fail detail);
       let noise_keeper_dir =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "snapshotless"
       in

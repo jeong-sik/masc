@@ -1312,7 +1312,7 @@ describe('keeper lifecycle', () => {
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({
       action: 'resume',
-      owner_generation: 7,
+      owner_nonce: 7,
       operator_operation_id: 'dashboard-resume-test-1',
     })
   })

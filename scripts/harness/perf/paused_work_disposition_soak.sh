@@ -403,7 +403,7 @@ resume_cleanup() {
   local keeper="$1" generation="$2" operation_id="$3" request
   request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
     --argjson generation "$generation" \
-    '{schema:$schema,operation:"resume_owner",owner_generation:$generation,operator_operation_id:$op}')"
+    '{schema:$schema,operation:"resume_owner",owner_nonce:$generation,operator_operation_id:$op}')"
   post_disposition "$keeper" "$request" "cleanup resume $keeper"
   jq -e '.ok == true and .operation == "resume_owner"' <<<"$HTTP_LAST_BODY" >/dev/null ||
     die "cleanup resume projection incomplete for $keeper: $HTTP_LAST_BODY"
@@ -461,7 +461,7 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     resume)
       request="$(jq -cn --arg schema "$REQUEST_SCHEMA" --arg op "$operation_id" \
         --argjson generation "$source_generation" \
-        '{schema:$schema,operation:"resume_owner",owner_generation:$generation,operator_operation_id:$op}')"
+        '{schema:$schema,operation:"resume_owner",owner_nonce:$generation,operator_operation_id:$op}')"
       RESUME_CASES=$((RESUME_CASES + 1))
       ;;
     transfer)
@@ -470,7 +470,7 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
         --argjson generation "$source_generation" --argjson target_generation "$target_generation" \
         --arg target "$target_keeper" --argjson binding "$binding" --argjson settled_at "$settled_at" \
         '{schema:$schema,operation:"transfer_owner",source:$source,source_revision:$revision,
-          owner_generation:$generation,target_generation:$target_generation,to_keeper:$target,
+          owner_nonce:$generation,target_generation:$target_generation,to_keeper:$target,
           continuation_binding:$binding,operator_operation_id:$op,settled_at:$settled_at}')"
       target_queue_path="$(queue_path "$target_keeper")"
       if [[ -f "$target_queue_path" ]]; then
@@ -487,7 +487,7 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
         --argjson source "$source" --arg revision "$source_revision" \
         --argjson generation "$source_generation" --argjson settled_at "$settled_at" \
         '{schema:$schema,operation:"cancel_accepted",source_state:"pending",source:$source,
-          source_revision:$revision,owner_generation:$generation,operator_operation_id:$op,
+          source_revision:$revision,owner_nonce:$generation,operator_operation_id:$op,
           reason:"paused-work soak accepted cancellation",settled_at:$settled_at}')"
       CANCEL_CASES=$((CANCEL_CASES + 1))
       ;;
@@ -558,12 +558,12 @@ while (( $(date +%s) - START_EPOCH < DURATION_SEC )); do
     --argjson iteration "$ITERATIONS" --arg action "$action" --arg source_keeper "$source_keeper" \
     --arg target_keeper "$( [[ "$action" == "transfer" ]] && printf '%s' "$target_keeper" || printf '')" \
     --arg post_id "$post_id" --arg operation_id "$operation_id" --argjson source "$source" \
-    --argjson source_revision "$source_revision" --argjson owner_generation "$source_generation" \
+    --argjson source_revision "$source_revision" --argjson owner_nonce "$source_generation" \
     --argjson restarted "$restarted" --argjson receipt "$first_receipt" \
     '{schema:$schema,run_id:$run_id,iteration:$iteration,action:$action,
       source_keeper:$source_keeper,target_keeper:(if $target_keeper == "" then null else $target_keeper end),
       post_id:$post_id,operation_id:$operation_id,source:$source,source_revision:$source_revision,
-      owner_generation:$owner_generation,restarted:$restarted,receipt:$receipt,
+      owner_nonce:$owner_nonce,restarted:$restarted,receipt:$receipt,
       duplicate_terminal_effects:0,silent_losses:0}' >>"$LEDGER_FILE"
 
   if [[ "$action" != "resume" ]]; then

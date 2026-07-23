@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "0f1df2a423d487e854af5b8559c6d1e2daec6de9",
-  "pinned_version": "v0.221.0",
+  "pinned_sha": "2b6b7b98cb19a4bc6d0cf2dba728ba36c987fbe0",
+  "pinned_version": "v0.221.1",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -54,6 +54,9 @@
       "type:receipt:type receipt",
       "type:call_id:type call_id",
       "type:schema_fingerprint:type schema_fingerprint",
+      "type:flow_candidate:type flow_candidate",
+      "type:ready_flow:type ready_flow",
+      "type:flow_attempt:type flow_attempt",
       "type:resolver_io:type resolver_io = { getenv : string -> (string option, unit) result }",
       "type:catalog_document:type catalog_document = { source : string ; contents : string }",
       "type:resolver_catalog_input:type resolver_catalog_input = | Embedded_default | Embedded_with_overlay of catalog_document | Full_replacement of catalog_document | Full_replacement_file of string",
@@ -75,6 +78,15 @@
       "type:execution_error_cause:type execution_error_cause = | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch | Completion_failed | Incomplete_output | Missing_output | Ambiguous_output of int | Unexpected_output_content | Invalid_json_output | Internal_non_json_output",
       "type:execution_error:type execution_error = { call_id : call_id ; receipt : receipt ; cause : execution_error_cause ; raw_response : raw_response option }",
       "type:success:type success = { call_id : call_id ; receipt : receipt ; output : Yojson.Safe.t ; provenance : plan_provenance ; raw_response : raw_response }",
+      "type:flow_candidate_identity:type flow_candidate_identity = { candidate_id : string ; catalog_generation : catalog_generation ; catalog_evidence : catalog_evidence ; target_identity : target_identity }",
+      "type:admitted_flow_candidate:type admitted_flow_candidate = { identity : flow_candidate_identity ; plan_fingerprint : string ; request_body_sha256 : string ; provenance : plan_provenance }",
+      "type:candidate_admission:type candidate_admission = | Candidate_admitted of admitted_flow_candidate | Candidate_rejected of { identity : flow_candidate_identity ; cause : admission_error }",
+      "type:flow_candidate_error:type flow_candidate_error = Blank_flow_candidate_id",
+      "type:flow_admission_error:type flow_admission_error = | Duplicate_flow_candidate_id of { candidate_id : string ; first_position : int ; duplicate_position : int } | No_admitted_flow_candidates of candidate_admission list",
+      "val:make_flow_candidate:val make_flow_candidate : id:string -> target:selected_target -> (flow_candidate, flow_candidate_error) result",
+      "val:flow_candidate_identity:val flow_candidate_identity : flow_candidate -> flow_candidate_identity",
+      "val:admit_flow:val admit_flow : first:flow_candidate -> rest:flow_candidate list -> messages:Types.message list -> output_requirement -> (ready_flow, flow_admission_error) result",
+      "val:ready_flow_admissions:val ready_flow_admissions : ready_flow -> candidate_admission list",
       "val:load_resolver_snapshot:val load_resolver_snapshot : io:resolver_io -> ?catalog:resolver_catalog_input -> unit -> (resolver_snapshot, resolver_snapshot_error) result",
       "val:resolver_catalog_generation:val resolver_catalog_generation : resolver_snapshot -> catalog_generation",
       "val:resolver_catalog_evidence:val resolver_catalog_evidence : resolver_snapshot -> catalog_evidence",
@@ -93,6 +105,8 @@
       "val:schema_fingerprint_to_string:val schema_fingerprint_to_string : schema_fingerprint -> string",
       "type:start_attempt_error:type start_attempt_error = Call_id_generation_failed of string",
       "val:start_attempt:val start_attempt : ready_plan -> (attempt, start_attempt_error) result",
+      "type:flow_start_error:type flow_start_error = | Flow_candidate_attempt_start_failed of { identity : flow_candidate_identity ; position : int ; cause : start_attempt_error ; admissions : candidate_admission list }",
+      "val:start_flow:val start_flow : ready_flow -> (flow_attempt, flow_start_error) result",
       "val:call_id_to_string:val call_id_to_string : call_id -> string",
       "val:attempt_receipt:val attempt_receipt : attempt -> receipt",
       "val:receipt_call_id:val receipt_call_id : receipt -> call_id",
@@ -104,7 +118,13 @@
       "val:receipt_catalog_generation:val receipt_catalog_generation : receipt -> catalog_generation",
       "val:receipt_catalog_evidence:val receipt_catalog_evidence : receipt -> catalog_evidence",
       "val:receipt_target_identity:val receipt_target_identity : receipt -> target_identity",
-      "val:execute_once:val execute_once : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> ?clock:_ Eio.Time.clock -> attempt -> (success, execution_error) result"
+      "type:flow_attempt_receipt:type flow_attempt_receipt = { identity : flow_candidate_identity ; receipt : receipt }",
+      "type:flow_evidence:type flow_evidence = { admissions : candidate_admission list ; attempts : flow_attempt_receipt list }",
+      "type:flow_success:type flow_success = { candidate : flow_attempt_receipt ; success : success ; evidence : flow_evidence }",
+      "type:'callback_error:type 'callback_error flow_execution_error = | Flow_attempt_already_started of flow_evidence | Flow_before_dispatch_callback_failed of { candidate : flow_attempt_receipt ; cause : 'callback_error ; evidence : flow_evidence } | Flow_before_advance_callback_failed of { failed : flow_attempt_receipt ; failure : execution_error ; next : flow_attempt_receipt ; cause : 'callback_error ; evidence : flow_evidence } | Flow_exact_execution_failed of { candidate : flow_attempt_receipt ; cause : execution_error ; evidence : flow_evidence }",
+      "val:flow_attempt_evidence:val flow_attempt_evidence : flow_attempt -> flow_evidence",
+      "val:execute_once:val execute_once : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> ?clock:_ Eio.Time.clock -> attempt -> (success, execution_error) result",
+      "val:execute_flow_once:val execute_flow_once : net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> ?clock:_ Eio.Time.clock -> before_dispatch:(flow_attempt_receipt -> (unit, 'callback_error) result) -> before_advance: (failed:flow_attempt_receipt -> failure:execution_error -> next:flow_attempt_receipt -> (unit, 'callback_error) result) -> flow_attempt -> (flow_success, 'callback_error flow_execution_error) result"
     ],
     "exact_output_reexport_declarations": [
       "module Exact_output = Llm_provider.Exact_output"

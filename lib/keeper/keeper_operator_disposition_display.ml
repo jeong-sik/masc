@@ -12,6 +12,9 @@ let of_kind ~operator_disposition_reason = function
     ("Pass", reason_or_default ~operator_disposition_reason "continue_next_cycle")
   | Keeper_execution_receipt.Disp_user_cancelled ->
     ("Blocked", reason_or_default ~operator_disposition_reason "cancelled")
+  | Keeper_execution_receipt.Disp_operator_reset_required ->
+    ( "Pause",
+      reason_or_default ~operator_disposition_reason "transcript_corruption" )
   | Keeper_execution_receipt.Disp_unknown ->
     ( "Alert",
       reason_or_default ~operator_disposition_reason "unmapped_runtime_state" )

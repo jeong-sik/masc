@@ -8,7 +8,6 @@
 type lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason =
   | Cycle_busy
@@ -19,7 +18,6 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -100,16 +98,10 @@ type escalation_reason =
           window (an incompressible floor).  Distinct from
           [Compaction_retry_exhausted] so "compaction keeps failing" and
           "compaction succeeds but cannot help" stay operator-distinguishable. *)
-  | Transcript_quarantine_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-      (** #25296: settled instead of [Requeue Transcript_quarantine_retry]
-          once consecutive transcript-quarantine settlements reach the
-          escalation threshold.  The poisoned checkpoint is preserved
-          unmodified by design, so every re-lease rejects the same transcript
-          again — without this ceiling the source stimulus loops through the
-          full turn pipeline on every heartbeat. *)
+  | Transcript_corruption_requires_reset of { detail : string }
+      (** Structural transcript corruption is terminal for automatic
+          execution. The first failure pauses the Keeper and consumes the
+          source lease without a successor until explicit operator reset. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -252,11 +244,6 @@ val claim_when :
 val claim_board : claimed_at:float -> t -> (t * lease option, string) result
 (** Lease every pending board stimulus as one ordered digest. *)
 
-val add_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> (t * lease option, string) result
-(** Migration/test compatibility boundary.  Adds one lease for legacy
-    [event-queue-inflight.json] rows and removes matching pending identities. *)
-
 val settle :
   settled_at:float ->
   lease:lease ->
@@ -267,8 +254,8 @@ val settle :
     same semantic settlement returns [Already_settled]; a different settlement
     for an already-settled lease is an explicit conflict.
 
-    [Retry_after_observed], [Context_compaction_retry], and
-    [Transcript_quarantine_retry] retain the exact leased stimuli at the
+    [Retry_after_observed] and [Context_compaction_retry] retain the exact
+    leased stimuli at the
     pending FIFO tail so unrelated work in the same lane can proceed before
     another provider attempt. [No_compaction] is accepted
     only for a lease containing exactly one typed
@@ -427,12 +414,6 @@ val mark_transition_projected : transition_id:string -> t -> (t, string) result
 val remove_by_post_id :
   Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
 
-val release_legacy_inflight :
-  Keeper_event_queue.stimulus list -> t -> t
-(** Compatibility-only projection for the retired split-file API.  Removes
-    matching identities from active leases while leaving pending untouched.
-    New runtime code must settle the opaque lease instead. *)
-
 val lease_to_yojson : lease -> Yojson.Safe.t
 val lease_of_yojson : Yojson.Safe.t -> (lease, string) result
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
@@ -448,5 +429,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v4"]. Strict v3 snapshots are read as the sole
-    supported predecessor and upgraded on their next durable mutation. *)
+(** ["keeper.event_queue.state.v4"]. Only this current schema is accepted.
+    Stale or unknown persisted state fails closed and requires a runtime reset. *)

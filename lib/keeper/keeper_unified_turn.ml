@@ -36,7 +36,7 @@ type source_lease_disposition =
       { reason : Keeper_event_queue_state.no_compaction_reason }
   | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
-  | Requeue_after_transcript_quarantine
+  | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 
 let source_lease_disposition_after_no_compaction
@@ -62,9 +62,10 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
-let is_incomplete_tool_transcript_error error =
+let transcript_corruption error =
   match Keeper_internal_error.classify_masc_internal_error error with
-  | Some (Keeper_internal_error.Incomplete_tool_transcript _) -> true
+  | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
+    Some detail
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
@@ -75,7 +76,7 @@ let is_incomplete_tool_transcript_error error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
-    false
+    None
 ;;
 
 type turn_success =
@@ -1173,18 +1174,20 @@ dominant source of the observed CAS race exhaustion after
                      the heartbeat settles the current lease and, for
                      [Escalate_judgment], enqueues its typed successor in the
                      same durable event-queue transaction. *)
+                  let transcript_corruption = transcript_corruption err in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
                       ~boundary:
-                        (if is_incomplete_tool_transcript_error err
+                        (if Option.is_some transcript_corruption
                          then Keeper_runtime_failure_route.Masc_execution
                          else Keeper_runtime_failure_route.Oas_execution)
                       err
                   in
                   let source_lease_disposition, turn_state =
-                    if is_incomplete_tool_transcript_error err
-                    then Requeue_after_transcript_quarantine, turn_state
-                    else (
+                    match transcript_corruption with
+                    | Some detail ->
+                      Pause_after_transcript_corruption { detail }, turn_state
+                    | None ->
                       (* The checkpoint helper reports [Ok] only after the
                          compacted checkpoint is durably saved. The heartbeat
                          settles the owning lease after this cycle returns, so
@@ -1209,7 +1212,7 @@ dominant source of the observed CAS race exhaustion after
                         ~turn_start
                         ~turn_state
                         ~base_dir
-                        overflow_recovery)
+                        overflow_recovery
                   in
                   exact_failure_execution :=
                     Some

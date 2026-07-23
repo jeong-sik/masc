@@ -926,7 +926,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~settled_at:3.0
             ~stop_requested:false
             ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with
@@ -1001,7 +1000,6 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~settled_at:4.0
             ~stop_requested:false
             ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with

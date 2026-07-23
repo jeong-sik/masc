@@ -884,27 +884,16 @@ type parsed_bulk_directive =
       }
   | Bulk_resume_owner of bulk_resume_target list
 
-let resume_owner_nonce json =
-  (* Wire-compat (#25599): pre-rename dashboard/operator clients send the
-     fencing counter as ["owner_generation"]. During the deprecation window
-     both keys are accepted; the new ["owner_nonce"] key wins when a request
-     carries both. *)
-  match Safe_ops.json_int_opt "owner_nonce" json with
-  | Some _ as nonce -> nonce
-  | None -> Safe_ops.json_int_opt "owner_generation" json
-
 let required_resume_owner_request json =
   match
-    resume_owner_nonce json,
+    Safe_ops.json_int_opt "owner_nonce" json,
     Safe_ops.json_string_opt "operator_operation_id" json
   with
   | Some owner_nonce, Some operator_operation_id ->
     Ok
       Keeper_paused_work_resume_transaction.
         { owner_nonce; operator_operation_id }
-  | None, _ ->
-    Error
-      "resume requires integer \"owner_nonce\" (or legacy \"owner_generation\")"
+  | None, _ -> Error "resume requires integer \"owner_nonce\""
   | _, None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
@@ -1032,6 +1021,7 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
+  | Durable_owner_transcript_reset_required
   | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed
   | Registry_owner_not_paused _ -> `Conflict

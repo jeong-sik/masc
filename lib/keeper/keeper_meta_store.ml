@@ -322,12 +322,8 @@ let write_meta_error_to_string = function
 let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
   (* Write-boundary invariant (fail-closed): never persist [paused=false] with
-     a terminal [Dead_tombstone] latch. That split is un-recoverable (lifecycle
-     admission denies by the latch alone) and is only produced by a writer that
-     cleared [paused] without clearing the latch. Rejecting here — rather than
-     silently repairing — forces resume writers through [mark_resumed] / dead
-     revival, keeping the illegal state unrepresentable on disk. *)
-  match Keeper_meta_contract.dead_tombstone_pause_violation m with
+     a terminal or reset-required latch. *)
+  match Keeper_meta_contract.terminal_latch_pause_violation m with
   | Some detail -> Error (Invariant_violation { keeper_name = m.name; detail })
   | None ->
   Keeper_lifecycle_reservation.with_key_lock
@@ -606,29 +602,23 @@ let persist_compaction_outcome config ~keeper_name ~outcome
     |> Result.map (fun () -> `Persisted)
 ;;
 
-(* #25296: advance the transcript-quarantine retry streak on
-   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
-   same read/stamp/merge shape as {!persist_compaction_outcome}.
-
-   [`Retried] increments the streak each time a failed turn settles as
-   [Requeue Transcript_quarantine_retry] — including the escalated terminal
-   attempt, so an operator inspecting the meta sees the streak at the
-   ceiling. [`Recovered] resets it on a completed turn: any successful turn
-   proves the keeper is no longer pinned to the poisoned transcript. *)
-let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+(* Structural transcript corruption is deterministic current-state damage, not
+   a retry class. Persist the typed reset-required latch before the owning
+   lease is terminally settled. A concurrent dead tombstone remains stronger;
+   an ordinary operator/unclassified pause is upgraded to reset-required. *)
+let persist_transcript_corruption_pause config ~keeper_name
   : ([ `Persisted | `No_durable_meta ], string) result
   =
   let stamp (m : Keeper_meta_contract.keeper_meta) =
-    let rt = m.runtime in
-    { m with
-      runtime =
-        { rt with
-          transcript_quarantine_consecutive_retries =
-            (match outcome with
-             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
-             | `Recovered -> 0)
-        }
-    }
+    match
+      Keeper_lifecycle_admission.state
+        ~paused:m.paused
+        ~latched_reason:m.latched_reason
+    with
+    | Keeper_lifecycle_admission.Dead_tombstone -> m
+    | Keeper_lifecycle_admission.Active
+    | Keeper_lifecycle_admission.Paused _ ->
+      Keeper_meta_contract.mark_transcript_corruption_reset_required m
   in
   match read_meta config keeper_name with
   | Error msg -> Error msg

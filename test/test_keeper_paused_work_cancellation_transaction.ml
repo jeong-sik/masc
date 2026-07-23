@@ -7,6 +7,7 @@ module State = Keeper_event_queue_state
 module Transaction = Keeper_paused_work_cancellation_transaction
 module Disposition_receipt = Keeper_paused_work_disposition_receipt
 module Resume_transaction = Keeper_paused_work_resume_transaction
+module Heartbeat_testing = Keeper_heartbeat_loop.For_testing
 
 let require_ok label = function
   | Ok value -> value
@@ -662,6 +663,160 @@ let test_resume_owner_rejects_dead_tombstone_without_receipt () =
        | Error detail -> Alcotest.fail detail)
 ;;
 
+let test_resume_owner_rejects_transcript_reset_without_receipt () =
+  with_seeded_owner
+    ~registered:false
+    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
+    ~paused:true
+    ~generation:24
+    (fun config keeper_name _source ->
+       let request = resume_request 24 "operator-resume-corrupted" in
+       (match Resume_transaction.resume config ~keeper_name request with
+        | Error
+            { Resume_transaction.cause =
+                Resume_transaction.Durable_owner_transcript_reset_required
+            ; reservation_release = Some release
+            } ->
+          check_resume_released release
+        | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
+        | Ok _ ->
+          Alcotest.fail "Resume_owner replayed a structurally corrupted checkpoint");
+       match
+         Disposition_receipt.load
+           config
+           ~keeper_name
+           ~operator_operation_id:request.operator_operation_id
+       with
+       | Ok None -> ()
+       | Ok (Some _) ->
+         Alcotest.fail "reset-required Resume_owner persisted a receipt"
+       | Error detail -> Alcotest.fail detail)
+;;
+
+let test_transcript_corruption_pause_precedes_settlement () =
+  let stop = Atomic.make false in
+  let calls = ref [] in
+  let result =
+    Heartbeat_testing.commit_transcript_corruption
+      ~stop
+      ~persist_pause:(fun () ->
+        calls := "pause" :: !calls;
+        Ok `Persisted)
+      ~settle:(fun () ->
+        calls := "settle" :: !calls;
+        Ok ())
+      ()
+  in
+  Alcotest.(check bool) "corrupted fiber is stopped" true (Atomic.get stop);
+  Alcotest.(check (list string))
+    "durable pause commits before terminal settlement"
+    [ "pause"; "settle" ]
+    (List.rev !calls);
+  Alcotest.(check bool)
+    "both commits are reported"
+    true
+    (match result with
+     | Heartbeat_testing.Transcript_pause_and_settlement_persisted -> true
+     | Heartbeat_testing.Transcript_pause_persisted
+     | Heartbeat_testing.Transcript_pause_persistence_failed _
+     | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
+       false)
+;;
+
+let assert_transcript_corruption_pause_failure_preserves_lease ~persist_pause =
+  with_lane ~registered:false ~paused:false ~generation:24
+    (fun config keeper_name request ->
+       let stop = Atomic.make false in
+       let settlement_called = ref false in
+       let result =
+         Heartbeat_testing.commit_transcript_corruption
+           ~stop
+           ~persist_pause
+           ~settle:(fun () ->
+             settlement_called := true;
+             Registry_queue.settle_result
+               ~base_path:config.Workspace.base_path
+               keeper_name
+               ~settled_at:4.0
+               ~lease:request.lease
+               ~settlement:
+                 (Registry_queue.Escalate
+                    { reason =
+                        Registry_queue.Transcript_corruption_requires_reset
+                          { detail = "fixture transcript corruption" }
+                    ; successor = None
+                    })
+             |> Result.map (fun _ -> ()))
+           ()
+       in
+       Alcotest.(check bool)
+         "corrupted fiber remains stopped"
+         true
+         (Atomic.get stop);
+       Alcotest.(check bool)
+         "pause failure never enters terminal settlement"
+         false
+         !settlement_called;
+       Alcotest.(check bool)
+         "pause CAS failure is typed"
+         true
+         (match result with
+          | Heartbeat_testing.Transcript_pause_persistence_failed _ -> true
+          | Heartbeat_testing.Transcript_pause_persisted
+          | Heartbeat_testing.Transcript_pause_and_settlement_persisted
+          | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
+            false);
+       let state =
+         Persistence.load_state_result
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+         |> require_ok "load lease after pause CAS failure"
+       in
+       (match State.leases state with
+        | [ lease ] ->
+          Alcotest.(check string)
+            "pause CAS failure preserves the exact durable lease"
+            request.lease.lease_id
+            lease.lease_id
+        | leases ->
+          Alcotest.failf
+            "pause CAS failure changed durable lease count: expected 1, got %d"
+            (List.length leases));
+       Alcotest.(check int)
+         "pause CAS failure creates no terminal outbox receipt"
+         0
+         (List.length (State.transition_outbox state)))
+;;
+
+let test_transcript_corruption_pause_failure_preserves_lease () =
+  assert_transcript_corruption_pause_failure_preserves_lease
+    ~persist_pause:(fun () -> Error "injected pause CAS failure")
+;;
+
+let test_transcript_corruption_pause_exception_preserves_lease () =
+  assert_transcript_corruption_pause_failure_preserves_lease
+    ~persist_pause:(fun () -> failwith "injected pause persistence exception")
+;;
+
+let test_unleased_transcript_corruption_only_persists_pause () =
+  let stop = Atomic.make false in
+  let result =
+    Heartbeat_testing.commit_transcript_corruption
+      ~stop
+      ~persist_pause:(fun () -> Ok `Persisted)
+      ()
+  in
+  Alcotest.(check bool)
+    "unleased corruption commits only durable pause"
+    true
+    (match result with
+     | Heartbeat_testing.Transcript_pause_persisted -> true
+     | Heartbeat_testing.Transcript_pause_and_settlement_persisted
+     | Heartbeat_testing.Transcript_pause_persistence_failed _
+     | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
+       false)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -712,6 +867,26 @@ let () =
             "Resume_owner rejects Dead tombstone without receipt"
             `Quick
             test_resume_owner_rejects_dead_tombstone_without_receipt
+        ; Alcotest.test_case
+            "Resume_owner rejects transcript reset without receipt"
+            `Quick
+            test_resume_owner_rejects_transcript_reset_without_receipt
+        ; Alcotest.test_case
+            "transcript pause precedes settlement"
+            `Quick
+            test_transcript_corruption_pause_precedes_settlement
+        ; Alcotest.test_case
+            "transcript pause failure preserves lease"
+            `Quick
+            test_transcript_corruption_pause_failure_preserves_lease
+        ; Alcotest.test_case
+            "transcript pause exception preserves lease"
+            `Quick
+            test_transcript_corruption_pause_exception_preserves_lease
+        ; Alcotest.test_case
+            "unleased transcript only persists pause"
+            `Quick
+            test_unleased_transcript_corruption_only_persists_pause
         ] )
     ]
 ;;

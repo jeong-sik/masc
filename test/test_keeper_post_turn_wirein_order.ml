@@ -473,8 +473,6 @@ let test_manual_compaction_serializes_owner_lane () =
            ~stop_requested:false
            ~compaction_consecutive_failures:
              meta.runtime.compaction_rt.consecutive_failures
-           ~transcript_quarantine_consecutive_retries:
-             meta.runtime.transcript_quarantine_consecutive_retries
            ~lease
            (Some busy_outcome)
        with
@@ -715,8 +713,6 @@ let test_manual_compaction_serializes_owner_lane () =
           ~stop_requested:false
           ~compaction_consecutive_failures:
             meta.runtime.compaction_rt.consecutive_failures
-          ~transcript_quarantine_consecutive_retries:
-            meta.runtime.transcript_quarantine_consecutive_retries
           ~lease
           (Some
              (Cycle.Manual_compaction_not_applied

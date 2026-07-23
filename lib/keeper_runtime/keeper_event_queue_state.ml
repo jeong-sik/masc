@@ -1,7 +1,6 @@
 type lease_kind =
   | Single
   | Board_batch
-  | Legacy_inflight
 
 type requeue_reason =
   | Cycle_busy
@@ -12,7 +11,6 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
     (* The two approval arms are no longer produced: the approval-wake
@@ -89,18 +87,10 @@ type escalation_reason =
        the checkpoint, reset the streak forever). Distinct from
        [Compaction_retry_exhausted] so the operator can tell "compaction keeps
        failing" from "compaction succeeds but cannot help". *)
-  | Transcript_quarantine_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
-    (* #25296: a quarantined poisoned checkpoint is preserved unmodified by
-       design, so every re-lease reloads the same incomplete transcript and
-       the admission rejects it again — an unbounded
-       [Requeue Transcript_quarantine_retry] loop. After
-       [transcript_quarantine_retry_escalation_threshold] consecutive
-       quarantine settlements the settlement escalates instead, surfacing the
-       suspended lane to the operator rather than re-firing the full turn
-       pipeline on every heartbeat. *)
+  | Transcript_corruption_requires_reset of { detail : string }
+    (* Structural transcript corruption is deterministic and rejected before
+       provider dispatch. The first failure pauses the Keeper and terminally
+       consumes the source lease without a successor. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -153,7 +143,7 @@ let escalation_reason_requests_external_input = function
   | Compaction_exact_output_terminal _
   | Compaction_retry_exhausted _
   | Compaction_floor_exceeded _
-  | Transcript_quarantine_retry_exhausted _ -> false
+  | Transcript_corruption_requires_reset _ -> false
 ;;
 
 type settlement =
@@ -210,7 +200,6 @@ type transfer_projection_result =
   | Transfer_already_projected
 
 let schema = "keeper.event_queue.state.v4"
-let predecessor_schema = "keeper.event_queue.state.v3"
 
 let empty =
   { revision = 0L
@@ -342,18 +331,6 @@ let append_missing stimuli queue =
     stimuli
 ;;
 
-let remove_stimuli queue stimuli =
-  let should_remove stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.filter (fun stimulus -> not (should_remove stimulus))
-  |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
-;;
-
 let lease_id_of_sequence sequence = Printf.sprintf "lease:%Ld" sequence
 
 let make_lease ~kind ~claimed_at stimuli state =
@@ -408,25 +385,14 @@ let claim_board ~claimed_at state =
     make_lease ~kind:Board_batch ~claimed_at:(Some claimed_at) stimuli { state with pending })
 ;;
 
-let add_legacy_inflight stimuli state =
-  if lease_admission_blocked state
-  then Error "event queue cannot migrate legacy inflight work while a lease or outbox exists"
-  else (
-    let stimuli = Keeper_event_queue.uniq_stimuli stimuli in
-    let pending = remove_stimuli state.pending stimuli in
-    make_lease ~kind:Legacy_inflight ~claimed_at:None stimuli { state with pending })
-;;
-
 let lease_kind_label = function
   | Single -> "single"
   | Board_batch -> "board_batch"
-  | Legacy_inflight -> "legacy_inflight"
 ;;
 
 let lease_kind_of_label = function
   | "single" -> Ok Single
   | "board_batch" -> Ok Board_batch
-  | "legacy_inflight" -> Ok Legacy_inflight
   | label -> Error (Printf.sprintf "unknown event queue lease kind: %s" label)
 ;;
 
@@ -439,7 +405,6 @@ let requeue_reason_label = function
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
   | Context_compaction_retry -> "context_compaction_retry"
-  | Transcript_quarantine_retry -> "transcript_quarantine_retry"
   | Approval_grant_unconsumed -> "approval_grant_unconsumed"
   | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
@@ -453,7 +418,6 @@ let requeue_reason_of_label = function
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
   | "context_compaction_retry" -> Ok Context_compaction_retry
-  | "transcript_quarantine_retry" -> Ok Transcript_quarantine_retry
   | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
   | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
@@ -537,8 +501,8 @@ let escalation_reason_label = function
   | Compaction_exact_output_terminal _ -> "compaction_exact_output_terminal"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
   | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
-  | Transcript_quarantine_retry_exhausted _ ->
-    "transcript_quarantine_retry_exhausted"
+  | Transcript_corruption_requires_reset _ ->
+    "transcript_corruption_requires_reset"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -563,8 +527,8 @@ let escalation_reason_detail_to_yojson = function
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
   | Compaction_floor_exceeded { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
-  | Transcript_quarantine_retry_exhausted { attempts; detail } ->
-    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Transcript_corruption_requires_reset { detail } ->
+    `Assoc [ "detail", `String detail ]
 ;;
 
 let required_nonempty_reason_string ~context name fields =
@@ -722,30 +686,20 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_floor_exceeded { attempts; detail })
-  | "transcript_quarantine_retry_exhausted", `Assoc fields ->
+  | "transcript_corruption_requires_reset", `Assoc fields ->
     let* () =
       exact_reason_fields
-        ~context:"transcript_quarantine_retry_exhausted"
-        [ "attempts"; "detail" ]
+        ~context:"transcript_corruption_requires_reset"
+        [ "detail" ]
         fields
-    in
-    let* attempts =
-      match List.assoc_opt "attempts" fields with
-      | Some (`Int value) when value > 0 -> Ok value
-      | Some (`Int _) ->
-        Error "transcript_quarantine_retry_exhausted.attempts must be positive"
-      | Some _ ->
-        Error "transcript_quarantine_retry_exhausted.attempts must be an int"
-      | None ->
-        Error "transcript_quarantine_retry_exhausted.attempts is required"
     in
     let* detail =
       required_nonempty_reason_string
-        ~context:"transcript_quarantine_retry_exhausted"
+        ~context:"transcript_corruption_requires_reset"
         "detail"
         fields
     in
-    Ok (Transcript_quarantine_retry_exhausted { attempts; detail })
+    Ok (Transcript_corruption_requires_reset { detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -993,12 +947,12 @@ let validate_settlement = function
   | Escalate
       { reason = Compaction_exact_output_terminal _; successor = Some _ } ->
     Error "terminal exact-output compaction must not enqueue a successor"
-  | Escalate { reason = Transcript_quarantine_retry_exhausted _; successor = None }
+  | Escalate { reason = Transcript_corruption_requires_reset _; successor = None }
     ->
     Ok ()
   | Escalate
-      { reason = Transcript_quarantine_retry_exhausted _; successor = Some _ } ->
-    Error "transcript quarantine retry exhaustion must not enqueue a successor"
+      { reason = Transcript_corruption_requires_reset _; successor = Some _ } ->
+    Error "transcript corruption reset requirement must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
@@ -1352,7 +1306,6 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
-          | Transcript_quarantine_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
         (* Retryable provider work, context repair handoffs, and a durable
@@ -1977,29 +1930,6 @@ let remove_by_post_id post_id state =
   , { state with pending; leases } )
 ;;
 
-let release_legacy_inflight stimuli state =
-  let should_release stimulus =
-    List.exists
-      (Keeper_event_queue.stimulus_identity_equal stimulus)
-      stimuli
-  in
-  let leases =
-    List.filter_map
-      (fun (lease : lease) ->
-         match binding_for_lease lease state with
-         | Some _ -> Some lease
-         | None ->
-           let remaining =
-             List.filter (fun stimulus -> not (should_release stimulus)) lease.stimuli
-           in
-           (match remaining with
-            | [] -> None
-            | _ :: _ -> Some { lease with stimuli = remaining }))
-      state.leases
-  in
-  { state with leases }
-;;
-
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
   | _ -> Error (context ^ " must be a JSON object")
@@ -2044,29 +1974,6 @@ let int_field ~context name fields =
   match value with
   | `Int value -> Ok value
   | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
-;;
-
-(* Wire-compat (#25599): pre-rename persisted rows (snapshot "last_settlement",
-   "transition_outbox", "accepted_transfer_projections" and every settlement
-   WAL entry) carry the fencing counter under ["owner_generation"]; post-rename
-   rows use ["owner_nonce"]. Read both — the new key wins when a row carries
-   both — so replay of pre-rename state survives the rename boundary. The
-   writer keeps emitting only ["owner_nonce"]. *)
-let owner_nonce_field ~context fields =
-  let parse name = function
-    | `Int value -> Ok value
-    | _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
-  in
-  match List.assoc_opt "owner_nonce" fields with
-  | Some value -> parse "owner_nonce" value
-  | None ->
-    (match List.assoc_opt "owner_generation" fields with
-     | Some value -> parse "owner_generation" value
-     | None ->
-       Error
-         (Printf.sprintf
-            "%s missing required field owner_nonce (or legacy owner_generation)"
-            context))
 ;;
 
 let int64_field ~context name fields =
@@ -2349,7 +2256,6 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
-          ; "owner_generation"
           ; "operator_operation_id"
           ; "reason"
           ]
@@ -2358,7 +2264,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = owner_nonce_field ~context fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -2377,7 +2283,6 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
-          ; "owner_generation"
           ; "operator_operation_id"
           ; "from_keeper"
           ; "to_keeper"
@@ -2387,7 +2292,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = owner_nonce_field ~context fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -2413,7 +2318,6 @@ let settlement_of_yojson json =
           ; "source"
           ; "source_revision"
           ; "owner_nonce"
-          ; "owner_generation"
           ; "operator_operation_id"
           ; "source_receipt_kind"
           ]
@@ -2422,7 +2326,7 @@ let settlement_of_yojson json =
     let* source_json = required_field ~context "source" fields in
     let* source = Keeper_event_queue.stimulus_of_yojson source_json in
     let* source_revision = int64_field ~context "source_revision" fields in
-    let* owner_nonce = owner_nonce_field ~context fields in
+    let* owner_nonce = int_field ~context "owner_nonce" fields in
     let* operator_operation_id =
       string_field ~context "operator_operation_id" fields
     in
@@ -2807,15 +2711,9 @@ let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  if
-    not
-      (String.equal schema_value schema
-       || String.equal schema_value predecessor_schema)
+  if not (String.equal schema_value schema)
   then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
   else
-    let has_exact_execution_bindings =
-      String.equal schema_value schema && List.mem_assoc "exact_execution_bindings" fields
-    in
     let expected_fields =
       [ "schema"
       ; "revision"
@@ -2824,11 +2722,9 @@ let of_yojson json =
       ; "leases"
       ; "last_settlement"
       ; "transition_outbox"
+      ; "accepted_transfer_projections"
+      ; "exact_execution_bindings"
       ]
-      @ (if String.equal schema_value schema
-         then [ "accepted_transfer_projections" ]
-         else [])
-      @ (if has_exact_execution_bindings then [ "exact_execution_bindings" ] else [])
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
@@ -2846,37 +2742,18 @@ let of_yojson json =
       list_field ~context "transition_outbox" outbox_entry_of_yojson fields
     in
     let* accepted_transfer_projections =
-      if String.equal schema_value predecessor_schema
-      then Ok []
-      else
-        list_field
-          ~context
-          "accepted_transfer_projections"
-          accepted_transfer_projection_of_yojson
-          fields
-    in
-    let* () =
-      if has_exact_execution_bindings || leases = []
-      then Ok ()
-      else
-        Error
-          "legacy keeper event queue state with active leases cannot be upgraded without exact execution bindings"
+      list_field
+        ~context
+        "accepted_transfer_projections"
+        accepted_transfer_projection_of_yojson
+        fields
     in
     let* exact_execution_bindings =
-      if has_exact_execution_bindings
-      then
-        list_field
-          ~context
-          "exact_execution_bindings"
-          exact_execution_binding_of_yojson
-          fields
-      else
-        match leases with
-        | [] -> Ok []
-        | _ :: _ ->
-          Error
-            "legacy keeper event queue state has active leases without exact \
-             execution bindings; refusing replay-unsafe promotion"
+      list_field
+        ~context
+        "exact_execution_bindings"
+        exact_execution_binding_of_yojson
+        fields
     in
     validate_state
       { revision

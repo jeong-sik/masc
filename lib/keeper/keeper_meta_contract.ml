@@ -69,15 +69,6 @@ let compaction_retry_escalation_threshold = 3
 let compaction_retry_suspended rt =
   rt.consecutive_failures >= compaction_retry_escalation_threshold
 
-(* #25296: consecutive transcript-quarantine requeues tolerated before the
-   settlement escalates instead of retrying. Defined next to
-   [compaction_retry_escalation_threshold] so the heartbeat settlement reads
-   one family of retry ceilings. Three attempts keeps a transient
-   checkpoint-write race recoverable while bounding a structurally poisoned
-   transcript, which the admission rejects deterministically on every
-   re-lease. *)
-let transcript_quarantine_retry_escalation_threshold = 3
-
 type proactive_runtime =
   { count_total : int
   ; last_ts : float
@@ -371,16 +362,6 @@ type agent_runtime_state =
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)
-  ; transcript_quarantine_consecutive_retries : int
-    (* #25296: consecutive transcript-quarantine requeue settlements for this
-       keeper. Incremented each time a failed turn settles as
-       [Requeue Transcript_quarantine_retry], reset to 0 on a completed turn.
-       The heartbeat settlement escalates
-       ([Transcript_quarantine_retry_exhausted]) instead of requeuing once
-       this reaches [transcript_quarantine_retry_escalation_threshold];
-       without it a poisoned checkpoint — preserved unmodified by design —
-       loops the same source stimulus through the full turn pipeline on every
-       heartbeat. *)
   }
 
 type keeper_meta =
@@ -407,9 +388,10 @@ type keeper_meta =
     active_goal_ids : string list
   ; paused : bool
   ; latched_reason : Keeper_latched_reason.t option
-    (** Typed companion to [paused]. Only explicit operator pause and terminal
-        dead-tombstone paths may write it. [None] while paused is a fail-closed
-        unclassified legacy state that requires an operator resume. *)
+    (** Typed companion to [paused]. Explicit operator pause, terminal
+        dead-tombstone, and transcript-corruption reset-required paths may write
+        it. [None] while paused is a fail-closed unclassified state that
+        requires operator action. *)
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -426,44 +408,53 @@ type keeper_meta =
   ; meta_version : int
   }
 
-(* Sanctioned unpause transform: the coupled way to set [paused = false].
-   Clears the typed latch (including the terminal [Dead_tombstone]) and the
-   last blocker together with the pause bit, so [paused = false &&
-   latched_reason <> None] cannot be constructed through the resume path.
-   Terminal dead-tombstone revival additionally runs the crash-recoverable
-   [Keeper_dead_revival_transaction] at its call site; [mark_resumed] only
-   normalizes the meta fields. Callers set [updated_at] themselves. *)
-let mark_resumed (m : keeper_meta) : keeper_meta =
+let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =
   { m with
-    paused = false
-  ; latched_reason = None
-  ; runtime = { m.runtime with last_blocker = None }
+    paused = true
+  ; latched_reason = Some Keeper_latched_reason.Transcript_corruption_reset_required
+  ; updated_at = now_iso ()
   }
 ;;
 
-(* Write-boundary invariant: a terminal [Dead_tombstone] latch must co-occur
-   with [paused = true]. The canonical setter ([dead_tombstone_meta]) pairs
-   them, and every sanctioned clear runs through [mark_resumed] / dead
-   revival which nulls the latch. [paused = false] while [Dead_tombstone] is
-   latched is un-recoverable: lifecycle admission denies by the latch alone
-   (paused-independent), yet the split can only be produced by a writer that
-   cleared [paused] without clearing the latch. Returns [Some detail] when the
-   split is present so the store can reject the write fail-closed rather than
-   persist an unrepresentable state. Non-terminal latches with [paused = false]
-   are left alone (admission treats them as [Active], so they are recoverable). *)
-let dead_tombstone_pause_violation (m : keeper_meta) : string option =
+(* Sanctioned generic unpause transform. The reset-required transcript latch
+   is deliberately immutable here: only checkpoint reset/replacement may
+   remove it. Other latches are cleared together with the pause bit and last
+   blocker. Terminal dead-tombstone revival additionally runs the
+   crash-recoverable [Keeper_dead_revival_transaction] at its call site. *)
+let mark_resumed (m : keeper_meta) : keeper_meta =
+  match m.latched_reason with
+  | Some Keeper_latched_reason.Transcript_corruption_reset_required -> m
+  | Some
+      ( Keeper_latched_reason.Operator_paused _
+      | Keeper_latched_reason.Dead_tombstone )
+  | None ->
+    { m with
+      paused = false
+    ; latched_reason = None
+    ; runtime = { m.runtime with last_blocker = None }
+    }
+;;
+
+(* Write-boundary invariant: terminal/reset-required latches must co-occur
+   with [paused = true]. Admission denies them by latch identity even if a
+   stale writer cleared [paused], so reject that split instead of repairing it
+   silently. *)
+let terminal_latch_pause_violation (m : keeper_meta) : string option =
   (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
      catch-all): a future terminal latch variant must force a decision here
      rather than silently escaping the write-boundary guard. A non-terminal
      latch with [paused = false] is admission-[Active] (recoverable), so it is
      not a violation. [paused = true] is always consistent with any latch. *)
   match m.paused, m.latched_reason with
-  | false, Some Keeper_latched_reason.Dead_tombstone ->
+  | false,
+    Some
+      (( Keeper_latched_reason.Dead_tombstone
+       | Keeper_latched_reason.Transcript_corruption_reset_required ) as reason) ->
     Some
       (Printf.sprintf
-         "keeper %s: paused=false with Dead_tombstone latch (resume must clear \
-          the latch via mark_resumed / dead revival)"
-         m.name)
+         "keeper %s: paused=false with terminal/reset-required latch %s"
+         m.name
+         (Keeper_latched_reason.to_wire reason))
   | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
   | true, _ -> None
 ;;

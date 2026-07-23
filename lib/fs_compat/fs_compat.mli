@@ -803,6 +803,8 @@ type private_jsonl_transaction_operation =
   | Sync_rewrite_parent
   | Inspect_rewritten_data
   | Remove_rewrite_stage
+  | Truncate_transaction_data
+  | Sync_transaction_data
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -926,6 +928,18 @@ val private_jsonl_lock_path : string -> string
 val read_private_jsonl_durable_locked_result :
   string ->
   after:Private_jsonl_cursor.t option ->
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result
+
+(** Process-start recovery read of a private JSONL store under its stable
+    sibling lock. Behaves like {!read_private_jsonl_durable_locked_result} with
+    [after = None], except that a torn tail (an incomplete final row left by a
+    mid-append crash) is truncated to the last complete row and fsynced while
+    the lock is held, after which reading resumes with the truncated cursor.
+    Every other failure propagates unchanged. Only process-start recovery may
+    use this entry point; general reads keep hard-failing on
+    [Incomplete_transaction_tail]. *)
+val recover_private_jsonl_durable_locked_result :
+  string ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
 type private_jsonl_transaction_io_for_testing =

@@ -376,6 +376,68 @@ let test_strict_codec_and_ledger_identity_validation () =
   expect_error "duplicate live candidate membership" (P.load ~base_path ~keeper_name:"sangsu")
 ;;
 
+let inject_torn_tail ledger_path =
+  (* Simulates SIGKILL mid-append: partial row bytes without trailing newline. *)
+  let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
+  output_string output "{\"schema_version\":2,\"partition_id\":\"torn-partial";
+  close_out output
+;;
+
+let test_torn_tail_truncates_to_last_complete_row () =
+  with_temp_base "board-attention-partition-torn-tail" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-torn" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  let durable = Fs_compat.load_file ledger_path in
+  inject_torn_tail ledger_path;
+  expect_error
+    "torn tail still hard-fails general reads"
+    (P.load ~base_path ~keeper_name:"sangsu");
+  Alcotest.(check int)
+    "torn tail without claims recovers nothing"
+    0
+    (ok
+       "torn-tail process-start recovery"
+       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
+  Alcotest.(check string)
+    "torn tail truncated to last complete row"
+    durable
+    (Fs_compat.load_file ledger_path);
+  (match ok "load after torn-tail recovery" (P.load ~base_path ~keeper_name:"sangsu") with
+   | [ { P.state = P.Ready; candidate_id; _ } ] ->
+     Alcotest.(check string) "durable partition survives" pending.candidate_id candidate_id
+   | _ -> Alcotest.fail "torn-tail recovery lost the durable partition");
+  Alcotest.(check int)
+    "process start after truncation is stable"
+    0
+    (ok
+       "repeat process-start recovery"
+       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"))
+;;
+
+let test_torn_tail_recovery_releases_prior_running () =
+  with_temp_base "board-attention-partition-torn-claim" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-torn-claim" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  ignore (claim ~base_path ~worker_epoch:owner ~now:10.0 : P.t);
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  inject_torn_tail ledger_path;
+  expect_error
+    "torn tail still hard-fails general reads"
+    (P.load ~base_path ~keeper_name:"sangsu");
+  Alcotest.(check int)
+    "torn tail no longer wedges Running recovery"
+    1
+    (ok
+       "torn-tail process-start recovery"
+       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
+  match ok "load after torn-tail recovery" (P.load ~base_path ~keeper_name:"sangsu") with
+  | [ { P.state = P.Ready; candidate_id; _ } ] ->
+    Alcotest.(check string) "prior Running released to Ready" pending.candidate_id candidate_id
+  | _ -> Alcotest.fail "torn-tail recovery lost the durable partition"
+;;
+
 let test_invalid_observation_values_never_rewrite () =
   with_temp_base "board-attention-partition-invalid" @@ fun base_path ->
   expect_error
@@ -425,6 +487,14 @@ let () =
             "lane abort and process-start recovery"
             `Quick
             test_lane_abort_and_process_start_recovery_are_explicit
+        ; Alcotest.test_case
+            "torn tail truncates to last complete row"
+            `Quick
+            test_torn_tail_truncates_to_last_complete_row
+        ; Alcotest.test_case
+            "torn tail recovery releases prior Running"
+            `Quick
+            test_torn_tail_recovery_releases_prior_running
         ; Alcotest.test_case
             "strict codec and ledger identity"
             `Quick

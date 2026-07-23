@@ -1820,6 +1820,8 @@ type private_jsonl_transaction_operation =
   | Sync_rewrite_parent
   | Inspect_rewritten_data
   | Remove_rewrite_stage
+  | Truncate_transaction_data
+  | Sync_transaction_data
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -1961,6 +1963,8 @@ let private_jsonl_operation_to_string = function
   | Sync_rewrite_parent -> "sync rewrite parent"
   | Inspect_rewritten_data -> "inspect rewritten data"
   | Remove_rewrite_stage -> "remove rewrite stage"
+  | Truncate_transaction_data -> "truncate transaction data"
+  | Sync_transaction_data -> "sync transaction data"
 ;;
 
 let private_jsonl_operation_failure_to_string failure =
@@ -2544,6 +2548,95 @@ let read_private_jsonl_durable_locked_result path ~after =
     ~io:private_jsonl_transaction_unix_io
     path
     ~after
+;;
+
+let private_jsonl_last_complete_row_length bytes =
+  match String.rindex_opt bytes '\n' with
+  | Some index -> index + 1
+  | None -> 0
+;;
+
+(* Process-start recovery entry point: a torn tail left by a mid-append crash
+   is truncated to the last complete row under the stable lock, then reading
+   resumes. General reads keep hard-failing on [Incomplete_transaction_tail];
+   only recovery callers may opt into truncation. *)
+let recover_private_jsonl_durable_locked_with_io ~io path =
+  let success snapshot = Snapshot_succeeded snapshot in
+  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
+  match private_jsonl_open_existing ~close_fd:io.close_fd path [ Unix.O_RDWR ] with
+  | Error _ as error -> error
+  | Ok None -> Ok { bytes = ""; cursor = Private_jsonl_cursor.Missing }
+  | Ok (Some fd) ->
+    private_jsonl_with_fd
+      ~close_operation:Close_transaction_data
+      ~close_fd:io.close_fd
+      ~success
+      fd
+      (fun () ->
+         match private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd) with
+         | Error failure -> Error (Private_jsonl_operation_failed failure)
+         | Ok stats ->
+           (match private_jsonl_cursor_of_stats stats with
+            | Error _ as error -> error
+            | Ok actual ->
+              (match private_jsonl_validate_complete_tail fd stats.Unix.st_size with
+               | Ok () ->
+                 private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size
+                 |> Result.map (fun bytes -> { bytes; cursor = actual })
+               | Error (Incomplete_transaction_tail { end_offset }) ->
+                 (match private_jsonl_read_exact fd ~from:0 ~end_offset with
+                  | Error _ as error -> error
+                  | Ok bytes ->
+                    let complete_length = private_jsonl_last_complete_row_length bytes in
+                    (match
+                       private_jsonl_capture Truncate_transaction_data (fun () ->
+                         Unix.ftruncate fd complete_length)
+                     with
+                     | Error failure -> Error (Private_jsonl_operation_failed failure)
+                     | Ok () ->
+                       (match
+                          private_jsonl_capture Sync_transaction_data (fun () ->
+                            Unix.fsync fd)
+                        with
+                        | Error failure -> Error (Private_jsonl_operation_failed failure)
+                        | Ok () ->
+                          (match
+                             private_jsonl_capture Inspect_transaction_data (fun () ->
+                               Unix.fstat fd)
+                           with
+                           | Error failure ->
+                             Error (Private_jsonl_operation_failed failure)
+                           | Ok truncated_stats ->
+                             (match private_jsonl_cursor_of_stats truncated_stats with
+                              | Error _ as error -> error
+                              | Ok cursor ->
+                                Ok
+                                  { bytes = String.sub bytes 0 complete_length
+                                  ; cursor
+                                  })))))
+               (* Recovery is scoped to [Incomplete_transaction_tail]; every
+                  other typed failure propagates exactly as the general read
+                  path surfaces it. *)
+               | Error
+                   ( Stable_lock_contended _
+                   | Unexpected_stable_lock_permissions _
+                   | Invalid_stable_lock_state _
+                   | Cursor_mismatch _
+                   | Unexpected_transaction_file_kind _
+                   | Ambiguous_transaction_file_identity _
+                   | Transaction_path_binding_changed _
+                   | Invalid_transaction_suffix
+                   | Private_jsonl_operation_failed _
+                   | Rewrite_stage_failed _
+                   | Rewrite_published_durability_unknown _
+                   | Transaction_settlement_failed _
+                   | Transaction_append_failed _ ) as error -> error)))
+;;
+
+let recover_private_jsonl_durable_locked_result path =
+  recover_private_jsonl_durable_locked_with_io
+    ~io:private_jsonl_transaction_unix_io
+    path
 ;;
 
 let read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after =

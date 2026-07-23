@@ -81,7 +81,7 @@ let persisted_checkpoint_source_exn trace_id =
   | Error detail -> Alcotest.failf "checkpoint source trace id failed: %s" detail
   | Ok trace_id ->
     (match
-       Masc.Keeper_checkpoint_ref.of_persisted
+       Keeper_checkpoint_ref.of_persisted
          ~trace_id
          ~generation:1
          ~turn_count:1
@@ -1397,7 +1397,7 @@ let test_post_success_terminalization_is_affine () =
     | Error detail -> Alcotest.failf "terminal source trace id failed: %s" detail
     | Ok trace_id ->
       (match
-         Masc.Keeper_checkpoint_ref.of_persisted
+         Keeper_checkpoint_ref.of_persisted
            ~trace_id
            ~generation:1
            ~turn_count:1

@@ -434,17 +434,24 @@ let handle_surface_post_with_outcome
        with
       | Error message -> fail (Keeper_surface_post.error_json message)
       | Ok Keeper_surface_post.To_dashboard ->
-        Keeper_chat_store.append_assistant_message
-          ~base_dir:config.Workspace.base_path
-          ~keeper_name:meta.name
-          ~content:safe_content
-          ~surface:(Surface_ref.Dashboard { session_id = None })
-          ();
-        Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-          ~source:"dashboard"
-          ~content:safe_content
-          ();
-        succeed (Keeper_surface_post.ok_json ~surface ())
+        (match
+           Keeper_chat_store.append_assistant_message_result
+             ~base_dir:config.Workspace.base_path
+             ~keeper_name:meta.name
+             ~content:safe_content
+             ~surface:(Surface_ref.Dashboard { session_id = None })
+             ()
+         with
+         | Error detail ->
+           fail
+             ~class_:Tool_result.Runtime_failure
+             (Keeper_surface_post.error_json detail)
+         | Ok () ->
+           Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+             ~source:"dashboard"
+             ~content:safe_content
+             ();
+           succeed (Keeper_surface_post.ok_json ~surface ()))
     | Ok (Keeper_surface_post.To_discord { channel_id }) ->
       let input =
         connector_post_gate_input

@@ -2665,6 +2665,59 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
+let test_surface_post_append_failure_does_not_complete_terminal_effect () =
+  with_exec_fixture
+    "surface_post_append_failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let chat_path =
+         Filename.concat
+           (Filename.concat
+              (Common.masc_dir_from_base_path ~base_path:config.base_path)
+              "keeper_chat")
+           (meta.name ^ ".jsonl")
+       in
+       mkdir_p (Filename.dirname chat_path);
+       Unix.mkdir chat_path 0o755;
+       let bundle =
+         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let surface_post =
+         match find_tool_by_name bundle.tools "keeper_surface_post" with
+         | Some tool -> tool
+         | None -> fail "keeper_surface_post missing from Keeper tool bundle"
+       in
+       let result =
+         Agent_sdk.Tool.execute
+           surface_post
+           (`Assoc
+              [ "surface", `String "dashboard"
+              ; "content", `String "must remain undelivered"
+              ])
+       in
+       (match result with
+        | Error error ->
+          let error_detail =
+            Yojson.Safe.Util.
+              (parse_json error.Agent_sdk.Types.message
+               |> member "error"
+               |> to_string)
+          in
+          check bool
+            "raw append failure retains the exact chat target"
+            true
+            (contains_substring error_detail (Filename.basename chat_path))
+        | Ok _ -> fail "durable dashboard append failure became Completed");
+       check bool
+         "failed surface delivery does not set the terminal completion latch"
+         false
+         (bundle.terminal_effect_completed ()))
+;;
+
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -2731,6 +2784,8 @@ let () =
         test_malformed_json_looking_success_stays_success;
       test_case "only typed producer failure is failure" `Quick
         test_only_typed_producer_failure_is_failure;
+      test_case "surface append failure is not terminal completion" `Quick
+        test_surface_post_append_failure_does_not_complete_terminal_effect;
     ]);
     ("exact_registered_dispatch", [
       test_case "raw Board runtime respects typed projection" `Quick

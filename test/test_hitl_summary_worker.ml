@@ -2,8 +2,9 @@ open Alcotest
 
 module EO = Agent_sdk.Exact_output
 module F = Compaction_exact_output_fixture
+module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue
-module Registry = Masc.Runtime_exact_output_registry
+module Runtime = Masc.Runtime
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
 
@@ -42,7 +43,7 @@ let install_queue base_path =
   | Error error -> fail (Q.install_error_to_string error)
 ;;
 
-let pending_entry ~base_path =
+let pending_entry ?(input_tag = "default") ~base_path =
   let request_context =
     `Assoc
       [ ( "initial"
@@ -62,7 +63,12 @@ let pending_entry ~base_path =
       Q.submit_pending
         ~keeper_name:"keeper"
         ~tool_name:"external-effect"
-        ~input:(`Assoc [ "target", `String "document"; "body", `String "hello" ])
+        ~input:
+          (`Assoc
+             [ "target", `String "document"
+             ; "body", `String "hello"
+             ; "input_tag", `String input_tag
+             ])
         ~base_path
         ~request_context
         ()
@@ -81,12 +87,12 @@ let pending_entry ~base_path =
 
 let publish_lane slot_ids snapshot =
   match
-    Registry.publish
+    Runtime.publish_exact_output_registry
       ~lanes:[ { Masc.Runtime_schema.id = Worker.For_testing.lane_id; slot_ids } ]
       snapshot
   with
   | Ok _ -> ()
-  | Error error -> fail (Registry.publication_error_to_string error)
+  | Error detail -> fail detail
 ;;
 
 let run_eio f =
@@ -105,6 +111,23 @@ let prepare_exn entry =
   | Ok prepared -> prepared
   | Error detail -> fail detail
 ;;
+
+let visible_after_rename_writer path body =
+  match Fs_compat.save_file_atomic path body with
+  | Error reason -> failf "visible writer could not replace %s: %s" path reason
+  | Ok () ->
+    Error
+      { Fs_compat.path
+      ; stage = Fs_compat.After_rename
+      ; exception_ = Failure "injected parent-directory sync failure"
+      ; backtrace = Printexc.get_raw_backtrace ()
+      }
+;;
+
+exception Unknown_writer_failure
+exception Cancel_after_request_arrived
+
+let unknown_writer _path _body = raise Unknown_writer_failure
 
 let test_parse_typed_judgments () =
   List.iter
@@ -350,6 +373,315 @@ let test_all_candidates_rejected_before_network () =
           | _ -> fail "admission failure mutated the exact queue binding"))
 ;;
 
+let test_visible_bind_blocks_dispatch () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-visible-bind" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-visible-bind" ]
+         (F.resolver_snapshot
+            ~source:"hitl-visible-bind"
+            [ { id = "hitl-visible-bind"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path in
+       Worker.For_testing.execute_prepared_flow_with_writers
+         ~bind_writer:visible_after_rename_writer
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "unconfirmed bind delivered a summary")
+         (prepare_exn entry);
+       check int "unconfirmed bind forbids POST" 0 (F.post_count server);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status =
+                     Q.Exact_quarantined Q.Exact_terminal_persistence_failure
+                 ; _
+                 }
+           ; _
+           } ->
+         ()
+       | _ -> fail "unconfirmed bind was not terminally quarantined")
+;;
+
+let test_visible_advance_blocks_successor () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-visible-advance" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let successor =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let fixtures : F.target_fixture list =
+         [ { id = "hitl-advance-unreachable"; base_url = "http://127.0.0.1:1" }
+         ; { id = "hitl-advance-successor"; base_url = successor.base_url }
+         ]
+       in
+       publish_lane
+         [ "hitl-advance-unreachable"; "hitl-advance-successor" ]
+         (F.resolver_snapshot ~source:"hitl-visible-advance" fixtures);
+       let entry = pending_entry ~base_path in
+       Worker.For_testing.execute_prepared_flow_with_writers
+         ~release_writer:visible_after_rename_writer
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "unconfirmed release advanced the flow")
+         (prepare_exn entry);
+       check int "unconfirmed release forbids successor POST" 0 (F.post_count successor);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status =
+                     Q.Exact_quarantined Q.Exact_terminal_persistence_failure
+                 ; _
+                 }
+           ; _
+           } ->
+         ()
+       | _ -> fail "unconfirmed release was not terminally quarantined")
+;;
+
+let test_visible_completion_blocks_gate_delivery () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-visible-completion" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-visible-completion" ]
+         (F.resolver_snapshot
+            ~source:"hitl-visible-completion"
+            [ { id = "hitl-visible-completion"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path in
+       let delivered = ref false in
+       Worker.For_testing.execute_prepared_flow_with_writers
+         ~complete_writer:visible_after_rename_writer
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> delivered := true)
+         (prepare_exn entry);
+       check int "provider completed once" 1 (F.post_count server);
+       check bool "unconfirmed completion forbids Gate delivery" false !delivered;
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound { status = Q.Exact_completed; _ }
+           ; summary_status = Q.Summary_available _
+           ; _
+           } ->
+         ()
+       | _ -> fail "visible completion did not retain recoverable completed state")
+;;
+
+let test_postdispatch_failure_never_fails_over () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-postdispatch" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
+       let successor =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       let fixtures : F.target_fixture list =
+         [ { id = "hitl-postdispatch-failed"; base_url = failed.base_url }
+         ; { id = "hitl-postdispatch-successor"; base_url = successor.base_url }
+         ]
+       in
+       publish_lane
+         [ "hitl-postdispatch-failed"; "hitl-postdispatch-successor" ]
+         (F.resolver_snapshot ~source:"hitl-postdispatch" fixtures);
+       let entry = pending_entry ~base_path in
+       Worker.For_testing.execute_prepared_flow
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "post-dispatch failure delivered a summary")
+         (prepare_exn entry);
+       check int "failed candidate dispatched once" 1 (F.post_count failed);
+       check int "post-dispatch failure forbids failover" 0 (F.post_count successor);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status = Q.Exact_quarantined Q.Exact_flow_execution_failed
+                 ; _
+                 }
+           ; _
+           } ->
+         ()
+       | _ -> fail "post-dispatch failure was not terminally quarantined")
+;;
+
+let test_cancellation_after_dispatch_is_terminal () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-cancellation" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Delay_then_reply
+              (60.0, F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-cancelled" ]
+         (F.resolver_snapshot
+            ~source:"hitl-cancellation"
+            [ { id = "hitl-cancelled"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path in
+       (match
+          Eio.Fiber.first
+            (fun () ->
+               Worker.For_testing.execute_prepared_flow
+                 ~net
+                 ~clock
+                 ~on_summary:(fun _ -> fail "cancelled flow delivered a summary")
+                 (prepare_exn entry))
+            (fun () ->
+               F.await_first_request server;
+               raise Cancel_after_request_arrived)
+        with
+        | exception Cancel_after_request_arrived -> ()
+        | () -> fail "cancellation trigger did not win");
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status = Q.Exact_quarantined Q.Exact_cancellation; _ }
+           ; _
+           } ->
+         ()
+       | _ -> fail "post-dispatch cancellation was not terminally quarantined")
+;;
+
+let test_unknown_callback_exception_is_terminal () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-unknown" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-unknown" ]
+         (F.resolver_snapshot
+            ~source:"hitl-unknown"
+            [ { id = "hitl-unknown"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path in
+       (match
+          Worker.For_testing.execute_prepared_flow_with_writers
+            ~bind_writer:unknown_writer
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> fail "unknown callback delivered a summary")
+            (prepare_exn entry)
+        with
+        | exception Unknown_writer_failure -> ()
+        | () -> fail "unknown callback exception was swallowed");
+       check int "unknown pre-effect failure forbids POST" 0 (F.post_count server);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt = Q.Exact_unbound
+           ; summary_status = Q.Summary_failed { retryable = false; _ }
+           ; _
+           } ->
+         ()
+       | _ -> fail "unknown callback exception did not require operator recovery")
+;;
+
+let test_owner_fifo_blocks_later_pending_entry () =
+  with_temp_dir "hitl-owner-fifo" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       let first = pending_entry ~input_tag:"first" ~base_path in
+       let second = pending_entry ~input_tag:"second" ~base_path in
+       (match
+          Q.mark_summary_failed
+            ~id:first.id
+            ~reason:"operator recovery required"
+            ~retryable:false
+        with
+        | Ok true -> ()
+        | Ok false -> fail "oldest entry did not enter terminal failed state"
+        | Error error -> fail (Q.summary_transition_error_to_string error));
+       let first =
+         Q.get_pending_entry ~id:first.id
+         |> Option.get
+       in
+       let ready =
+         Gate.For_testing.ready_auto_judges_for_owner
+           ~base_path
+           ~keeper_name:first.keeper_name
+           [ second; first ]
+       in
+       check (list string) "later entry stays blocked" [] (List.map (fun e -> e.id) ready);
+       let ready_after_oldest_removed =
+         Gate.For_testing.ready_auto_judges_for_owner
+           ~base_path
+           ~keeper_name:first.keeper_name
+           [ second ]
+       in
+       check
+         (list string)
+         "next entry becomes ready only after oldest is absent"
+         [ second.id ]
+         (List.map (fun entry -> entry.id) ready_after_oldest_removed))
+;;
+
 let test_gate_judgment_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
@@ -391,6 +723,34 @@ let () =
             "all candidates reject before network"
             `Quick
             test_all_candidates_rejected_before_network
+        ; test_case
+            "visible bind blocks dispatch"
+            `Quick
+            test_visible_bind_blocks_dispatch
+        ; test_case
+            "visible advance blocks successor"
+            `Quick
+            test_visible_advance_blocks_successor
+        ; test_case
+            "visible completion blocks Gate delivery"
+            `Quick
+            test_visible_completion_blocks_gate_delivery
+        ; test_case
+            "post-dispatch failure never fails over"
+            `Quick
+            test_postdispatch_failure_never_fails_over
+        ; test_case
+            "post-dispatch cancellation is terminal"
+            `Quick
+            test_cancellation_after_dispatch_is_terminal
+        ; test_case
+            "unknown callback exception is terminal"
+            `Quick
+            test_unknown_callback_exception_is_terminal
+        ; test_case
+            "owner FIFO blocks later pending work"
+            `Quick
+            test_owner_fifo_blocks_later_pending_entry
         ] )
     ]
 ;;

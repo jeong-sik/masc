@@ -52,7 +52,7 @@ let test_build_resolved_serializes_defaults_and_routing () =
   Alcotest.(check string) "librarian routing" "openai.gpt-4o"
     (member "librarian_runtime_id" routing |> Yojson.Safe.Util.to_string);
   Alcotest.(check string) "structured judge routing" "openai.gpt-4o"
-    (member "structured_judge_runtime_id" routing |> Yojson.Safe.Util.to_string);
+    (member "structured_judge_runtime_id" routing |> Yojson.Safe.Util.to_string)
 let test_build_uninitialized_emits_null_not_fabricated_default () =
   (* No fabrication: an unresolved runtime config surfaces null/empty, never a
      fake default model or runtime. *)
@@ -79,7 +79,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
   Alcotest.(check bool) "cross_verifier null" true
     (member "cross_verifier_runtime_id" routing = `Null);
   Alcotest.(check bool) "structured_judge null" true
-    (member "structured_judge_runtime_id" routing = `Null);
+    (member "structured_judge_runtime_id" routing = `Null)
 let () =
   Alcotest.run "runtime_defaults_json"
     [ ( "build",

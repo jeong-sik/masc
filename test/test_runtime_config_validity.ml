@@ -2079,7 +2079,7 @@ let test_structured_judge_lane_target () =
   with_temp_runtime_toml capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _, lanes) ->
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
       check
         (option string)
         "structured_judge keeps the lane id"

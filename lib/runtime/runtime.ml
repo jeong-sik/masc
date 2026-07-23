@@ -1108,6 +1108,13 @@ let init_default ~config_path =
   set_loaded ~config_path loaded;
   Ok ()
 
+let publish_exact_output_registry ~lanes resolver_snapshot =
+  match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+  | Ok registry -> Ok (Runtime_exact_output_registry.generation registry)
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
    PLUS the OAS capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —
@@ -1116,7 +1123,7 @@ let init_default ~config_path =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1130,7 +1137,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with

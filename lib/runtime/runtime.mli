@@ -138,6 +138,14 @@ val init_default : config_path:string -> (unit, string) result
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)
 
+val publish_exact_output_registry :
+  lanes:Runtime_schema.exact_output_lane_decl list ->
+  Agent_sdk.Exact_output.resolver_snapshot ->
+  (int64, string) result
+(** Publish one immutable OAS resolver-and-lane snapshot and return its
+    generation. This is the production bootstrap boundary; callers provide
+    opaque target references and never receive the private registry value. *)
+
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} PLUS the OAS
     capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a

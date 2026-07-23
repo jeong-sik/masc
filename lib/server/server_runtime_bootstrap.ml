@@ -228,16 +228,15 @@ let configure_exact_output_registry ?config_root () =
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
     let lanes = load_exact_output_lane_declarations () in
-    (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
-     | Error error ->
+    (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
+     | Error detail ->
        raise
          (Env_config_core.Config_error
-            ("exact-output resolver-and-lane registry: "
-             ^ Runtime_exact_output_registry.publication_error_to_string error))
-     | Ok registry ->
+            ("exact-output resolver-and-lane registry: " ^ detail))
+     | Ok generation ->
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
-         (Runtime_exact_output_registry.generation registry)
+         generation
          catalog_description;
        if
          not

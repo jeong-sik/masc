@@ -55,6 +55,21 @@ module For_testing : sig
     -> prepared_flow
     -> unit
 
+  type strict_snapshot_writer =
+    Keeper_approval_queue.For_testing.strict_snapshot_writer
+
+  val execute_prepared_flow_with_writers
+    :  ?bind_writer:strict_snapshot_writer
+    -> ?release_writer:strict_snapshot_writer
+    -> ?complete_writer:strict_snapshot_writer
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?clock:_ Eio.Time.clock
+    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> prepared_flow
+    -> unit
+  (** The same production callbacks with only the queue's strict atomic writer
+      replaced, so durability-uncertainty tests exercise the real OAS flow. *)
+
   val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
   val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
   val summary_version : int

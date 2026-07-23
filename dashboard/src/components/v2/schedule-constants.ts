@@ -4,6 +4,8 @@
 // prototype markup. Pure data; the live schedule surface maps its API records
 // onto these keys.
 
+import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
+
 export interface SchedStatusSpec {
   readonly lbl: string
   readonly cls: string
@@ -34,7 +36,7 @@ export const SCHED_PAYLOAD: Readonly<Record<string, { glyph: string; lbl: string
 }
 
 export function schedStatusSpec(status: string | null | undefined): SchedStatusSpec {
-  return (status && SCHED_STATUS[status]) || { lbl: status || '알 수 없음', cls: 'dim', glyph: '◌' }
+  return (status && SCHED_STATUS[status]) || { lbl: status || UNKNOWN_STATUS_LABEL, cls: 'dim', glyph: '◌' }
 }
 
 export function schedPayloadSpec(kind: string | null | undefined): { glyph: string; lbl: string } {

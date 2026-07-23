@@ -8,6 +8,7 @@ import type { AuditEntry } from './api/dashboard'
 import { journal } from './sse'
 import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import { contextThresholds } from './config/context-thresholds'
+import { HEARTBEAT_STALE_MS } from './config/constants'
 import type { AgentMotionSnapshot } from './components/common/agent-motion'
 import type { StatusChipTone } from './components/common/status-chip'
 
@@ -53,7 +54,7 @@ export const filteredJournal: ReadonlySignal<JournalEntry[]> = computed(() => {
 
 export type PulseState = 'working' | 'idle' | 'stale'
 
-const STALE_THRESHOLD_MS = 120_000
+const STALE_THRESHOLD_MS = HEARTBEAT_STALE_MS
 
 interface AgentPulse {
   name: string

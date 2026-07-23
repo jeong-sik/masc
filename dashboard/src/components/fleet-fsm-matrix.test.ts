@@ -485,7 +485,7 @@ describe('fleetCellPresentation', () => {
 
     expect(snap.phase).toBe('Running')
     expect(cell.runtimePhaseConflict).toBe(true)
-    expect(cell.label).toBe('가동 중 · 정체')
+    expect(cell.label).toBe('실행 중 · 정체')
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
@@ -711,7 +711,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const cell = await screen.findByText('가동 중 · 정체')
+    const cell = await screen.findByText('실행 중 · 정체')
     expect(cell.getAttribute('data-axis')).toBe('phase')
     expect(cell.getAttribute('data-runtime-phase-conflict')).toBe('true')
   })

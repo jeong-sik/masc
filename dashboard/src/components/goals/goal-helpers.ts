@@ -175,12 +175,14 @@ export function matchesGoalPhaseFilter(
 
 export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
-    case 'executing': return '실행 중'
-    case 'blocked': return '차단됨'
-    case 'paused': return '일시정지'
-    case 'completed': return '완료'
-    case 'dropped': return '중단'
-    default: return '전체'
+    case 'executing':
+    case 'blocked':
+    case 'paused':
+    case 'completed':
+    case 'dropped':
+      return goalPhaseLabel(value)
+    default:
+      return '전체'
   }
 }
 

@@ -1,13 +1,13 @@
 // Unified number formatting utilities.
 
 /** Format a 0–1 ratio as percentage string. Returns fallback for null/NaN. */
-export function formatPct(value: number | null | undefined, fallback = '-'): string {
+export function formatPct(value: number | null | undefined, fallback = '--'): string {
   if (!isFiniteMetricValue(value)) return fallback
   return `${Math.round(value * 100)}%`
 }
 
 /** Format a 0–1 ratio as percentage with 1 decimal. Returns fallback for null/NaN. */
-export function formatPct1(value: number | null | undefined, fallback = '-'): string {
+export function formatPct1(value: number | null | undefined, fallback = '--'): string {
   if (!isFiniteMetricValue(value)) return fallback
   return `${(value * 100).toFixed(1)}%`
 }

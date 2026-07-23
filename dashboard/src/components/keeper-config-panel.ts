@@ -15,6 +15,7 @@ import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
+import { relativeTime } from '../lib/format-time'
 import type { AsyncState } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -254,16 +255,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   }
   setIfChanged('instructions')
   return payload
-}
-
-function formatRelativeTime(date: Date): string {
-  const sec = Math.round((Date.now() - date.getTime()) / 1000)
-  if (sec < 60) return `${sec}초 전`
-  const min = Math.round(sec / 60)
-  if (min < 60) return `${min}분 전`
-  const hour = Math.round(min / 60)
-  if (hour < 24) return `${hour}시간 전`
-  return date.toLocaleString('ko-KR')
 }
 
 // Runtime config draft for sandbox/proactive/compaction inline editing
@@ -1727,7 +1718,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   // --- Toolbar ---
   const lastSavedText = lastSavedAt.value
-    ? `마지막 저장: ${formatRelativeTime(new Date(lastSavedAt.value))}`
+    ? `마지막 저장: ${relativeTime(lastSavedAt.value)}`
     : null
   const toolbar = html`
     <div class="flex flex-wrap gap-2 items-center mb-3 v2-monitoring-toolbar">

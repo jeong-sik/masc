@@ -128,12 +128,13 @@ describe('keeperPhaseLabel', () => {
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'HandingOff' }))).toBe('인계 중')
   })
-  it('collapses unknown tokens to the 알 수 없음 fallback (no raw wire string leak)', () => {
+  it('collapses unknown tokens to the 확인 필요 fallback (no raw wire string leak)', () => {
     // Closed-sum SSOT: phaseTokenFromKeeper returns 'unknown' for unmapped
     // wire tokens, and PHASE_LABEL_KO['unknown'] is the canonical
-    // '알 수 없음' label. The old behavior leaked raw status strings
-    // like 'bootstrapping' into the UI — that's a wire-format leak.
-    expect(keeperPhaseLabel(mk({ status: 'bootstrapping' }))).toBe('알 수 없음')
+    // '확인 필요' label (UNKNOWN_STATUS_LABEL). The old behavior leaked raw
+    // status strings like 'bootstrapping' into the UI — that's a
+    // wire-format leak.
+    expect(keeperPhaseLabel(mk({ status: 'bootstrapping' }))).toBe('확인 필요')
   })
 })
 

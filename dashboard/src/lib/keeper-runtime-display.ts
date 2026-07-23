@@ -2,9 +2,10 @@ import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import { relativeTime } from './format-time'
 import { firstNonEmptyString } from './format-string'
 import { isKeeperPaused } from './keeper-predicates'
+import { HEARTBEAT_STALE_MS } from '../config/constants'
 
 /** Max seconds since last heartbeat to consider the keeper process alive. */
-const HEARTBEAT_ALIVE_THRESHOLD_S = 120
+const HEARTBEAT_ALIVE_THRESHOLD_S = HEARTBEAT_STALE_MS / 1000
 
 export type KeeperActivitySource =
   | 'autonomous_action'

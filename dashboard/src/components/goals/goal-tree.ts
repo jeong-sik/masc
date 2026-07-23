@@ -168,14 +168,7 @@ function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
 // `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
 
 function goalFsmStateLabel(state: GoalFsmProjection['state']): string {
-  switch (state) {
-    case 'executing': return '실행'
-    case 'blocked': return '차단'
-    case 'paused': return '일시정지'
-    case 'completed': return '완료'
-    case 'dropped': return '중단'
-    default: return state
-  }
+  return goalPhaseLabel(state)
 }
 
 function goalFsmObservationLabel(

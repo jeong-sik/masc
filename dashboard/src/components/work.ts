@@ -20,6 +20,8 @@ import { LoadingState } from './common/feedback-state'
 import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
+import { goalPhaseLabel } from './goals/goal-helpers'
+import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import { claimTask as claimTaskAction } from '../api/actions'
@@ -55,14 +57,14 @@ type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '백로그', 'todo'],
-  ['claimed',               '클레임', 'claimed'],
-  ['in_progress',           '진행',   'wip'],
-  ['awaiting_verification', '검증',   'verify'],
-  ['blocked',               '차단',   'blocked'],
-  ['paused',                '정지',   'paused'],
-  ['unknown',               '미확인', 'unknown'],
-  ['done',                  '완료',   'done'],
+  ['todo',                  statusLabel('todo'), 'todo'],
+  ['claimed',               statusLabel('claimed'), 'claimed'],
+  ['in_progress',           statusLabel('in_progress'), 'wip'],
+  ['awaiting_verification', statusLabel('awaiting_verification'), 'verify'],
+  ['blocked',               statusLabel('blocked'), 'blocked'],
+  ['paused',                statusLabel('paused'), 'paused'],
+  ['unknown',               statusLabel('unknown'), 'unknown'],
+  ['done',                  statusLabel('done'), 'done'],
 ] as const
 
 interface JobState {
@@ -72,17 +74,20 @@ interface JobState {
 }
 
 function jobStateForTask(task: Task): JobState {
+  // Status label comes from the statusLabel SSOT (lib/status-label.ts);
+  // only the bucket/cls progress axes are decided here.
+  const label = statusLabel(task.status)
   switch (task.status) {
-    case 'done': return { label: '완료', bucket: 'done', cls: 'done' }
-    case 'in_progress': return { label: '진행 중', bucket: 'wip', cls: 'wip' }
-    case 'claimed': return { label: '클레임', bucket: 'wip', cls: 'claimed' }
-    case 'awaiting_verification': return { label: '검증 대기', bucket: 'verify', cls: 'verify' }
-    case 'blocked': return { label: '차단', bucket: 'blocked', cls: 'blocked' }
-    case 'paused': return { label: '일시정지', bucket: 'blocked', cls: 'paused' }
-    case 'unknown': return { label: '상태 미확인', bucket: 'blocked', cls: 'unknown' }
-    case 'cancelled': return { label: '취소', bucket: 'blocked', cls: 'cancelled' }
+    case 'done': return { label, bucket: 'done', cls: 'done' }
+    case 'in_progress': return { label, bucket: 'wip', cls: 'wip' }
+    case 'claimed': return { label, bucket: 'wip', cls: 'claimed' }
+    case 'awaiting_verification': return { label, bucket: 'verify', cls: 'verify' }
+    case 'blocked': return { label, bucket: 'blocked', cls: 'blocked' }
+    case 'paused': return { label, bucket: 'blocked', cls: 'paused' }
+    case 'unknown': return { label, bucket: 'blocked', cls: 'unknown' }
+    case 'cancelled': return { label, bucket: 'blocked', cls: 'cancelled' }
     case 'todo':
-    default: return { label: '대기', bucket: 'todo', cls: 'todo' }
+    default: return { label, bucket: 'todo', cls: 'todo' }
   }
 }
 
@@ -135,16 +140,9 @@ function taskGateRows(task: Task): Array<{ label: string; outcome: 'satisfied' |
 
 // Keyed by Goal_phase values — the only lifecycle representation after
 // RFC-0352 slice 1 (the legacy status duplicate is gone).
-const GOAL_PHASE_LABEL: Record<string, string> = {
-  executing: '진행 중',
-  blocked: '차단됨',
-  paused: '일시정지',
-  completed: '완료',
-  dropped: '중단',
-}
-
+// Labels come from the goalPhaseLabel SSOT (goals/goal-helpers.ts).
 function goalPhaseText(phase: string): string {
-  return GOAL_PHASE_LABEL[phase] ?? phase
+  return goalPhaseLabel(phase)
 }
 
 const GOAL_PHASE_CLASS: Record<string, 'neutral' | 'ok' | 'warn' | 'bad'> = {
@@ -707,20 +705,14 @@ const GOAL_PHASE_FLAG_CLS: Record<string, WkaFlagCls> = {
   dropped: 'bad',
 }
 
-const GOAL_PHASE_FLAG_LBL: Record<string, string> = {
-  executing: '진행 중',
-  blocked: '차단',
-  paused: '일시정지',
-  completed: '완료',
-  dropped: '폐기',
-}
-
 function goalPhaseFlagCls(phase: string): WkaFlagCls {
   return GOAL_PHASE_FLAG_CLS[phase] ?? 'warn'
 }
 
+// Flag labels reuse the goalPhaseLabel SSOT (goals/goal-helpers.ts) so the
+// aside cannot disagree with the goal list on the same phase token.
 function goalPhaseFlagLbl(phase: string): string {
-  return GOAL_PHASE_FLAG_LBL[phase] ?? phase
+  return goalPhaseLabel(phase)
 }
 
 // Goals needing operator attention — positive enumeration of the triage

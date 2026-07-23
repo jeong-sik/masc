@@ -495,7 +495,7 @@ describe('deriveFleetTickerEvents', () => {
     })
 
     expect(events).toHaveLength(1)
-    expect(events[0]?.text).toBe('Paused')
+    expect(events[0]?.text).toBe('일시정지')
     expect(events[0]?.tone).toBe('warn')
   })
 })

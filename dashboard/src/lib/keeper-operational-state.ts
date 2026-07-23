@@ -424,15 +424,45 @@ export function derivePreferredPhase(
 // now source their top-level label from this table, keyed on the typed
 // `KeeperOperationalState['kind']` so a new kind forces the compiler to
 // flag every consumer. Fine-grained detail axes (압축 중, 인계 중, …)
-// stay in `lib/fleet-tone.ts` — this table is the coarse 4-state verdict
-// only.
+// stay in `lib/fleet-tone.ts` — the coarse 4-state verdict is the
+// primary keyspace here.
+//
+// `stuck` is '조치 필요' (NOT '확인 필요'): the latter is reserved for
+// `UNKNOWN_STATUS_LABEL` (`lib/format-string.ts`) where the status itself
+// is unknown. '조치 필요' matches the `needs_attention` headline already
+// used by `lib/keeper-runtime-projection.ts`.
+//
+// The extra keys beyond the 4 kinds cover the legacy flat `keeper.status`
+// wire tokens (overview fleet ticker) that are finer-grained than the
+// typed sum: active/live/busy/executing collapse onto the `running`
+// label, while dead/stopped/unbooted keep the distinct words the former
+// English labels (Dead/Stopped/Unbooted) carried — reused from the
+// fleet-tone phase vocabulary so one backend state cannot surface two
+// different Korean words.
+export type KeeperStatusLabelKey =
+  | KeeperOperationalState['kind']
+  | 'active'
+  | 'live'
+  | 'busy'
+  | 'executing'
+  | 'dead'
+  | 'stopped'
+  | 'unbooted'
+
 export const KEEPER_STATUS_LABEL_KO: Readonly<
-  Record<KeeperOperationalState['kind'], string>
+  Record<KeeperStatusLabelKey, string>
 > = Object.freeze({
   running: '실행 중',
   paused: '일시정지',
-  stuck: '확인 필요',
+  stuck: '조치 필요',
   offline: '중지',
+  active: '실행 중',
+  live: '실행 중',
+  busy: '실행 중',
+  executing: '실행 중',
+  dead: '종료됨',
+  stopped: '중지',
+  unbooted: '미기동',
 })
 
 /** The monitoring band layer has one extra state the typed operational

@@ -36,6 +36,15 @@ import { keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } 
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
 import { isAgentOffline } from '../../lib/agent-status'
+import {
+  KEEPER_STATUS_LABEL_KO,
+  type KeeperStatusLabelKey,
+} from '../../lib/keeper-operational-state'
+import {
+  PHASE_LABEL_KO,
+  type KeeperPhaseToken,
+} from '../../lib/fleet-tone'
+import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
 import { keeperRowLooksRunning } from '../../runtime-counts'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
@@ -775,17 +784,20 @@ function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 
 }
 
 // Human-readable keeper status, used in the fleet ticker event text.
+// Labels come from the KEEPER_STATUS_LABEL_KO SSOT
+// (lib/keeper-operational-state.ts), falling back to the fleet-tone
+// PHASE_LABEL_KO for lifecycle phase tokens (compacting, handoff, …)
+// that `keeperDisplayStatus` can emit — the dashboard is Korean-only, so
+// the former English pass-through ('Active'/'Busy'/…) is gone.
 function keeperStatusLabel(status?: string | null): string {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active': case 'live': return 'Active'
-    case 'busy': case 'executing': return 'Busy'
-    case 'paused': return 'Paused'
-    case 'offline': return 'Offline'
-    case 'dead': return 'Dead'
-    case 'stopped': return 'Stopped'
-    case 'unbooted': return 'Unbooted'
-    default: return status ?? 'Unknown'
+  const key = (status ?? '').toLowerCase()
+  if (Object.prototype.hasOwnProperty.call(KEEPER_STATUS_LABEL_KO, key)) {
+    return KEEPER_STATUS_LABEL_KO[key as KeeperStatusLabelKey]
   }
+  if (Object.prototype.hasOwnProperty.call(PHASE_LABEL_KO, key)) {
+    return PHASE_LABEL_KO[key as KeeperPhaseToken]
+  }
+  return status ?? UNKNOWN_STATUS_LABEL
 }
 
 export function deriveFleetTickerEvents({

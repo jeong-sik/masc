@@ -16,6 +16,7 @@ import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
 import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { formatTokens } from '../lib/format-number'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { findKeeper } from '../lib/keeper-utils'
 import { isSubmitEnter } from '../lib/keyboard'
 import { autonomyHint } from './keeper-detail-ctx-utils'
@@ -295,17 +296,17 @@ function CharacterPlate({ name }: { name: string }) {
       <div class="w-full mt-2">
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
-            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
+            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : MISSING_DATA_DASH, delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
             { label: '세대', value: generation ?? 0 },
             { label: '턴', value: keeper.turn_count ?? 0 },
             { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, delta: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ? { direction: 'flat' as const, text: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) } : undefined },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[
-            { label: '완료', value: summary ? summary.tasks_completed : 'N/A' },
-            { label: '수임', value: summary ? summary.tasks_claimed : 'N/A' },
-            { label: '메시지', value: summary ? summary.messages_sent : 'N/A' },
-            { label: '활동', value: summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A' },
+            { label: '완료', value: summary ? summary.tasks_completed : MISSING_DATA_DASH },
+            { label: '수임', value: summary ? summary.tasks_claimed : MISSING_DATA_DASH },
+            { label: '메시지', value: summary ? summary.messages_sent : MISSING_DATA_DASH },
+            { label: '활동', value: summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : MISSING_DATA_DASH },
           ]} />
         `}
       </div>

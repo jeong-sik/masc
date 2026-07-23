@@ -7,6 +7,7 @@ import { extractApiError } from '../../api/core'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { findKeeper } from '../../lib/keeper-utils'
+import { statusLabel } from '../../lib/status-label'
 import { goalById } from './goal-helpers'
 import type { Goal, Task } from '../../types'
 
@@ -69,17 +70,22 @@ export interface TaskLineageStage {
   readonly lbl: string
 }
 
+// Lifecycle-stage labels reuse the statusLabel SSOT (lib/status-label.ts)
+// for every key that is also a task status token, so the rail cannot
+// disagree with the kanban / work-list rendering of the same status.
+// Event-only stages (created/started/submitted/approved/rejected/
+// transition) have no statusLabel arm and keep their local labels.
 const TASK_LINEAGE_STAGES: Readonly<Record<string, TaskLineageStage>> = {
   created: { key: 'created', glyph: '○', cls: 'dim', lbl: '생성' },
-  claimed: { key: 'claimed', glyph: '◉', cls: 'claimed', lbl: '클레임' },
+  claimed: { key: 'claimed', glyph: '◉', cls: 'claimed', lbl: statusLabel('claimed') },
   started: { key: 'started', glyph: '▶', cls: 'wip', lbl: '착수' },
-  handoff: { key: 'handoff', glyph: '⇄', cls: 'volt', lbl: '핸드오프' },
+  handoff: { key: 'handoff', glyph: '⇄', cls: 'volt', lbl: statusLabel('handoff') },
   submitted: { key: 'submitted', glyph: '◪', cls: 'verify', lbl: '검증 제출' },
   approved: { key: 'approved', glyph: '✓', cls: 'done', lbl: '검증 승인' },
   rejected: { key: 'rejected', glyph: '✕', cls: 'bad', lbl: '반려' },
-  blocked: { key: 'blocked', glyph: '⚠', cls: 'bad', lbl: '차단' },
-  done: { key: 'done', glyph: '✓', cls: 'done', lbl: '완료' },
-  cancelled: { key: 'cancelled', glyph: '◌', cls: 'dim', lbl: '취소' },
+  blocked: { key: 'blocked', glyph: '⚠', cls: 'bad', lbl: statusLabel('blocked') },
+  done: { key: 'done', glyph: '✓', cls: 'done', lbl: statusLabel('done') },
+  cancelled: { key: 'cancelled', glyph: '◌', cls: 'dim', lbl: statusLabel('cancelled') },
   transition: { key: 'transition', glyph: '·', cls: 'dim', lbl: '전이' },
 }
 

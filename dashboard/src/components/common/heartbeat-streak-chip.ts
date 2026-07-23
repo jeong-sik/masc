@@ -14,6 +14,7 @@ import {
   type HeartbeatState,
   type HeartbeatStreak,
 } from '../../lib/heartbeat-history'
+import { MISSING_DATA_DASH } from '../../lib/format-string'
 
 const STATE_GLYPH: Record<HeartbeatState, string> = {
   up: '▲',
@@ -24,7 +25,7 @@ const STATE_GLYPH: Record<HeartbeatState, string> = {
 const STATE_LABEL: Record<HeartbeatState, string> = {
   up: 'UP',
   down: 'DOWN',
-  unknown: 'N/A',
+  unknown: MISSING_DATA_DASH,
 }
 
 const STATE_TONE: Record<HeartbeatState, string> = {

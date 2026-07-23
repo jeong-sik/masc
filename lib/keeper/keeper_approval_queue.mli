@@ -375,8 +375,9 @@ val release_summary_exact_attempt_before_dispatch :
 (** Mark the matching binding released only after OAS proves the attempt stayed
     before dispatch. Only [Fsync_completed] permits failover. A visible
     unconfirmed release retains the original identity, forbids a successor, and
-    may be terminalized only with [Exact_terminal_persistence_failure]. The same
-    release is idempotently strict-rewritten. *)
+    may be terminalized only with [Exact_terminal_persistence_failure],
+    [Exact_cancellation], or [Exact_flow_execution_failed]. The same release is
+    idempotently strict-rewritten. *)
 
 val fail_summary_exact_attempt_before_dispatch :
   id:string ->
@@ -406,11 +407,12 @@ val quarantine_summary_exact_attempt :
   cause:exact_attempt_quarantine_cause ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Terminally quarantine a matching dispatch-uncertain binding with one closed
-    typed cause. A released binding accepts only
-    [Exact_terminal_persistence_failure]. The same identity and cause is
-    idempotently strict-rewritten. It can never return to the legacy summary
-    mutation path. *)
+(** Terminally quarantine a matching exact binding with one closed typed cause.
+    A dispatch-uncertain binding accepts any current exact cause. A released
+    binding accepts only [Exact_terminal_persistence_failure],
+    [Exact_cancellation], or [Exact_flow_execution_failed]. The same identity
+    and cause is idempotently strict-rewritten. It can never return to the
+    legacy summary mutation path. *)
 
 val complete_summary_exact_attempt :
   id:string ->

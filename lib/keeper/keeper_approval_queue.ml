@@ -190,7 +190,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 5
+let pending_store_version = 6
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
@@ -896,7 +896,11 @@ let snapshot_of_yojson ~base_path json =
 
 let quarantine_restarted_entry (entry : pending_approval) =
   match entry.exact_attempt with
-  | Exact_bound ({ status = Exact_dispatch_uncertain; _ } as binding) ->
+  | Exact_bound
+      ( { status =
+            Exact_dispatch_uncertain
+        ; _
+        } as binding ) ->
     ( { entry with
         exact_attempt =
           Exact_bound
@@ -908,9 +912,7 @@ let quarantine_restarted_entry (entry : pending_approval) =
   | Exact_unbound
   | Exact_bound
       { status =
-          ( Exact_released_before_dispatch
-          | Exact_quarantined _
-          | Exact_completed )
+          (Exact_released_before_dispatch | Exact_quarantined _ | Exact_completed)
       ; _
       } ->
     entry, false
@@ -2071,6 +2073,15 @@ let fail_summary_exact_attempt_before_dispatch =
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
+let exact_attempt_quarantine_cause_is_public = function
+  | Exact_restart_uncertainty -> false
+  | Exact_flow_execution_failed
+  | Exact_cancellation
+  | Exact_attempt_replay
+  | Exact_domain_invalid_output
+  | Exact_terminal_persistence_failure -> true
+;;
+
 let quarantine_summary_exact_attempt_with
       ~save_file_atomic_strict_staged
       ~id
@@ -2111,7 +2122,12 @@ let quarantine_summary_exact_attempt_with
                (Exact_attempt_rejected
                   (Exact_attempt_identity_conflict existing))
            | Exact_bound existing ->
-             (match existing.status with
+             if not (exact_attempt_quarantine_cause_is_public cause) then
+               Error
+                 (Exact_attempt_rejected
+                    (Exact_attempt_status_conflict existing))
+             else
+               (match existing.status with
               | Exact_dispatch_uncertain ->
                 let quarantined =
                   exact_attempt_binding_with_status
@@ -2133,7 +2149,9 @@ let quarantine_summary_exact_attempt_with
                     ~entry
                     entry
                 | Exact_released_before_dispatch
-                  when cause = Exact_terminal_persistence_failure ->
+                  when cause = Exact_terminal_persistence_failure
+                       || cause = Exact_cancellation
+                       || cause = Exact_flow_execution_failed ->
                   let quarantined =
                     exact_attempt_binding_with_status
                       existing

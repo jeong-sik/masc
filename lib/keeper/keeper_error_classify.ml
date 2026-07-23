@@ -182,6 +182,58 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
+(** 0-byte empty completion: the provider ended the turn with a modeled,
+    non-overflow stop_reason but returned no thinking, text, or tool calls
+    (a broken backend model answering with an empty assistant turn).  OAS
+    surfaces exactly two shapes for this condition
+    (oas [Retry.verdict_of_empty_completion]):
+
+    - [Provider (ProviderUnavailable {detail})] with [detail] starting
+      ["empty completion (stop_reason="] — a recognized non-overflow
+      stop_reason (e.g. [end_turn]) on an empty assistant turn, routed to
+      provider-unavailability handling upstream;
+    - [Provider (ParseError {detail})] whose detail embeds the marker
+      ["empty completion (no thinking, text, or tool calls"]
+      (defensive: see the branch comment in [is_empty_completion_error] —
+      no production producer of this shape exists at the pinned SDK).
+
+    Deliberately excluded:
+
+    - [Api (InvalidRequest _)] — OAS flattens only the unmodeled-stop_reason
+      and the context-overflow empty completions into [InvalidRequest].  The
+      first is intentionally non-retryable (oas
+      provider_failure_attribution.ml: retrying replays the identical prompt
+      and never terminates); the second replays the same oversized prompt.
+      Neither is recoverable by retry or failover, so no [InvalidRequest]
+      message text is matched here — free-form provider bodies are not a
+      classification source (see [is_provider_rejected_parse_error]).
+    - ["Context overflow: empty completion"] — a context-overflow diagnostic,
+      already classified by [is_context_overflow] on the typed path. *)
+let is_empty_completion_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
+      String.starts_with ~prefix:"empty completion (stop_reason=" detail
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
+      (* Defensive: no production producer at pinned SDK 5851df2e.  The
+         marker is rendered only by backend_openai_parse.ml
+         [parse_error_to_string], whose callers are all test-only; production
+         empty completions route via [Http_client.empty_completion_error] into
+         [ProviderUnavailable]/[InvalidRequest], and production [ParseError]
+         details come from sse/glm/image_generation/speech_generation parse
+         failures.  Kept as a bounded guard (exemption budget caps the blast
+         radius) in case a future SDK promotes this shape to [ParseError]. *)
+      String_util.contains_substring detail "empty completion (no thinking"
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.Internal _ -> false
+
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
@@ -737,6 +789,7 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
+  || is_empty_completion_error err
   || is_invalid_request_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =

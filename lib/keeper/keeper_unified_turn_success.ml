@@ -442,6 +442,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
       updated_meta.name;
     Keeper_unified_turn_failure.reset_invalid_request_failures
       ~keeper_name:updated_meta.name;
+    Keeper_unified_turn_failure.note_turn_success updated_meta.name;
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with

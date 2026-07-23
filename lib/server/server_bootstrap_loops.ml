@@ -615,6 +615,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        (fun (error : Fusion_delivery_projector.recovery_record_error) ->
           Log.Keeper.error
             "fusion_delivery: startup projection retained request_id=%s error=%s"
+            (* DET-OK: log placeholder for malformed records; never feeds a branch. *)
             (Option.value error.request_id ~default:"<malformed-record>")
             error.detail)
        report.record_errors;

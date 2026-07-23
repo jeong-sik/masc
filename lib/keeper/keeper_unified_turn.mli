@@ -153,8 +153,10 @@ type in_lane_compaction =
 
 type exact_output_terminal_reason = private
   | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_execution_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : Keeper_event_queue_state.exact_execution_terminal
+      }
 (** Closed exact-output reasons that forbid another provider-overflow
     compaction attempt for the same source. *)
 

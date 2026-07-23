@@ -25,8 +25,10 @@ type in_lane_compaction =
 
 type exact_output_terminal_reason =
   | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_execution_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : Keeper_event_queue_state.exact_execution_terminal
+      }
 
 type source_lease_disposition =
   | Follow_failure_route
@@ -42,10 +44,9 @@ let source_lease_disposition_after_no_compaction
   match reason with
   | Keeper_event_queue_state.Exact_lane_unconfigured ->
     Escalate_after_exact_output_terminal (Exact_lane_unconfigured { source })
-  | Keeper_event_queue_state.Execution_may_have_dispatched ->
-    Escalate_after_exact_output_terminal Execution_may_have_dispatched
-  | Keeper_event_queue_state.Domain_invalid_output ->
-    Escalate_after_exact_output_terminal Domain_invalid_output
+  | Keeper_event_queue_state.Exact_execution_terminal terminal ->
+    Escalate_after_exact_output_terminal
+      (Exact_execution_terminal { source; terminal })
   | ( Keeper_event_queue_state.No_eligible_history
     | Keeper_event_queue_state.Invalid_structural_source
     | Keeper_event_queue_state.Structurally_unchanged

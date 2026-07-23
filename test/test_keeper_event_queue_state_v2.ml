@@ -44,6 +44,10 @@ let no_compaction ~turn_count reason : State.no_compaction =
   { source = checkpoint_source ~turn_count; reason }
 ;;
 
+let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
+  State.Exact_execution_terminal { cause; slot_id; call_id }
+;;
+
 let test_exact_output_terminal_reasons_round_trip () =
   List.iter
     (fun (reason, label) ->
@@ -90,9 +94,64 @@ let test_exact_output_terminal_reasons_round_trip () =
          "terminal settlement survives public receipt codec"
          true
          (State.transition_receipt_equal receipt restored))
-    [ State.Exact_lane_unconfigured, "exact_lane_unconfigured"
-    ; State.Execution_may_have_dispatched, "execution_may_have_dispatched"
-    ; State.Domain_invalid_output, "domain_invalid_output"
+    [ State.Exact_lane_unconfigured, "exact_lane_unconfigured" ];
+  List.iter
+    (fun cause ->
+       let reason = exact_terminal cause in
+       let label = State.exact_execution_terminal_cause_label cause in
+       Alcotest.(check string)
+         "exact terminal cause label"
+         label
+         (State.no_compaction_reason_label reason);
+       (match State.no_compaction_reason_of_label label with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "terminal reason decoded without call provenance");
+       let claimed, lease =
+         State.with_pending
+           (queue
+              [ stimulus
+                  ~payload:Queue.Manual_compaction_requested
+                  Queue.manual_compaction_post_id
+                  1.0
+              ])
+           State.empty
+         |> claim_head
+       in
+       let lease = require_some "exact terminal lease" lease in
+       let _, settled =
+         State.settle
+           ~settled_at:11.0
+           ~lease
+           ~settlement:
+             (State.No_compaction (no_compaction ~turn_count:7 reason))
+           claimed
+         |> require_ok "settle exact terminal"
+       in
+       let receipt =
+         match settled with
+         | State.Settled receipt -> receipt
+         | State.Already_settled _ -> Alcotest.fail "exact terminal replayed"
+       in
+       let restored =
+         State.transition_receipt_to_yojson receipt
+         |> State.transition_receipt_of_yojson
+         |> require_ok "exact terminal receipt round-trip"
+       in
+       Alcotest.(check bool)
+         "exact terminal receipt retains call provenance"
+         true
+         (State.transition_receipt_equal receipt restored))
+    [ State.Execution_failed_after_dispatch
+    ; State.Attempt_already_started
+    ; State.Execution_cancelled_after_dispatch
+    ; State.Execution_provenance_mismatch
+    ; State.Domain_invalid_output
+    ; State.Invalid_structural_evidence
+    ; State.Invalid_structural_source_after_dispatch
+    ; State.Commit_admission_unavailable
+    ; State.Lifecycle_transition_failed_after_dispatch
+    ; State.Checkpoint_source_changed
+    ; State.Checkpoint_persistence_failed
     ];
   (* Malformed structural evidence and planner invariant violations remain
      retryable/escalated and cannot be encoded as terminal no-compaction. *)
@@ -105,9 +164,125 @@ let test_exact_output_terminal_reasons_round_trip () =
            "stochastic/invariant outcome %S encodable as terminal no-compaction"
            label)
     [ "invalid_compaction_plan"
-    ; "invalid_structural_evidence"
     ; "compaction_invariant_violation"
     ]
+;;
+
+let test_exact_terminal_codec_rejects_missing_or_blank_call_identity () =
+  let claimed, lease =
+    State.with_pending
+      (queue
+         [ stimulus
+             ~payload:Queue.Manual_compaction_requested
+             Queue.manual_compaction_post_id
+             1.0
+         ])
+      State.empty
+    |> claim_head
+  in
+  let lease = require_some "closed exact terminal lease" lease in
+  let _, settled =
+    State.settle
+      ~settled_at:2.0
+      ~lease
+      ~settlement:
+        (State.No_compaction
+           (no_compaction
+              ~turn_count:7
+              (exact_terminal State.Execution_cancelled_after_dispatch)))
+      claimed
+    |> require_ok "settle closed exact terminal"
+  in
+  let receipt =
+    match settled with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "closed terminal was replayed"
+  in
+  let json = State.transition_receipt_to_yojson receipt in
+  let map_settlement f =
+    match json with
+    | `Assoc receipt_fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "settlement"
+              then name, f value
+              else name, value)
+           receipt_fields)
+    | _ -> Alcotest.fail "receipt encoder returned a non-object"
+  in
+  let missing =
+    map_settlement (function
+      | `Assoc fields ->
+        `Assoc (List.filter (fun (name, _) -> not (String.equal name "exact_execution")) fields)
+      | _ -> Alcotest.fail "settlement encoder returned a non-object")
+  in
+  (match State.transition_receipt_of_yojson missing with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "terminal receipt decoded without exact execution");
+  let blank =
+    map_settlement (function
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+                if String.equal name "exact_execution"
+                then
+                  name,
+                  (match value with
+                   | `Assoc exact_fields ->
+                     `Assoc
+                       (List.map
+                          (fun (field, value) ->
+                             if String.equal field "call_id"
+                             then field, `String "   "
+                             else field, value)
+                          exact_fields)
+                   | _ -> Alcotest.fail "exact execution encoder returned a non-object")
+                else name, value)
+             fields)
+      | _ -> Alcotest.fail "settlement encoder returned a non-object")
+  in
+  match State.transition_receipt_of_yojson blank with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "terminal receipt decoded a blank call id"
+;;
+
+let test_cancelled_exact_terminal_consumes_queue_durably () =
+  let request =
+    stimulus
+      ~payload:Queue.Manual_compaction_requested
+      Queue.manual_compaction_post_id
+      1.0
+  in
+  let claimed, lease =
+    State.with_pending (queue [ request ]) State.empty |> claim_head
+  in
+  let lease = require_some "cancelled exact terminal lease" lease in
+  let settled, _ =
+    State.settle
+      ~settled_at:2.0
+      ~lease
+      ~settlement:
+        (State.No_compaction
+           (no_compaction
+              ~turn_count:7
+              (exact_terminal
+                 ~slot_id:"cancelled-slot"
+                 ~call_id:"cancelled-call"
+                 State.Execution_cancelled_after_dispatch)))
+      claimed
+    |> require_ok "settle cancelled exact terminal"
+  in
+  let restored =
+    State.to_yojson settled
+    |> State.of_yojson
+    |> require_ok "cancelled exact terminal durable round-trip"
+  in
+  Alcotest.(check (list string)) "cancelled terminal leaves queue empty" []
+    (post_ids (State.pending restored));
+  Alcotest.(check int) "cancelled terminal leaves no active lease" 0
+    (List.length (State.leases restored))
 ;;
 
 let test_no_compaction_terminal_consumes_exact_request () =
@@ -1354,12 +1529,18 @@ let test_in_lane_compaction_streak_bounds_retries () =
          { retry_class = Keeper_runtime_failure_route.Rate_limited
          ; retry_after = None
          })
-      (no_compaction ~turn_count:14 State.Execution_may_have_dispatched)
+      (no_compaction
+         ~turn_count:14
+         (exact_terminal State.Execution_failed_after_dispatch))
   in
   (match dispatch_terminal with
    | Masc.Keeper_registry_event_queue.Escalate
        { reason =
-           Masc.Keeper_registry_event_queue.Compaction_execution_may_have_dispatched
+           Masc.Keeper_registry_event_queue.Compaction_exact_output_terminal
+             { terminal =
+                 { cause = State.Execution_failed_after_dispatch; _ }
+             ; _
+             }
        ; successor = None
        } ->
      ()
@@ -1370,11 +1551,15 @@ let test_in_lane_compaction_streak_bounds_retries () =
     terminal_settlement
       (Keeper_runtime_failure_route.Rotate_now
          { rotate = Keeper_runtime_failure_route.Auth_failed })
-      (no_compaction ~turn_count:15 State.Domain_invalid_output)
+      (no_compaction
+         ~turn_count:15
+         (exact_terminal State.Domain_invalid_output))
   in
   (match domain_terminal with
    | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Compaction_domain_invalid_output
+       { reason =
+           Masc.Keeper_registry_event_queue.Compaction_exact_output_terminal
+             { terminal = { cause = State.Domain_invalid_output; _ }; _ }
        ; successor = None
        } ->
      ()
@@ -1433,13 +1618,13 @@ let test_in_lane_compaction_streak_bounds_retries () =
   ignore
     (check_durable_terminal
        "post-dispatch-terminal"
-       "compaction_execution_may_have_dispatched"
+       "compaction_exact_output_terminal"
        dispatch_terminal
      : State.t);
   ignore
     (check_durable_terminal
        "domain-invalid-terminal"
-       "compaction_domain_invalid_output"
+       "compaction_exact_output_terminal"
        domain_terminal
      : State.t);
   let exact_lane_restored =
@@ -1532,13 +1717,17 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
     "failed"
     (failed
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          (no_compaction ~turn_count:18 State.Execution_may_have_dispatched)));
+          (no_compaction
+             ~turn_count:18
+             (exact_terminal State.Execution_failed_after_dispatch))));
   check
     "domain-invalid terminal records failure without retry"
     "failed"
     (failed
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
-          (no_compaction ~turn_count:19 State.Domain_invalid_output)));
+          (no_compaction
+             ~turn_count:19
+             (exact_terminal State.Domain_invalid_output))));
   check
     "a generic turn failure leaves the streak untouched"
     "none"
@@ -2551,6 +2740,14 @@ let () =
             "exact-output terminal reasons round-trip"
             `Quick
             test_exact_output_terminal_reasons_round_trip
+        ; Alcotest.test_case
+            "exact terminal codec rejects missing or blank call identity"
+            `Quick
+            test_exact_terminal_codec_rejects_missing_or_blank_call_identity
+        ; Alcotest.test_case
+            "cancelled exact terminal consumes the queue durably"
+            `Quick
+            test_cancelled_exact_terminal_consumes_queue_durably
         ; Alcotest.test_case
             "cancelled and skipped cycles requeue"
             `Quick

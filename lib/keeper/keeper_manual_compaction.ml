@@ -86,6 +86,15 @@ let dispatch_failed ~config ~meta reason =
     (Keeper_state_machine.Compaction_failed { reason })
 ;;
 
+let observe_terminal_dispatch_failure ~meta = function
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "manual compaction terminal lifecycle dispatch failed without reopening the affine request: %s"
+      (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
+;;
+
 let run_start_lifecycle ~config ~meta =
   match dispatch_event ~config ~meta Keeper_state_machine.Operator_compact_requested with
   | Error error ->
@@ -106,6 +115,12 @@ let run_start_lifecycle ~config ~meta =
 
 let run_commit ~config ~base_dir ~meta prepared =
   match Keeper_context_runtime.commit_prepared_compaction prepared with
+  | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+    let failure_dispatch =
+      dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    observe_terminal_dispatch_failure ~meta failure_dispatch;
+    Ok (No_compaction no_compaction)
   | Error error ->
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -120,12 +135,12 @@ let run_commit ~config ~base_dir ~meta prepared =
          ~origin:Keeper_registry.Operator_compact
      with
      | Error error ->
-       Error
-         (Lifecycle
-            { stage = Compaction_completed
-            ; checkpoint_applied = true
-            ; error
-            })
+       Log.Keeper.error
+         ~keeper_name:meta.name
+         "manual compaction completion lifecycle dispatch failed after durable commit; request remains applied: %s"
+         (Keeper_context_runtime.lifecycle_dispatch_error_to_string error);
+       Keeper_unified_metrics.broadcast_compaction ~name:meta.name recovery;
+       Ok (Compacted { recovery; manifest })
      | Ok () ->
        Keeper_unified_metrics.broadcast_compaction
          ~name:meta.name
@@ -141,9 +156,8 @@ let finish_preparation ~config ~base_dir ~meta = function
         ~meta
         (Keeper_post_turn.compaction_recovery_error_to_tag error)
     in
-    (match failure_dispatch with
-     | Ok () -> Ok (No_compaction no_compaction)
-     | Error _ -> Error (Recovery (error, failure_dispatch)))
+    observe_terminal_dispatch_failure ~meta failure_dispatch;
+    Ok (No_compaction no_compaction)
   | Error error ->
     let failure_dispatch =
       dispatch_failed
@@ -186,14 +200,42 @@ let prepare =
   prepare_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
 ;;
 
+let no_compaction_after_prepared_cancellation prepared =
+  Eio.Cancel.protect (fun () ->
+    No_compaction
+      (Keeper_post_turn.no_compaction_of_uncommitted_prepared
+         ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
+         prepared))
+;;
+
 let run ~(config : Workspace.config) ~(meta : keeper_meta) =
   (* Planning is outside the lifecycle. Only the deterministic lifecycle and
      source-CAS commit may set [compaction_active], and they close in this
      single synchronous section. *)
   let base_dir, preparation = prepare ~config ~meta in
-  match run_start_lifecycle ~config ~meta with
-  | Error _ as error -> error
-  | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
+  match preparation with
+  | Ok prepared ->
+    (try
+       match run_start_lifecycle ~config ~meta with
+       | Error _ ->
+         Ok
+           (No_compaction
+              (Keeper_post_turn.no_compaction_of_uncommitted_prepared
+                 ~cause:
+                   Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                 prepared))
+       | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
+     with
+     | Eio.Cancel.Cancelled _ ->
+       Ok (no_compaction_after_prepared_cancellation prepared))
+  | Error (Keeper_post_turn.No_compaction no_compaction) ->
+    (match run_start_lifecycle ~config ~meta with
+     | Error _ -> Ok (No_compaction no_compaction)
+     | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+  | (Error _ as failed_preparation) ->
+    (match run_start_lifecycle ~config ~meta with
+     | Error failure -> Error failure
+     | Ok () -> finish_preparation ~config ~base_dir ~meta failed_preparation)
 ;;
 
 let observe_manifest ~keeper_name = function
@@ -227,14 +269,36 @@ let run_admitted_with
   | `Busy block -> `Busy block
   | `Ran () ->
     let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
-    (match
-       Keeper_turn_admission.run_compaction_if_free
-         ~base_path:config.base_path
-         ~keeper_name:meta.name
-         (fun () ->
-           match run_start_lifecycle ~config ~meta with
-           | Error failure -> Error failure
-           | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+    let final_admission () =
+      Keeper_turn_admission.run_compaction_if_free
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        (fun () ->
+          match run_start_lifecycle ~config ~meta with
+          | Error failure ->
+            (match preparation with
+             | Ok prepared ->
+               Ok
+                 (No_compaction
+                    (Keeper_post_turn.no_compaction_of_uncommitted_prepared
+                       ~cause:
+                         Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                       prepared))
+             | Error (Keeper_post_turn.No_compaction no_compaction) ->
+               Ok (No_compaction no_compaction)
+             | Error _ -> Error failure)
+          | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+    in
+    let admitted =
+      match preparation with
+      | Ok prepared ->
+        (try final_admission () with
+         | Eio.Cancel.Cancelled _ ->
+           Eio.Cancel.protect (fun () ->
+             `Ran (Ok (no_compaction_after_prepared_cancellation prepared))))
+      | Error _ -> final_admission ()
+    in
+    (match admitted
      with
      | `Busy block ->
        (match preparation with

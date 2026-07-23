@@ -21,6 +21,25 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
+type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+
+type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -29,8 +48,10 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       ; rationale : string
       }
   | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -46,8 +67,7 @@ type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason 
   | Structurally_unchanged
   | Checkpoint_not_reduced
   | Exact_lane_unconfigured
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_execution_terminal of exact_execution_terminal
 
 type no_compaction = Keeper_event_queue_persistence.no_compaction =
   { source : Keeper_checkpoint_ref.t

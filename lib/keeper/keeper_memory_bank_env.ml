@@ -11,9 +11,6 @@ let memory_env_bool_logged name ~default =
   Env_config_memory.get_bool_logged name ~default
 ;;
 
-let memory_llm_summary_enabled () =
-  memory_env_bool_logged "MASC_KEEPER_MEMORY_LLM_SUMMARY" ~default:false
-
 (* RFC keeper-memory-consolidation Stage 1: memory_bank long-term inject의
    kill-switch. default=true → 동작 변화 0 (기존 inject 유지). 키 정의를 여기
    한 곳에 모아 keeper_turn 가드와 테스트가 같은 함수를 호출하게 한다 (SSOT). *)

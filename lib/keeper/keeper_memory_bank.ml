@@ -88,9 +88,6 @@ type keeper_memory_row_raw = {
   ts_unix: float;
 }
 
-type memory_consolidation_summarizer =
-  trace_id:string -> texts:string list -> string option
-
 let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
@@ -182,35 +179,6 @@ let deterministic_progress_consolidation_summary ~count texts =
     count
     (String.concat "; " (take 5 texts))
 
-let sanitize_consolidation_summary text =
-  text
-  |> String.trim
-  |> String_util.utf8_safe ~max_bytes:(max_memory_text_length ()) ~suffix:"..."
-  |> String_util.to_string
-
-let progress_consolidation_summary ?summarizer ~trace_id ~count texts =
-  let fallback = deterministic_progress_consolidation_summary ~count texts in
-  match summarizer with
-  | Some summarize when memory_llm_summary_enabled () ->
-      let summarized =
-        try summarize ~trace_id ~texts with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            Log.Keeper.warn
-              "memory consolidation summarizer failed for trace_id=%s: %s; using deterministic fallback"
-              trace_id
-              (Printexc.to_string exn);
-            None
-      in
-      (match summarized with
-      | Some candidate ->
-          let summary = sanitize_consolidation_summary candidate in
-          if summary <> "" && is_meaningful_memory_text summary then
-            Printf.sprintf "[consolidated:%d][llm] %s" count summary
-          else fallback
-      | None -> fallback)
-  | _ -> fallback
-
 (** Minimum group size that triggers consolidation, used for both
     same-trace progress merging and cross-trace recurrence promotion.
     Below this floor a "burst" is treated as noise and not promoted to
@@ -236,7 +204,7 @@ let consolidation_recurrence_priority = 95
     2. Promote recurring texts across trace_ids to long_term at
        {!consolidation_recurrence_priority}.
     Returns a new row list with consolidated entries appended. *)
-let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
+let consolidate_memory_notes (rows : keeper_memory_row_raw list)
     : keeper_memory_row_raw list * int =
   let now = Unix.gettimeofday () in
   let consolidated = ref [] in
@@ -267,7 +235,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           0 group
       in
       let summary_text =
-        progress_consolidation_summary ?summarizer ~trace_id:tid
+        deterministic_progress_consolidation_summary
           ~count:(List.length group)
           texts
       in
@@ -542,7 +510,6 @@ let evicted_generated_rows ~generated ~retained =
        | _ -> true)
 
 let compact_memory_bank_if_needed
-    ?summarizer
     (config : Workspace.config)
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
@@ -598,7 +565,7 @@ let compact_memory_bank_if_needed
       else
         (* Consolidation: merge progress clusters and promote recurring notes *)
         let consolidated_parsed, consolidated_count =
-          consolidate_memory_notes ?summarizer parsed
+          consolidate_memory_notes parsed
         in
         let generated_consolidated =
           drop_memory_rows before_notes consolidated_parsed

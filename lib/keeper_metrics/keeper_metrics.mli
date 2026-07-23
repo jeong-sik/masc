@@ -126,8 +126,6 @@ type t =
   | ThinkingPersistFailures
   | CheckpointFailures
   | DecisionAuditRingOverflows
-  | MemoryLlmSummaryOutcomes
-  | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
   | MemoryWriteFailures

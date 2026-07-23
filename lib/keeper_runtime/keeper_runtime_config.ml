@@ -53,7 +53,6 @@ let key_to_env =
     "memory.max_length",                "MASC_KEEPER_MEMORY_MAX_LENGTH";
     "memory.placeholders",              "MASC_KEEPER_MEMORY_PLACEHOLDERS";
     "memory.consensus_pattern",         "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
-    "memory.llm_summary",               "MASC_KEEPER_MEMORY_LLM_SUMMARY";
     (* [web_search] *)
     "web_search.searxng_url",           "MASC_SEARXNG_URL";
     "web_search.provider",              "MASC_WEB_SEARCH_PROVIDER";

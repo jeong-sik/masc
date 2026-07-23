@@ -646,9 +646,9 @@ end
 
 (* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
    deleted (audit F8): its value was threaded as [?provider_filter] into
-   [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
-   which silently ignored it after the RFC-0206 single-runtime purge. The knob
-   was dead while its docs were live; deletion documents reality. Provider
-   selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
+   [Keeper_turn_driver.run_named], which silently ignored it after the RFC-0206
+   single-runtime purge. The knob was dead while its docs were live; deletion
+   documents reality. Provider selection is runtime.toml SSOT
+   ([runtime].default / [[runtime.assignments]]). *)
 
 (** Print configuration summary for debugging *)

@@ -7,7 +7,6 @@ module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
-module Memory_summary = Masc.Keeper_memory_llm_summary
 module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Structured_schema = Masc.Keeper_structured_output_schema
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
@@ -235,20 +234,6 @@ let invalid_schema_provider_cfg () =
     ~model_id:"fake-librarian-model"
     ~base_url:"http://127.0.0.1:1"
     ~max_tokens:4096
-    ()
-;;
-
-let json_only_provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"json-only-memory-summary"
-    ~base_url:"https://json-only.invalid/v1"
-    ~max_tokens:4096
-    ~model_capabilities_override:
-      { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
-        supports_structured_output = false
-      ; supports_response_format_json = true
-      }
     ()
 ;;
 
@@ -996,17 +981,10 @@ let test_memory_provider_configs_use_runtime_temperature () =
     match Runtime.get_default_runtime () with
     | None -> Alcotest.fail "default memory runtime should resolve"
     | Some runtime ->
-      let summary =
-        Memory_summary.provider_for_summary runtime.Runtime.provider_config
-      in
       let consolidation =
         Consolidation_runtime.For_testing.provider_for_consolidation
           runtime.Runtime.provider_config
       in
-      Alcotest.(check (option (float 0.0001)))
-        "memory summary keeps runtime.toml temperature"
-        (Some 1.0)
-        summary.temperature;
       Alcotest.(check (option (float 0.0001)))
         "memory consolidation keeps runtime.toml temperature"
         (Some 1.0)
@@ -1408,138 +1386,6 @@ let test_librarian_rejects_invalid_claims () =
        ; "constraints", `List []
        ; "preserved_tool_refs", `List []
        ])
-;;
-
-let test_memory_llm_summary_provider_requests_json_schema () =
-  let provider_cfg =
-    Memory_summary.provider_for_summary (test_provider_cfg ())
-  in
-  let expected_schema = Structured_schema.memory_bank_summary_output_schema in
-  Alcotest.(check (option int))
-    "summary max tokens capped"
-    (Some Memory_summary.summary_max_tokens)
-    provider_cfg.Llm_provider.Provider_config.max_tokens;
-  Alcotest.(check bool)
-    "summary json schema response format"
-    true
-    (match provider_cfg.response_format with
-     | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
-     | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-  Alcotest.(check (option bool))
-    "summary output schema mirrors response format"
-    (Some true)
-    (Option.map
-       (Yojson.Safe.equal expected_schema)
-       provider_cfg.Llm_provider.Provider_config.output_schema);
-  Alcotest.(check bool)
-    "summary schema config accepted by OAS"
-    true
-    (Result.is_ok
-       (Llm_provider.Provider_config.validate_output_schema_request provider_cfg))
-;;
-
-let test_memory_llm_summary_accepts_json_object_mode () =
-  let provider_cfg =
-    Memory_summary.provider_for_summary (json_only_provider_cfg ())
-  in
-  Alcotest.(check bool)
-    "JSON-only provider is eligible"
-    true
-    (Memory_summary.summary_json_guarantee_supported
-       (json_only_provider_cfg ()));
-  Alcotest.(check bool)
-    "summary requests JSON-object mode"
-    true
-    (match provider_cfg.response_format with
-     | Agent_sdk.Types.JsonMode -> true
-     | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
-  Alcotest.(check (option bool))
-    "JSON-object mode carries no output schema"
-    None
-    (Option.map (fun _ -> true) provider_cfg.output_schema)
-;;
-
-let test_memory_llm_summary_rejects_provider_without_json_guarantee () =
-  Alcotest.(check bool)
-    "provider without a JSON guarantee rejected"
-    false
-    (Memory_summary.summary_json_guarantee_supported
-       (invalid_schema_provider_cfg ()))
-;;
-
-let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
-  let parse raw =
-    Memory_summary.For_testing.summary_text_of_response (fake_response raw)
-  in
-  let parse_result raw =
-    Memory_summary.For_testing.summary_text_result_of_response (fake_response raw)
-  in
-  let check_invalid_structured label = function
-    | Error (Memory_summary.Invalid_structured_response _) -> ()
-    | Ok summary -> Alcotest.failf "%s: expected invalid structured response, got %S" label summary
-    | Error Memory_summary.Empty_summary_response ->
-        Alcotest.failf "%s: expected invalid structured response, got empty response" label
-  in
-  Alcotest.(check (option string))
-    "valid summary json"
-    (Some "Remember exact command.")
-    (parse {|{"summary":" Remember exact command.  "}|});
-  (match parse_result {|{"summary":" Remember exact command.  "}|} with
-   | Ok summary ->
-       Alcotest.(check string)
-         "valid summary json result"
-         "Remember exact command."
-         summary
-   | Error _ -> Alcotest.fail "valid summary json result rejected");
-  Alcotest.(check (option string))
-    "plain text rejected"
-    None
-    (parse "Remember exact command.");
-  check_invalid_structured "plain text result" (parse_result "Remember exact command.");
-  Alcotest.(check (option string))
-    "empty summary rejected"
-    None
-    (parse {|{"summary":"   "}|});
-  Alcotest.(check bool)
-    "empty summary result"
-    true
-    (match parse_result {|{"summary":"   "}|} with
-     | Error Memory_summary.Empty_summary_response -> true
-     | Ok _
-     | Error (Memory_summary.Invalid_structured_response _) -> false);
-  Alcotest.(check (option string))
-    "wrong field rejected"
-    None
-    (parse {|{"text":"Remember exact command."}|});
-  check_invalid_structured
-    "wrong field result"
-    (parse_result {|{"text":"Remember exact command."}|})
-;;
-
-let test_memory_llm_summary_does_not_invent_clock_requirement () =
-  with_eio (fun ~sw ~net ~clock:_ ->
-    let runtime_id = "summary-clock-required-runtime" in
-    let called = ref false in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-      called := true;
-      Ok (fake_response {|{"summary":"should not run"}|})
-    in
-    let result =
-      Memory_summary.For_testing.summarize_with_provider
-        ~complete
-        ~runtime_id
-        ~sw
-        ~net
-        ~provider_cfg:(test_provider_cfg ())
-        ~trace_id:"summary-clock-required-trace"
-        ~texts:[ "remember this only if timeout can be enforced" ]
-        ()
-    in
-    Alcotest.(check (option string))
-      "summary returned"
-      (Some "should not run")
-      result;
-    Alcotest.(check bool) "provider was called" true !called)
 ;;
 
 let json_episode_file_count ~keeper_id =
@@ -4640,25 +4486,21 @@ let () =
             `Quick
             test_librarian_rejects_invalid_claims
         ; Alcotest.test_case
-            "memory llm summary requests json schema"
+            "librarian runtime appends episode bundle"
             `Quick
-            test_memory_llm_summary_provider_requests_json_schema
+            test_librarian_runtime_appends_episode_bundle
         ; Alcotest.test_case
-            "memory llm summary accepts json object mode"
+            "librarian runtime falls back when schema unavailable"
             `Quick
-            test_memory_llm_summary_accepts_json_object_mode
+            test_librarian_runtime_falls_back_when_schema_unavailable
         ; Alcotest.test_case
-            "memory llm summary rejects provider without json guarantee"
+            "librarian runtime requires clock for provider call"
             `Quick
-            test_memory_llm_summary_rejects_provider_without_json_guarantee
+            test_librarian_runtime_requires_clock_for_provider_call
         ; Alcotest.test_case
-            "memory llm summary accepts only summary json"
+            "librarian runtime reports fact upsert failure"
             `Quick
-            test_memory_llm_summary_response_parser_accepts_only_summary_json
-        ; Alcotest.test_case
-            "memory llm summary does not invent clock requirement"
-            `Quick
-            test_memory_llm_summary_does_not_invent_clock_requirement
+            test_librarian_runtime_reports_fact_upsert_failure
         ; Alcotest.test_case
             "dashboard fact json omits deleted score keys (RFC-keeper-memory-panel-real-data §4a)"
             `Quick

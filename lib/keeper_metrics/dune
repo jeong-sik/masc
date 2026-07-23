@@ -9,7 +9,6 @@
   keeper_metrics
   keeper_prompt_names
   keeper_timing
-  keeper_memory_llm_summary_outcome
   keeper_memory_recall_exn_class
   keeper_chat_store_operation
   keeper_compact_audit_retention_outcome

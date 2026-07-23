@@ -13,6 +13,7 @@
     "governance.deliberation.md",
     "governance.dry_run.md",
     "keeper.board_attention_judgment.md",
+    "keeper.board_attention_judgment_batch.md",
     "keeper.capabilities.md",
     "keeper.claimed_task_nudge.md",
     "keeper.connected_surfaces_guidance.md",

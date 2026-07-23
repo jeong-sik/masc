@@ -790,7 +790,9 @@ let recover_for_process_start ~base_path ~keeper_name =
     let entry = cache_entry ledger_path in
     Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
       match
-        Fs_compat.read_private_jsonl_durable_locked_result ledger_path ~after:None
+        (* Process-start recovery only: a torn tail from a mid-append crash is
+           truncated to the last complete row; general reads keep hard-failing. *)
+        Fs_compat.recover_private_jsonl_durable_locked_result ledger_path
         |> snapshot_result ~ledger_path
       with
       | Error error -> Error error

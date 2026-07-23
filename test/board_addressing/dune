@@ -1,0 +1,6 @@
+; Standalone alcotest for the shared stdlib-only addressing grammar
+; (issue #25601).
+
+(tests
+ (names test_board_addressing)
+ (libraries alcotest masc.board_addressing))

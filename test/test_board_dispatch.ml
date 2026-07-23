@@ -1714,6 +1714,25 @@ let test_write_boundary_emits_typed_audience () =
      | _ -> Alcotest.fail "expected one exact Board target")
 ;;
 
+let test_target_case_is_identity_level () =
+  (* #25601: the shared grammar (Board_addressing) preserves target case;
+     case normalization is an identity-level concern.  Board agent ids are
+     case-sensitive, so differently-cased targets stay DISTINCT here —
+     while the Keeper boundary folds them into one canonical id (pinned in
+     test_keeper_lane_mentions). *)
+  match
+    Board.audience_for_post ~visibility:Board.Public ~title:""
+      ~content:"@MiXeD-Agent and @mixed-agent"
+  with
+  | Ok (Board.Targets targets) ->
+    Alcotest.(check (list string))
+      "Board targets keep distinct casings"
+      [ "MiXeD-Agent"; "mixed-agent" ]
+      (List.map Board.Agent_id.to_string targets)
+  | Ok _ -> Alcotest.fail "expected exact targets"
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
 (** {1 SubBoard CRUD} *)
 
 let test_sub_board_create_and_get () =
@@ -2161,6 +2180,8 @@ let () =
         (with_eio test_malformed_target_fails_closed);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
+      Alcotest.test_case "target case is identity-level" `Quick
+        (with_eio test_target_case_is_identity_level);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

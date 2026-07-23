@@ -3,7 +3,7 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
@@ -28,13 +28,13 @@ type failure =
   | Durable_meta_missing of string
   | Source_owner_not_paused
   | Source_owner_dead_tombstone
-  | Source_owner_generation_changed of
+  | Source_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
   | Source_owner_identity_changed
   | Target_owner_not_active
-  | Target_owner_generation_changed of
+  | Target_owner_nonce_changed of
       { expected : int
       ; actual : int
       }

@@ -1,7 +1,10 @@
 type t =
   | No_shutdown_admission_token
-  | Operator_metadata_update_token of
+  | Operator_supersession_token of
       Keeper_shutdown_store.operator_metadata_supersession_token
+      (* Carries either a blocked-operator-stop release or a
+         reconciliation-required release; the store token records which, so
+         this wrapper stays agnostic. *)
 
 type committed =
   | No_shutdown_admission
@@ -49,7 +52,7 @@ let preflight ~config ~keeper_name ~actor =
       ~keeper_name
       ~operation_id
       ~actor
-    |> Result.map (fun token -> Operator_metadata_update_token token)
+    |> Result.map (fun token -> Operator_supersession_token token)
     |> Result.map_error (fun error -> Preflight_failed error)
   | None ->
     (match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
@@ -68,7 +71,7 @@ let preflight ~config ~keeper_name ~actor =
             ~keeper_name
             ~operation_id:operation.operation_id
             ~actor
-          |> Result.map (fun token -> Operator_metadata_update_token token)
+          |> Result.map (fun token -> Operator_supersession_token token)
           |> Result.map_error (fun error -> Preflight_failed error)
         | operations ->
           Error
@@ -80,7 +83,7 @@ let preflight ~config ~keeper_name ~actor =
 
 let commit_after_metadata_update ~config = function
   | No_shutdown_admission_token -> Ok No_shutdown_admission
-  | Operator_metadata_update_token token ->
+  | Operator_supersession_token token ->
     (match
        Keeper_shutdown_store.supersede_blocked_operator_stop
          ~config

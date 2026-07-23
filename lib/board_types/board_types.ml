@@ -126,6 +126,15 @@ type visibility =
   | Internal    (* This MASC instance only *)
   | Direct      (* Mentioned agents only *)
 
+type audience =
+  | Targets of Agent_id.t list
+  | Broadcast
+  | Thread_participants
+  | Discoverable
+(** Closed routing authority for Board mutations. [Targets] contains exact
+    typed Board identities, not Keeper identities; MASC may project those
+    identities into Keeper lanes without making Board depend on Keeper. *)
+
 type post_kind =
   | Human_post [@tla.symbol "human_post"]
   | Automation_post [@tla.symbol "automation_post"]
@@ -192,6 +201,16 @@ type comment = {
   expires_at: float;   (* MANDATORY *)
   votes_up: int;
   votes_down: int;
+}
+
+type post_creation = {
+  post: post;
+  audience: audience;
+}
+
+type comment_creation = {
+  comment: comment;
+  audience: audience;
 }
 
 type reaction_target_type =

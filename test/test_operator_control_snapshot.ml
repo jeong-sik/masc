@@ -625,7 +625,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
           (Keeper_lane.id running_entry.lane)
           (Keeper_lane.id dead_entry.lane)));
   Alcotest.(check bool) "revival mints a new generation" true
-    (running_entry.meta.runtime.generation > persisted_seed.runtime.generation);
+    (running_entry.meta.runtime.nonce > persisted_seed.runtime.nonce);
   let journal_path =
     List.fold_left Filename.concat base_dir
       [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
@@ -784,7 +784,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
           Keeper_lifecycle_reservation.acquire
             ~base_path:base_dir
             ~keeper_name:persisted.name
-            ~expected_generation:persisted.runtime.generation
+            ~expected_generation:persisted.runtime.nonce
             ~purpose:Keeper_lifecycle_reservation.Dead_revival
         with
         | Ok token -> token
@@ -807,7 +807,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
            with
            | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
              Alcotest.(check int) "registration conflict generation"
-               persisted.runtime.generation owner.expected_generation
+               persisted.runtime.nonce owner.expected_generation
            | Error
                ( Keeper_registry.Registration_shutdown_reserved _
                | Keeper_registry.Registration_invalid _
@@ -950,7 +950,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
       Alcotest.(check bool) "rollback restores Dead tombstone" true
         (rolled_back.latched_reason = Some Keeper_latched_reason.Dead_tombstone);
       Alcotest.(check int) "rollback restores original generation"
-        original.runtime.generation rolled_back.runtime.generation;
+        original.runtime.nonce rolled_back.runtime.nonce;
       let restored_entry =
         match Keeper_registry.get ~base_path:base_dir keeper_name with
         | Some entry -> entry

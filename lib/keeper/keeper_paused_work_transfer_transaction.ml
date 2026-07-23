@@ -1,7 +1,7 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
@@ -26,13 +26,13 @@ type failure =
   | Durable_meta_missing of string
   | Source_owner_not_paused
   | Source_owner_dead_tombstone
-  | Source_owner_generation_changed of
+  | Source_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
   | Source_owner_identity_changed
   | Target_owner_not_active
-  | Target_owner_generation_changed of
+  | Target_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -98,7 +98,7 @@ let failure_to_string = function
   | Source_owner_not_paused -> "Transfer_owner source Keeper must be paused"
   | Source_owner_dead_tombstone ->
     "Transfer_owner cannot use a Dead source tombstone"
-  | Source_owner_generation_changed { expected; actual } ->
+  | Source_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Transfer_owner source generation changed: expected %d, actual %d"
       expected
@@ -106,7 +106,7 @@ let failure_to_string = function
   | Source_owner_identity_changed ->
     "Transfer_owner source trace identity changed"
   | Target_owner_not_active -> "Transfer_owner target Keeper must be active"
-  | Target_owner_generation_changed { expected; actual } ->
+  | Target_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Transfer_owner target generation changed: expected %d, actual %d"
       expected
@@ -142,7 +142,7 @@ let validate_request ~from_keeper ~to_keeper request =
   then Error "target Keeper must not be empty"
   else if String.equal from_keeper to_keeper
   then Error "source and target Keepers must differ"
-  else if request.owner_generation < 0
+  else if request.owner_nonce < 0
   then Error "source owner generation must not be negative"
   else if request.target_generation < 0
   then Error "target owner generation must not be negative"
@@ -178,20 +178,20 @@ let validate_source_owner request (meta : Keeper_meta_contract.keeper_meta) =
   | Keeper_lifecycle_admission.Active -> Error Source_owner_not_paused
   | Keeper_lifecycle_admission.Dead_tombstone -> Error Source_owner_dead_tombstone
   | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.generation request.owner_generation
+    if Int.equal meta.runtime.nonce request.owner_nonce
     then Ok meta
     else
       Error
-        (Source_owner_generation_changed
-           { expected = request.owner_generation; actual = meta.runtime.generation })
+        (Source_owner_nonce_changed
+           { expected = request.owner_nonce; actual = meta.runtime.nonce })
 ;;
 
 let validate_target_owner request (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.generation request.target_generation)
+  if not (Int.equal meta.runtime.nonce request.target_generation)
   then
     Error
-      (Target_owner_generation_changed
-         { expected = request.target_generation; actual = meta.runtime.generation })
+      (Target_owner_nonce_changed
+         { expected = request.target_generation; actual = meta.runtime.nonce })
   else
     match
       Keeper_lifecycle_admission.state
@@ -244,7 +244,7 @@ let receipt_matches_request ~from_keeper ~to_keeper request receipt =
   | Error _ -> false
   | Ok transfer ->
     String.equal receipt.keeper_name from_keeper
-    && Int.equal receipt.expected_generation request.owner_generation
+    && Int.equal receipt.expected_generation request.owner_nonce
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && String.equal transfer.from_keeper from_keeper
     && String.equal transfer.to_keeper to_keeper
@@ -275,7 +275,7 @@ let create_receipt config ~from_keeper ~to_keeper request =
   Ok
     ({ keeper_name = from_keeper
      ; expected_trace_id = source_meta.runtime.trace_id
-     ; expected_generation = request.owner_generation
+     ; expected_generation = request.owner_nonce
      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation = Keeper_paused_work_disposition_receipt.Transfer_owner transfer
@@ -288,7 +288,7 @@ let accepted_transfer receipt
     : Keeper_registry_event_queue.accepted_transfer =
   { source = transfer.Keeper_paused_work_disposition_receipt.source
   ; source_revision = transfer.source_revision
-  ; owner_generation = receipt.Keeper_paused_work_disposition_receipt.expected_generation
+  ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
   ; operator_operation_id = receipt.operator_operation_id
   ; from_keeper = transfer.from_keeper
   ; to_keeper = transfer.to_keeper
@@ -315,12 +315,12 @@ let source_settlement config receipt transfer =
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
-      if not (Int.equal current.runtime.generation receipt.expected_generation)
+      if not (Int.equal current.runtime.nonce receipt.expected_generation)
       then
         Error
-          (Source_owner_generation_changed
+          (Source_owner_nonce_changed
              { expected = receipt.expected_generation
-             ; actual = current.runtime.generation
+             ; actual = current.runtime.nonce
              })
       else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Source_owner_identity_changed
@@ -329,7 +329,7 @@ let source_settlement config receipt transfer =
     Keeper_registry_event_queue.transfer_pending_accepted_result
       ~base_path
       transfer.from_keeper
-      ~current_owner_generation:current.runtime.generation
+      ~current_owner_nonce:current.runtime.nonce
       ~settled_at:transfer.settled_at
       ~transfer:causal
     |> Result.map_error (fun detail ->
@@ -338,11 +338,11 @@ let source_settlement config receipt transfer =
 
 let validate_committed_target config transfer =
   let* meta = read_meta config transfer.Keeper_paused_work_disposition_receipt.to_keeper in
-  if not (Int.equal meta.runtime.generation transfer.target_generation)
+  if not (Int.equal meta.runtime.nonce transfer.target_generation)
   then
     Error
-      (Target_owner_generation_changed
-         { expected = transfer.target_generation; actual = meta.runtime.generation })
+      (Target_owner_nonce_changed
+         { expected = transfer.target_generation; actual = meta.runtime.nonce })
   else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id)
   then
     Error
@@ -421,7 +421,7 @@ let transfer_pending config ~from_keeper ~to_keeper request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name:from_keeper
-         ~expected_generation:request.owner_generation
+         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

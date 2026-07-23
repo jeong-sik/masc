@@ -60,9 +60,7 @@ val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
-val save_reactions_jsonl : string -> unit
-val rewrite_reactions_unlocked : store -> unit
-val rewrite_reactions : store -> unit
+val save_reactions_jsonl_result : string -> (unit, board_error) result
 val append_post : post -> (unit, board_error) result
 val append_comment : comment -> (unit, board_error) result
 
@@ -112,6 +110,24 @@ val create_post_once_by_fusion_run_id :
     An exact normalized payload replay for the same typed Fusion run returns
     the committed post instead of appending another row. A conflicting replay
     returns [Already_exists]. The regular create path remains unchanged. *)
+
+val create_post_with_audience :
+  store ->
+  author:string ->
+  content:string ->
+  ?title:string ->
+  ?body:string ->
+  post_kind:post_kind ->
+  ?meta_json:Yojson.Safe.t ->
+  ?visibility:visibility ->
+  ?ttl_hours:int ->
+  ?hearth:string ->
+  ?thread_id:string ->
+  ?origin:post_origin ->
+  unit ->
+  (post_creation, board_error) result
+(** Validate and freeze the post audience before mutating or persisting the
+    Board, returning that same authority with the committed post. *)
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a

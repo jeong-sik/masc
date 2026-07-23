@@ -164,7 +164,7 @@ let delete_journal config keeper_name =
 
 let same_identity (a : keeper_meta) (b : keeper_meta) =
   Keeper_id.Trace_id.equal a.runtime.trace_id b.runtime.trace_id
-  && Int.equal a.runtime.generation b.runtime.generation
+  && Int.equal a.runtime.nonce b.runtime.nonce
 ;;
 
 let same_persisted_payload (a : keeper_meta) (b : keeper_meta) =
@@ -349,9 +349,9 @@ let validate_registry_snapshot config original =
     Error
       (Registry_identity_conflict
          { expected_trace_id = original.runtime.trace_id
-         ; expected_generation = original.runtime.generation
+         ; expected_generation = original.runtime.nonce
          ; actual_trace_id = entry.meta.runtime.trace_id
-         ; actual_generation = entry.meta.runtime.generation
+         ; actual_generation = entry.meta.runtime.nonce
          })
   | Some entry
     when Option.is_none (Eio.Promise.peek entry.done_p)
@@ -365,7 +365,7 @@ let revive (ctx : _ context) ~original ~candidate =
     Keeper_lifecycle_reservation.acquire
       ~base_path:ctx.config.base_path
       ~keeper_name:original.name
-      ~expected_generation:original.runtime.generation
+      ~expected_generation:original.runtime.nonce
       ~purpose:Keeper_lifecycle_reservation.Dead_revival
   with
   | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
@@ -373,23 +373,23 @@ let revive (ctx : _ context) ~original ~candidate =
     Error (Reservation_conflict owner)
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
-    let generation =
+    let nonce =
       Keeper_memory_os_io.next_generation_with_floor_for_base_path
         ~base_path:ctx.config.base_path
-        ~floor:(original.runtime.generation + 1)
+        ~floor:(original.runtime.nonce + 1)
         ~keeper_id:original.name
         ~trace_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
     in
     let candidate =
       { candidate with
-        runtime = { candidate.runtime with generation }
+        runtime = { candidate.runtime with nonce }
       }
     in
     let journal =
       { owner_id = Keeper_lifecycle_reservation.owner_id token
       ; keeper_name = original.name
       ; expected_trace_id = original.runtime.trace_id
-      ; expected_generation = original.runtime.generation
+      ; expected_generation = original.runtime.nonce
       ; original
       ; candidate
       ; stage = Reserved
@@ -457,7 +457,7 @@ let revive (ctx : _ context) ~original ~candidate =
                      Error
                        (Registry_identity_conflict
                           { expected_trace_id = original.runtime.trace_id
-                          ; expected_generation = original.runtime.generation
+                          ; expected_generation = original.runtime.nonce
                           ; actual_trace_id = original.runtime.trace_id
                           ; actual_generation = owner.expected_generation
                           }))

@@ -141,8 +141,9 @@ val settlement_of_failure :
     ceiling this lane requeues forever, one summarizer LLM call per heartbeat
     cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
     rejections over ~10h, ended only by operator keeper_down). A
-    [Compaction_committed] disposition always requeues: the retry reloads a
-    durably smaller checkpoint. [Escalate_after_exact_output_terminal] ignores
+    [Compaction_committed] disposition requeues below the threshold so the retry
+    reloads a durably smaller checkpoint; at the threshold it escalates as
+    [Compaction_floor_exceeded]. [Escalate_after_exact_output_terminal] ignores
     the ordinary route and immediately settles as a typed escalation with no
     successor.
 
@@ -271,3 +272,14 @@ val record_keepalive_stage_timing :
 val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> unit
+
+module For_testing : sig
+  val exact_execution_guard :
+    base_path:string ->
+    keeper_name:string ->
+    lease:Keeper_registry_event_queue.lease ->
+    Keeper_compaction_llm_summarizer.exact_execution_guard
+
+  val check_cancellation_after_exact_terminal_settlement :
+    Keeper_registry_event_queue.settlement -> unit
+end

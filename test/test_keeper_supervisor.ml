@@ -27,6 +27,14 @@ module Process_switch = Masc.Keeper_process_switch
 module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
 
+(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
+   unit projection over [resolve_with_policy] (production resolution path). *)
+let aq_resolve ~base_path ~id ~decision =
+  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as error -> error
+;;
+
 let supervisor_agent_name = Sup.supervisor_agent_name
 
 let temp_dir () =
@@ -338,7 +346,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       List.iter
         (fun id ->
           ignore
-            (AQ.resolve
+            (aq_resolve
                ~base_path:base_dir
                ~id
                ~decision:(AQ.Decision.Reject "test cleanup")))
@@ -1001,11 +1009,12 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
               (publication_recovery_registry env sw config);
         }
       in
-      let pending_before = AQ.pending_count () in
+      let pending_before = List.length (AQ.list_pending_entries ()) in
       sweep_and_recover_no_materialize ctx;
       check bool "paused keeper has no synthetic approval" false
-        (AQ.has_pending_for_keeper ~keeper_name:meta.name);
-      check int "approval count unchanged" pending_before (AQ.pending_count ());
+        (AQ.pending_count_for_keeper ~keeper_name:meta.name > 0);
+      check int "approval count unchanged" pending_before
+        (List.length (AQ.list_pending_entries ()));
       let persisted_meta =
         match Keeper_meta_store.read_meta config meta.name with
         | Ok (Some value) -> value
@@ -1028,7 +1037,7 @@ let test_sweep_reports_pending_hitl_approval () =
       Option.iter
         (fun id ->
            ignore
-             (AQ.resolve
+             (aq_resolve
                 ~base_path:base_dir
                 ~id
                 ~decision:(AQ.Decision.Reject "test cleanup")))
@@ -1078,12 +1087,12 @@ let test_sweep_reports_pending_hitl_approval () =
       in
       check bool "pending HITL approval visibility emitted" true visibility_seen;
       check bool "approval remains pending after visibility sweep" true
-        (AQ.has_pending_for_keeper ~keeper_name:name);
-      (match AQ.resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
+        (AQ.pending_count_for_keeper ~keeper_name:name > 0);
+      (match aq_resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false
-        (AQ.has_pending_for_keeper ~keeper_name:name))
+        (AQ.pending_count_for_keeper ~keeper_name:name > 0))
 
 let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   with_restart_launch_noop @@ fun () ->

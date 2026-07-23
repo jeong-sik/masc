@@ -203,7 +203,7 @@ val handle_keeper_directive_post :
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). A resume body
-    must carry [owner_generation] and a stable [operator_operation_id], and is
+    must carry [owner_nonce] and a stable [operator_operation_id], and is
     committed through the typed paused-work disposition transaction. *)
 
 val handle_keeper_paused_work_post :
@@ -222,7 +222,7 @@ val handle_keeper_bulk_directive_post :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
     [{"names": [...]}]. Resume uses exact per-owner
-    [{"targets": [{"name", "owner_generation", "operator_operation_id"}, ...]}]
+    [{"targets": [{"name", "owner_nonce", "operator_operation_id"}, ...]}]
     fences and commits each target through the typed paused-work disposition
     transaction. Cache invalidation runs once for the whole batch. *)
 

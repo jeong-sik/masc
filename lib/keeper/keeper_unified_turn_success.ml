@@ -614,17 +614,6 @@ let handle
       ~original_meta:meta
       ~updated_meta
   in
-  let tool_call_summaries =
-    result.Keeper_agent_run.tool_calls
-    |> List.map (fun (d : Keeper_agent_run.tool_call_detail) ->
-       ( { tool_name = d.tool_name; outcome = d.outcome }
-         : Keeper_meta_contract.tool_call_summary ))
-  in
-  let updated_meta =
-    { updated_meta with
-      runtime = { updated_meta.runtime with last_turn_tool_calls = tool_call_summaries }
-    }
-  in
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)

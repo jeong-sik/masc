@@ -345,7 +345,7 @@ let read_operation_meta ~config operation =
      | Ok (Some (_, meta)) ->
        if
          Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
-         && Int.equal meta.runtime.generation operation.generation
+         && Int.equal meta.runtime.nonce operation.generation
        then Ok meta
        else Error "Keeper metadata identity changed before finalization")
 ;;

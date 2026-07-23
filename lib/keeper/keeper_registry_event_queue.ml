@@ -22,6 +22,16 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
+let publish_pending ~base_path name pending =
+  match Keeper_registry.get ~base_path name with
+  | None -> ()
+  | Some entry -> Atomic.set entry.event_queue pending
+;;
+
+include Keeper_registry_event_queue_exact_execution.Make (struct
+    let publish_pending = publish_pending
+  end)
+
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -29,8 +39,11 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -49,8 +62,8 @@ type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason 
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_lane_unconfigured
+  | Exact_execution_terminal of exact_execution_terminal
 
 type no_compaction = Keeper_event_queue_persistence.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -60,7 +73,7 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -68,7 +81,7 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -82,7 +95,7 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -113,28 +126,6 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
-
-let active_lease_result ~base_path name =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.active_lease_result
-      ~base_path
-      ~keeper_name:name
-;;
-
-let transition_outbox_result ~base_path name =
-  Keeper_event_queue_persistence.transition_outbox_result
-    ~base_path
-    ~keeper_name:name
-;;
-
-let mark_transition_projected_result ~base_path name ~transition_id =
-  Keeper_event_queue_persistence.mark_transition_projected_result
-    ~base_path
-    ~keeper_name:name
-    ~transition_id
-;;
 
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
@@ -168,12 +159,6 @@ let enqueue_external_decision queue stimulus =
       (Printf.sprintf
          "conflicting durable stimulus already exists for post_id=%s"
          stimulus.post_id)
-;;
-
-let publish_pending ~base_path name pending =
-  match Keeper_registry.get ~base_path name with
-  | None -> ()
-  | Some entry -> Atomic.set entry.event_queue pending
 ;;
 
 let enqueue ~base_path name stimulus =
@@ -430,7 +415,7 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
 let cancel_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~lease
       ~cancellation
@@ -438,7 +423,7 @@ let cancel_accepted_result
   Keeper_event_queue_persistence.cancel_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~lease
     ~cancellation
@@ -449,14 +434,14 @@ let cancel_accepted_result
 let cancel_pending_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
@@ -466,14 +451,14 @@ let cancel_pending_accepted_result
 let transfer_pending_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~transfer
   =
   Keeper_event_queue_persistence.transfer_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~transfer
     ~after_commit:(publish_pending ~base_path name)
@@ -483,14 +468,14 @@ let transfer_pending_accepted_result
 let settle_pending_from_source_terminal_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~source_terminal
   =
   Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)

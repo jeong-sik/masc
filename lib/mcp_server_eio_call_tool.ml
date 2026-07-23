@@ -240,7 +240,7 @@ let runtime_mcp_keeper_log_context_of_entry
     model;
     trace_id = Some trace_id;
     session_id;
-    generation = Some entry.meta.runtime.generation;
+    generation = Some entry.meta.runtime.nonce;
     turn;
     keeper_turn_id = turn;
     task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;

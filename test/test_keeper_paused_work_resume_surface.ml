@@ -17,7 +17,7 @@ let test_single_resume_requires_exact_fences () =
     Surface.parse_resume_request
       (`Assoc
          [ "action", `String "resume"
-         ; "owner_generation", `Int 7
+         ; "owner_nonce", `Int 7
          ; "operator_operation_id", `String "dashboard-resume-7"
          ])
     |> require_ok "parse exact Resume_owner"
@@ -43,12 +43,12 @@ let test_bulk_resume_requires_per_owner_targets () =
            , `List
                [ `Assoc
                    [ "name", `String "rondo"
-                   ; "owner_generation", `Int 3
+                   ; "owner_nonce", `Int 3
                    ; "operator_operation_id", `String "resume-rondo-1"
                    ]
                ; `Assoc
                    [ "name", `String "qa-king"
-                   ; "owner_generation", `Int 5
+                   ; "owner_nonce", `Int 5
                    ; "operator_operation_id", `String "resume-qa-1"
                    ]
                ] )

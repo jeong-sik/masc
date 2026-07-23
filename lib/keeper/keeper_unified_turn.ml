@@ -24,8 +24,11 @@ type in_lane_compaction =
   | Compaction_attempt_failed of { reason : string }
 
 type exact_output_terminal_reason =
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
+  | Exact_execution_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : Keeper_event_queue_state.exact_execution_terminal
+      }
 
 type source_lease_disposition =
   | Follow_failure_route
@@ -36,11 +39,15 @@ type source_lease_disposition =
   | Requeue_after_transcript_quarantine
   | Acknowledge_after_in_turn_handling
 
-let source_lease_disposition_after_no_compaction = function
-  | Keeper_event_queue_state.Execution_may_have_dispatched ->
-    Escalate_after_exact_output_terminal Execution_may_have_dispatched
-  | Keeper_event_queue_state.Domain_invalid_output ->
-    Escalate_after_exact_output_terminal Domain_invalid_output
+let source_lease_disposition_after_no_compaction
+      ({ source; reason } : Keeper_event_queue_state.no_compaction)
+  =
+  match reason with
+  | Keeper_event_queue_state.Exact_lane_unconfigured ->
+    Escalate_after_exact_output_terminal (Exact_lane_unconfigured { source })
+  | Keeper_event_queue_state.Exact_execution_terminal terminal ->
+    Escalate_after_exact_output_terminal
+      (Exact_execution_terminal { source; terminal })
   | ( Keeper_event_queue_state.No_eligible_history
     | Keeper_event_queue_state.Invalid_structural_source
     | Keeper_event_queue_state.Structurally_unchanged
@@ -177,6 +184,7 @@ type provider_overflow_recovery =
       }
 
 let recover_provider_context_overflow_in_lane
+      ?exact_execution_guard
       ~(config : Workspace.config)
       ~base_dir
       ~(meta : keeper_meta)
@@ -241,17 +249,25 @@ let recover_provider_context_overflow_in_lane
           (try
              match
                recover_latest_checkpoint_for_compaction
+                 ?exact_execution_guard
                  ~base_dir
                  ~meta
                  ~trigger
                  ~projection_request
+                 ()
              with
-             | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-               let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
-               record_overflow_failure ~config ~meta ~reason;
-               (match release_failed_lifecycle reason with
-                | Ok () -> Provider_overflow_no_compaction no_compaction
-                | Error _ -> Provider_overflow_retry_without_checkpoint { trigger; reason })
+      | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+        Eio.Cancel.protect (fun () ->
+          let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
+          (try record_overflow_failure ~config ~meta ~reason with
+           | exn ->
+             Log.Keeper.error
+               ~keeper_name:meta.name
+               "provider overflow terminal observation failed without reopening exact request: %s"
+               (Printexc.to_string exn));
+          (* fire-and-forget: terminal disposition must not reopen on release failure. *)
+          ignore (release_failed_lifecycle reason : (unit, string) result);
+          Provider_overflow_no_compaction no_compaction)
              | Error error ->
                retry_after_started
                  (Keeper_post_turn.compaction_recovery_error_to_string error)
@@ -363,7 +379,7 @@ let append_provider_overflow_manifest
        failure route. Effect-boundary and domain-invalid reasons instead become
        an immediate typed escalation: replaying the source could issue a second
        exact-output request after dispatch. *)
-    source_lease_disposition_after_no_compaction no_compaction.reason,
+    source_lease_disposition_after_no_compaction no_compaction,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
@@ -412,6 +428,7 @@ let append_provider_overflow_manifest
 ;;
 
 let run_keeper_cycle
+      ?exact_execution_guard
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(publication_recovery_provider :
@@ -714,7 +731,7 @@ let run_keeper_cycle
                    ~masc_root
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.generation ()
+                   ~generation:meta.runtime.nonce ()
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
@@ -1174,6 +1191,7 @@ dominant source of the observed CAS race exhaustion after
                          no source stimulus is acknowledged ahead of it. *)
                       let overflow_recovery =
                         recover_provider_context_overflow_in_lane
+                          ?exact_execution_guard
                           ~config
                           ~base_dir
                           ~meta

@@ -245,6 +245,7 @@ export interface DashboardScheduledAutomation {
   signals?: DashboardScheduledAutomationSignal[]
   counts: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport
+  warnings?: string[]
   live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
@@ -417,6 +418,48 @@ export interface DashboardToolsResponse {
   keeper_background?: DashboardKeeperBackground
 }
 
+export interface DashboardScheduleRunnerCounts {
+  due_changed?: number
+  emitted?: number
+  rescheduled?: number
+  dispatch_succeeded?: number
+  dispatch_failed?: number
+  dispatch_unsupported?: number
+  dispatch_start_rejected?: number
+  wake_enqueued?: number
+  wake_skipped_no_keeper?: number
+  wake_skipped_missing_schedule?: number
+  wake_skipped_non_keeper_actor?: number
+  wake_skipped_unregistered_keeper?: number
+  wake_failed?: number
+}
+
+export interface DashboardScheduleRunnerStatus {
+  schema?: string
+  status?: string
+  tick_in_flight?: boolean
+  tick_count?: number
+  success_count?: number
+  failure_count?: number
+  crash_count?: number
+  last_tick_started_at?: number | null
+  last_tick_finished_at?: number | null
+  last_success_at?: number | null
+  last_error_at?: number | null
+  last_error?: string | null
+  last_duration_sec?: number | null
+  last_counts?: DashboardScheduleRunnerCounts | null
+  stale_after_sec?: number | null
+  last_tick_age_sec?: number | null
+  last_success_age_sec?: number | null
+  last_error_age_sec?: number | null
+}
+
+export interface DashboardFullHealthResponse {
+  health_detail?: string
+  schedule_runner?: DashboardScheduleRunnerStatus | null
+}
+
 // --- Runtime probe (KV-cache / model load probe) ---
 
 interface DashboardRuntimeProbeLoadedModel {
@@ -552,8 +595,163 @@ export async function fetchDashboardRuntimeProbe(
   return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
+export async function fetchDashboardFullHealth(
+  opts?: AbortableRequestOptions,
+): Promise<DashboardFullHealthResponse> {
+  const raw = await get<DashboardFullHealthResponse>('/health?full=1', { signal: opts?.signal })
+  return normalizeFullHealthResponse(raw)
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+export function normalizeScheduleRunnerStatus(
+  raw: unknown,
+): DashboardScheduleRunnerStatus | null {
+  const record = asRecord(raw)
+  if (!record) return null
+
+  const counts = asRecord(record.last_counts)
+  const status: DashboardScheduleRunnerStatus = {
+    schema: typeof record.schema === 'string' ? record.schema : undefined,
+    status: typeof record.status === 'string' ? record.status : 'unknown',
+    tick_in_flight: typeof record.tick_in_flight === 'boolean' ? record.tick_in_flight : false,
+    tick_count: typeof record.tick_count === 'number' ? record.tick_count : 0,
+    success_count: typeof record.success_count === 'number' ? record.success_count : 0,
+    failure_count: typeof record.failure_count === 'number' ? record.failure_count : 0,
+    crash_count: typeof record.crash_count === 'number' ? record.crash_count : 0,
+    last_tick_started_at:
+      typeof record.last_tick_started_at === 'number' ? record.last_tick_started_at : null,
+    last_tick_finished_at:
+      typeof record.last_tick_finished_at === 'number' ? record.last_tick_finished_at : null,
+    last_success_at:
+      typeof record.last_success_at === 'number' ? record.last_success_at : null,
+    last_error_at:
+      typeof record.last_error_at === 'number' ? record.last_error_at : null,
+    last_error:
+      typeof record.last_error === 'string' ? record.last_error : null,
+    last_duration_sec:
+      typeof record.last_duration_sec === 'number' ? record.last_duration_sec : null,
+    last_counts: counts
+      ? {
+          due_changed:
+            typeof counts.due_changed === 'number' ? counts.due_changed : undefined,
+          emitted:
+            typeof counts.emitted === 'number' ? counts.emitted : undefined,
+          rescheduled:
+            typeof counts.rescheduled === 'number' ? counts.rescheduled : undefined,
+          dispatch_succeeded:
+            typeof counts.dispatch_succeeded === 'number' ? counts.dispatch_succeeded : undefined,
+          dispatch_failed:
+            typeof counts.dispatch_failed === 'number' ? counts.dispatch_failed : undefined,
+          dispatch_unsupported:
+            typeof counts.dispatch_unsupported === 'number' ? counts.dispatch_unsupported : undefined,
+          dispatch_start_rejected:
+            typeof counts.dispatch_start_rejected === 'number' ? counts.dispatch_start_rejected : undefined,
+          wake_enqueued:
+            typeof counts.wake_enqueued === 'number' ? counts.wake_enqueued : undefined,
+          wake_skipped_no_keeper:
+            typeof counts.wake_skipped_no_keeper === 'number' ? counts.wake_skipped_no_keeper : undefined,
+          wake_skipped_missing_schedule:
+            typeof counts.wake_skipped_missing_schedule === 'number'
+              ? counts.wake_skipped_missing_schedule
+              : undefined,
+          wake_skipped_non_keeper_actor:
+            typeof counts.wake_skipped_non_keeper_actor === 'number'
+              ? counts.wake_skipped_non_keeper_actor
+              : undefined,
+          wake_skipped_unregistered_keeper:
+            typeof counts.wake_skipped_unregistered_keeper === 'number'
+              ? counts.wake_skipped_unregistered_keeper
+              : undefined,
+          wake_failed:
+            typeof counts.wake_failed === 'number' ? counts.wake_failed : undefined,
+        }
+      : null,
+    stale_after_sec: typeof record.stale_after_sec === 'number' ? record.stale_after_sec : null,
+    last_tick_age_sec:
+      typeof record.last_tick_age_sec === 'number' ? record.last_tick_age_sec : null,
+    last_success_age_sec:
+      typeof record.last_success_age_sec === 'number' ? record.last_success_age_sec : null,
+    last_error_age_sec:
+      typeof record.last_error_age_sec === 'number' ? record.last_error_age_sec : null,
+  }
+  return status
+}
+
+export function normalizeFullHealthResponse(
+  raw: DashboardFullHealthResponse,
+): DashboardFullHealthResponse {
+  const scheduleRunner = normalizeScheduleRunnerStatus(raw.schedule_runner)
+  return {
+    ...raw,
+    ...(scheduleRunner ? { schedule_runner: scheduleRunner } : {}),
+  }
+}
+
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
+  const normalizeScheduledAutomation = (
+    rawAutomation: DashboardScheduledAutomation,
+  ): DashboardScheduledAutomation => {
+    const requests =
+      rawAutomation.requests && Array.isArray(rawAutomation.requests) ? rawAutomation.requests : []
+    const counts =
+      rawAutomation.counts
+      && typeof rawAutomation.counts === 'object'
+      && !Array.isArray(rawAutomation.counts)
+        ? rawAutomation.counts
+        : {}
+    const signals =
+      rawAutomation.signals && Array.isArray(rawAutomation.signals) ? rawAutomation.signals : []
+    const warnings =
+      rawAutomation.warnings && Array.isArray(rawAutomation.warnings)
+        ? rawAutomation.warnings.filter(warning => typeof warning === 'string')
+        : []
+    const fsm =
+      rawAutomation.fsm && typeof rawAutomation.fsm === 'object'
+        ? {
+            state:
+              typeof rawAutomation.fsm.state === 'string' && rawAutomation.fsm.state.trim() !== ''
+                ? rawAutomation.fsm.state
+                : 'unknown',
+            active_count:
+              typeof rawAutomation.fsm.active_count === 'number'
+                ? rawAutomation.fsm.active_count
+                : 0,
+            terminal_count:
+              typeof rawAutomation.fsm.terminal_count === 'number'
+                ? rawAutomation.fsm.terminal_count
+                : 0,
+            next_due_at: rawAutomation.fsm.next_due_at,
+          }
+        : {
+            state: 'unknown',
+            active_count: 0,
+            terminal_count: 0,
+            next_due_at: null,
+          }
+    return {
+      ...rawAutomation,
+      request_count:
+        typeof rawAutomation.request_count === 'number'
+          ? rawAutomation.request_count
+          : requests.length,
+      request_limit:
+        typeof rawAutomation.request_limit === 'number'
+          ? rawAutomation.request_limit
+          : requests.length,
+      truncated: typeof rawAutomation.truncated === 'boolean' ? rawAutomation.truncated : false,
+      counts,
+      signals,
+      requests,
+      warnings,
+      fsm,
+    }
+  }
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -583,6 +781,9 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
           : {}),
       }
     : undefined
+  const normalizedScheduledAutomation = raw.scheduled_automation
+    ? normalizeScheduledAutomation(raw.scheduled_automation)
+    : undefined
   return {
     ...raw,
     tool_inventory: {
@@ -591,6 +792,9 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     },
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
+      : {}),
+    ...(normalizedScheduledAutomation
+      ? { scheduled_automation: normalizedScheduledAutomation }
       : {}),
   }
 }

@@ -1,4 +1,4 @@
-(** Tests for [Keeper_tool_filesystem_runtime.handle_file_write] mode=patch.
+(** Tests for [handle_file_write] mode=patch.
 
     RFC-0006 Phase A.4 — string-replace edit mode added so the
     Provider_a Code [Edit] cognate can be wired through OAS dual
@@ -13,6 +13,37 @@ module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
+
+(* The bare string-returning wrapper handle_file_write (formerly exported
+   from [Keeper_tool_filesystem_runtime]) was retired: it had zero
+   production callers
+   ([keeper_tool_runtime.ml] calls [handle_file_write_with_outcome]
+   directly). This test-local shim reproduces its [.raw_output] projection
+   so the assertions below keep exercising the real production entry
+   point. *)
+let handle_file_write
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~publication_recovery
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~publication_recovery
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ())
+    .raw_output
+;;
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -125,7 +156,7 @@ let public_fs_edit_call
       args
   =
   let args = Keeper_tool_alias.translate_input ~public args in
-  Keeper_tool_filesystem_runtime.handle_file_write
+  handle_file_write
     ~turn_sandbox_factory:None
     ~config
     ~meta
@@ -181,7 +212,7 @@ let test_patch_unique_match () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\nlet y = 2\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -208,7 +239,7 @@ let test_patch_no_match_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -243,7 +274,7 @@ let test_patch_multiple_matches_without_replace_all_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -268,7 +299,7 @@ let test_patch_replace_all () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -295,7 +326,7 @@ let test_patch_empty_old_string_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -318,7 +349,7 @@ let test_patch_missing_file_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "ghost.ml" in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -340,7 +371,7 @@ let test_patch_delete_via_empty_new_string () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "keep me\nDELETE_ME\nkeep me too\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -364,7 +395,7 @@ let test_overwrite_unchanged_by_patch_addition () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "new.txt" in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -389,7 +420,7 @@ let test_atomic_writes_preserve_existing_executable_permissions () =
     Fs_compat.save_file path initial;
     Unix.chmod path 0o751;
     let raw =
-      Keeper_tool_filesystem_runtime.handle_file_write
+      handle_file_write
         ~turn_sandbox_factory:None
         ~config
         ~meta
@@ -435,7 +466,7 @@ let test_created_entries_have_exact_authorized_permissions () =
       ())
     (fun () ->
        let raw =
-         Keeper_tool_filesystem_runtime.handle_file_write
+         handle_file_write
            ~turn_sandbox_factory:None
            ~config
            ~meta
@@ -462,7 +493,7 @@ let test_patch_symlink_result_is_regular_0644 () =
   Unix.chmod referent 0o751;
   Unix.symlink referent leaf;
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -503,7 +534,7 @@ let test_outside_referent_endpoint_semantics ~sandbox ~with_runtime () =
     Fs_compat.save_file outside ("outside-" ^ label);
     Unix.symlink outside leaf;
     let raw =
-      Keeper_tool_filesystem_runtime.handle_file_write
+      handle_file_write
         ~turn_sandbox_factory
         ~config
         ~meta
@@ -557,7 +588,7 @@ let test_append_inside_symlink_uses_canonical_referent_capability () =
   Fs_compat.save_file referent "before\n";
   Unix.symlink referent lexical;
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -614,7 +645,7 @@ let test_symlink_component_swap_cannot_escape_allowed_root
       }
     in
     let raw =
-      Keeper_tool_filesystem_runtime.handle_file_write
+      handle_file_write
         ~turn_sandbox_factory
         ~config
         ~meta
@@ -696,7 +727,7 @@ let test_sandbox_root_swap_after_open_keeps_pinned_capability
     }
   in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory
       ~config
       ~meta
@@ -753,7 +784,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
       }
     in
     let raw =
-      Keeper_tool_filesystem_runtime.handle_file_write
+      handle_file_write
         ~turn_sandbox_factory
         ~config
         ~meta
@@ -822,7 +853,7 @@ let test_docker_runtime_leaf_swap_preserves_exact_effect () =
     }
   in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory
       ~config
       ~meta
@@ -847,7 +878,7 @@ let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground (label ^ ".txt") in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config
+    handle_file_write ~turn_sandbox_factory:None ~config
       ~meta
       ~publication_recovery
       ~args:
@@ -925,7 +956,7 @@ let test_write_file_surfaces_missing_ide_observation_sink () =
   Agent_observation.reset_for_testing ();
   let path = Filename.concat playground "observed.ml" in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -956,7 +987,7 @@ let test_write_file_sanitizes_ide_observation_sink_failure () =
     (fun () ->
        let path = Filename.concat playground "observed-sink-failure.ml" in
        let raw =
-         Keeper_tool_filesystem_runtime.handle_file_write
+         handle_file_write
            ~turn_sandbox_factory:None
            ~config
            ~meta

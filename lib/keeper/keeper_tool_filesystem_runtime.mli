@@ -31,42 +31,12 @@ val resolve_partition_for_write
 
     [kind] selects the metric label ([annotation] or [region]). *)
 
-(** Issue #8490: Variant SSOT for filesystem write mode. Mirror in
-    [Tool_shard_types.fs_write_mode_enum_strings] (cycle avoidance, sync
-    regression test catches drift). *)
-type fs_write_mode = Overwrite | Append | Patch
-
-val fs_write_mode_to_string : fs_write_mode -> string
-val fs_write_mode_of_string_opt : string -> fs_write_mode option
-val all_fs_write_modes : fs_write_mode list
-val valid_fs_write_mode_strings : string list
-
-val handle_read_file :
-  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  args:Yojson.Safe.t ->
-  string
-
 val handle_read_file_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
-
-val handle_file_write :
-  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  publication_recovery:
-    Keeper_publication_recovery_availability.turn_context ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
-  ?gate_context:(unit -> Keeper_gate.causal_context) ->
-  ?gate_grant:Keeper_gate.cycle_grant ->
-  args:Yojson.Safe.t ->
-  unit ->
-  string
 
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

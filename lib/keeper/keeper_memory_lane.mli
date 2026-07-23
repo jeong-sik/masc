@@ -17,10 +17,26 @@
     (e.g. [Keeper_meta_contract.keeper_meta], [Workspace.config]) and never over
     mutable turn-local references.
 
-    The per-keeper reservation bound is controlled by
+    Work is split into two independent lanes per keeper ({!lane}). They write
+    different stores under their own locks, so serializing them against each
+    other bought nothing while making them share one reservation budget: a
+    librarian unit holding its mutex across a provider round trip left room for
+    only one of the next turn's two units, and the deterministic write has no
+    retry. Each lane now has its own mutex and its own budget; ordering within a
+    lane is unchanged.
+
+    The per-keeper, per-lane reservation bound is controlled by
     [MASC_KEEPER_MEMORY_LANE_MAX_PENDING] (default [2]). Submission outcomes
     are counted under [masc_keeper_memory_lane_*] and per-keeper pending /
-    in-flight gauges are exported. *)
+    in-flight gauges are exported, all labelled by [lane]. *)
+
+type lane =
+  | Deterministic
+      (** Local append to the keeper memory bank. One-shot: a drop here is
+          permanent, so it must not queue behind provider-backed work. *)
+  | Librarian
+      (** Provider-backed episode extraction. Holds its lane across the round
+          trip; a drop is retried on the next due turn by its own cadence. *)
 
 type outcome =
   | Submitted
@@ -41,9 +57,10 @@ val init : sw:Eio.Switch.t -> unit
 val submit
   :  base_path:string
   -> keeper_name:string
+  -> lane:lane
   -> (unit -> unit)
   -> outcome
-(** [submit ~base_path ~keeper_name f] runs [f] on [keeper_name]'s memory lane.
+(** [submit ~base_path ~keeper_name ~lane f] runs [f] on [keeper_name]'s [lane].
     When the executor switch is set, [f] is forked and serialized behind that
     keeper's mutex; over the pending bound it is dropped and counted. When the
     executor is not initialized, [f] runs inline and any exception is contained
@@ -54,6 +71,6 @@ module For_testing : sig
   val reset : unit -> unit
   (** Clear the lane registry and the executor switch. *)
 
-  val pending : base_path:string -> keeper_name:string -> int option
-  (** Current pending count for a keeper ([None] if the keeper has no entry). *)
+  val pending : base_path:string -> keeper_name:string -> lane:lane -> int option
+  (** Current pending count for a keeper's [lane] ([None] if it has no entry). *)
 end

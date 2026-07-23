@@ -1194,6 +1194,30 @@ function SchPayloadSupportBanner({
   `
 }
 
+function ProjectionWarnings({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) {
+    return null
+  }
+
+  return html`
+    <section
+      class="sch-banner payload warn"
+      data-schedule-projection-warnings="present"
+      data-testid="schedule-projection-warnings"
+    >
+      <span class="sch-banner-ico">!</span>
+      <div class="sch-banner-txt">
+        <div>
+          <b>scheduled automation projection warnings</b>
+        </div>
+        <div class="sch-banner-sub">
+          ${warnings.map(warning => html`<div>${warning}</div>`)}
+        </div>
+      </div>
+    </section>
+  `
+}
+
 type LiveSupportedEvidenceStatus =
   DashboardScheduledAutomationLiveSupportedNonTerminalEvidence['projection_status']
 
@@ -1837,6 +1861,7 @@ function SchedulePrototypeSurface({
         summary=${payloadSummary}
         onOpen=${setSelectedScheduleId}
       />
+      <${ProjectionWarnings} warnings=${automation.warnings ?? []} />
       <${SchLiveSupportedEvidence}
         automation=${automation}
         evidence=${automation.live_supported_non_terminal_evidence ?? null}
@@ -2164,11 +2189,12 @@ export function ScheduledAutomationPanel({
           `
         : null}
 
-      <${SchLiveSupportedEvidence}
-        automation=${automation}
-        evidence=${automation.live_supported_non_terminal_evidence ?? null}
-        onOpen=${setSelectedScheduleId}
-      />
+    <${SchLiveSupportedEvidence}
+      automation=${automation}
+      evidence=${automation.live_supported_non_terminal_evidence ?? null}
+      onOpen=${setSelectedScheduleId}
+    />
+    <${ProjectionWarnings} warnings=${automation.warnings ?? []} />
 
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0

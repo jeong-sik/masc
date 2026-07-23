@@ -8,10 +8,28 @@ let settlement_wal_path ~base_path ~keeper_name =
     "event-queue-settlements.jsonl"
 ;;
 
+let snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+;;
+
 let read_file_or_fail label path =
   match Safe_ops.read_file_safe path with
   | Ok bytes -> bytes
   | Error detail -> Alcotest.failf "%s read failed: %s" label detail
+;;
+
+let decode_raw_snapshot label ~base_path ~keeper_name =
+  let path = snapshot_path ~base_path ~keeper_name in
+  let json =
+    try Yojson.Safe.from_string (read_file_or_fail label path) with
+    | Yojson.Json_error detail ->
+      Alcotest.failf "%s raw snapshot JSON failed: %s" label detail
+  in
+  match State.of_yojson json with
+  | Ok state -> state
+  | Error detail -> Alcotest.failf "%s raw current-state decode failed: %s" label detail
 ;;
 
 let require_loaded_state label ~base_path ~keeper_name =
@@ -22,6 +40,20 @@ let require_loaded_state label ~base_path ~keeper_name =
 
 let check_no_active_lease label state =
   Alcotest.(check bool) (label ^ " has no active lease") true (Option.is_none (State.active_lease state))
+;;
+
+let check_no_exact_binding label state =
+  Alcotest.(check bool)
+    (label ^ " has no exact binding")
+    true
+    (Option.is_none (State.exact_execution_binding state))
+;;
+
+let check_no_pending label state =
+  Alcotest.(check bool)
+    (label ^ " has no pending stimuli")
+    true
+    (Q.is_empty (State.pending state))
 ;;
 
 let state_json state = State.to_yojson state |> Yojson.Safe.to_string
@@ -447,6 +479,9 @@ let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
       ~terminal
       ~prepared_at:3.0
   in
+  let precommit =
+    decode_raw_snapshot (label ^ " precommit") ~base_path ~keeper_name
+  in
   (match
      P.For_testing.finalize_exact_source_disposition_with_followup_failure_result
        ~failure
@@ -466,8 +501,44 @@ let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
    | Error detail -> Alcotest.failf "%s lost the durable WAL commit: %s" label detail);
   let wal_path = settlement_wal_path ~base_path ~keeper_name in
   check_single_v2_wal_row label (read_file_or_fail label wal_path);
+  let before_replay =
+    decode_raw_snapshot (label ^ " before replay") ~base_path ~keeper_name
+  in
+  (match failure with
+   | P.For_testing.Fail_checkpoint _ ->
+     Alcotest.(check string)
+       (label ^ " checkpoint failure preserves precommit revision")
+       (Int64.to_string (State.revision precommit))
+       (Int64.to_string (State.revision before_replay));
+     check_same_state
+       (label ^ " checkpoint failure preserves the prepared snapshot")
+       precommit
+       before_replay;
+     (match State.exact_execution_binding before_replay with
+      | Some { status = P.Disposition_prepared prepared; _ }
+        when String.equal prepared.disposition_id disposition.disposition_id ->
+        ()
+      | Some _ ->
+        Alcotest.failf "%s checkpoint failure lost the prepared disposition" label
+      | None ->
+        Alcotest.failf "%s checkpoint failure removed the exact binding" label)
+   | P.For_testing.Fail_wal_compaction _ ->
+     Alcotest.(check string)
+       (label ^ " compaction failure retains the committed revision")
+       (Int64.to_string (Int64.succ (State.revision precommit)))
+       (Int64.to_string (State.revision before_replay));
+     check_no_active_lease (label ^ " committed snapshot") before_replay;
+     check_no_exact_binding (label ^ " committed snapshot") before_replay;
+     check_no_pending (label ^ " committed snapshot") before_replay;
+     ignore
+       (require_single_exact_outbox
+          ~disposition_id:disposition.disposition_id
+          (label ^ " committed snapshot")
+          before_replay));
   let recovered = require_loaded_state (label ^ " first restart") ~base_path ~keeper_name in
   check_no_active_lease (label ^ " first restart") recovered;
+  check_no_exact_binding (label ^ " first restart") recovered;
+  check_no_pending (label ^ " first restart") recovered;
   let receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
@@ -563,6 +634,8 @@ let test_visible_prepare_sync_failure_recovers_once () =
    | Error detail -> Alcotest.failf "visible prepare restart recovery failed: %s" detail);
   let recovered = require_loaded_state "visible prepare first restart" ~base_path ~keeper_name in
   check_no_active_lease "visible prepare first restart" recovered;
+  check_no_exact_binding "visible prepare first restart" recovered;
+  check_no_pending "visible prepare first restart" recovered;
   let receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
@@ -649,12 +722,28 @@ let test_stale_finalize_preserves_active_successor () =
        ~transition_id:receipt.transition_id
    with
    | Ok () -> ()
-   | Error detail -> Alcotest.failf "stale-owner outbox projection failed: %s" detail);
+  | Error detail -> Alcotest.failf "stale-owner outbox projection failed: %s" detail);
   let successor = claim_manual_lease ~base_path ~keeper_name in
-  (match P.transition_outbox_result ~base_path ~keeper_name with
-   | Ok [] -> ()
-   | Ok _ -> Alcotest.fail "successor started with an unexpected outbox entry"
-   | Error detail -> Alcotest.failf "successor outbox load failed: %s" detail);
+  let before_retry =
+    require_loaded_state "stale finalize before retry" ~base_path ~keeper_name
+  in
+  (match State.active_lease before_retry with
+   | Some active ->
+     Alcotest.(check string)
+       "stale finalize starts with successor lease id"
+       successor.lease_id
+       active.lease_id;
+     Alcotest.(check string)
+       "stale finalize starts with successor lease sequence"
+       (Int64.to_string successor.sequence)
+       (Int64.to_string active.sequence)
+   | None -> Alcotest.fail "stale finalize setup lost the active successor lease");
+  check_no_exact_binding "stale finalize before retry" before_retry;
+  check_no_pending "stale finalize before retry" before_retry;
+  Alcotest.(check int)
+    "stale finalize starts without outbox work"
+    0
+    (List.length (State.transition_outbox before_retry));
   (match
      P.finalize_exact_source_disposition_result
        ~base_path
@@ -674,6 +763,14 @@ let test_stale_finalize_preserves_active_successor () =
   let after_retry =
     require_loaded_state "stale finalize post-retry" ~base_path ~keeper_name
   in
+  Alcotest.(check string)
+    "stale finalize preserves the successor revision"
+    (Int64.to_string (State.revision before_retry))
+    (Int64.to_string (State.revision after_retry));
+  check_same_state
+    "stale finalize leaves the adjacent full state unchanged"
+    before_retry
+    after_retry;
   (match State.active_lease after_retry with
    | Some active ->
      Alcotest.(check string)
@@ -685,6 +782,8 @@ let test_stale_finalize_preserves_active_successor () =
        (Int64.to_string successor.sequence)
        (Int64.to_string active.sequence)
    | None -> Alcotest.fail "stale finalize removed the active successor lease");
+  check_no_exact_binding "stale finalize after retry" after_retry;
+  check_no_pending "stale finalize after retry" after_retry;
   Alcotest.(check int)
     "stale finalize creates no successor outbox mutation"
     0
@@ -716,20 +815,30 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
       ; reason = P.Exact_execution_terminal terminal
       }
   in
-  let context, resolve_context = Eio.Promise.create () in
-  let entered, resolve_entered = Eio.Promise.create () in
+  let progress, resolve_progress = Eio.Promise.create () in
   let release, resolve_release = Eio.Promise.create () in
   let result, resolve_result = Eio.Promise.create () in
   let finalized = Atomic.make false in
+  let prepare_entered = Atomic.make false in
+  let progress_resolved = Atomic.make false in
+  let release_resolved = Atomic.make false in
+  let resolve_progress_once progress =
+    if Atomic.compare_and_set progress_resolved false true
+    then Eio.Promise.resolve resolve_progress progress
+  in
+  let resolve_release_once () =
+    if Atomic.compare_and_set release_resolved false true
+    then Eio.Promise.resolve resolve_release ()
+  in
   Eio.Fiber.fork ~sw (fun () ->
     let outcome =
       try
         Eio.Cancel.sub (fun cancel_context ->
-          Eio.Promise.resolve resolve_context cancel_context;
           (match
              Masc.Keeper_heartbeat_loop.For_testing.settle_claimed_lease_exact
                ~after_exact_disposition_prepare:(fun () ->
-                 Eio.Promise.resolve resolve_entered ();
+                 Atomic.set prepare_entered true;
+                 resolve_progress_once (`Prepare_entered cancel_context);
                  Eio.Promise.await release)
                ~base_path
                ~keeper_name
@@ -752,17 +861,42 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
       | Eio.Cancel.Cancelled _ -> Cancellation_observed
       | exn -> Raised (Printexc.to_string exn)
     in
+    if not (Atomic.get prepare_entered)
+    then resolve_progress_once (`Worker_finished outcome);
     Eio.Promise.resolve resolve_result outcome);
-  let cancel_context = Eio.Promise.await context in
-  Eio.Promise.await entered;
-  Eio.Cancel.cancel cancel_context Exit;
-  Eio.Fiber.yield ();
-  Alcotest.(check bool) "settlement is still protected" false (Atomic.get finalized);
-  (match P.exact_execution_binding_result ~base_path ~keeper_name with
-   | Ok (Some { status = P.Disposition_prepared _; _ }) -> ()
-   | Ok _ -> Alcotest.fail "cancellation barrier was not after durable prepare"
-   | Error detail -> Alcotest.failf "prepared cancellation binding load failed: %s" detail);
-  Eio.Promise.resolve resolve_release ();
+  let worker_finished_early =
+    Fun.protect
+      ~finally:resolve_release_once
+      (fun () ->
+         match Eio.Promise.await progress with
+         | `Worker_finished outcome -> Some outcome
+         | `Prepare_entered cancel_context ->
+           Eio.Cancel.cancel cancel_context Exit;
+           Alcotest.(check bool)
+             "settlement is still protected"
+             false
+             (Atomic.get finalized);
+           (match P.exact_execution_binding_result ~base_path ~keeper_name with
+            | Ok (Some { status = P.Disposition_prepared _; _ }) -> ()
+            | Ok _ ->
+              Alcotest.fail "cancellation barrier was not after durable prepare"
+            | Error detail ->
+              Alcotest.failf
+                "prepared cancellation binding load failed: %s"
+                detail);
+           None)
+  in
+  Alcotest.(check bool)
+    "release resolver settled exactly once"
+    true
+    (Atomic.get release_resolved);
+  (match worker_finished_early with
+   | None -> ()
+   | Some Cancellation_observed ->
+     Alcotest.fail "worker observed cancellation before durable prepare"
+   | Some Returned -> Alcotest.fail "worker returned before durable prepare"
+   | Some (Raised detail) ->
+     Alcotest.failf "worker failed before durable prepare: %s" detail);
   (match Eio.Promise.await result with
    | Cancellation_observed -> ()
    | Returned -> Alcotest.fail "post-settlement cancellation check did not propagate"
@@ -770,6 +904,8 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
   Alcotest.(check bool) "terminal settlement finalized first" true (Atomic.get finalized);
   let state = require_loaded_state "post-cancellation finalization" ~base_path ~keeper_name in
   check_no_active_lease "post-cancellation finalization" state;
+  check_no_exact_binding "post-cancellation finalization" state;
+  check_no_pending "post-cancellation finalization" state;
   ignore (require_single_exact_outbox "post-cancellation finalization" state);
   match P.prepare_registration_result ~base_path ~keeper_name ~settled_at:8.0 () with
   | Ok pending -> Alcotest.(check bool) "settled cancellation never requeues" true (Q.is_empty pending)

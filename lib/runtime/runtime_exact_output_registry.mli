@@ -33,6 +33,15 @@ val republish
     Returns [Registry_not_published] when no registry has been published yet
     (pre-bootstrap or non-server contexts). *)
 
+val validate
+  :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> (unit, error) result
+(** Validate [lanes] against the currently published resolver snapshot WITHOUT
+    mutating the Atomic. Save paths run this before the durable write and call
+    {!republish} only after the write commits, so a failed write never leaves
+    routing ahead of the on-disk config. Returns [Registry_not_published] when
+    no registry has been published yet. *)
+
 val current : unit -> (t, error) result
 (** Return the currently published registry, or a typed error before bootstrap
     has published one. *)

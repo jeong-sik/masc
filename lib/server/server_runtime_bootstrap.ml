@@ -199,44 +199,14 @@ let load_exact_output_lane_declarations () =
                (List.length errors))))
 ;;
 
-(* The compaction summarizer resolves this lane by name; it must exist in
-   every published registry for manual/provider-overflow compaction to run. *)
-let compaction_exact_lane_id = "compaction_exact"
-
-(* Upgraded workspaces keep their operator-owned runtime.toml
-   ([Config_root_bootstrap] preserves existing roots), which predates
-   [runtime.exact_output_lanes]. Without a backfill the bootstrap would
-   publish a valid registry with zero lanes and every compaction would fail at
-   execution with [Exact_target_selection_failed]. The seed declaration comes
-   from the binary-embedded seed config so repo config and backfill share one
-   source; operator declarations always win. *)
-let seed_exact_output_lane_declarations () =
-  match Embedded_config.read "runtime.toml" with
-  | None ->
-    Log.Misc.warn
-      "exact_output: embedded seed runtime.toml is unavailable; cannot backfill the %S lane"
-      compaction_exact_lane_id;
-    []
-  | Some contents ->
-    (match Runtime_toml.parse_string contents with
-     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
-     | Error errors ->
-       Log.Misc.warn
-         "exact_output: embedded seed runtime.toml parse failed (%d error(s)); cannot backfill the %S lane"
-         (List.length errors)
-         compaction_exact_lane_id;
-       [])
-
-let backfill_required_exact_output_lanes ~seed_lanes lanes =
-  let has_compaction_exact (lane : Runtime_schema.exact_output_lane_decl) =
-    String.equal lane.id compaction_exact_lane_id
-  in
-  if List.exists has_compaction_exact lanes
-  then lanes, false
-  else
-    match List.find_opt has_compaction_exact seed_lanes with
-    | None -> lanes, false
-    | Some seed_lane -> lanes @ [ seed_lane ], true
+(* Required-lane backfill is owned by [Runtime_exact_output_lanes] so the
+   runtime.toml save path applies the same rule; these aliases keep the
+   bootstrap call sites (and the exported test surface) stable. *)
+let compaction_exact_lane_id = Runtime_exact_output_lanes.compaction_exact_lane_id
+let seed_exact_output_lane_declarations =
+  Runtime_exact_output_lanes.seed_lane_declarations
+let backfill_required_exact_output_lanes =
+  Runtime_exact_output_lanes.backfill_required
 ;;
 
 (* Row identity for catalog table arrays, mirroring [Model_catalog] merge

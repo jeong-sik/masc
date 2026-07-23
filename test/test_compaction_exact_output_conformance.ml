@@ -355,7 +355,87 @@ let test_domain_invalid_json_is_terminal () =
   Alcotest.(check int) "domain invalidity does not fail over" 0 (F.post_count second)
 ;;
 
-let test_timeout_cancellation_escapes_without_failover () =
+(* A lane mixing one fully usable target with one target whose credential is
+   absent: publication intentionally accepts the missing credential, and slot
+   selection must keep the resolvable slot instead of vetoing the whole lane. *)
+let optional_credential_snapshot ~usable_base_url =
+  let overlay : EO.catalog_overlay =
+    { source = "masc optional credential"
+    ; contents =
+        Printf.sprintf
+          "[[providers]]\n\
+           id = \"masc-exact-usable\"\n\
+           kind = \"openai_compat\"\n\
+           base_url = %S\n\
+           request_path = \"/v1/chat/completions\"\n\
+           api_key_env = \"\"\n\
+           \n\
+           [[providers]]\n\
+           id = \"masc-exact-needs-key\"\n\
+           kind = \"openai_compat\"\n\
+           base_url = \"http://127.0.0.1:9\"\n\
+           request_path = \"/v1/chat/completions\"\n\
+           api_key_env = \"MASC_CONFORMANCE_UNSET_KEY\"\n\
+           \n\
+           [[models]]\n\
+           id_prefix = \"usable-model\"\n\
+           provider_name = \"masc-exact-usable\"\n\
+           max_context_tokens = 8192\n\
+           max_output_tokens = 1024\n\
+           supports_response_format_json = true\n\
+           supports_structured_output = true\n\
+           \n\
+           [[models]]\n\
+           id_prefix = \"keyed-model\"\n\
+           provider_name = \"masc-exact-needs-key\"\n\
+           max_context_tokens = 8192\n\
+           max_output_tokens = 1024\n\
+           supports_response_format_json = true\n\
+           supports_structured_output = true\n\
+           \n\
+           [[targets]]\n\
+           id = \"masc-exact-usable.usable-model\"\n\
+           provider_ref = \"masc-exact-usable\"\n\
+           model_id = \"usable-model\"\n\
+           \n\
+           [[targets]]\n\
+           id = \"masc-exact-needs-key.keyed-model\"\n\
+           provider_ref = \"masc-exact-needs-key\"\n\
+           model_id = \"keyed-model\"\n"
+          usable_base_url
+    }
+  in
+  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+  match EO.load_resolver_snapshot ~io ~overlay () with
+  | Ok snapshot -> snapshot
+  | Error _ -> Alcotest.fail "optional-credential resolver fixture did not load"
+;;
+
+let test_unavailable_credential_slot_does_not_veto_usable_slot () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    optional_credential_snapshot ~usable_base_url:first.base_url
+  in
+  let registry =
+    publish_exn
+      ~slot_ids:
+        [ "masc-exact-usable.usable-model"; "masc-exact-needs-key.keyed-model" ]
+      snapshot
+  in
+  let prepared =
+    prepare_exn ~keeper_name:"keeper-optional-credential" ~registry
+  in
+  ignore (completed_exn (C.execute_prepared_lane
+    ~keeper_name:"keeper-optional-credential" ~net ~clock prepared));
+  Alcotest.(check int)
+    "usable slot dispatched exactly once"
+    1
+    (F.post_count first)
+;;
+
+let test_post_dispatch_cancellation_settles_terminal_without_failover () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let hold_response, _resolve_hold_response = Eio.Promise.create () in
@@ -396,27 +476,19 @@ let test_timeout_cancellation_escapes_without_failover () =
           ~clock
           prepared))
   in
-  let cancellation_propagated =
-    try
-      Eio.Time.with_timeout_exn clock 1.0 (fun () ->
-        let context = Eio.Promise.await cancel_context in
-        F.await_first_request first;
-        Eio.Cancel.cancel context Cancel_after_request_arrived;
-        try
-          ignore
-            (Eio.Promise.await_exn execution
-              : (C.completed_plan, C.summarization_failure) result);
-          false
-        with
-        | Eio.Cancel.Cancelled Cancel_after_request_arrived -> true)
-    with
-    | Eio.Time.Timeout ->
-      Alcotest.fail "request-arrival cancellation watchdog expired"
+  let settlement =
+    Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+      let context = Eio.Promise.await cancel_context in
+      F.await_first_request first;
+      Eio.Cancel.cancel context Cancel_after_request_arrived;
+      Eio.Promise.await_exn execution)
   in
-  Alcotest.(check bool)
-    "caller cancellation escapes compaction"
-    true
-    cancellation_propagated;
+  (match settlement with
+   | Error C.Exact_execution_failed_after_dispatch -> ()
+   | Error _ ->
+     Alcotest.fail
+       "post-dispatch cancellation must settle as Exact_execution_failed_after_dispatch"
+   | Ok _ -> Alcotest.fail "post-dispatch cancellation must not succeed");
   check_observation
     ~label:"cancelled real receipt"
     ~phase:EO.Dispatch_started
@@ -503,9 +575,13 @@ let () =
             `Quick
             test_domain_invalid_json_is_terminal
         ; Alcotest.test_case
-            "timeout cancellation escapes without failover"
+            "unavailable credential slot does not veto usable slot"
             `Quick
-            test_timeout_cancellation_escapes_without_failover
+            test_unavailable_credential_slot_does_not_veto_usable_slot
+        ; Alcotest.test_case
+            "post-dispatch cancellation settles terminal without failover"
+            `Quick
+            test_post_dispatch_cancellation_settles_terminal_without_failover
         ] )
     ; ( "Keeper isolation"
       , [ Alcotest.test_case

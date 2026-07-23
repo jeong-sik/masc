@@ -43,8 +43,10 @@ val prepare_lane
 
 (** Execute each admitted ready plan at most once. Only a real receipt at
     [Before_dispatch] with dispatch count zero advances to the next slot.
-    Cancellation is not caught, and a dispatched failure or MASC-invalid domain
-    plan is terminal. *)
+    Cancellation before the dispatch boundary propagates; a cancellation whose
+    receipt shows the request already crossed the provider boundary settles as
+    [Exact_execution_failed_after_dispatch] (terminal), and a dispatched
+    failure or MASC-invalid domain plan is terminal. *)
 val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

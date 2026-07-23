@@ -416,45 +416,60 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
         (Runtime_exact_output_registry.error_to_string error);
       Error Exact_target_selection_failed
     | Ok slot_ids ->
-      let selected_slots_result =
+      (* Optional failover credentials are intentionally not mandatory:
+         publication defers credential admission, so an unavailable slot must
+         not veto the resolvable ones. Selection fails only when no slot can
+         be resolved at all. *)
+      let selected_slots =
         Runtime_exact_output_registry.resolve_slots registry slot_ids
-        |> List.fold_left
-             (fun selected_slots_result outcome ->
-                match selected_slots_result, outcome with
-                | (Error _ as error), _ -> error
-                | Ok selected_slots, Ok selected -> Ok (selected :: selected_slots)
-                | Ok _, Error error ->
-                  Log.Keeper.warn
-                    ~keeper_name
-                    "compaction exact registry readiness violated generation=%Ld: %s"
-                    registry_generation
-                    (Runtime_exact_output_registry.error_to_string error);
-                  Error Exact_target_selection_failed)
-             (Ok [])
+        |> List.filter_map (function
+          | Ok selected -> Some selected
+          | Error error ->
+            Log.Keeper.warn
+              ~keeper_name
+              "compaction exact slot unavailable generation=%Ld: %s"
+              registry_generation
+              (Runtime_exact_output_registry.error_to_string error);
+            None)
       in
-      (match selected_slots_result with
-       | Error _ as error -> error
-       | Ok selected_slots ->
-         let selected_slots = List.rev selected_slots in
-         if selected_slots = []
-         then Error Exact_target_selection_failed
-         else
-           let messages = messages_for_plan ~units in
-           (* Every candidate is admitted against the same immutable registry before
-              the first network effect. Each admitted plan's real receipt is retained
-              before execution enters a cancellation scope. *)
-           let admitted_slots = admit_all ~keeper_name selected_slots ~messages in
-           if admitted_slots = []
-           then Error Exact_admission_failed
-           else Ok { units; admitted_slots })
+      (match selected_slots with
+       | [] -> Error Exact_target_selection_failed
+       | selected_slots ->
+         let messages = messages_for_plan ~units in
+         (* Every candidate is admitted against the same immutable registry before
+            the first network effect. Each admitted plan's real receipt is retained
+            before execution enters a cancellation scope. *)
+         let admitted_slots = admit_all ~keeper_name selected_slots ~messages in
+         if admitted_slots = []
+         then Error Exact_admission_failed
+         else Ok { units; admitted_slots })
 ;;
 
 let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
   let rec execute = function
     | [] -> Error Exact_execution_failed_before_dispatch
     | { slot_id; ready_plan; receipt } :: rest ->
-      (match Exact_output.execute_once ~net ?clock ready_plan with
-       | Error _
+      let result =
+        (* A cancellation that arrives after the request crossed the provider
+           boundary must not escape as an unsettled [Cancelled]: the heartbeat
+           exception handler would requeue the lease and dispatch the same
+           compaction again. The receipt's dispatch count is pure local state,
+           so inspecting it cannot block; once the boundary was crossed, settle
+           the source as post-dispatch terminal instead. *)
+        try Ok (Exact_output.execute_once ~net ?clock ready_plan) with
+        | Eio.Cancel.Cancelled _ as exn ->
+          if Exact_output.receipt_dispatch_count receipt > 0
+          then Error `Cancelled_after_dispatch
+          else raise exn
+      in
+      (match result with
+       | Error `Cancelled_after_dispatch ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact slot cancelled after dispatch slot=%s"
+           slot_id;
+         Error Exact_execution_failed_after_dispatch
+       | Ok (Error _)
          when Exact_output.receipt_phase receipt = Exact_output.Before_dispatch
               && Exact_output.receipt_dispatch_count receipt = 0 ->
          Log.Keeper.warn
@@ -462,8 +477,8 @@ let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
            "compaction exact slot failed before dispatch slot=%s"
            slot_id;
          execute rest
-       | Error _ -> Error Exact_execution_failed_after_dispatch
-       | Ok success ->
+       | Ok (Error _) -> Error Exact_execution_failed_after_dispatch
+       | Ok (Ok success) ->
          (match plan_of_json ~units:prepared_lane.units success.output with
           | Error detail ->
             Log.Keeper.warn

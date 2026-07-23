@@ -27,6 +27,9 @@
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver
+  ;; runtime_exact_output_lanes reads the required-lane seed declarations
+  ;; from the binary-embedded seed runtime.toml (RFC: exact-output backfill).
+  masc.embedded_config
   masc.event_bus_slots
   masc.provider_tool_support
   masc.keeper_runtime

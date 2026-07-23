@@ -145,6 +145,12 @@ let republish ~lanes =
   | Some registry -> publish ~lanes registry.resolver_snapshot
 ;;
 
+let validate ~lanes =
+  match Atomic.get published with
+  | None -> Error Registry_not_published
+  | Some registry -> validate_lanes registry.resolver_snapshot lanes
+;;
+
 let generation registry = registry.generation
 
 let lane_slots registry ~lane_id =

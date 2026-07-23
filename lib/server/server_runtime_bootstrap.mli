@@ -40,7 +40,8 @@ val configure_oas_model_catalog_overlay :
 
 val compaction_exact_lane_id : string
 (** Lane id the compaction summarizer resolves by name; every published
-    exact-output registry must carry it. *)
+    exact-output registry must carry it. Alias of
+    [Runtime_exact_output_lanes.compaction_exact_lane_id]. *)
 
 val backfill_required_exact_output_lanes
   :  seed_lanes:Runtime_schema.exact_output_lane_decl list
@@ -49,7 +50,9 @@ val backfill_required_exact_output_lanes
 (** Append the seed {!compaction_exact_lane_id} declaration when the operator
     config does not declare the lane (legacy runtime.toml from before
     [runtime.exact_output_lanes] existed). Returns the effective lane list and
-    whether a backfill happened. Operator declarations always win. *)
+    whether a backfill happened. Operator declarations always win. Alias of
+    [Runtime_exact_output_lanes.backfill_required], shared with the
+    runtime.toml save path. *)
 
 val merge_catalog_overlay_toml
   :  base_contents:string

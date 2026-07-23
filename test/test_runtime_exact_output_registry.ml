@@ -12,6 +12,13 @@ let fixture_provider_id = "masc-exact-registry-provider"
 let fixture_model_id = "masc-exact-registry-model"
 let fixture_target_id = "masc-exact-registry-provider.masc-exact-registry-model"
 
+(* The embedded-catalog provider/model pair the seed runtime.toml's required
+   [compaction_exact] lane references. Declaring the target here lets the
+   backfilled seed lane validate against the fixture snapshot; its credential
+   (DEEPSEEK_API_KEY, absent under the fixture getenv) is deferred at publish
+   by design. *)
+let seed_target_id = "deepseek.deepseek-v4-pro"
+
 let fixture_catalog_toml ~api_key_env =
   Printf.sprintf
     "[[providers]]\n\
@@ -32,7 +39,12 @@ let fixture_catalog_toml ~api_key_env =
      [[targets]]\n\
      id = %S\n\
      provider_ref = %S\n\
-     model_id = %S\n"
+     model_id = %S\n\
+     \n\
+     [[targets]]\n\
+     id = %S\n\
+     provider_ref = \"deepseek\"\n\
+     model_id = \"deepseek-v4-pro\"\n"
     fixture_provider_id
     api_key_env
     fixture_model_id
@@ -40,6 +52,7 @@ let fixture_catalog_toml ~api_key_env =
     fixture_target_id
     fixture_provider_id
     fixture_model_id
+    seed_target_id
 ;;
 
 let load_snapshot ~api_key_env =
@@ -232,6 +245,104 @@ let test_save_config_text_republishes_exact_output_lanes () =
                   && not (contains_substring on_disk "no.such-target"))))
 ;;
 
+let test_save_config_text_backfills_required_lane () =
+  let snapshot = load_snapshot ~api_key_env:"" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       match
+         Registry.publish
+           ~lanes:[ lane "compaction_exact" [ fixture_target_id ] ]
+           snapshot
+       with
+       | Error error ->
+         failf "fixture publish failed: %s" (Registry.error_to_string error)
+       | Ok _published ->
+         (* A legacy runtime.toml without [runtime.exact_output_lanes]: the
+            save must keep the required lane (backfilled from the embedded
+            seed), not republish an empty lane set. *)
+         let path = Filename.temp_file "runtime-exact-output" ".toml" in
+         Fun.protect
+           ~finally:(fun () ->
+             try Sys.remove path with
+             | Sys_error _ -> ())
+           (fun () ->
+              match Runtime.save_config_text ~runtime_config_path:path (runtime_config_text ~extra:"") with
+              | Error msg -> failf "lane-less config save failed: %s" msg
+              | Ok () ->
+                (match Registry.current () with
+                 | Error _ -> fail "registry must stay published after a save"
+                 | Ok current ->
+                   (match Registry.lane_slots current ~lane_id:"compaction_exact" with
+                    | Error error ->
+                      failf
+                        "required lane missing after lane-less save: %s"
+                        (Registry.error_to_string error)
+                    | Ok slot_ids ->
+                      check
+                        (list string)
+                        "lane-less save backfills the seed lane"
+                        [ seed_target_id ]
+                        slot_ids))))
+;;
+
+let test_failed_write_does_not_republish () =
+  let snapshot = load_snapshot ~api_key_env:"" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       match
+         Registry.publish
+           ~lanes:[ lane "compaction_exact" [ fixture_target_id ] ]
+           snapshot
+       with
+       | Error error ->
+         failf "fixture publish failed: %s" (Registry.error_to_string error)
+       | Ok published ->
+         let content =
+           runtime_config_text
+             ~extra:
+               (Printf.sprintf
+                  "[runtime.exact_output_lanes.compaction_exact]\n\
+                   slots = [ %S ]\n\
+                   [runtime.exact_output_lanes.extra_lane]\n\
+                   slots = [ %S ]\n"
+                  fixture_target_id
+                  fixture_target_id)
+         in
+         let missing_dir_path =
+           Filename.concat
+             (Filename.get_temp_dir_name ())
+             "masc-exact-output-no-such-dir/runtime.toml"
+         in
+         (match Runtime.save_config_text ~runtime_config_path:missing_dir_path content with
+          | Ok () -> fail "save into a missing directory must fail"
+          | Error _ -> ());
+         (match Registry.current () with
+          | Error _ -> fail "registry must stay published after a failed write"
+          | Ok current ->
+            check bool
+              "failed write does not advance the generation"
+              true
+              (Int64.equal (Registry.generation current) (Registry.generation published));
+            (match Registry.lane_slots current ~lane_id:"extra_lane" with
+             | Ok _ -> fail "failed write must not publish the rejected lanes"
+             | Error _ -> ());
+            match Registry.lane_slots current ~lane_id:"compaction_exact" with
+            | Error error ->
+              failf
+                "previously published lane lost after failed write: %s"
+                (Registry.error_to_string error)
+            | Ok slot_ids ->
+              check
+                (list string)
+                "previously published lanes survive the failed write"
+                [ fixture_target_id ]
+                slot_ids))
+;;
+
 let () =
   Alcotest.run
     "Runtime_exact_output_registry"
@@ -244,6 +355,10 @@ let () =
             test_republish_revalidates_against_current_snapshot
         ; test_case "config save republishes lanes" `Quick
             test_save_config_text_republishes_exact_output_lanes
+        ; test_case "lane-less config save backfills required lane" `Quick
+            test_save_config_text_backfills_required_lane
+        ; test_case "failed write does not republish" `Quick
+            test_failed_write_does_not_republish
         ] )
     ]
 ;;

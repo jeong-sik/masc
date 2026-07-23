@@ -244,7 +244,21 @@ let run_admitted_with
         | Error (Keeper_post_turn.No_compaction no_compaction) ->
           `No_compaction no_compaction
         | Error _ -> `Busy block)
-     | `Ran (Error failure) -> `Compaction_failed failure
+     | `Ran (Error failure) ->
+       (match preparation, failure with
+        | ( Ok prepared
+          , Recovery
+              ( Keeper_post_turn.Checkpoint_cas_failed
+                  (Keeper_checkpoint_store.Source_changed _)
+              , _ ) ) ->
+          (* Another turn advanced the checkpoint while the exact-output
+             request was already dispatched against the old source. Re-driving
+             the same stale source would pay a second provider request, so
+             settle the source-bound terminal used for the final-admission
+             race instead of the replayable [Compaction_failed] arm. *)
+          `No_compaction
+            (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
+        | _ -> `Compaction_failed failure)
      | `Ran (Ok (Compacted success)) ->
        observe_manifest ~keeper_name:meta.name success.manifest;
        `Applied success

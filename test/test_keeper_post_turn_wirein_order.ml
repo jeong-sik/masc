@@ -696,6 +696,162 @@ let test_manual_compaction_serializes_owner_lane () =
         (Exact_fixture.post_count race_server))
 ;;
 
+let test_evidence_failure_maps_to_post_dispatch_terminal () =
+  (match
+     Post_turn.For_testing.terminal_reason_of_rejection
+       (Compact_policy.Invalid_structural_evidence
+          Keeper_compaction_evidence.Expected_object)
+   with
+   | Some Keeper_event_queue_state.Execution_may_have_dispatched -> ()
+   | _ ->
+     fail
+       "post-dispatch evidence failure must settle as Execution_may_have_dispatched");
+  (match
+     Post_turn.For_testing.terminal_reason_of_rejection
+       Compact_policy.Exact_execution_failed_after_dispatch
+   with
+   | Some Keeper_event_queue_state.Execution_may_have_dispatched -> ()
+   | _ -> fail "failed-after-dispatch execution must stay a post-dispatch terminal");
+  match
+    Post_turn.For_testing.terminal_reason_of_rejection
+      Compact_policy.Exact_target_selection_failed
+  with
+  | None -> ()
+  | Some _ -> fail "pre-dispatch selection failure must stay retryable"
+;;
+
+let test_manual_compaction_stale_source_commit_settles_terminal () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta =
+    make_meta
+      ~name:"compaction-stale-source"
+      ~trace_id:"trace-compaction-stale-source"
+      ()
+  in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Admission.For_testing.reset ();
+      Masc.Keeper_registry.For_testing.unregister ~base_path meta.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+      init_runtime_fixture ();
+      Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+      let owner_entry =
+        Masc.Keeper_registry.For_testing.register ~base_path meta.name meta
+      in
+      Atomic.set owner_entry.fiber_wakeup false;
+      let checkpoint =
+        { (make_checkpoint ()) with
+          session_id = "trace-compaction-stale-source"
+        ; agent_name = meta.agent_name
+        }
+      in
+      let session =
+        Masc.Keeper_context_core.create_session
+          ~session_id:checkpoint.session_id
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      in
+      (match
+         Masc.Keeper_context_core.save_oas_checkpoint_classified
+           ~multimodal_policy:meta.multimodal_policy
+           ~keeper_name:meta.name
+           ~session
+           ~agent_name:meta.agent_name
+           ~ctx:(Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint)
+           ~generation:meta.runtime.generation
+       with
+       | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
+       | Ok (_, Stale_noop _) -> fail "initial checkpoint save was stale"
+       | Error detail ->
+         failf
+           "initial checkpoint save failed: %s"
+           (Masc.Keeper_context_core.checkpoint_write_error_to_string
+              ~persistence_error_to_string:Fun.id
+              detail));
+      (* The loaded checkpoint carries the injected keeper generation in its
+         context, which the raw interleaved save below needs for the source
+         ref. *)
+      let saved_checkpoint =
+        Result.get_ok
+          (Masc.Keeper_checkpoint_store.load_oas
+             ~session_dir:session.session_dir
+             ~session_id:checkpoint.session_id)
+      in
+      (* Another turn advances the durable source while the exact-output
+         request is in flight, so the prepared plan's commit CAS-misses. *)
+      let race_server =
+        Exact_fixture.start_server
+          ~on_request_before_reply:(fun () ->
+            let advanced =
+              { saved_checkpoint with
+                turn_count = saved_checkpoint.turn_count + 1
+              ; messages =
+                  saved_checkpoint.messages
+                  @ [ Agent_sdk.Types.text_message
+                        Agent_sdk.Types.User
+                        "interleaved turn"
+                    ]
+              }
+            in
+            match
+              Masc.Keeper_checkpoint_store.save_oas_classified
+                ~session_dir:session.session_dir
+                advanced
+            with
+            | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+            | Ok (Stale_noop _) -> fail "interleaved checkpoint save was stale"
+            | Error detail ->
+              failf "interleaved checkpoint save failed: %s" detail)
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply
+             (summarize_response "stale source must not commit"))
+      in
+      publish_exact_fixture ~source:"post-turn stale-source commit" race_server;
+      let outcome =
+        Masc.Keeper_manual_compaction.run_admitted ~config ~meta
+      in
+      check int
+        "stale-source commit performs one exact dispatch"
+        1
+        (Exact_fixture.post_count race_server);
+      (match outcome with
+       | `No_compaction
+           { reason =
+               Keeper_event_queue_state.Execution_may_have_dispatched
+           ; _
+           } ->
+         ()
+       | `Busy _ -> fail "stale-source commit collapsed to replayable Busy"
+       | `Applied _ -> fail "stale-source commit applied past the source CAS"
+       | `No_compaction _ ->
+         fail "stale-source commit lost its post-dispatch terminal reason"
+       | `Compaction_failed failure ->
+         failf
+           "stale-source commit stayed a replayable Compaction_failed: %s"
+           (Masc.Keeper_manual_compaction.failure_to_string failure));
+      let retained =
+        Result.get_ok
+          (Masc.Keeper_checkpoint_store.load_oas
+             ~session_dir:session.session_dir
+             ~session_id:checkpoint.session_id)
+      in
+      check int
+        "interleaved checkpoint is retained exactly"
+        (List.length checkpoint.messages + 1)
+        (List.length retained.messages))
+;;
+
 let test_malformed_structure_preserves_checkpoint () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -927,6 +1083,10 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
+      test_case "stale-source commit settles post-dispatch terminal"
+        `Quick test_manual_compaction_stale_source_commit_settles_terminal;
+      test_case "evidence failure maps to post-dispatch terminal"
+        `Quick test_evidence_failure_maps_to_post_dispatch_terminal;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"

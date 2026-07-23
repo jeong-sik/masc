@@ -506,7 +506,13 @@ let terminal_reason_of_rejection = function
   | Invalid_compaction_plan -> Some Domain_invalid_output
   | Exact_execution_failed_after_dispatch ->
     Some Execution_may_have_dispatched
-  | Invalid_structural_evidence _
+  | Invalid_structural_evidence _ ->
+    (* Evidence is constructed only after the summarizer returned a completed
+       plan, which for the exact-output path means [execute_once] already
+       crossed the provider boundary. Retrying would dispatch a second
+       request for the same source, so this settles as the same post-dispatch
+       terminal as a failed-after-dispatch execution. *)
+    Some Execution_may_have_dispatched
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_execution_context_unavailable
@@ -752,3 +758,7 @@ let recover_latest_checkpoint_for_compaction
   | Error _ as error -> error
   | Ok prepared -> commit_prepared_compaction prepared
 ;;
+
+module For_testing = struct
+  let terminal_reason_of_rejection = terminal_reason_of_rejection
+end

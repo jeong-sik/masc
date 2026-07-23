@@ -1701,23 +1701,27 @@ let validate_runtime_config_text ~config_path content =
 let save_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* exact_output_lane_decls = validate_runtime_config_text ~config_path:path content in
+  (* Upgraded workspaces keep a persisted runtime.toml that predates
+     [runtime.exact_output_lanes]; startup backfills [compaction_exact] only
+     in memory. Apply the same required-lane backfill when deriving the
+     effective lanes for a save, so an unrelated raw save does not strip the
+     lane the compaction summarizer resolves by name. *)
+  let effective_lanes =
+    Runtime_exact_output_lanes.with_required_backfill exact_output_lane_decls
+  in
   (* Raw config edits may rewrite [runtime.exact_output_lanes]. Validate the
-     new declarations against the live resolver snapshot and republish so the
-     active exact-output registry tracks the save instead of going stale
-     until the next restart. Republishing precedes the atomic write so an
-     invalid lane set is rejected before it reaches disk; if the write itself
-     fails, the registry still holds a valid lane set and the next successful
-     save or restart reconverges. Without a published registry (pre-bootstrap
-     or non-server contexts) there is no snapshot to validate against —
-     bootstrap publishes from the saved file. *)
+     new declarations against the live resolver snapshot WITHOUT publishing;
+     the registry is republished only after the durable write commits, so a
+     failed write never leaves active routing ahead of both the on-disk
+     config and what the caller believes was applied. Without a published
+     registry (pre-bootstrap or non-server contexts) there is no snapshot to
+     validate against — bootstrap publishes from the saved file. *)
   let* () =
     match Runtime_exact_output_registry.current () with
     | Error _ -> Ok ()
     | Ok _registry ->
-      (match
-         Runtime_exact_output_registry.republish ~lanes:exact_output_lane_decls
-       with
-       | Ok _registry -> Ok ()
+      (match Runtime_exact_output_registry.validate ~lanes:effective_lanes with
+       | Ok () -> Ok ()
        | Error error ->
          Error
            (Printf.sprintf
@@ -1726,6 +1730,20 @@ let save_config_text ?runtime_config_path content =
   in
   let* () = Fs_compat.save_file_atomic path content in
   let* () = init_default ~config_path:path in
+  (* The write committed: republish so the active registry tracks the saved
+     lanes instead of going stale until the next restart. Validation above
+     already succeeded against the same immutable snapshot, so a failure here
+     is unexpected — log it rather than misreporting the committed save as
+     failed. *)
+  (match Runtime_exact_output_registry.current () with
+   | Error _ -> ()
+   | Ok _registry ->
+     (match Runtime_exact_output_registry.republish ~lanes:effective_lanes with
+      | Ok _registry -> ()
+      | Error error ->
+        Log.Misc.error
+          "exact-output registry republish failed after committed config save: %s"
+          (Runtime_exact_output_registry.error_to_string error)));
   Ok ()
 ;;
 

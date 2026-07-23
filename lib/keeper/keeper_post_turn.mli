@@ -136,3 +136,15 @@ val recover_latest_checkpoint_for_compaction :
   trigger:Compaction_trigger.t ->
   projection_request:Keeper_compaction_projection_target.request ->
   (compaction_recovery, compaction_recovery_error) result
+
+(** {1 Test hooks} *)
+
+module For_testing : sig
+  val terminal_reason_of_rejection
+    :  Keeper_compact_policy.compaction_rejection
+    -> Keeper_event_queue_state.no_compaction_reason option
+  (** Terminal-settlement mapping for compaction rejections. Post-dispatch
+      failures (failed-after-dispatch execution, structural-evidence
+      invalidity) map to [Execution_may_have_dispatched]; pre-dispatch
+      exact-output rejections stay retryable ([None]). *)
+end

@@ -836,6 +836,7 @@ let test_pre_worker_start_failure_is_retryable () =
        install_queue base_path;
        select_auto_judge_mode base_path;
        let entry = pending_entry ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        (match
           Gate.For_testing.spawn_auto_judge_entry_with_worker
             ~spawn_worker:
@@ -862,6 +863,13 @@ let test_pre_worker_start_failure_is_retryable () =
            "no usable exact-output lane slots"
            reason
        | _ -> fail "pre-worker failure was not durably retryable")
+       ;
+       check
+         bool
+         "pre-worker failure releases the owner claim"
+         true
+         (Gate.For_testing.claim_auto_judge successor);
+       Gate.For_testing.release_auto_judge successor
 ;;
 
 let test_visible_uncertainty_withholds_production_drain () =

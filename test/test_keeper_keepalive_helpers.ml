@@ -671,6 +671,97 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
          (board_queue_length config healthy.name))
 ;;
 
+(* #25600 fixture: a [Thread_participants]-audience comment signal is the
+   only route that re-reads the board store at signal time
+   ([check_self_comment_status]).  The keeper authored an earlier comment on
+   the post, so a newer external comment addresses it as
+   [Thread_reply_after_self_comment] — but only if the store read succeeds. *)
+let create_thread_fixture config ~keeper_name =
+  let meta = make_board_resume_meta keeper_name in
+  persist_and_register_board_lane config meta;
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"external-author"
+        ~content:"thread topic"
+        ~title:"thread"
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let add_comment ~author ~content =
+    match Board_dispatch.add_comment ~post_id ~author ~content () with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok _comment -> ()
+  in
+  add_comment ~author:meta.Keeper_meta_contract.agent_name ~content:"keeper was here";
+  add_comment ~author:"external-author" ~content:"follow up";
+  let signal : Board_dispatch.addressed_board_signal =
+    { signal =
+        { kind = Board_dispatch.Board_comment_added
+        ; post_id
+        ; author = "external-author"
+        ; title = "thread"
+        ; content = "follow up"
+        ; hearth = None
+        ; updated_at = Some 125.5
+        }
+    ; audience = Board.Thread_participants
+    }
+  in
+  meta, signal
+;;
+
+(* #25600 regression: a transient store read failure on the
+   [Thread_participants] route must not silently drop the signal — the
+   bounded retry re-reads and the addressed keeper still wakes. *)
+let test_thread_participant_wakes_after_transient_store_read_failure () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      KKS.force_transient_relevance_failures_for_test 0;
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_thread_fixture config ~keeper_name:"threadlane" in
+       KKS.force_transient_relevance_failures_for_test 1;
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "addressed lane durable queue after transient failure" 1
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "addressed lane woken after transient failure" true
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "threadlane registry entry missing")
+;;
+
+(* #25600 bound pin: the retry is bounded — a store that keeps failing past
+   [board_signal_relevance_max_attempts] still drops the lane (loudly), it
+   does not retry forever. *)
+let test_thread_participant_drop_is_bounded_under_persistent_failure () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      KKS.force_transient_relevance_failures_for_test 0;
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let meta, signal = create_thread_fixture config ~keeper_name:"boundlane" in
+       KKS.force_transient_relevance_failures_for_test 100;
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "persistently failing lane stays undelivered" 0
+         (board_queue_length config meta.name);
+       match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+         check bool "persistently failing lane not woken" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "boundlane registry entry missing")
+;;
+
 (* ── Test runner ─── *)
 
 let () =
@@ -711,6 +802,10 @@ let () =
             test_restarting_exact_mention_is_durable_with_deferred_wake
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
+        ; test_case "thread participant wakes after transient store read failure" `Quick
+            test_thread_participant_wakes_after_transient_store_read_failure
+        ; test_case "thread participant drop is bounded under persistent failure" `Quick
+            test_thread_participant_drop_is_bounded_under_persistent_failure
         ] )
     ; ( "interruptible_cadence"
       , [ test_case "directed wake cuts configured sleep" `Quick

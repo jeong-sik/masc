@@ -247,19 +247,6 @@ module For_testing : sig
     request_body_sha256:string ->
     (exact_attempt_transition, exact_attempt_error) result
 
-  val fail_summary_exact_attempt_before_dispatch_with_writer :
-    save_file_atomic_strict_staged:strict_snapshot_writer ->
-    id:string ->
-    input_hash:string ->
-    sequence:int ->
-    slot_id:string ->
-    call_id:string ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
-    reason:string ->
-    retryable:bool ->
-    (exact_attempt_transition, exact_attempt_error) result
-
   val quarantine_summary_exact_attempt_with_writer :
     save_file_atomic_strict_staged:strict_snapshot_writer ->
     id:string ->
@@ -379,23 +366,6 @@ val release_summary_exact_attempt_before_dispatch :
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same release is
     idempotently strict-rewritten. *)
 
-val fail_summary_exact_attempt_before_dispatch :
-  id:string ->
-  input_hash:string ->
-  sequence:int ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  reason:string ->
-  retryable:bool ->
-  (exact_attempt_transition, exact_attempt_error) result
-
-(** Atomically release the matching binding and record the final summary
-    failure only after OAS proves the attempt stayed before dispatch.
-    [retryable] is observation only; execution requires an explicit operator
-    restart. Replaying the same identity and failure strictly rewrites it. *)
-
 val quarantine_summary_exact_attempt :
   id:string ->
   input_hash:string ->
@@ -411,8 +381,10 @@ val quarantine_summary_exact_attempt :
     A dispatch-uncertain binding accepts any public exact cause. A released
     binding accepts only [Exact_terminal_persistence_failure],
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same identity
-    and cause is idempotently strict-rewritten. It can never return to the
-    summary mutation path. Restart-only states are not values of
+    and cause is idempotently strict-rewritten. The same strict snapshot
+    atomically records a non-retryable [Summary_failed] with a stable MASC-owned
+    cause. It can never return to the summary mutation path. Restart-only states
+    are not values of
     [exact_attempt_quarantine_cause] and cannot enter this surface. *)
 
 val complete_summary_exact_attempt :

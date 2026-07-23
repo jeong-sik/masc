@@ -381,16 +381,32 @@ let compare_auto_judge_entries
   Int.compare left.sequence right.sequence
 ;;
 
+let earliest_auto_judge_for_owner ?exclude_id ~base_path ~keeper_name entries =
+  let sorted =
+    entries
+    |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+      String.equal entry.audit_base_path base_path
+      && String.equal entry.keeper_name keeper_name
+      && (match exclude_id with
+          | Some id -> not (String.equal id entry.id)
+          | None -> true))
+    |> List.sort compare_auto_judge_entries
+  in
+  match sorted with
+  | [] -> None
+  | entry :: _ -> Some entry
+;;
+
 let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
-  entries
-  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
-    String.equal entry.audit_base_path base_path
-    && String.equal entry.keeper_name keeper_name
-    && (match exclude_id with
-        | Some id -> not (String.equal id entry.id)
-        | None -> true)
-    && auto_judge_entry_ready entry)
-  |> List.sort compare_auto_judge_entries
+  match
+    earliest_auto_judge_for_owner
+      ?exclude_id
+      ~base_path
+      ~keeper_name
+      entries
+  with
+  | Some entry when auto_judge_entry_ready entry -> [ entry ]
+  | Some _ | None -> []
 ;;
 
 type auto_judge_drain_outcome =
@@ -398,31 +414,27 @@ type auto_judge_drain_outcome =
   ; failures : (string * string) list
   }
 
-let rec spawn_claimed_auto_judge_entry
+type hitl_worker_spawner =
+  sw:Eio.Switch.t ->
+  entry:Keeper_approval_queue.pending_approval ->
+  on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
+  on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
+  unit ->
+  (unit, string) result
+
+let rec spawn_claimed_auto_judge_entry_with
+      ~(spawn_worker : hitl_worker_spawner)
       (entry : Keeper_approval_queue.pending_approval)
   =
   let approval_id = entry.id in
   let on_summary summary =
-    match Keeper_approval_queue.attach_summary ~id:approval_id summary with
-    | Ok true ->
-      (match resolve_judgment entry ~approval_id summary with
-       | Ok (Judgment_finalized | Judgment_skipped) -> ()
-       | Error reason ->
-         log_auto_resolution_error
-           ~keeper_name:entry.keeper_name
-           ~approval_id
-           reason)
-    | Ok false ->
-      log_summary_transition_miss
+    match resolve_judgment entry ~approval_id summary with
+    | Ok (Judgment_finalized | Judgment_skipped) -> ()
+    | Error reason ->
+      log_auto_resolution_error
         ~keeper_name:entry.keeper_name
         ~approval_id
-        ~operation:"attach"
-    | Error error ->
-      log_summary_state_error
-        ~keeper_name:entry.keeper_name
-        ~approval_id
-        ~operation:"attach"
-        error
+        reason
   in
   let on_failure ~reason ~retryable =
     match
@@ -451,37 +463,33 @@ let rec spawn_claimed_auto_judge_entry
          on_failure ~reason ~retryable;
          Error reason)
   in
-  let provider_selection =
-    try
-      Ok (Hitl_summary_worker.provider_config_for_summary ())
-    with
-    | Eio.Cancel.Cancelled _ as exn ->
-      release_auto_judge entry;
-      raise exn
-    | exn ->
-      Error
-        ("Auto Judge provider selection failed: " ^ Printexc.to_string exn)
-  in
-  match Eio_context.get_root_switch_opt (), provider_selection with
-  | Some sw, Ok (Some selected) ->
+  match Eio_context.get_root_switch_opt () with
+  | Some sw ->
     (try
-       Hitl_summary_worker.spawn
-         ~sw
-         ~runtime_id:selected.runtime_id
-         ~entry
-         ~provider_config:selected.provider_config
-         ~on_summary
-         ~on_failure
-         ~on_finish:(fun () ->
-           release_auto_judge entry;
-           ignore
-             (drain_auto_judge_owner
-                ~exclude_id:entry.id
-                ~base_path:entry.audit_base_path
-                ~keeper_name:entry.keeper_name
-                ()))
-         ();
-       Ok Started
+       match
+         spawn_worker
+           ~sw
+           ~entry
+           ~on_summary
+           ~on_finish:(fun finish_outcome ->
+             release_auto_judge entry;
+             match finish_outcome with
+             | Hitl_summary_worker.Conclusive_terminalization ->
+               ignore
+                 (drain_auto_judge_owner
+                    ~base_path:entry.audit_base_path
+                    ~keeper_name:entry.keeper_name
+                    ())
+             | Hitl_summary_worker.Terminalization_persistence_uncertain ->
+               Log.Keeper.error
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge owner drain withheld after persistence uncertainty \
+                  approval=%s"
+                 entry.id)
+           ()
+       with
+       | Ok () -> Ok Started
+       | Error reason -> fail_before_worker ~reason ~retryable:false
      with
      | Eio.Cancel.Cancelled _ as exn ->
        release_auto_judge entry;
@@ -491,21 +499,28 @@ let rec spawn_claimed_auto_judge_entry
          "Auto Judge worker start failed: " ^ Printexc.to_string exn
        in
        fail_before_worker ~reason ~retryable:true)
-  | None, _ ->
+  | None ->
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
       ~retryable:true
-  | Some _, Ok None ->
-    fail_before_worker
-      ~reason:
-        "Auto Judge unavailable: explicit [runtime].hitl_summary provider is not loaded"
-      ~retryable:true
-  | Some _, Error reason -> fail_before_worker ~reason ~retryable:true
 
-and spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and spawn_claimed_auto_judge_entry entry =
+  spawn_claimed_auto_judge_entry_with
+    ~spawn_worker:Hitl_summary_worker.spawn
+    entry
+
+and spawn_auto_judge_entry_with
+      ~(spawn_worker : hitl_worker_spawner)
+      (entry : Keeper_approval_queue.pending_approval)
+  =
   if claim_auto_judge entry
-  then spawn_claimed_auto_judge_entry entry
+  then spawn_claimed_auto_judge_entry_with ~spawn_worker entry
   else Ok Skipped
+
+and spawn_auto_judge_entry entry =
+  spawn_auto_judge_entry_with
+    ~spawn_worker:Hitl_summary_worker.spawn
+    entry
 
 and retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
@@ -644,13 +659,26 @@ let recovered_work_for_base_path ~base_path =
   in
   if not enabled
   then []
-  else
-    Keeper_approval_queue.list_pending_entries ()
+  else (
+    let entries = Keeper_approval_queue.list_pending_entries () in
+    let owners =
+      List.fold_left
+        (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+           if String.equal entry.audit_base_path base_path
+           then Auto_judge_owner_set.add (auto_judge_owner entry) owners
+           else owners)
+        Auto_judge_owner_set.empty
+        entries
+    in
+    owners
+    |> Auto_judge_owner_set.elements
+    |> List.filter_map (fun (_, keeper_name) ->
+      earliest_auto_judge_for_owner
+        ~base_path
+        ~keeper_name
+        entries)
     |> List.sort compare_auto_judge_entries
-    |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
-    if not (String.equal entry.audit_base_path base_path)
-    then None
-    else
+    |> List.filter_map (fun entry ->
         match classify_auto_judge_entry entry with
         | Auto_judge_not_requested
         | Auto_judge_pending_unbound ->
@@ -662,7 +690,7 @@ let recovered_work_for_base_path ~base_path =
         | Auto_judge_finalizable
             { judgment = Keeper_approval_queue.Require_human; _ }
         | Auto_judge_ineligible ->
-          None)
+          None))
 ;;
 
 let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval) =
@@ -1062,6 +1090,15 @@ module For_testing = struct
 
   let claim_auto_judge = claim_auto_judge
   let release_auto_judge = release_auto_judge
+
+  type nonrec hitl_worker_spawner = hitl_worker_spawner
+
+  let spawn_auto_judge_entry_with_worker ~spawn_worker entry =
+    match spawn_auto_judge_entry_with ~spawn_worker entry with
+    | Ok Started -> Ok true
+    | Ok Skipped -> Ok false
+    | Error reason -> Error reason
+  ;;
 
   let resume_persisted_auto_judges_with_exact_completion =
     resume_persisted_auto_judges_with

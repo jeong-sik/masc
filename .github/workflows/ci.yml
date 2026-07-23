@@ -1071,6 +1071,8 @@ jobs:
         run: |
           scripts/test_oas_boundary_ratchet.sh
           scripts/oas-boundary-ratchet.sh
+          scripts/check-hitl-exact-flow-boundary.sh --self-test
+          scripts/check-hitl-exact-flow-boundary.sh --check
 
       - name: Run keeper tool boundary matrix ratchet
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'

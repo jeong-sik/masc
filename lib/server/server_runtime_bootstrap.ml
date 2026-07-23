@@ -196,6 +196,38 @@ let load_exact_output_lane_declarations () =
                (List.length errors))))
 ;;
 
+let hitl_auto_judge_lane_id = "hitl_auto_judge"
+
+let structured_judge_exact_slot_ids () =
+  let assignment_id = Runtime.runtime_id_for_structured_judge () in
+  match Runtime.resolve_assignment assignment_id with
+  | `Single_runtime runtime -> [ runtime.Runtime.id ]
+  | `Lane lane -> lane.Runtime_lane.candidates
+  | `Missing ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "exact-output registry: structured-judge assignment %S does not resolve \
+             to a runtime or lane"
+            assignment_id))
+;;
+
+let ensure_hitl_auto_judge_lane lanes =
+  if
+    List.exists
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id hitl_auto_judge_lane_id)
+      lanes
+  then
+    lanes
+  else
+    lanes
+    @ [ { Runtime_schema.id = hitl_auto_judge_lane_id
+        ; slot_ids = structured_judge_exact_slot_ids ()
+        }
+      ]
+;;
+
 let configure_exact_output_registry ?config_root () =
   let catalog, catalog_description =
     match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
@@ -227,17 +259,18 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes = load_exact_output_lane_declarations () in
-    (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
-     | Error error ->
+    let lanes =
+      load_exact_output_lane_declarations () |> ensure_hitl_auto_judge_lane
+    in
+    (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
+     | Error detail ->
        raise
          (Env_config_core.Config_error
-            ("exact-output resolver-and-lane registry: "
-             ^ Runtime_exact_output_registry.publication_error_to_string error))
-     | Ok registry ->
+            ("exact-output resolver-and-lane registry: " ^ detail))
+     | Ok generation ->
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
-         (Runtime_exact_output_registry.generation registry)
+         generation
          catalog_description;
        if
          not
@@ -258,6 +291,10 @@ let configure_exact_output_registry ?config_root () =
          Log.Server.warn
            "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
+
+module For_testing = struct
+  let configure_exact_output_registry = configure_exact_output_registry
+end
 
 (* GC tuning for long-running server with bursty allocation.
 
@@ -405,7 +442,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_oas_model_catalog_env () in
   let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
-  configure_exact_output_registry ~config_root ();
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
@@ -766,26 +802,31 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  (match Runtime.config_path () with
-   | None ->
-     raise (Owner_initialization_failed Runtime_config_path_unavailable)
-   | Some config_path ->
-     (match Runtime.init_default_degraded_report ~config_path with
-      | Ok Runtime.Initialized ->
-        Log.Server.info
-          "Runtime default initialized: %s"
-          (Runtime.get_default_runtime_id ())
-      | Ok (Runtime.Initialized_degraded degradation) ->
-        Log.Server.warn
-          "Runtime default initialized in degraded catalog mode: %s"
-          (Runtime.startup_degradation_to_string degradation);
-        Log.Server.warn
-          "Runtime degraded effective default: %s"
-          (Runtime.get_default_runtime_id ())
-      | Error error ->
-        raise
-          (Owner_initialization_failed
-             (Runtime_default_initialization_failed error))));
+  let runtime_config_path =
+    match Runtime.config_path () with
+    | None ->
+      raise (Owner_initialization_failed Runtime_config_path_unavailable)
+    | Some config_path -> config_path
+  in
+  (match Runtime.init_default_degraded_report ~config_path:runtime_config_path with
+   | Ok Runtime.Initialized ->
+     Log.Server.info
+       "Runtime default initialized: %s"
+       (Runtime.get_default_runtime_id ())
+   | Ok (Runtime.Initialized_degraded degradation) ->
+     Log.Server.warn
+       "Runtime default initialized in degraded catalog mode: %s"
+       (Runtime.startup_degradation_to_string degradation);
+     Log.Server.warn
+       "Runtime degraded effective default: %s"
+       (Runtime.get_default_runtime_id ())
+   | Error error ->
+     raise
+       (Owner_initialization_failed
+          (Runtime_default_initialization_failed error)));
+  configure_exact_output_registry
+    ~config_root:(Filename.dirname runtime_config_path)
+    ();
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;

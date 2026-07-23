@@ -169,7 +169,6 @@ function makeRuntimeDefaults(
     model_routing: {
       librarian_runtime_id: null,
       structured_judge_runtime_id: null,
-      hitl_summary_runtime_id: null,
       cross_verifier_runtime_id: null,
       media_failover: [],
     },
@@ -1281,7 +1280,6 @@ describe('SettingsSurface', () => {
         model_routing: {
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: 'rt-c',
-          hitl_summary_runtime_id: 'rt-a',
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         },
@@ -1304,8 +1302,6 @@ describe('SettingsSurface', () => {
         .toContain('provider 실패 자동 전환이 아니라')
       expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
         .toBe('rt-c')
-      expect((container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement | null)?.value)
-        .toBe('rt-a')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
@@ -1319,7 +1315,6 @@ describe('SettingsSurface', () => {
         model_routing: {
           librarian_runtime_id: 'rt-b',
           structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -1344,36 +1339,6 @@ describe('SettingsSurface', () => {
         .toBe('rt-b')
     })
     expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
-  })
-
-  it('patches the HITL summary routing lane from settings', async () => {
-    apiMock.fetchRuntimeDefaults.mockReset()
-    apiMock.fetchRuntimeDefaults
-      .mockResolvedValueOnce(makeRuntimeDefaults())
-      .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: {
-          librarian_runtime_id: null,
-          structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: 'rt-c',
-          cross_verifier_runtime_id: null,
-          media_failover: [],
-        },
-      }))
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-routing-hitl-summary"]')).not.toBeNull()
-    })
-
-    const hitlSummary = container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement
-    await fireEvent.input(hitlSummary, { target: { value: 'rt-c' } })
-
-    await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('hitl_summary', 'rt-c')
-      expect((container.querySelector('[data-testid="runtime-routing-hitl-summary"]') as HTMLSelectElement).value)
-        .toBe('rt-c')
-    })
   })
 
   it('routing section exposes a required default lane without an empty option and patches it', async () => {
@@ -1438,7 +1403,6 @@ describe('SettingsSurface', () => {
         model_routing: {
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
         },
@@ -1447,7 +1411,6 @@ describe('SettingsSurface', () => {
         model_routing: {
           librarian_runtime_id: null,
           structured_judge_runtime_id: null,
-          hitl_summary_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
         },

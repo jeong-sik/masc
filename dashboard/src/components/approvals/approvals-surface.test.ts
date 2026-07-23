@@ -239,6 +239,26 @@ describe('ApprovalsSurface', () => {
     expect(retryGateAutoJudge).toHaveBeenCalledWith('appr-retry')
   }, 20000)
 
+  it('does not offer retry for a terminal non-retryable Auto Judge failure', async () => {
+    const { ApprovalsSurface, retryGateAutoJudge } = await loadSurface([
+      queueItem({
+        id: 'appr-terminal',
+        summary_status: {
+          status: 'failed',
+          reason: 'exact attempt quarantined',
+          retryable: false,
+        },
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('재시도 불가')
+    expect(container.querySelector('.ap-card .ap-act.retry')).toBeNull()
+    expect(retryGateAutoJudge).not.toHaveBeenCalled()
+  }, 20000)
+
   it('renders no summary block when the approval has no summary status', async () => {
     const { ApprovalsSurface } = await loadSurface([queueItem({ id: 'appr-nosummary' })])
 

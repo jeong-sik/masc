@@ -309,27 +309,6 @@ let validate_structured_judge_runtime ~(config_path : string)
                runtime.model.id)))
 ;;
 
-(* [runtime].hitl_summary is a dedicated lane for approval context summaries.
-   It deliberately validates only existence: the worker can use either native
-   structured output or plain JSON mode depending on the resolved provider config. *)
-let validate_hitl_summary_runtime ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (hitl_summary_id : string option) : (unit, string) result =
-  match hitl_summary_id with
-  | None -> Ok ()
-  | Some id ->
-    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "%s: [runtime].hitl_summary = %S%s"
-           config_path
-           id
-           (unresolved_runtime_suffix ~dropped_bindings
-              ~runtime_count:(List.length runtimes) id))
-;;
-
 (* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
    each id in the ordered list: an unknown id is an operator typo rejected at
    load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
@@ -772,11 +751,10 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments, librarian_id, structured_judge_id,
-       hitl_summary_id, cross_verifier_id, media_failover, lanes) :
+       cross_verifier_id, media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string option
       * string option
       * string option
@@ -786,7 +764,6 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string option
         * string option
         * string option
@@ -879,9 +856,6 @@ let degrade_loaded_for_missing_catalog
   let structured_judge_id, structured_judge_drop =
     drop_route "[runtime].structured_judge" structured_judge_id
   in
-  let hitl_summary_id, hitl_summary_drop =
-    drop_route "[runtime].hitl_summary" hitl_summary_id
-  in
   let cross_verifier_id, cross_verifier_drop =
     drop_route "[runtime].cross_verifier" cross_verifier_id
   in
@@ -889,7 +863,6 @@ let degrade_loaded_for_missing_catalog
     [ default_drop
     ; librarian_drop
     ; structured_judge_drop
-    ; hitl_summary_drop
     ; cross_verifier_drop
     ]
     |> List.filter_map Fun.id
@@ -947,7 +920,6 @@ let degrade_loaded_for_missing_catalog
         , kept_assignments
         , librarian_id
         , structured_judge_id
-        , hitl_summary_id
         , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
@@ -961,7 +933,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string option
        * string option
@@ -1012,10 +983,6 @@ let materialize_config
       cfg.structured_judge_runtime_id
   in
   let* () =
-    validate_hitl_summary_runtime ~config_path ~dropped_bindings runtimes
-      cfg.hitl_summary_runtime_id
-  in
-  let* () =
     validate_cross_verifier_runtime ~config_path ~dropped_bindings runtimes
       lanes
       cfg.cross_verifier_runtime_id
@@ -1039,7 +1006,6 @@ let materialize_config
       , assignments
       , cfg.librarian_runtime_id
       , cfg.structured_judge_runtime_id
-      , cfg.hitl_summary_runtime_id
       , cfg.cross_verifier_runtime_id
       , cfg.media_failover
       , lanes )
@@ -1050,7 +1016,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string option
        * string option
        * string option
@@ -1088,7 +1053,6 @@ type loaded_state =
   ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
-  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
@@ -1102,7 +1066,6 @@ let empty_loaded_state =
   ; keeper_assignments = []
   ; librarian_runtime_id = None
   ; structured_judge_runtime_id = None
-  ; hitl_summary_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
@@ -1122,7 +1085,6 @@ let set_loaded
     , assignments
     , librarian_id
     , structured_judge_id
-    , hitl_summary_id
     , cross_verifier_id
     , media_failover
     , lanes ) =
@@ -1132,7 +1094,6 @@ let set_loaded
     ; keeper_assignments = assignments
     ; librarian_runtime_id = librarian_id
     ; structured_judge_runtime_id = structured_judge_id
-    ; hitl_summary_runtime_id = hitl_summary_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
@@ -1147,6 +1108,13 @@ let init_default ~config_path =
   set_loaded ~config_path loaded;
   Ok ()
 
+let publish_exact_output_registry ~lanes resolver_snapshot =
+  match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+  | Ok registry -> Ok (Runtime_exact_output_registry.generation registry)
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
    PLUS the OAS capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —
@@ -1155,7 +1123,7 @@ let init_default ~config_path =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1169,7 +1137,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1180,7 +1148,7 @@ let init_default_degraded_report ~config_path =
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (((active_runtimes, _, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+        | Ok (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
@@ -1232,11 +1200,6 @@ let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
 (* [runtime].structured_judge is the explicit runtime.toml SSOT for
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
-
-(* [runtime].hitl_summary is the dedicated HITL approval-summary lane.
-   [None] means that Auto Judge is not configured; callers must not substitute
-   another subsystem's runtime. *)
-let hitl_summary_runtime_id () = (runtime_state ()).hitl_summary_runtime_id
 
 let runtime_id_for_structured_judge () =
   let state = runtime_state () in
@@ -1916,10 +1879,6 @@ let set_runtime_librarian ?runtime_config_path ~runtime_id () =
 
 let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
-;;
-
-let set_runtime_hitl_summary ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"hitl_summary" ~runtime_id ()
 ;;
 
 let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =

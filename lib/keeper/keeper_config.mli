@@ -120,10 +120,6 @@ val keeper_batch_limit : unit -> int
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
 
-(** {2 HITL Context-Summary Worker Policy} *)
-
-val hitl_summary_temperature : unit -> float
-
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool

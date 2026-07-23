@@ -52,11 +52,6 @@ val apply_to_provider_config
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for [schema]. *)
 
-val apply_hitl_summary_schema_to_config
-  :  Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Set both OAS structured-output fields for {!hitl_context_summary_schema}. *)
-
 val without_response_format
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t

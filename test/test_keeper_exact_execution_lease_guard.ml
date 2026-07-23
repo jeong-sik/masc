@@ -850,10 +850,10 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
                ()
            with
            | Ok
-               ( Keeper_registry_event_queue.Settled _
-               | Keeper_registry_event_queue.Already_settled _ ) ->
+               ( P.Settled _
+               | P.Already_settled _ ) ->
              Atomic.set finalized true
-           | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+           | Ok (P.Committed_followup_failed { detail; _ }) ->
              failwith detail
            | Error detail -> failwith detail);
           Masc.Keeper_heartbeat_loop.For_testing.check_cancellation_after_exact_terminal_settlement

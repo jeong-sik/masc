@@ -122,7 +122,9 @@ let sdk_termination_semantics = function
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Oas_input_required
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.HookExecutionFailed _) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.HookExecutionFailed _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TerminalToolEffectFailed _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TerminalToolDurabilityFailed _) ->
     Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
@@ -172,6 +174,13 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
 (* Per-variant terminal_reason_code for Agent_sdk.Error.Agent.
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
+let terminal_effect_disposition_to_wire effect_disposition =
+  match Agent_sdk.Error.terminal_effect_disposition effect_disposition with
+  | Agent_sdk.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
+  | Agent_sdk.Tool_contract.Proven_post_effect -> "proven_post_effect"
+  | Agent_sdk.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
+;;
+
 let agent_error_terminal_reason_code = function
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
@@ -180,6 +189,18 @@ let agent_error_terminal_reason_code = function
       "agent_error_hook_execution_failed:hook=%s,stage=%s"
       hook_name
       stage
+  | Agent_sdk.Error.TerminalToolEffectFailed
+      { tool_use_id; effect_disposition; detail = _ } ->
+    Printf.sprintf
+      "agent_error_terminal_tool_effect_failed:tool_use_id=%s,effect_disposition=%s"
+      tool_use_id
+      (terminal_effect_disposition_to_wire effect_disposition)
+  | Agent_sdk.Error.TerminalToolDurabilityFailed
+      { invocation; effect_disposition; detail = _ } ->
+    Printf.sprintf
+      "agent_error_terminal_tool_durability_failed:tool_use_id=%s,effect_disposition=%s"
+      (Agent_sdk.Tool_contract.Invocation.tool_use_id invocation)
+      (terminal_effect_disposition_to_wire effect_disposition)
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->

@@ -50,6 +50,13 @@ let invalid_request_reason_to_wire = function
   | Agent_sdk.Retry.Unknown_invalid_request -> "unknown_invalid_request"
 ;;
 
+let terminal_effect_disposition_to_wire effect_disposition =
+  match Agent_sdk.Error.terminal_effect_disposition effect_disposition with
+  | Agent_sdk.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
+  | Agent_sdk.Tool_contract.Proven_post_effect -> "proven_post_effect"
+  | Agent_sdk.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
+;;
+
 let sdk_api_error_fields = function
   | Agent_sdk.Retry.RateLimited { retry_after; message } ->
     [ "variant", `String "rate_limited"
@@ -100,6 +107,25 @@ let sdk_agent_error_fields = function
     ; "stage", `String stage
     ; "tool_name", Json_util.string_opt_to_json tool_name
     ; "tool_use_id", Json_util.string_opt_to_json tool_use_id
+    ; "detail_digest", `String (sha256_hex detail)
+    ]
+  | Agent_sdk.Error.TerminalToolEffectFailed
+      { tool_use_id; effect_disposition; detail } ->
+    [ "variant", `String "terminal_tool_effect_failed"
+    ; "tool_use_id", `String tool_use_id
+    ; ( "effect_disposition"
+      , `String (terminal_effect_disposition_to_wire effect_disposition) )
+    ; "detail_digest", `String (sha256_hex detail)
+    ]
+  | Agent_sdk.Error.TerminalToolDurabilityFailed
+      { invocation; effect_disposition; detail } ->
+    [ "variant", `String "terminal_tool_durability_failed"
+    ; ( "tool_use_id"
+      , `String (Agent_sdk.Tool_contract.Invocation.tool_use_id invocation) )
+    ; "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
+    ; "planned_index", `Int (Agent_sdk.Tool_contract.Invocation.planned_index invocation)
+    ; ( "effect_disposition"
+      , `String (terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
     ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->

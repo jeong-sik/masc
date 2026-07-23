@@ -50,7 +50,11 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | None ->
     (match err with
      | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent (HookExecutionFailed _) -> None
+     | Agent_sdk.Error.Agent
+         ( HookExecutionFailed _
+         | TerminalToolEffectFailed _
+         | TerminalToolDurabilityFailed _ ) ->
+       None
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation

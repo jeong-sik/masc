@@ -10,6 +10,7 @@ import {
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import {
   deriveKeeperOperationalState,
+  KEEPER_STATUS_LABEL_KO,
   type KeeperOperationalState,
 } from '../../lib/keeper-operational-state'
 import { keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
@@ -34,11 +35,14 @@ interface RegistryKeeperGroup {
   readonly tone: PillTone
 }
 
+// Group labels come from the canonical KEEPER_STATUS_LABEL_KO SSOT so the
+// registry groups read identically to the monitoring band chip and the
+// keeper-workspace roster groups.
 const KEEPER_GROUPS: Readonly<Record<RegistryKeeperGroupId, RegistryKeeperGroup>> = {
-  running: { id: 'running', label: '실행 중', dot: 'ok', tone: 'ok' },
-  stuck: { id: 'stuck', label: '차단 · 확인 필요', dot: 'bad', tone: 'bad' },
-  paused: { id: 'paused', label: '일시정지', dot: 'warn', tone: 'warn' },
-  offline: { id: 'offline', label: '중지 · 미기동', dot: 'idle', tone: 'neutral' },
+  running: { id: 'running', label: KEEPER_STATUS_LABEL_KO.running, dot: 'ok', tone: 'ok' },
+  stuck: { id: 'stuck', label: KEEPER_STATUS_LABEL_KO.stuck, dot: 'bad', tone: 'bad' },
+  paused: { id: 'paused', label: KEEPER_STATUS_LABEL_KO.paused, dot: 'warn', tone: 'warn' },
+  offline: { id: 'offline', label: KEEPER_STATUS_LABEL_KO.offline, dot: 'idle', tone: 'neutral' },
 }
 
 export function keeperGroup(
@@ -86,7 +90,7 @@ function configuredOnly(state: KeeperOperationalState): boolean {
 function PersonaLayer() {
   return html`
     <div class="reg-layer reg-personas">
-      <h3 style="margin:0 0 8px;">Persona</h3>
+      <h2 style="margin:0 0 8px;">Persona</h2>
       <p style="margin:0 0 12px;opacity:.7;font-size:12px;">
         페르소나를 만들고 편집합니다. <strong>키퍼 시작</strong>은 그 페르소나의 기본 지시사항으로
         키퍼를 생성하고 곧바로 부팅합니다 — 설정만 해두는 경로는 아직 없습니다.
@@ -123,8 +127,17 @@ export function RegistrySurface() {
     <section class="reg-surface" style="padding:16px;display:flex;flex-direction:column;gap:20px;">
       <${PersonaLayer} />
 
-      <div class="reg-layer reg-keepers">
-        <h3 style="margin:0 0 8px;">Keeper <${Pill} tone="info">${roster.length}<//></h3>
+      <!-- Persona-centric registry: persona CRUD is the primary surface;
+           keeper instances are a collapsed, de-emphasized listing below.
+           The <details> toggle keeps groupRegistryKeepers + the
+           #registry?keeper=<name> deep link behavior intact. -->
+      <details class="reg-layer reg-keepers">
+        <summary style="cursor:pointer;list-style:none;">
+          <h3 style="margin:0;display:inline-flex;align-items:center;gap:6px;">
+            Keeper 인스턴스 <${Pill} tone="info">${roster.length}<//>
+          </h3>
+        </summary>
+        <div style="margin-top:12px;">
         ${Object.values(KEEPER_GROUPS).map(group => html`
           <div key=${group.id} class="reg-kgroup" style="margin-bottom:12px;">
             <h4 style="margin:0 0 6px;display:flex;align-items:center;gap:6px;">
@@ -161,7 +174,8 @@ export function RegistrySurface() {
                 `}
           </div>
         `)}
-      </div>
+        </div>
+      </details>
     </section>
   `
 }

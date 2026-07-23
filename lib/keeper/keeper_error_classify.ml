@@ -658,41 +658,44 @@ let degraded_rotation_after_recoverable_error
 
 (** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
     provider refused the request body itself (malformed payload, orphan
-    tool-call residues), so same-turn retry is futile. *)
+    tool-call residues), so same-turn retry is futile.  Also matches legacy
+    string-rendered ["Invalid request"] / ["Bad Request"] messages. *)
 let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
-  | _ -> false
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    let has_prefix str prefix =
+      let len_p = String.length prefix in
+      String.length str >= len_p && String.sub str 0 len_p = prefix
+    in
+    has_prefix msg "Invalid request"
+    || has_prefix msg "Bad Request"
+    || has_prefix msg "oas-ollama_cloud" && String.contains msg '4'
 
 (** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  (* Other API error variants do not indicate context overflow. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (AuthorizationError _)
-  | Agent_sdk.Error.Api (PaymentRequired _)
-  | Agent_sdk.Error.Api (InvalidRequest _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  | Agent_sdk.Error.Provider _ -> false
-  (* Other agent error variants. *)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (HookExecutionFailed _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-API / non-Agent error families. *)
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    (match String.split_on_char ':' msg with
+     | "Context overflow" :: _ -> true
+     | _ ->
+       let contains_substring str sub =
+         let len_s = String.length str in
+         let len_sub = String.length sub in
+         if len_sub > len_s then false
+         else
+           let found = ref false in
+           for i = 0 to len_s - len_sub do
+             if not !found && String.sub str i len_sub = sub then found := true
+           done;
+           !found
+       in
+       contains_substring msg "model_context_window_exceeded"
+       || contains_substring msg "Context overflow")
 
 (* Invariant for this predicate: every class listed here is exempted from the
    crash threshold ([Keeper_unified_turn_failure.record_failure_observation]
@@ -705,6 +708,15 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
    - context overflow: accounted at the point of detection by
      [Keeper_turn_runtime_budget.record_overflow_failure], and its in-lane
      compaction retries are bounded (#25536).
+   - 0-byte empty completion: bounded by
+     [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
+     [empty_completion_exemption_budget] consecutive exempted empty
+     completions the failure counts toward the crash threshold again, and a
+     successful turn resets the budget.  Only the modeled, non-overflow
+     shapes are exempt via [is_empty_completion_error]; the unmodeled
+     stop_reason shape that OAS reports as [InvalidRequest] is NOT an
+     empty-completion exemption — it falls under the [InvalidRequest] class
+     below.
    - deterministic invalid request (400): bounded by the per-keeper
      consecutive counter in
      [Keeper_unified_turn_failure.note_invalid_request_failure]; after

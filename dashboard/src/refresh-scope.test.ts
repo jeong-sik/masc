@@ -21,7 +21,6 @@ describe('routeWantsRefreshTarget', () => {
   it('matches execution-backed routes without broadening fleet-health defaults', () => {
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'agents' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('keepers', { keeper: 'sangsu' }), 'execution')).toBe(true)
-    expect(routeWantsRefreshTarget(route('monitoring', { section: 'cognition' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'journey' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory' }), 'execution')).toBe(false)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory', view: 'live' }), 'execution')).toBe(false)

@@ -114,6 +114,18 @@ let run_eio f =
   @@ fun () -> f ~sw ~net ~clock
 ;;
 
+let run_eio_without_context f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  f
+    ~sw
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+;;
+
 let prepare_exn entry =
   match Worker.For_testing.prepare_flow ~entry with
   | Ok prepared -> prepared
@@ -655,7 +667,7 @@ let test_cancellation_after_dispatch_is_terminal () =
 ;;
 
 let test_visible_uncertainty_withholds_production_drain () =
-  run_eio @@ fun ~sw ~net ~clock ->
+  run_eio_without_context @@ fun ~sw ~net ~clock ~mono_clock ->
   with_temp_dir "hitl-uncertain-lifecycle" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
@@ -678,10 +690,11 @@ let test_visible_uncertainty_withholds_production_drain () =
        select_auto_judge_mode base_path;
        let uncertain = pending_entry ~input_tag:"uncertain" ~base_path in
        let successor = pending_entry ~input_tag:"successor" ~base_path in
-       let mono_clock =
-         match Eio_context.get_mono_clock_opt () with
-         | Some mono_clock -> mono_clock
-         | None -> fail "test monotonic clock is unavailable"
+       let writer_reached, resolve_writer_reached = Eio.Promise.create () in
+       let visible_writer path body =
+         let outcome = visible_after_rename_writer path body in
+         ignore (Eio.Promise.try_resolve resolve_writer_reached ());
+         outcome
        in
        let supervisor_observed_uncertainty =
          match
@@ -697,13 +710,13 @@ let test_visible_uncertainty_withholds_production_drain () =
               Gate.For_testing.spawn_auto_judge_entry_with_worker
                 ~spawn_worker:
                   (Worker.For_testing.spawn_with_writers
-                     ~complete_writer:visible_after_rename_writer)
+                     ~complete_writer:visible_writer)
                 uncertain
             with
             | Ok true -> ()
             | Ok false -> fail "production Gate chain did not claim oldest work"
             | Error detail -> fail detail);
-           Eio.Time.sleep clock 0.2;
+           Eio.Promise.await writer_reached;
            false
          with
          | exception Worker.Exact_terminalization_persistence_failed _ -> true

@@ -524,7 +524,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
   let result =
     match ensure_keeper_meta_with_cause ctx.config name with
     | Ok meta -> Ok { meta; materialized = false }
-    | Error original_error -> (
+    | Error ({ cause = Missing_meta; _ } as original_error) -> (
         match keeper_toml_path_opt_for_config ctx.config name with
         | None -> Error original_error
         | Some toml_path -> (
@@ -563,6 +563,7 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                   | Ok meta -> Ok { meta; materialized = true }
                   | Error msg ->
                       Error (materialized_reload_boot_error ~name ~toml_path msg))))
+    | Error original_error -> Error original_error
   in
   remember_boot_meta_result ctx name result
 

@@ -742,7 +742,7 @@ let settle_claimed_lease
                 keeper_name
                 ~settled_at
                 ~lease
-                ~disposition_id:disposition.disposition_id))
+                ~disposition_id:disposition.disposition_id)))
 ;;
 
 let exact_execution_guard ~base_path ~keeper_name ~lease =

@@ -1435,7 +1435,7 @@ let prepare_registration_after_exact_recovery_result
                    lease.lease_id)
             | Some lease, Some { status = Disposition_prepared disposition; _ } ->
               (match disposition.outcome with
-               | Terminal _ -> finish_exact lease disposition state))
+               | Terminal _ -> finish_exact lease disposition state)))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

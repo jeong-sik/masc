@@ -382,15 +382,19 @@ let compare_auto_judge_entries
 ;;
 
 let earliest_auto_judge_for_owner ?exclude_id ~base_path ~keeper_name entries =
-  entries
-  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+  let sorted =
+    entries
+    |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
       String.equal entry.audit_base_path base_path
       && String.equal entry.keeper_name keeper_name
       && (match exclude_id with
           | Some id -> not (String.equal id entry.id)
           | None -> true))
-  |> List.sort compare_auto_judge_entries
-  |> List.hd_opt
+    |> List.sort compare_auto_judge_entries
+  in
+  match sorted with
+  | [] -> None
+  | entry :: _ -> Some entry
 ;;
 
 let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =

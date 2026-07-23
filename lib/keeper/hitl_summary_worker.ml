@@ -764,24 +764,29 @@ let spawn_with
   let* prepared = prepare_flow ~entry in
   let clock = Eio_context.get_clock_opt () in
   Eio.Fiber.fork ~sw (fun () ->
-    match
-      execute_prepared_flow_with_queue_writers
-        ~queue_writers
-        ~net
-        ?clock
-        ~on_summary
-        prepared
-    with
-    | () -> on_finish Conclusive_terminalization
-    | exception Eio.Cancel.Cancelled _ as cancellation ->
+    let execution_outcome =
+      try
+        execute_prepared_flow_with_queue_writers
+          ~queue_writers
+          ~net
+          ?clock
+          ~on_summary
+          prepared;
+        `Completed
+      with
+      | Eio.Cancel.Cancelled _ as cancellation -> `Cancelled cancellation
+      | Exact_terminalization_persistence_failed _ as uncertainty ->
+        `Uncertain uncertainty
+      | exn -> `Uncertain exn
+    in
+    match execution_outcome with
+    | `Completed -> on_finish Conclusive_terminalization
+    | `Cancelled cancellation ->
       on_finish Conclusive_terminalization;
       raise cancellation
-    | exception Exact_terminalization_persistence_failed _ as uncertainty ->
+    | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;
-      raise uncertainty
-    | exception exn ->
-      on_finish Terminalization_persistence_uncertain;
-      raise exn);
+      raise uncertainty);
   Ok ()
 ;;
 

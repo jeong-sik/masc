@@ -39,6 +39,7 @@ let with_temp_dir prefix f =
 let overlay_target = "overlay-only-target"
 let replacement_target = "replacement-only-target"
 let replacement_structured_judge_target = "replacement_provider.replacement"
+let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
 let embedded_target = "ollama-cloud-minimax-m3-json"
 
@@ -109,17 +110,29 @@ let overlay_catalog =
 let replacement_catalog =
   catalog_toml
     ~additional_target_ids:
-      [ replacement_structured_judge_target; replacement_secondary_target ]
+      [ replacement_structured_judge_target
+      ; replacement_secondary_runtime_target
+      ; replacement_secondary_target
+      ]
     ~provider_id:"replacement_provider"
     ~model_id:"replacement-model"
     ~target_id:replacement_target
     ()
 ;;
 
-let runtime_toml ?hitl_slots lane_target =
+let runtime_toml ?hitl_slots ?structured_judge_candidates lane_target =
+  let structured_judge_route, structured_judge_lane =
+    match structured_judge_candidates with
+    | None -> "", ""
+    | Some candidates ->
+      ( "structured_judge = \"judges\"\n"
+      , Printf.sprintf
+          "\n[runtime.lanes.judges]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
+          (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ") )
+  in
   let base =
-    Printf.sprintf
-      {|[providers.replacement_provider]
+    (Printf.sprintf
+       {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
 
@@ -127,15 +140,32 @@ endpoint = "http://127.0.0.1:1/v1"
 api-name = "replacement-model"
 max-context = 8192
 
+[models.replacement.capabilities]
+supports-response-format-json = true
+supports-structured-output = true
+
+[models.secondary]
+api-name = "replacement-model"
+max-context = 8192
+
+[models.secondary.capabilities]
+supports-response-format-json = true
+supports-structured-output = true
+
 [replacement_provider.replacement]
+
+[replacement_provider.secondary]
 
 [runtime]
 default = "replacement_provider.replacement"
+%s
 
 [runtime.exact_output_lanes.compaction_exact]
 slots = [%S]
 |}
-    lane_target
+       structured_judge_route
+       lane_target)
+    ^ structured_judge_lane
   in
   match hitl_slots with
   | None -> base

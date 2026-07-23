@@ -454,10 +454,29 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
     ~lane_id:"hitl_auto_judge"
     ~expected:[ Runtime.runtime_id_for_structured_judge () ]
     default_registry;
+  let structured_judge_candidates =
+    [ replacement_structured_judge_target
+    ; replacement_secondary_runtime_target
+    ]
+  in
+  write_file
+    runtime_path
+    (runtime_toml
+       ~structured_judge_candidates
+       replacement_target);
+  create_server_state ();
+  require_lane_slots
+    "runtime-lane structured judge expands to ordered opaque candidates"
+    ~lane_id:"hitl_auto_judge"
+    ~expected:structured_judge_candidates
+    (current_registry "runtime-lane HITL bootstrap");
   let explicit_slots = [ replacement_secondary_target; replacement_target ] in
   write_file
     runtime_path
-    (runtime_toml ~hitl_slots:explicit_slots replacement_target);
+    (runtime_toml
+       ~hitl_slots:explicit_slots
+       ~structured_judge_candidates
+       replacement_target);
   create_server_state ();
   require_lane_slots
     "explicit HITL lane preserves configured slot order"

@@ -198,6 +198,20 @@ let load_exact_output_lane_declarations () =
 
 let hitl_auto_judge_lane_id = "hitl_auto_judge"
 
+let structured_judge_exact_slot_ids () =
+  let assignment_id = Runtime.runtime_id_for_structured_judge () in
+  match Runtime.resolve_assignment assignment_id with
+  | `Single_runtime runtime -> [ runtime.Runtime.id ]
+  | `Lane lane -> lane.Runtime_lane.candidates
+  | `Missing ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "exact-output registry: structured-judge assignment %S does not resolve \
+             to a runtime or lane"
+            assignment_id))
+;;
+
 let ensure_hitl_auto_judge_lane lanes =
   if
     List.exists
@@ -209,7 +223,7 @@ let ensure_hitl_auto_judge_lane lanes =
   else
     lanes
     @ [ { Runtime_schema.id = hitl_auto_judge_lane_id
-        ; slot_ids = [ Runtime.runtime_id_for_structured_judge () ]
+        ; slot_ids = structured_judge_exact_slot_ids ()
         }
       ]
 ;;

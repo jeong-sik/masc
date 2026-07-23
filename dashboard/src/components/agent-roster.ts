@@ -19,7 +19,6 @@ import {
 } from '../store'
 import { EmptyState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
-import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import { AgentAvatar } from './overview/agent-avatar'
 import { AgentPresence } from './common/agent-presence'
@@ -65,7 +64,11 @@ import {
 // `composite.runtime_attention.execution_current`, producing the
 // 2026-05-19 lifecycle-worker symptom (`현재 차단 · synthetic_stall` in
 // the list while detail showed `턴 진행 중 · executing live`).
-import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import {
+  deriveKeeperOperationalState,
+  KEEPER_STATUS_LABEL_KO,
+  KEEPER_TRANSIENT_LABEL_KO,
+} from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
@@ -77,13 +80,18 @@ import { operatorSnapshot } from '../operator-store'
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
-function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
+// The band chip is the single status text per row (dashboard-ssot
+// unification): hints that merely restate the canonical band label
+// (감시 중 ≈ 실행 중, 확인 필요 = 확인 필요, 재개 대기 ≈ 일시정지,
+// 전이 ≈ 전이 중) are suppressed. Only the offline action axis survives —
+// '기동 필요' / '연결 없음' say what to do, not what the state is.
+function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string | null {
   switch (band) {
-    case 'active': return '감시 중'
-    case 'attention': return '확인 필요'
-    case 'paused': return '재개 대기'
+    case 'active': return null
+    case 'attention': return null
+    case 'paused': return null
     case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
-    case 'transient': return '전이'
+    case 'transient': return null
   }
 }
 
@@ -145,7 +153,10 @@ function rosterContextMeta(
  *  - running + synthetic_stall → `상태 추정` (diagnostic; not a blocker)
  *  - running           → fallback to diagnostic error / monitoring hint
  *  - paused           → pause cause when available, because it explains the
- *                       resume gate.
+ *                       resume gate. A bare paused band with no recorded
+ *                       cause returns null — the band chip already reads
+ *                       `일시정지`, and a second identical status text per
+ *                       row is the duplication this SSOT pass removed.
  *  - offline          → interrupted work / diagnostics / monitoring hint when
  *                       available; otherwise the row action axis carries the
  *                       "start required" state.
@@ -182,8 +193,9 @@ export function rosterStateNote(
       return { label: '일시정지 원인', text: summary, kind: blockerClass }
     }
 
-    const hint = monitoringHint?.trim()
-    if (hint) return { label: '일시정지', text: hint, kind: blockerClass }
+    // No recorded cause: suppress the note entirely. The monitoring hint
+    // fallback used to emit { label: '일시정지', text: hint } here, which
+    // restated the band chip as a second status text on the same row.
     return null
   }
 
@@ -961,7 +973,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ]
       : [
           livePausedKeepers > 0 ? `일시정지 ${livePausedKeepers}개` : null,
-          liveOfflineKeepers > 0 ? `오프라인 ${liveOfflineKeepers}개` : null,
+          liveOfflineKeepers > 0 ? `중지 ${liveOfflineKeepers}개` : null,
           pausedOutsideDetail > 0 ? `목록 밖 일시정지 ${pausedOutsideDetail}개` : null,
           notStartedKeepers > 0 ? `미기동 ${notStartedKeepers}개` : null,
         ]
@@ -1119,8 +1131,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // chip text: band label (운영판정) so the operational verdict reads first,
     // matching the legacy column the tests + operators rely on. gloss line:
     // blocker reason when present, else the stage/phase label. The band action
-    // hint (재개 대기 / 기동 필요 / 감시 중 / 연결 없음) renders as a second
-    // muted line. All fall back to honest copy, never faked.
+    // hint survives only for offline rows (기동 필요 / 연결 없음 — an action
+    // axis, not a status restatement). All fall back to honest copy, never
+    // faked.
     const chipLabel = row.band.label
     // autoboot exclusion (declarative_autoboot_disabled / autoboot_disabled):
     // why this keeper is not booting. null when bootable; paused has its own
@@ -1135,7 +1148,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // "unknown" when neither is available.
     const glossText = row.stateNote
       ? blockerDisplay.cell
-      : (stageLabel ?? row.presenceDisplay.detail ?? '상태 확인 필요')
+      : (stageLabel
+        ?? row.presenceDisplay.detail
+        // A bare "needs checking" gloss only earns its place under the
+        // active band — under paused/offline it would read as a second,
+        // vaguer status text next to the canonical band chip.
+        ?? (row.band.key === 'active' ? '상태 확인 필요' : ''))
     const glossTitle = row.stateNote ? blockerDisplay.title : (stageLabel ?? '')
     const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '—')
     const ctxPct = row.contextMeta?.pct ?? null
@@ -1183,7 +1201,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ${row.band.key === 'attention' ? html`<span class="fl-att">▲</span>` : null}
             </div>
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-secondary)]">
-              <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
+              <!-- One status text per keeper row: the band chip in fl-state
+                   owns the canonical label, so keeper rows render the
+                   presence dot (and any informative detail) label-less. -->
+              <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" showLabel=${!row.isKeeper} />
             </div>
             ${row.keeperRuntime?.sandbox_profile === 'local'
               ? html`<div class="fl-ns"><span class="fl-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span> worktree 격리</div>`
@@ -1191,13 +1212,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </div>
 
-        <div class="fl-state" aria-label=${`운영판정 · 차단 · 단계 ${chipLabel} ${glossText} ${row.bandActionHint}`}>
+        <div class="fl-state" aria-label=${`운영판정 · 차단 · 단계 ${chipLabel} ${glossText}${row.bandActionHint ? ` ${row.bandActionHint}` : ''}`}>
           <span class="fl-chip" data-tone=${tone} title=${row.band.description}>
             <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
             ${chipLabel}
           </span>
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
-          <span class="fl-gloss">${row.bandActionHint}</span>
+          ${row.bandActionHint ? html`<span class="fl-gloss">${row.bandActionHint}</span>` : null}
           ${exclusionLabel
             ? html`<span class="fl-gloss" data-exclusion title="자동 부팅에서 제외됨 — 서버 시작 시 기동하지 않습니다. 기동 버튼으로 직접 켜세요.">${exclusionLabel}</span>`
             : null}
@@ -1255,9 +1276,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
         <div class="fl-health">
           <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
-          ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 <b>${healthTransient}</b></span>` : null}
+          ${healthTransient > 0 ? html`<span class="fl-hpill busy">${KEEPER_TRANSIENT_LABEL_KO} <b>${healthTransient}</b></span>` : null}
           <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
-          <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
+          <span class="fl-hpill">${KEEPER_STATUS_LABEL_KO.offline} <b>${healthOffline}</b></span>
           ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
         </div>
         <span class="fl-spacer"></span>
@@ -1269,7 +1290,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           onClick=${() => navigate('registry', {})}
         >＋ 새 Keeper</button>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
-        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 오프라인 rows ${healthOffline}</span>
+        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
       </header>
 
       ${showExecutionFallbackState
@@ -1374,7 +1395,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
-                  <${AgentPresence} status=${selectedRow.presenceDisplay.status} detail=${selectedRow.presenceDisplay.detail} size="sm" />
+                  <!-- KeeperPhaseBadge below is the aside's single status
+                       display; the presence label would duplicate it. -->
+                  <${AgentPresence} status=${selectedRow.presenceDisplay.status} detail=${selectedRow.presenceDisplay.detail} size="sm" showLabel=${!selectedRow.isKeeper} />
                   <span class="inline-flex items-center gap-1 text-[var(--color-fg-muted)]">
                     ${selectedRow.lastActivityLabel}
                     <span class="text-[var(--color-fg-primary)]">
@@ -1482,35 +1505,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   ${selectedRow.toolAuditAt ? html`
                     <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
                   ` : null}
-                </div>
-              </div>
-            ` : null}
-
-            ${selectedRow.keeperRuntime ? html`
-              <div class="fl-as-sec">
-                <h4>상세 렌즈</h4>
-                <div class="flex flex-wrap gap-2">
-                  <${RouteLink}
-                    tab="monitoring"
-                    params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'tool-access' }}
-                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                  >
-                    Cognition
-                  <//>
-                  <${RouteLink}
-                    tab="monitoring"
-                    params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'tool-access' }}
-                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                  >
-                    Tool Access
-                  <//>
-                  <${RouteLink}
-                    tab="monitoring"
-                    params=${{ section: 'runtime', view: 'inspector', keeper: selectedRow.keeperRuntime.name }}
-                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                  >
-                    Runtime Trace
-                  <//>
                 </div>
               </div>
             ` : null}

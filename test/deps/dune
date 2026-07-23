@@ -126,6 +126,7 @@
   (re_export masc.response)
   (re_export masc.shared_audit)
   (re_export masc.tool_schemas)
+  (re_export masc.tool_schemas_specs)
   (re_export masc.tool_catalog_surfaces)
   (re_export masc.config_dir_resolver)
   ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.

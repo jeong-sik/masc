@@ -61,8 +61,7 @@ type RefreshTask =
 //            transport-health / feature-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
-//   Outliers — `journey` (execution only) and `cognition` keep dedicated
-//            branches above.
+//   Outliers — `journey` (execution only) keeps a dedicated branch above.
 const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
@@ -93,9 +92,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['execution']
       }
       if (!routeState.params.section || routeState.params.section === 'agents') {
-        return ['namespaceTruth', 'execution', 'missionSnapshot']
-      }
-      if (routeState.params.section === 'cognition') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
       // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)

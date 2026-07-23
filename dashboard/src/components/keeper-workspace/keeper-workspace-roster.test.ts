@@ -64,7 +64,7 @@ describe('KeeperWorkspaceRoster', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     selectStatusSort()
     const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
-    expect(labels).toEqual(['실행 중', '대기', '중지'])
+    expect(labels).toEqual(['실행 중', '일시정지', '중지'])
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
@@ -230,6 +230,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(result).toEqual({
       total: 4,
       running: 2,
+      stuck: 0,
       paused: 1,
       offline: 1,
       attention: 1,
@@ -340,7 +341,7 @@ describe('KeeperWorkspaceRoster', () => {
     const headers = Array.from(host.querySelectorAll('.kw-roster-group'))
     expect(headers.map(h => h.textContent)).toEqual([
       expect.stringContaining('실행 중'),
-      expect.stringContaining('대기'),
+      expect.stringContaining('일시정지'),
       expect.stringContaining('중지'),
     ])
     expect(Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)).toEqual(['1', '1', '1'])

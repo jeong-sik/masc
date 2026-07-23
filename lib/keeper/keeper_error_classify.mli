@@ -64,6 +64,9 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when a structured error indicates invalid request or bad request. *)
+val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 

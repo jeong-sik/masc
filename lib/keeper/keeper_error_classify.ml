@@ -709,34 +709,42 @@ let degraded_rotation_after_recoverable_error
          None)
 
 (** [true] when a structured error indicates context overflow. *)
+let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest _) -> true
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    let has_prefix str prefix =
+      let len_p = String.length prefix in
+      String.length str >= len_p && String.sub str 0 len_p = prefix
+    in
+    has_prefix msg "Invalid request"
+    || has_prefix msg "Bad Request"
+    || has_prefix msg "oas-ollama_cloud" && String.contains msg '4'
+
+(** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  (* Other API error variants do not indicate context overflow. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (AuthorizationError _)
-  | Agent_sdk.Error.Api (PaymentRequired _)
-  | Agent_sdk.Error.Api (InvalidRequest _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  | Agent_sdk.Error.Provider _ -> false
-  (* Other agent error variants. *)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (HookExecutionFailed _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-API / non-Agent error families. *)
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+  | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
+  | _ ->
+    let msg = Agent_sdk.Error.to_string err in
+    (match String.split_on_char ':' msg with
+     | "Context overflow" :: _ -> true
+     | _ ->
+       let contains_substring str sub =
+         let len_s = String.length str in
+         let len_sub = String.length sub in
+         if len_sub > len_s then false
+         else
+           let found = ref false in
+           for i = 0 to len_s - len_sub do
+             if not !found && String.sub str i len_sub = sub then found := true
+           done;
+           !found
+       in
+       contains_substring msg "model_context_window_exceeded"
+       || contains_substring msg "Context overflow")
 
 (* Invariant for this predicate: every class listed here is exempted from the
    crash threshold ([Keeper_unified_turn_failure.record_failure_observation]
@@ -771,6 +779,7 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   || is_auto_recoverable_runtime_exhausted_error err
   || is_context_overflow err
   || is_empty_completion_error err
+  || is_invalid_request_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err

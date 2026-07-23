@@ -511,19 +511,12 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
                model_run_id = identity.call_id
              }))
   in
-  let legacy_source =
-    submit_eligibility_entry ~base_path ~keeper_name "legacy-uncertain"
-  in
-  let legacy =
-    { legacy_source with exact_attempt = AQ.Legacy_execution_uncertain }
-  in
   let check_ready label expected entry =
     check bool label expected (Gate.For_testing.auto_judge_entry_ready entry)
   in
   check_ready "new unbound judgment is startable" true not_requested;
   check_ready "pending unbound judgment is resumable" true pending;
   check_ready "available judgment does not start a provider worker" false available;
-  check_ready "legacy execution uncertainty is not worker-ready" false legacy;
   check_ready "dispatch-uncertain binding is not worker-ready" false dispatch_uncertain;
   check_ready
     "released-before-dispatch binding is not worker-ready"
@@ -535,7 +528,6 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
    | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_post_dispatch_failure; _ } ->
      ()
    | AQ.Exact_unbound
-   | AQ.Legacy_execution_uncertain
    | AQ.Exact_bound _ ->
      fail "typed quarantine cause was not persisted");
   (match completed.exact_attempt, completed.summary_status with
@@ -551,7 +543,6 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
       (not_requested
        :: pending
        :: available
-       :: legacy
        :: other_owner
        :: [ dispatch_uncertain; released_before_dispatch; quarantined; completed ])
   in

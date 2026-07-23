@@ -360,9 +360,7 @@ let classify_auto_judge_entry
     Auto_judge_finalizable summary
   | Keeper_approval_queue.Exact_unbound,
     Keeper_approval_queue.Summary_failed _
-  | ( Keeper_approval_queue.Exact_bound _
-    | Keeper_approval_queue.Legacy_execution_uncertain ),
-    _ ->
+  | Keeper_approval_queue.Exact_bound _, _ ->
     Auto_judge_ineligible
 ;;
 
@@ -783,8 +781,7 @@ let finalize_recovered_judgment
          ("exact completion durability confirmation failed; Gate finalization \
            withheld: "
           ^ Keeper_approval_queue.exact_attempt_error_to_string error))
-  | Keeper_approval_queue.Exact_bound _
-  | Keeper_approval_queue.Legacy_execution_uncertain ->
+  | Keeper_approval_queue.Exact_bound _ ->
     Error
       "recovered Auto Judge entry is not an unbound or completed exact judgment"
 ;;

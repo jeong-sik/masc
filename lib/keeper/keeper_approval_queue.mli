@@ -13,7 +13,6 @@ type storage_error =
 
 type summary_transition_rejection =
   | Summary_exact_attempt_bound of exact_attempt_binding
-  | Summary_legacy_execution_uncertain of string
 
 type summary_transition_error =
   | Summary_transition_storage_error of storage_error
@@ -29,7 +28,6 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
-  | Exact_attempt_legacy_execution_uncertain of string
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of

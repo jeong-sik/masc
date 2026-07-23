@@ -5,6 +5,10 @@ type publication_error =
   | Registry_not_published
   | Publication_busy
   | Generation_exhausted
+  | Replacement_base_changed of
+      { expected_generation : int64 option
+      ; actual_generation : int64 option
+      }
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
@@ -33,25 +37,7 @@ type publication_error =
       ; target_ref : string
       }
 
-type lane_lookup_error = Exact_lane_unconfigured of { lane_id : string }
-
-type slot_resolution_error =
-  | Blank_slot_id of { position : int }
-  | Duplicate_slot_id of
-      { position : int
-      ; slot_id : string
-      }
-  | Invalid_slot_id of
-      { position : int
-      ; slot_id : string
-      ; cause : Agent_sdk.Exact_output.target_ref_error
-      }
-  | Slot_target_unavailable of
-      { position : int
-      ; slot_id : string
-      ; cause : Agent_sdk.Exact_output.target_selection_error
-      }
-
+type prepared_replacement
 type reservation
 type reservation_error = Reservation_inactive
 
@@ -59,6 +45,24 @@ type selected_slot =
   { slot_id : string
   ; target : Agent_sdk.Exact_output.selected_target
   }
+
+type unavailable_slot =
+  { position : int
+  ; slot_id : string
+  ; cause : Agent_sdk.Exact_output.target_selection_error
+  }
+
+type resolved_lane =
+  { selected_slots : selected_slot list
+  ; unavailable_slots : unavailable_slot list
+  }
+
+type lane_resolution_error =
+  | Exact_lane_unconfigured of { lane_id : string }
+  | No_usable_lane_slots of
+      { lane_id : string
+      ; unavailable_slots : unavailable_slot list
+      }
 
 val publish
   :  lanes:Runtime_schema.exact_output_lane_decl list
@@ -69,20 +73,27 @@ val publish
     monotonically. Invalid declarations are rejected before the Atomic is
     changed.
 
-    Credential presence is deliberately excluded from publication admission.
-    {!resolve_slots} performs target resolution against the same frozen resolver
-    snapshot when execution selects slots. Config-level errors — blank or
-    duplicate ids, malformed or unknown target refs — remain fatal at
-    publish. Returns [Publication_busy] while a replacement reservation is
-    active. *)
+    Every declaration string is converted to an immutable OAS admitted-target
+    handle before publication. Credential presence is deliberately excluded
+    from publication admission. Config-level errors — blank or duplicate ids,
+    malformed or unknown target refs — remain fatal at publish. Returns
+    [Publication_busy] while a replacement reservation is active. *)
 
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> (prepared_replacement, publication_error) result
+(** Purely admit [lanes] against the currently published frozen resolver and
+    return an immutable candidate tied to that exact base registry identity.
+    This performs no credential resolution, global mutation, or publication
+    fence. When no registry exists, only an empty lane set can be prepared. *)
+
+val reserve_replacement
+  :  prepared_replacement
   -> (reservation, publication_error) result
-(** Validate [lanes], reserve the next generation, and install one opaque
-    one-shot publication reservation. When no registry exists, only an empty
-    lane set may be reserved; its candidate remains unpublished while fencing
-    a concurrent first publication. *)
+(** Atomically verify that the candidate's exact base registry is still
+    current, then install its opaque one-shot publication reservation. A stale
+    candidate fails with [Replacement_base_changed]; an active reservation
+    fails with [Publication_busy]. *)
 
 val finish_replacement : reservation -> (unit, reservation_error) result
 (** Consume the active reservation and publish its prepared candidate. An empty
@@ -98,16 +109,14 @@ val current : unit -> (t, publication_error) result
 
 val generation : t -> int64
 
-val lane_slots : t -> lane_id:string -> (string list, lane_lookup_error) result
-(** Return one lane's opaque target refs in declaration order from exactly the
-    supplied registry generation. *)
-
-val resolve_slots : t -> string list -> (selected_slot, slot_resolution_error) result list
-(** Resolve an ordered set of opaque slot ids against exactly the supplied
-    registry generation. Every input slot produces one outcome in declaration
-    order, so a selection failure cannot erase later failover candidates. *)
+val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
+(** Resolve one lane exclusively from the immutable admitted handles retained
+    by the supplied registry generation. Credential-missing, invalid, and
+    read-failed slots are returned as typed unavailable diagnostics in
+    declaration order while usable slots retain their relative order. The lane
+    fails only when it is unconfigured or no admitted slot is usable. *)
 
 val publication_error_to_string : publication_error -> string
-val lane_lookup_error_to_string : lane_lookup_error -> string
-val slot_resolution_error_to_string : slot_resolution_error -> string
+val unavailable_slot_to_string : unavailable_slot -> string
+val lane_resolution_error_to_string : lane_resolution_error -> string
 val reservation_error_to_string : reservation_error -> string

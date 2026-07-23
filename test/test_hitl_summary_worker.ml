@@ -256,6 +256,228 @@ let test_provenance_mismatch_matrix_fails_closed () =
     mismatches
 ;;
 
+type lifecycle_observation =
+  Worker.For_testing.attempt_observation
+
+type lifecycle_probe =
+  { execute_calls : string list ref
+  ; release_calls : int ref
+  ; gate_calls : int ref
+  ; quarantines : Q.exact_attempt_quarantine_cause list ref
+  }
+
+let lifecycle_observation slot_id phase dispatch_count : lifecycle_observation =
+  { slot_id
+  ; call_id = "call-" ^ slot_id
+  ; phase
+  ; dispatch_count
+  ; plan_fingerprint = "plan-" ^ slot_id
+  ; request_body_sha256 = "body-" ^ slot_id
+  ; catalog_generation_fingerprint = "catalog-generation"
+  ; catalog_evidence_sha256 = "catalog-evidence"
+  ; target_identity_fingerprint = "target-" ^ slot_id
+  }
+;;
+
+let run_lifecycle_case
+      ?(bind = fun _ -> Worker.For_testing.Lifecycle_fsync_completed)
+      ?(release = fun _ -> Worker.For_testing.Lifecycle_fsync_completed)
+      ?(fail = fun _ ~reason:_ -> Worker.For_testing.Lifecycle_fsync_completed)
+      ?(quarantine =
+        fun _ _ -> Worker.For_testing.Lifecycle_fsync_completed)
+      ?(complete =
+        fun _ _ -> Worker.For_testing.Lifecycle_fsync_completed)
+      ~execute
+      slot_ids
+  =
+  let execute_calls = ref [] in
+  let release_calls = ref 0 in
+  let gate_calls = ref 0 in
+  let quarantines = ref [] in
+  let effects : string Worker.For_testing.lifecycle_effects =
+    { bind
+    ; release =
+        (fun observation ->
+           incr release_calls;
+           release observation)
+    ; fail
+    ; quarantine =
+        (fun observation cause ->
+           quarantines := !quarantines @ [ cause ];
+           quarantine observation cause)
+    ; complete
+    ; execute =
+        (fun slot_id ->
+           execute_calls := !execute_calls @ [ slot_id ];
+           execute slot_id)
+    ; parse =
+        (fun ~model_run_id output ->
+           Worker.For_testing.parse_summary
+             ~generated_at:1780587600.0
+             ~model_run_id
+             output)
+    ; on_summary = (fun _ -> incr gate_calls)
+    ; record_outcome = (fun _ -> ())
+    ; protect = (fun action -> action ())
+    ; report_write_issue = (fun ~operation:_ _ ~detail:_ -> ())
+    }
+  in
+  let candidates =
+    List.map
+      (fun slot_id ->
+         { Worker.For_testing.initial_observation =
+             lifecycle_observation slot_id Exact_output.Not_started 0
+         ; candidate = slot_id
+         })
+      slot_ids
+  in
+  let result = Worker.For_testing.run_lifecycle ~effects candidates in
+  result, { execute_calls; release_calls; gate_calls; quarantines }
+;;
+
+let check_exact_cause label expected causes =
+  let matches =
+    match expected, causes with
+    | Q.Exact_cancellation, [ Q.Exact_cancellation ]
+    | Q.Exact_post_dispatch_failure, [ Q.Exact_post_dispatch_failure ]
+    | Q.Exact_terminal_persistence_failure,
+      [ Q.Exact_terminal_persistence_failure ] ->
+      true
+    | _ -> false
+  in
+  check bool label true matches
+;;
+
+let postdispatch slot_id =
+  Worker.For_testing.Lifecycle_post_dispatch_failure
+    (lifecycle_observation slot_id Exact_output.Terminal 1)
+;;
+
+let predispatch slot_id =
+  Worker.For_testing.Lifecycle_before_dispatch_failure
+    { observation =
+        lifecycle_observation slot_id Exact_output.Before_dispatch 0
+    ; reason = "typed pre-dispatch failure"
+    }
+;;
+
+let exact_success slot_id =
+  Worker.For_testing.Lifecycle_success
+    { observation =
+        lifecycle_observation slot_id Exact_output.Terminal 1
+    ; output = judgment_json "approve"
+    }
+;;
+
+let test_bind_fsync_allows_one_execute () =
+  let _, probe =
+    run_lifecycle_case
+      ~execute:postdispatch
+      [ "slot-a" ]
+  in
+  check (list string) "execute_once calls" [ "slot-a" ] !(probe.execute_calls)
+;;
+
+let test_bind_visible_forbids_execute () =
+  let _, probe =
+    run_lifecycle_case
+      ~bind:(fun _ ->
+        Worker.For_testing.Lifecycle_visible_unconfirmed "bind fsync unknown")
+      ~execute:postdispatch
+      [ "slot-a" ]
+  in
+  check (list string) "execute_once calls" [] !(probe.execute_calls)
+;;
+
+let test_predispatch_release_fsync_runs_next_slot () =
+  let _, probe =
+    run_lifecycle_case
+      ~execute:(function
+        | "slot-a" -> predispatch "slot-a"
+        | slot_id -> postdispatch slot_id)
+      [ "slot-a"; "slot-b" ]
+  in
+  check (list string)
+    "ordered execute_once calls"
+    [ "slot-a"; "slot-b" ]
+    !(probe.execute_calls);
+  check int "release count" 1 !(probe.release_calls)
+;;
+
+let test_release_visible_terminalizes_without_successor () =
+  let _, probe =
+    run_lifecycle_case
+      ~release:(fun _ ->
+        Worker.For_testing.Lifecycle_visible_unconfirmed "release fsync unknown")
+      ~execute:predispatch
+      [ "slot-a"; "slot-b" ]
+  in
+  check (list string) "successor was not executed" [ "slot-a" ] !(probe.execute_calls);
+  check_exact_cause
+    "release visibility is terminalized"
+    Q.Exact_terminal_persistence_failure
+    !(probe.quarantines)
+;;
+
+let test_postdispatch_failure_quarantines_without_failover () =
+  let _, probe =
+    run_lifecycle_case
+      ~execute:postdispatch
+      [ "slot-a"; "slot-b" ]
+  in
+  check (list string) "successor was not executed" [ "slot-a" ] !(probe.execute_calls);
+  check_exact_cause
+    "post-dispatch failure cause"
+    Q.Exact_post_dispatch_failure
+    !(probe.quarantines)
+;;
+
+let test_completion_visible_withholds_gate () =
+  let _, probe =
+    run_lifecycle_case
+      ~complete:(fun _ _ ->
+        Worker.For_testing.Lifecycle_visible_unconfirmed
+          "completion fsync unknown")
+      ~execute:exact_success
+      [ "slot-a" ]
+  in
+  check int "Gate callbacks" 0 !(probe.gate_calls)
+;;
+
+let test_completion_fsync_calls_gate_once () =
+  let _, probe =
+    run_lifecycle_case
+      ~execute:exact_success
+      [ "slot-a" ]
+  in
+  check int "Gate callbacks" 1 !(probe.gate_calls)
+;;
+
+let test_cancellation_before_dispatch_is_terminal_without_failover () =
+  let cancellation = Failure "caller cancelled" in
+  let result, probe =
+    run_lifecycle_case
+      ~execute:(fun slot_id ->
+        Worker.For_testing.Lifecycle_cancellation
+          { observation =
+              lifecycle_observation
+                slot_id
+                Exact_output.Before_dispatch
+                0
+          ; cancellation
+          })
+      [ "slot-a"; "slot-b" ]
+  in
+  check (list string) "successor was not executed" [ "slot-a" ] !(probe.execute_calls);
+  check int "release count" 0 !(probe.release_calls);
+  check bool "cancellation is returned for re-raise" true
+    (Option.is_some result.cancellation);
+  check_exact_cause
+    "cancellation quarantine cause"
+    Q.Exact_cancellation
+    !(probe.quarantines)
+;;
+
 let test_readiness_resolves_exact_lane () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
@@ -320,6 +542,38 @@ let () =
             "all provenance mismatches fail closed"
             `Quick
             test_provenance_mismatch_matrix_fails_closed
+        ; test_case
+            "bind fsync allows one execute"
+            `Quick
+            test_bind_fsync_allows_one_execute
+        ; test_case
+            "bind visible forbids execute"
+            `Quick
+            test_bind_visible_forbids_execute
+        ; test_case
+            "predispatch release fsync runs next slot"
+            `Quick
+            test_predispatch_release_fsync_runs_next_slot
+        ; test_case
+            "release visible terminalizes without successor"
+            `Quick
+            test_release_visible_terminalizes_without_successor
+        ; test_case
+            "postdispatch failure quarantines without failover"
+            `Quick
+            test_postdispatch_failure_quarantines_without_failover
+        ; test_case
+            "completion visible withholds Gate"
+            `Quick
+            test_completion_visible_withholds_gate
+        ; test_case
+            "completion fsync calls Gate once"
+            `Quick
+            test_completion_fsync_calls_gate_once
+        ; test_case
+            "cancellation before dispatch is terminal"
+            `Quick
+            test_cancellation_before_dispatch_is_terminal_without_failover
         ; test_case
             "readiness resolves exact lane"
             `Quick

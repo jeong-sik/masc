@@ -755,7 +755,7 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
-       check int "public seed has no provider-bound exact-output lanes" 1
+       check int "public seed has one HITL exact-output lane" 1
          (List.length config.exact_output_lane_decls));
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)

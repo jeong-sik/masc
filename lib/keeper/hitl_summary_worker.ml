@@ -428,30 +428,210 @@ let complete_attempt entry observation summary =
     ~summary
 ;;
 
-let quarantine_durably entry observation cause =
-  match quarantine_attempt entry observation cause with
-  | Ok { write_outcome = Fsync_completed; _ } -> true
-  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-    Log.Keeper.error
-      ~keeper_name:entry.keeper_name
-      "HITL exact quarantine visible without fsync approval=%s slot=%s detail=%s"
-      entry.id
-      observation.slot_id
-      detail;
-    false
-  | Error error ->
-    Log.Keeper.error
-      ~keeper_name:entry.keeper_name
-      "HITL exact quarantine failed approval=%s slot=%s error=%s"
-      entry.id
-      observation.slot_id
-      (exact_attempt_error_to_string error);
-    false
+type lifecycle_write =
+  | Lifecycle_fsync_completed
+  | Lifecycle_visible_unconfirmed of string
+  | Lifecycle_write_error of string
+
+type lifecycle_execution =
+  | Lifecycle_success of
+      { observation : attempt_observation
+      ; output : Yojson.Safe.t
+      }
+  | Lifecycle_provenance_mismatch of attempt_observation
+  | Lifecycle_replay of attempt_observation
+  | Lifecycle_before_dispatch_failure of
+      { observation : attempt_observation
+      ; reason : string
+      }
+  | Lifecycle_post_dispatch_failure of attempt_observation
+  | Lifecycle_cancellation of
+      { observation : attempt_observation
+      ; cancellation : exn
+      }
+
+type 'candidate lifecycle_candidate =
+  { initial_observation : attempt_observation
+  ; candidate : 'candidate
+  }
+
+type lifecycle_result =
+  { continue_owner : bool
+  ; cancellation : exn option
+  }
+
+type 'candidate lifecycle_effects =
+  { bind : attempt_observation -> lifecycle_write
+  ; release : attempt_observation -> lifecycle_write
+  ; fail : attempt_observation -> reason:string -> lifecycle_write
+  ; quarantine :
+      attempt_observation -> exact_attempt_quarantine_cause -> lifecycle_write
+  ; complete :
+      attempt_observation -> hitl_context_summary -> lifecycle_write
+  ; execute : 'candidate -> lifecycle_execution
+  ; parse :
+      model_run_id:string ->
+      Yojson.Safe.t ->
+      (hitl_context_summary, string) result
+  ; on_summary : hitl_context_summary -> unit
+  ; record_outcome : string -> unit
+  ; protect : (unit -> bool) -> bool
+  ; report_write_issue :
+      operation:string -> attempt_observation -> detail:string -> unit
+  }
+
+let lifecycle_result ?cancellation continue_owner =
+  { continue_owner; cancellation }
 ;;
 
-let terminalize_persistence_failure entry observation =
-  record_outcome "terminal_persistence_failure";
-  quarantine_durably entry observation Exact_terminal_persistence_failure
+let run_lifecycle ~effects candidates =
+  let report_write_issue operation observation detail =
+    effects.report_write_issue ~operation observation ~detail
+  in
+  let quarantine observation cause =
+    match effects.quarantine observation cause with
+    | Lifecycle_fsync_completed -> true
+    | Lifecycle_visible_unconfirmed detail
+    | Lifecycle_write_error detail ->
+      report_write_issue "quarantine" observation detail;
+      false
+  in
+  let terminalize_persistence_failure observation =
+    effects.record_outcome "terminal_persistence_failure";
+    quarantine observation Exact_terminal_persistence_failure
+  in
+  let rec execute_candidates = function
+    | [] -> lifecycle_result false
+    | { initial_observation; candidate } :: rest ->
+      (match effects.bind initial_observation with
+       | Lifecycle_write_error detail ->
+         effects.record_outcome "terminal_persistence_failure";
+         report_write_issue "bind" initial_observation detail;
+         lifecycle_result false
+       | Lifecycle_visible_unconfirmed detail ->
+         report_write_issue "bind" initial_observation detail;
+         lifecycle_result
+           (effects.protect (fun () ->
+              terminalize_persistence_failure initial_observation))
+       | Lifecycle_fsync_completed ->
+         (match effects.execute candidate with
+          | Lifecycle_cancellation { observation; cancellation } ->
+            (* Cancellation is caller-directed structured abort, not an
+               availability failure. Even an OAS receipt that still says
+               Before_dispatch/count=0 is terminally quarantined: it must not
+               release this identity or dispatch a successor slot. *)
+            effects.record_outcome "cancellation";
+            ignore
+              (effects.protect (fun () ->
+                 quarantine observation Exact_cancellation));
+            lifecycle_result ~cancellation false
+          | Lifecycle_provenance_mismatch observation ->
+            effects.record_outcome "provenance_mismatch";
+            lifecycle_result
+              (quarantine observation Exact_provenance_mismatch)
+          | Lifecycle_replay observation ->
+            effects.record_outcome "execution_failed_after_dispatch";
+            lifecycle_result (quarantine observation Exact_attempt_replay)
+          | Lifecycle_before_dispatch_failure { observation; reason } ->
+            (match rest with
+             | [] ->
+               effects.record_outcome "execution_failed_before_dispatch";
+               (match effects.fail observation ~reason with
+                | Lifecycle_fsync_completed -> lifecycle_result true
+                | Lifecycle_visible_unconfirmed detail ->
+                  report_write_issue "fail" observation detail;
+                  lifecycle_result
+                    (terminalize_persistence_failure observation)
+                | Lifecycle_write_error detail ->
+                  report_write_issue "fail" observation detail;
+                  lifecycle_result
+                    (terminalize_persistence_failure observation))
+             | _ ->
+               (match effects.release observation with
+                | Lifecycle_fsync_completed -> execute_candidates rest
+                | Lifecycle_visible_unconfirmed detail ->
+                  report_write_issue "release" observation detail;
+                  lifecycle_result
+                    (terminalize_persistence_failure observation)
+                | Lifecycle_write_error detail ->
+                  report_write_issue "release" observation detail;
+                  lifecycle_result
+                    (terminalize_persistence_failure observation)))
+          | Lifecycle_post_dispatch_failure observation ->
+            effects.record_outcome "execution_failed_after_dispatch";
+            lifecycle_result
+              (quarantine observation Exact_post_dispatch_failure)
+          | Lifecycle_success { observation; output } ->
+            (match
+               effects.parse
+                 ~model_run_id:initial_observation.call_id
+                 output
+             with
+             | Error _ ->
+               effects.record_outcome "domain_invalid_output";
+               lifecycle_result
+                 (quarantine observation Exact_domain_invalid_output)
+             | Ok summary ->
+               (match effects.complete observation summary with
+                | Lifecycle_fsync_completed ->
+                  effects.record_outcome "ok_summary";
+                  effects.on_summary summary;
+                  lifecycle_result true
+                | Lifecycle_visible_unconfirmed detail ->
+                  report_write_issue "complete" observation detail;
+                  lifecycle_result false
+                | Lifecycle_write_error detail ->
+                  report_write_issue "complete" observation detail;
+                  lifecycle_result
+                    (terminalize_persistence_failure observation)))))
+  in
+  execute_candidates candidates
+;;
+
+let lifecycle_write_of_transition = function
+  | Ok { write_outcome = Fsync_completed; _ } ->
+    Lifecycle_fsync_completed
+  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+    Lifecycle_visible_unconfirmed detail
+  | Error error ->
+    Lifecycle_write_error (exact_attempt_error_to_string error)
+;;
+
+let execute_exact_candidate ~net ~bound_observation (slot : admitted_slot) =
+  try
+    match
+      Exact_output.execute_once
+        ~net
+        ?clock:(Eio_context.get_clock_opt ())
+        slot.attempt
+    with
+    | Ok success ->
+      let observation = observe_attempt slot in
+      if success_provenance_matches slot bound_observation success
+      then Lifecycle_success { observation; output = success.output }
+      else Lifecycle_provenance_mismatch observation
+    | Error error ->
+      let observation = observe_attempt slot in
+      if not (execution_error_identity_matches bound_observation error)
+      then Lifecycle_provenance_mismatch observation
+      else
+        (match error.cause with
+         | Exact_output.Attempt_already_started ->
+           Lifecycle_replay observation
+         | _ when is_before_dispatch_zero error.receipt ->
+           Lifecycle_before_dispatch_failure
+             { observation; reason = execution_error_reason error }
+         | _ -> Lifecycle_post_dispatch_failure observation)
+  with
+  | Eio.Cancel.Cancelled _ as cancellation ->
+    Lifecycle_cancellation
+      { observation = observe_attempt slot; cancellation }
+  | exn ->
+    Log.Keeper.error
+      "HITL exact execution raised slot=%s error=%s"
+      slot.slot_id
+      (Printexc.to_string exn);
+    Lifecycle_post_dispatch_failure (observe_attempt slot)
 ;;
 
 (* -- Single worker lifecycle ---------------------------------------------- *)
@@ -495,177 +675,59 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_failure ~on_finish () 
             ~retryable:true
         | Some net ->
           let continue_owner = ref false in
+          let report_write_issue ~operation observation ~detail =
+            Log.Keeper.error
+              ~keeper_name:entry.keeper_name
+              "HITL exact lifecycle write not durable operation=%s approval=%s slot=%s detail=%s"
+              operation
+              entry.id
+              observation.slot_id
+              detail
+          in
+          let effects : (attempt_observation * admitted_slot) lifecycle_effects =
+            { bind = (fun observation ->
+                bind_attempt entry observation
+                |> lifecycle_write_of_transition)
+            ; release = (fun observation ->
+                release_attempt entry observation
+                |> lifecycle_write_of_transition)
+            ; fail = (fun observation ~reason ->
+                fail_last_attempt entry observation ~reason
+                |> lifecycle_write_of_transition)
+            ; quarantine = (fun observation cause ->
+                quarantine_attempt entry observation cause
+                |> lifecycle_write_of_transition)
+            ; complete = (fun observation summary ->
+                complete_attempt entry observation summary
+                |> lifecycle_write_of_transition)
+            ; execute = (fun (bound_observation, candidate) ->
+                execute_exact_candidate ~net ~bound_observation candidate)
+            ; parse = (fun ~model_run_id output ->
+                parse_summary ~generated_at ~model_run_id output)
+            ; on_summary
+            ; record_outcome
+            ; protect = Eio.Cancel.protect
+            ; report_write_issue
+            }
+          in
+          let candidates =
+            List.map
+              (fun candidate ->
+                 let initial_observation = observe_attempt candidate in
+                 { initial_observation
+                 ; candidate = initial_observation, candidate
+                 })
+              prepared_lane
+          in
           Eio.Fiber.fork ~sw (fun () ->
             Fun.protect
               ~finally:(fun () -> on_finish ~continue_owner:!continue_owner)
               (fun () ->
-                 let rec execute_candidates = function
-                   | [] -> false
-                   | slot :: rest ->
-                     let bound_observation = observe_attempt slot in
-                     (match bind_attempt entry bound_observation with
-                      | Error error ->
-                        record_outcome "terminal_persistence_failure";
-                        Log.Keeper.error
-                          ~keeper_name:entry.keeper_name
-                          "HITL exact bind failed approval=%s slot=%s error=%s"
-                          entry.id
-                          slot.slot_id
-                          (exact_attempt_error_to_string error);
-                        false
-                      | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-                        Log.Keeper.error
-                          ~keeper_name:entry.keeper_name
-                          "HITL exact bind visible without fsync; dispatch withheld approval=%s slot=%s detail=%s"
-                          entry.id
-                          slot.slot_id
-                          detail;
-                        Eio.Cancel.protect (fun () ->
-                          terminalize_persistence_failure entry bound_observation)
-                      | Ok { write_outcome = Fsync_completed; _ } ->
-                        let execute_result =
-                          try
-                            `Result
-                              (Exact_output.execute_once
-                                 ~net
-                                 ?clock:(Eio_context.get_clock_opt ())
-                                 slot.attempt)
-                          with
-                          | Eio.Cancel.Cancelled _ as cancellation ->
-                            let observation = observe_attempt slot in
-                            record_outcome "cancellation";
-                            ignore
-                              (Eio.Cancel.protect (fun () ->
-                                 quarantine_durably entry observation Exact_cancellation));
-                            raise cancellation
-                          | exn -> `Raised exn
-                        in
-                        (match execute_result with
-                         | `Raised exn ->
-                           let observation = observe_attempt slot in
-                           record_outcome "execution_failed_after_dispatch";
-                           Log.Keeper.error
-                             ~keeper_name:entry.keeper_name
-                             "HITL exact execution raised approval=%s slot=%s error=%s"
-                             entry.id
-                             slot.slot_id
-                             (Printexc.to_string exn);
-                           quarantine_durably
-                             entry
-                             observation
-                             Exact_post_dispatch_failure
-                         | `Result (Error error) ->
-                           let observation = observe_attempt slot in
-                           if not (execution_error_identity_matches bound_observation error)
-                           then (
-                             record_outcome "provenance_mismatch";
-                             quarantine_durably
-                               entry
-                               observation
-                               Exact_provenance_mismatch)
-                           else
-                             (match error.cause with
-                              | Exact_output.Attempt_already_started ->
-                                record_outcome "execution_failed_after_dispatch";
-                                quarantine_durably
-                                  entry
-                                  observation
-                                  Exact_attempt_replay
-                              | _ when is_before_dispatch_zero error.receipt ->
-                                let reason = execution_error_reason error in
-                                (match rest with
-                                 | [] ->
-                                   record_outcome "execution_failed_before_dispatch";
-                                   (match fail_last_attempt entry observation ~reason with
-                                    | Ok { write_outcome = Fsync_completed; _ } -> true
-                                    | Ok
-                                        { write_outcome =
-                                            Visible_sync_unconfirmed detail
-                                        ; _
-                                        } ->
-                                      Log.Keeper.error
-                                        ~keeper_name:entry.keeper_name
-                                        "HITL exact failure visible without fsync approval=%s slot=%s detail=%s"
-                                        entry.id
-                                        slot.slot_id
-                                        detail;
-                                      terminalize_persistence_failure entry observation
-                                    | Error _ ->
-                                      terminalize_persistence_failure entry observation)
-                                 | _ ->
-                                   (match release_attempt entry observation with
-                                    | Ok { write_outcome = Fsync_completed; _ } ->
-                                      execute_candidates rest
-                                    | Ok
-                                        { write_outcome =
-                                            Visible_sync_unconfirmed detail
-                                        ; _
-                                        } ->
-                                      Log.Keeper.error
-                                        ~keeper_name:entry.keeper_name
-                                        "HITL exact release visible without fsync; failover withheld approval=%s slot=%s detail=%s"
-                                        entry.id
-                                        slot.slot_id
-                                        detail;
-                                      terminalize_persistence_failure entry observation
-                                    | Error _ ->
-                                      terminalize_persistence_failure entry observation))
-                              | _ ->
-                                record_outcome "execution_failed_after_dispatch";
-                                quarantine_durably
-                                  entry
-                                  observation
-                                  Exact_post_dispatch_failure)
-                         | `Result (Ok success) ->
-                           let observation = observe_attempt slot in
-                           if not (success_provenance_matches slot bound_observation success)
-                           then (
-                             record_outcome "provenance_mismatch";
-                             quarantine_durably
-                               entry
-                               observation
-                               Exact_provenance_mismatch)
-                           else
-                             (match
-                                parse_summary
-                                  ~generated_at
-                                  ~model_run_id:bound_observation.call_id
-                                  success.output
-                              with
-                              | Error reason ->
-                                record_outcome "domain_invalid_output";
-                                Log.Keeper.warn
-                                  ~keeper_name:entry.keeper_name
-                                  "HITL exact domain validation failed approval=%s slot=%s reason=%s"
-                                  entry.id
-                                  slot.slot_id
-                                  reason;
-                                quarantine_durably
-                                  entry
-                                  observation
-                                  Exact_domain_invalid_output
-                              | Ok summary ->
-                                (match complete_attempt entry observation summary with
-                                 | Ok { write_outcome = Fsync_completed; _ } ->
-                                   record_outcome "ok_summary";
-                                   on_summary summary;
-                                   true
-                                 | Ok
-                                     { write_outcome =
-                                         Visible_sync_unconfirmed detail
-                                     ; _
-                                     } ->
-                                   Log.Keeper.error
-                                     ~keeper_name:entry.keeper_name
-                                     "HITL exact completion visible without fsync; Gate withheld approval=%s slot=%s detail=%s"
-                                     entry.id
-                                     slot.slot_id
-                                     detail;
-                                   false
-                                 | Error _ ->
-                                   terminalize_persistence_failure entry observation))))
-                 in
-                 continue_owner := execute_candidates prepared_lane)))
+                 let result = run_lifecycle ~effects candidates in
+                 continue_owner := result.continue_owner;
+                 match result.cancellation with
+                 | None -> ()
+                 | Some cancellation -> raise cancellation)))
 ;;
 
 module For_testing = struct
@@ -694,6 +756,63 @@ module For_testing = struct
     ; target_identity_fingerprint : string
     }
 
+  type nonrec lifecycle_write = lifecycle_write =
+    | Lifecycle_fsync_completed
+    | Lifecycle_visible_unconfirmed of string
+    | Lifecycle_write_error of string
+
+  type nonrec lifecycle_execution = lifecycle_execution =
+    | Lifecycle_success of
+        { observation : attempt_observation
+        ; output : Yojson.Safe.t
+        }
+    | Lifecycle_provenance_mismatch of attempt_observation
+    | Lifecycle_replay of attempt_observation
+    | Lifecycle_before_dispatch_failure of
+        { observation : attempt_observation
+        ; reason : string
+        }
+    | Lifecycle_post_dispatch_failure of attempt_observation
+    | Lifecycle_cancellation of
+        { observation : attempt_observation
+        ; cancellation : exn
+        }
+
+  type nonrec 'candidate lifecycle_candidate = 'candidate lifecycle_candidate =
+    { initial_observation : attempt_observation
+    ; candidate : 'candidate
+    }
+
+  type nonrec lifecycle_result = lifecycle_result =
+    { continue_owner : bool
+    ; cancellation : exn option
+    }
+
+  type nonrec 'candidate lifecycle_effects = 'candidate lifecycle_effects =
+    { bind : attempt_observation -> lifecycle_write
+    ; release : attempt_observation -> lifecycle_write
+    ; fail : attempt_observation -> reason:string -> lifecycle_write
+    ; quarantine :
+        attempt_observation ->
+        exact_attempt_quarantine_cause ->
+        lifecycle_write
+    ; complete :
+        attempt_observation -> hitl_context_summary -> lifecycle_write
+    ; execute : 'candidate -> lifecycle_execution
+    ; parse :
+        model_run_id:string ->
+        Yojson.Safe.t ->
+        (hitl_context_summary, string) result
+    ; on_summary : hitl_context_summary -> unit
+    ; record_outcome : string -> unit
+    ; protect : (unit -> bool) -> bool
+    ; report_write_issue :
+        operation:string ->
+        attempt_observation ->
+        detail:string ->
+        unit
+    }
+
   type nonrec preparation_error = preparation_error =
     | Context_unavailable of context_bundle_error
     | Prompt_unavailable of string
@@ -712,5 +831,6 @@ module For_testing = struct
   let observations prepared_lane = List.map observe_attempt prepared_lane
   let is_before_dispatch_zero = is_before_dispatch_zero
   let provenance_evidence_matches = provenance_evidence_matches
+  let run_lifecycle = run_lifecycle
 end
 ;;

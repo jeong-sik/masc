@@ -373,35 +373,6 @@ let eligibility_summary : AQ.hitl_context_summary =
   }
 ;;
 
-let eligibility_entry
-      ?(keeper_name = "keeper")
-      ?(audit_base_path = "/workspace")
-      ~id
-      ~sequence
-      ~summary_status
-      ~exact_attempt
-      ()
-  : AQ.pending_approval
-  =
-  { id
-  ; keeper_name
-  ; tool_name = "external-effect"
-  ; input_hash = "exact-input-hash-" ^ id
-  ; input = `Assoc [ "request", `String id ]
-  ; sequence
-  ; requested_at = Float.of_int sequence
-  ; turn_id = None
-  ; request_context = None
-  ; task_id = None
-  ; goal_id = None
-  ; goal_ids = []
-  ; continuation_channel = Keeper_continuation_channel.unrouted "eligibility test"
-  ; audit_base_path
-  ; summary_status
-  ; exact_attempt
-  }
-;;
-
 type eligibility_exact_identity =
   { slot_id : string
   ; call_id : string
@@ -532,7 +503,10 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
            ~call_id:identity.call_id
            ~plan_fingerprint:identity.plan_fingerprint
            ~request_body_sha256:identity.request_body_sha256
-           ~summary:eligibility_summary))
+           ~summary:
+             { eligibility_summary with
+               model_run_id = identity.call_id
+             }))
   in
   let legacy_source =
     submit_eligibility_entry ~base_path ~keeper_name "legacy-uncertain"
@@ -570,7 +544,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
   let ready =
     Gate.For_testing.ready_auto_judges_for_owner
       ~base_path
-      ~keeper_name:"keeper"
+      ~keeper_name
       (not_requested
        :: pending
        :: available
@@ -580,7 +554,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
   in
   check int "operator recovery queues only two worker-ready entries" 2 (List.length ready);
   check (list string) "operator recovery predicate preserves owner FIFO"
-    [ pending.id; not_requested.id ]
+    [ not_requested.id; pending.id ]
     (List.map (fun (entry : AQ.pending_approval) -> entry.id) ready)
 ;;
 
@@ -609,7 +583,10 @@ let test_available_judgments_finalize_without_worker () =
        ~call_id:identity.call_id
        ~plan_fingerprint:identity.plan_fingerprint
        ~request_body_sha256:identity.request_body_sha256
-       ~summary:eligibility_summary);
+       ~summary:
+         { eligibility_summary with
+           model_run_id = identity.call_id
+         });
   AQ.For_testing.reset_runtime_state ();
   (match AQ.install_persistence ~base_path with
    | Ok _ -> ()

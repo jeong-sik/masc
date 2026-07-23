@@ -32,6 +32,11 @@ type exact_attempt_rejection =
   | Exact_attempt_legacy_execution_uncertain of string
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
+  | Exact_attempt_provenance_mismatch of
+      { approval_id : string
+      ; expected_call_id : string
+      ; actual_model_run_id : string
+      }
   | Exact_attempt_content_conflict of string
 
 type exact_attempt_error =

@@ -1337,7 +1337,32 @@ let test_exact_attempt_completion_is_atomic () =
          "bind completion attempt"
          true
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
-       let summary = exact_summary "exact-completion-run" in
+       let mismatched_summary = exact_summary "different-call-id" in
+       (match complete_exact identity mismatched_summary with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_provenance_mismatch
+                { approval_id; expected_call_id; actual_model_run_id })) ->
+          Alcotest.(check string) "provenance approval" id approval_id;
+          Alcotest.(check string)
+            "provenance expected call"
+            identity.call_id_arg
+            expected_call_id;
+          Alcotest.(check string)
+            "provenance actual model run"
+            mismatched_summary.model_run_id
+            actual_model_run_id
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
+       (match pending_entry_exn id with
+        | { summary_status = AQ.Summary_pending
+          ; exact_attempt =
+              AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+          ; _
+          } ->
+          ()
+        | _ -> Alcotest.fail "provenance rejection mutated the exact attempt");
+       let summary = exact_summary identity.call_id_arg in
        check_exact_update
          "complete exact attempt"
          true

@@ -28,6 +28,11 @@ type exact_attempt_rejection =
   | Exact_attempt_legacy_execution_uncertain of string
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
+  | Exact_attempt_provenance_mismatch of
+      { approval_id : string
+      ; expected_call_id : string
+      ; actual_model_run_id : string
+      }
   | Exact_attempt_content_conflict of string
 
 type exact_attempt_error =
@@ -149,6 +154,15 @@ let exact_attempt_error_to_string = function
   | Exact_attempt_rejected (Exact_attempt_status_conflict binding) ->
     "exact attempt status rejects this transition: "
     ^ exact_attempt_binding_to_string binding
+  | Exact_attempt_rejected
+      (Exact_attempt_provenance_mismatch
+        { approval_id; expected_call_id; actual_model_run_id }) ->
+    Printf.sprintf
+      "exact attempt approval %s summary provenance mismatch: expected call_id=%s, \
+       actual model_run_id=%s"
+      approval_id
+      expected_call_id
+      actual_model_run_id
   | Exact_attempt_rejected (Exact_attempt_content_conflict approval_id) ->
     Printf.sprintf
       "exact attempt approval %s already completed with different content"
@@ -2070,6 +2084,15 @@ let complete_summary_exact_attempt
              Error
                (Exact_attempt_rejected
                   (Exact_attempt_identity_conflict existing))
+           | Exact_bound existing
+             when not (String.equal summary.model_run_id existing.call_id) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_provenance_mismatch
+                     { approval_id = entry.id
+                     ; expected_call_id = existing.call_id
+                     ; actual_model_run_id = summary.model_run_id
+                     }))
            | Exact_bound existing ->
              (match existing.status, entry.summary_status with
               | Exact_dispatch_uncertain, Summary_pending ->
@@ -2209,7 +2232,8 @@ let restart_failed_summaries ~base_path =
              ~pending_map:reopened
              ~delivery_map:(Atomic.get deliveries)
          with
-         | Error _ as error -> error
+         | Error error ->
+           Error (Summary_transition_storage_error error)
          | Ok () ->
            Atomic.set pending reopened;
            Ok (List.rev reopened_ids)))
@@ -2510,8 +2534,7 @@ let submit_pending
                ~pending_map:updated
                ~delivery_map:(Atomic.get deliveries)
            with
-           | Error error ->
-             Error (Summary_transition_storage_error error)
+           | Error error -> Error error
            | Ok () ->
              Atomic.set pending updated;
              Atomic.set

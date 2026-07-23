@@ -492,7 +492,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
            ~call_id:identity.call_id
            ~plan_fingerprint:identity.plan_fingerprint
            ~request_body_sha256:identity.request_body_sha256
-           ~cause:AQ.Exact_post_dispatch_failure))
+           ~cause:AQ.Exact_flow_execution_failed))
   in
   let completed =
     make_bound "completed" (fun entry identity ->
@@ -525,7 +525,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
   check_ready "quarantined binding is not worker-ready" false quarantined;
   check_ready "completed binding is finalize-only" false completed;
   (match quarantined.exact_attempt with
-   | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_post_dispatch_failure; _ } ->
+   | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_flow_execution_failed; _ } ->
      ()
    | AQ.Exact_unbound
    | AQ.Exact_bound _ ->

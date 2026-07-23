@@ -799,6 +799,7 @@ module For_testing = struct
     | Exact_request_context_unavailable
 
   type nonrec prepared_flow = prepared_flow
+  type nonrec strict_snapshot_writer = strict_snapshot_writer
 
   let build_context_bundle = build_context_bundle
   let context_bundle_error_to_string = context_bundle_error_to_string

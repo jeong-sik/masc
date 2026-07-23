@@ -303,6 +303,18 @@ let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
   match failure.Keeper_unified_turn.source_lease_disposition with
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
+  | Keeper_unified_turn.Escalate_after_exact_output_terminal
+      Keeper_unified_turn.Execution_may_have_dispatched ->
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_execution_may_have_dispatched
+      ; successor = None
+      }
+  | Keeper_unified_turn.Escalate_after_exact_output_terminal
+      Keeper_unified_turn.Domain_invalid_output ->
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_domain_invalid_output
+      ; successor = None
+      }
   | Keeper_unified_turn.Requeue_after_context_compaction
       Keeper_unified_turn.Compaction_committed ->
     (* RFC-0351 S0 / #25538: a committed in-lane compaction is normally
@@ -532,6 +544,7 @@ let compaction_outcome_of_cycle_outcome = function
          (Keeper_unified_turn.Compaction_attempt_failed _)
      | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
        Some `Failed
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
      | Keeper_unified_turn.Follow_failure_route
      | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> None)
   | Some (Cycle.Completed _) -> Some `Recovered
@@ -964,6 +977,7 @@ let run_keepalive_unified_turn
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.source_lease_disposition with
              | Keeper_unified_turn.Requeue_after_context_compaction _
+             | Keeper_unified_turn.Escalate_after_exact_output_terminal _
              | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
              | Keeper_unified_turn.Follow_failure_route
              | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->

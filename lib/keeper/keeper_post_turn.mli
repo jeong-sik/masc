@@ -119,6 +119,12 @@ val commit_prepared_compaction :
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
 
+(** Terminal source-bound disposition for a prepared exact-output result that
+    cannot enter its commit admission. The provider execution has completed,
+    so the owning stimulus must never be requeued into another exact call. *)
+val no_compaction_of_uncommitted_prepared :
+  prepared_compaction -> no_compaction
+
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed
     [Prepared] candidate has been durably saved; every other outcome is a

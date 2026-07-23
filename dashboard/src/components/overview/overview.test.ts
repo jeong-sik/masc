@@ -1,6 +1,6 @@
 import { h } from 'preact'
-import { cleanup, render } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   computeFunnelCounts,
   formatTargetRatio,
@@ -23,9 +23,24 @@ import {
   type FunnelCounts,
   Overview,
 } from './overview'
-import type { FusionRunRecord, TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
+import type {
+  DashboardScheduledAutomation,
+  DashboardToolsResponse,
+  DashboardScheduleRunnerStatus,
+  FusionRunRecord,
+  TelemetryEntry,
+  TelemetrySourceSummary,
+} from '../../api/dashboard'
 import { keepers } from '../../store'
 import type { Goal } from '../../types/core'
+
+const overviewMocks = vi.hoisted(() => ({
+  toolsData: { value: null as null | DashboardToolsResponse },
+}))
+
+vi.mock('../tools/tool-state', () => ({
+  toolsData: overviewMocks.toolsData,
+}))
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -89,6 +104,99 @@ function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
     comment_count: 0,
     created_at: localIsoAt(1),
     updated_at: localIsoAt(1),
+    ...partial,
+  }
+}
+
+function makeToolsResponse(partial: Partial<DashboardToolsResponse> = {}): DashboardToolsResponse {
+  return {
+    tool_inventory: {
+      count: 0,
+      tools: [],
+    },
+    tool_usage: {
+      total_calls: 0,
+      distinct_tools_called: 0,
+      top_20: [],
+      never_called_count: 0,
+      dispatch_v2_enabled: false,
+      registered_count: 0,
+    },
+    ...partial,
+  }
+}
+
+function makeScheduledAutomation(partial: Partial<DashboardScheduledAutomation> = {}): DashboardScheduledAutomation {
+  return {
+    request_count: 3,
+    request_limit: 10,
+    truncated: false,
+    counts: {
+      scheduled: 1,
+      due: 1,
+      running: 0,
+      succeeded: 1,
+    },
+    warnings: [],
+    fsm: {
+      state: 'due',
+      active_count: 1,
+      terminal_count: 1,
+      next_due_at: '2026-07-18T12:00:00Z',
+    },
+    requests: [
+      {
+        schedule_id: 's-1',
+        status: 'scheduled',
+        source: 'operator',
+      },
+      {
+        schedule_id: 's-2',
+        status: 'due',
+        source: 'operator',
+        payload_support: 'unsupported',
+      },
+      {
+        schedule_id: 's-3',
+        status: 'succeeded',
+        source: 'operator',
+        payload_support: 'unknown',
+      },
+    ],
+    ...partial,
+  }
+}
+
+function makeScheduleRunner(partial: Partial<DashboardScheduleRunnerStatus> = {}): DashboardScheduleRunnerStatus {
+  return {
+    schema: 'masc.schedule.runner_status.v1',
+    status: 'ok',
+    tick_in_flight: false,
+    tick_count: 3,
+    success_count: 2,
+    failure_count: 0,
+    crash_count: 0,
+    last_tick_started_at: 1_700_000_100,
+    last_tick_finished_at: 1_700_000_200,
+    last_success_at: 1_700_000_200,
+    last_error: null,
+    last_error_at: null,
+    last_duration_sec: 0.12,
+    last_counts: {
+      due_changed: 1,
+      emitted: 2,
+      rescheduled: 0,
+      dispatch_succeeded: 1,
+      dispatch_failed: 0,
+      dispatch_unsupported: 0,
+      dispatch_start_rejected: 0,
+      wake_enqueued: 3,
+      wake_skipped_no_keeper: 0,
+      wake_skipped_missing_schedule: 0,
+      wake_skipped_non_keeper_actor: 0,
+      wake_skipped_unregistered_keeper: 0,
+      wake_failed: 0,
+    },
     ...partial,
   }
 }
@@ -878,6 +986,61 @@ describe('computeOverviewDigest', () => {
     expect(digest.fusionTotal).toBe(3)
     expect(digest.fusionLatest?.runId).toBe('newest')
   })
+
+  it('summarizes scheduled-automation projection in the overview digest', () => {
+    const digest = computeOverviewDigest(
+      0,
+      [],
+      [],
+      makeScheduledAutomation({
+        request_count: 5,
+        request_limit: 10,
+        payload_support: {
+          unsupported_request_count: 2,
+          unknown_request_count: 3,
+        },
+      }),
+    )
+    expect(digest.scheduledAutomation.hasProjection).toBe(true)
+    expect(digest.scheduledAutomation.requestCount).toBe(5)
+    expect(digest.scheduledAutomation.requestLimit).toBe(10)
+    expect(digest.scheduledAutomation.fsmState).toBe('due')
+    expect(digest.scheduledAutomation.dueCount).toBe(1)
+    expect(digest.scheduledAutomation.runningCount).toBe(0)
+    expect(digest.scheduledAutomation.scheduledCount).toBe(1)
+    expect(digest.scheduledAutomation.unsupportedPayloadCount).toBe(2)
+    expect(digest.scheduledAutomation.unknownPayloadCount).toBe(3)
+    expect(digest.scheduledAutomation.tone).toBe('warn')
+  })
+
+  it('summarizes schedule runner status from /health as a digest field', () => {
+    const digest = computeOverviewDigest(
+      0,
+      [],
+      [],
+      makeScheduledAutomation(),
+      makeScheduleRunner({
+        status: 'degraded',
+        failure_count: 2,
+        crash_count: 1,
+        tick_in_flight: true,
+      }),
+    )
+    expect(digest.scheduleRunner.hasProjection).toBe(true)
+    expect(digest.scheduleRunner.status).toBe('degraded')
+    expect(digest.scheduleRunner.tickInFlight).toBe(true)
+    expect(digest.scheduleRunner.tickCount).toBe(3)
+    expect(digest.scheduleRunner.failureCount).toBe(2)
+    expect(digest.scheduleRunner.crashCount).toBe(1)
+    expect(digest.scheduleRunner.tone).toBe('volt')
+  })
+
+  it('falls back to a warn schedule-runner digest when full health is unavailable', () => {
+    const digest = computeOverviewDigest(0, [], [], null, null)
+    expect(digest.scheduleRunner.hasProjection).toBe(false)
+    expect(digest.scheduleRunner.tone).toBe('warn')
+    expect(digest.scheduleRunner.status).toBe('unknown')
+  })
 })
 
 // ─── Prototype overview surface (header / KPIs / domains) ─────────────────────
@@ -939,6 +1102,118 @@ describe('Overview prototype surface', () => {
       '커넥터',
       'Fleet 요약',
     ])
+  })
+
+  it('renders live scheduled-automation summary from tools projection', () => {
+    const previousToolsData = overviewMocks.toolsData.value
+    overviewMocks.toolsData.value = makeToolsResponse({
+      scheduled_automation: makeScheduledAutomation({
+        fsm: {
+          state: 'active',
+          active_count: 2,
+          terminal_count: 1,
+          next_due_at: '2026-07-18T12:00:00Z',
+        },
+        counts: {
+          due: 2,
+          running: 1,
+          scheduled: 0,
+        },
+        warnings: ['warn'],
+      }),
+    })
+
+    try {
+      const { container } = render(h(Overview, null))
+      const card = container.querySelector('[data-testid="domain-schedule"]')
+      const count = card?.querySelector('.ov-dcount')?.textContent
+      const bodyText = card?.textContent ?? ''
+
+      expect(count).toBe('3')
+      expect(bodyText).toContain('Due 2')
+      expect(bodyText).toContain('Running 1')
+      expect(bodyText).toContain('projection warning 1')
+      expect(bodyText).not.toContain('예약 자동화 projection 미연결')
+    } finally {
+      overviewMocks.toolsData.value = previousToolsData
+    }
+  })
+
+  it('renders schedule_runner liveness row in the 예약 · 자동화 card when full health returns runner status', async () => {
+    const previousToolsData = overviewMocks.toolsData.value
+    const previousFetch = global.fetch
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = `${input}`
+      if (url.includes('/health?full=1')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          health_detail: 'full',
+          schedule_runner: {
+            schema: 'masc.schedule.runner_status.v1',
+            status: 'ok',
+            tick_in_flight: true,
+            tick_count: 4,
+            success_count: 3,
+            failure_count: 0,
+            crash_count: 0,
+            last_error: null,
+            last_error_age_sec: null,
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry?')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-07-21T00:00:00Z',
+          count: 0,
+          entries: [],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry/summary')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-07-21T00:00:00Z',
+          sources: [],
+          total_entries: 0,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`))
+    })
+    try {
+      overviewMocks.toolsData.value = makeToolsResponse({
+        scheduled_automation: makeScheduledAutomation({
+          request_count: 1,
+          request_limit: 1,
+          counts: { scheduled: 1 },
+          fsm: {
+            state: 'active',
+            active_count: 1,
+            terminal_count: 0,
+            next_due_at: null,
+          },
+        }),
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { container } = render(h(Overview, null))
+      await waitFor(() => {
+        const card = container.querySelector('[data-testid="domain-schedule"]')
+        expect(card?.textContent).toContain('runner: ok')
+      })
+    } finally {
+      overviewMocks.toolsData.value = previousToolsData
+      if (previousFetch) {
+        vi.stubGlobal('fetch', previousFetch)
+      } else {
+        vi.unstubAllGlobals()
+      }
+    }
   })
 
   it('places the domain section last, after the primary grid', () => {

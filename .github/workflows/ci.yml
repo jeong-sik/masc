@@ -41,17 +41,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history so origin/<base> and the PR head commit exist locally;
+          # the version-drift gate below reads dune-project from both refs.
+          fetch-depth: 0
 
       - name: Verify PR sync
         env:
           PR_HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: origin/${{ github.base_ref }}
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
             --pr-number "$PR_NUMBER" \
+            --base-ref "$BASE_REF" \
             --expected-head-sha "$PR_HEAD_SHA"
 
   pr-live-gate:

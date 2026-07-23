@@ -407,7 +407,7 @@ let keepers_json
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
                          ; "agent", agent_json
-                         ; "generation", `Int meta.runtime.generation
+                         ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; "last_turn_ago_s", `Float last_turn_ago_s
                          ; "last_handoff_ago_s", `Float last_handoff_ago_s

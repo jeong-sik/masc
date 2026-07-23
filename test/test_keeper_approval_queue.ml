@@ -3,6 +3,15 @@ module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
 module Queue_state = Keeper_event_queue_state
 
+(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
+   reproduces its unit projection over [resolve_with_policy] so these
+   assertions keep exercising the production resolution path. *)
+let aq_resolve ~base_path ~id ~decision =
+  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as error -> error
+;;
+
 let yojson = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 
 let temp_dir () =
@@ -110,7 +119,7 @@ let submit ~base_path ~keeper_name ~input =
 ;;
 
 let reject_and_cleanup ~base_path id =
-  match AQ.resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
+  match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -310,7 +319,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        (match report with
         | Error error -> Alcotest.fail (AQ.install_error_to_string error)
         | Ok report -> Alcotest.(check int) "empty snapshot installed" 0 report.loaded_pending);
-       Alcotest.(check int) "mutation remains in memory" 1 (AQ.pending_count ());
+       Alcotest.(check int) "mutation remains in memory" 1 (List.length (AQ.list_pending_entries ()));
        Alcotest.(check bool)
          "mutation id remains addressable"
          true
@@ -763,7 +772,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
            ~input
            ()
        in
-       (match AQ.resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -792,6 +801,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~settled_at:3.0
             ~stop_requested:false
             ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with
@@ -866,6 +876,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~settled_at:4.0
             ~stop_requested:false
             ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with
@@ -912,7 +923,7 @@ let test_summary_updates_never_resolve_pending_request () =
        Alcotest.(check bool) "model judgment remains pending" true
          (Option.is_some (AQ.get_pending_entry ~id));
        Alcotest.(check bool) "resolved entry cannot be updated" true
-         (match AQ.resolve ~base_path ~id ~decision:(AQ.Decision.Reject "operator denied") with
+         (match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "operator denied") with
           | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
           | Ok () ->
             (match AQ.attach_summary ~id summary with
@@ -1284,7 +1295,7 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
        in
        check_update "judge marked in flight" true (AQ.mark_summary_pending ~id);
        AQ.For_testing.reset_runtime_state ();
-       Alcotest.(check int) "process state cleared" 0 (AQ.pending_count ());
+       Alcotest.(check int) "process state cleared" 0 (List.length (AQ.list_pending_entries ()));
        let report = install_exn ~base_path in
        Alcotest.(check int) "one pending restored" 1 report.loaded_pending;
        Alcotest.(check int) "no delivery replay" 0 report.replayed_deliveries;
@@ -1344,7 +1355,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
         | Ok _ -> Alcotest.fail "malformed snapshot must not install"
        | Error (AQ.Install_storage_failed _) -> ()
         );
-       Alcotest.(check int) "no partial install" 0 (AQ.pending_count ());
+       Alcotest.(check int) "no partial install" 0 (List.length (AQ.list_pending_entries ()));
        (match
           AQ.submit_pending
             ~keeper_name:"queue-invalid-store"
@@ -1649,7 +1660,7 @@ let test_submit_surfaces_storage_failure () =
            ()
        with
        | Ok _ -> Alcotest.fail "submission must not succeed without durable storage"
-       | Error _ -> Alcotest.(check int) "memory not mutated" 0 (AQ.pending_count ()))
+       | Error _ -> Alcotest.(check int) "memory not mutated" 0 (List.length (AQ.list_pending_entries ())))
 ;;
 
 let test_default_auto_judge_defers_without_blocking () =
@@ -1704,7 +1715,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
     (fun () ->
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match AQ.resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1763,7 +1774,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        in
        let rationale = "Use the project-scoped target." in
        (match
-          AQ.resolve
+          aq_resolve
             ~base_path
             ~id:reject_id
             ~decision:(AQ.Decision.Reject rationale)
@@ -1794,7 +1805,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
        let edited_input =
          `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
        in
-       (match AQ.resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
+       (match aq_resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let edited =

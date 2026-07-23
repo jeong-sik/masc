@@ -21,12 +21,11 @@
    each sample is printed verbatim so a deterministic provider is visible rather
    than silently collapsing [2] into [1].
 
-   It is keeper-independent: it bypasses [Fusion_orchestrator.run] (gate +
-   keeper chat-lane sink) and calls [Fusion_panel.run] and
-   [Fusion_judge.run] directly. Bypassing the orchestrator avoids the sink
+   It is keeper-independent: it bypasses the Keeper async delivery boundary
+   and calls [Fusion_panel.run] and [Fusion_judge.run] directly. This avoids the sink
    side effect (which writes a transcript to a keeper chat lane and, for a
-   synthetic keeper, can return [Sink_failed] and discard the computed panel
-   and judge results). (An hourly budget counter used to be listed here; it
+   synthetic keeper, would mix benchmark evidence with production delivery).
+   (An hourly budget counter used to be listed here; it
    was removed in PR #22051 and no invocation rate limit exists.)
 
    The baseline and the self-consistency arm reuse [Fusion_panel.run] so the

@@ -3,7 +3,7 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
   ; settled_at : float
@@ -20,7 +20,7 @@ type failure =
   | Durable_meta_missing
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
-  | Durable_owner_generation_changed of
+  | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
       }

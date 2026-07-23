@@ -11,7 +11,7 @@ import { deriveKeeperRuntimeProjection } from './keeper-runtime-projection'
 
 function makeSummary(overrides: Partial<KeeperMonitoringSummary> = {}): KeeperMonitoringSummary {
   return {
-    band: { key: 'active', label: '가동중', description: '정상' },
+    band: { key: 'active', label: '실행 중', description: '정상' },
     phase: { key: 'Running', label: '실행중', description: '정상 실행' },
     stage: { key: 'idle', label: '활동 없음', description: '없음' },
     hint: null,
@@ -27,13 +27,15 @@ describe('runtimeBandMeta', () => {
   it('returns active meta', () => {
     const meta = runtimeBandMeta('active')
     expect(meta.key).toBe('active')
-    expect(meta.label).toBeTruthy()
+    // Canonical KEEPER_STATUS_LABEL_KO.running (lib/keeper-operational-state.ts).
+    expect(meta.label).toBe('실행 중')
   })
 
   it('returns attention meta', () => {
     const meta = runtimeBandMeta('attention')
     expect(meta.key).toBe('attention')
-    expect(meta.label).toContain('주의')
+    // Canonical KEEPER_STATUS_LABEL_KO.stuck.
+    expect(meta.label).toBe('확인 필요')
   })
 
   it('returns paused meta', () => {
@@ -47,7 +49,7 @@ describe('runtimeBandMeta', () => {
   it('returns offline meta', () => {
     const meta = runtimeBandMeta('offline')
     expect(meta.key).toBe('offline')
-    expect(meta.label).toContain('오프라인')
+    expect(meta.label).toContain('중지')
     expect(meta.description).toContain('기동')
   })
 
@@ -56,7 +58,7 @@ describe('runtimeBandMeta', () => {
   it('returns transient meta', () => {
     const meta = runtimeBandMeta('transient')
     expect(meta.key).toBe('transient')
-    expect(meta.label).toBe('전이')
+    expect(meta.label).toBe('전이 중')
     expect(meta.description).toContain('전이')
   })
 })
@@ -172,7 +174,7 @@ describe('summarizeMonitoringEvidence', () => {
 
   it('suppresses unknown phase as null when default for band', () => {
     const evidence = summarizeMonitoringEvidence(makeSummary({
-      band: { key: 'active', label: '가동중', description: 'active' },
+      band: { key: 'active', label: '실행 중', description: 'active' },
       phase: { key: 'unknown', label: '확인 필요', description: 'unknown' },
     }))
     expect(evidence.phase).toBeNull()
@@ -326,7 +328,7 @@ describe('summarizeKeeperMonitoring', () => {
           >[1],
         )
         expect(summary.band.key).toBe('transient')
-        expect(summary.band.label).toBe('전이')
+        expect(summary.band.label).toBe('전이 중')
       },
     )
 

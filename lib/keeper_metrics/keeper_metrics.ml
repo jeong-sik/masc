@@ -74,6 +74,8 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalRoutedTotal
+  | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -292,6 +294,8 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
+  | BoardSignalRoutedTotal -> "masc_keeper_board_signal_routed_total"
+  | BoardSignalDeliveryTotal -> "masc_keeper_board_signal_delivery_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->
     "masc_keeper_board_signal_attention_candidate_total"

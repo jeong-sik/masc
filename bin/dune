@@ -265,7 +265,7 @@
 (executable
  (name gen_tool_descriptors)
  (modules gen_tool_descriptors)
- (libraries tool_schemas_specs yojson))
+ (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —

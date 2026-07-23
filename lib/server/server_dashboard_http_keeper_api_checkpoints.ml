@@ -63,7 +63,7 @@ let inventory_json (config : Workspace.config) (name : string)
           ~snapshot_id:(Filename.basename current_path)
           ~path:current_path
           ~is_current:true
-          ~fallback_generation:meta.runtime.generation
+          ~fallback_generation:meta.runtime.nonce
           checkpoint
         |> fun json -> Some (json, current_history_snapshot_id)
       | Error _ -> None
@@ -86,7 +86,7 @@ let inventory_json (config : Workspace.config) (name : string)
                ~snapshot_id
                ~path:(Keeper_checkpoint_store.oas_history_path ~session_dir ~snapshot_id)
                ~is_current:false
-               ~fallback_generation:meta.runtime.generation
+               ~fallback_generation:meta.runtime.nonce
                checkpoint)
         | Error _ -> None)
     in

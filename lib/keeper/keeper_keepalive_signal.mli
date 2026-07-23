@@ -124,11 +124,8 @@ val wakeup_keeper :
   ?stimulus:Keeper_event_queue.stimulus ->
   string -> unit
 
-(** Wake up all running keepers. [None] preserves legacy global wakeup. *)
-val wakeup_all_keepers : ?base_path:string -> unit -> unit
-
 val wakeup_relevant_keeper_for_board_signal :
-  config:Workspace.config -> Board_dispatch.board_signal -> unit
+  config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

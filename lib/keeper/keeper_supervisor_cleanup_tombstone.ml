@@ -53,7 +53,7 @@ let completion_meta_for_coverage config operation =
   match Keeper_meta_store.read_meta config operation.Keeper_shutdown_types.keeper_name with
   | Ok (Some meta)
     when Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
-         && Int.equal meta.runtime.generation operation.generation -> Some meta
+         && Int.equal meta.runtime.nonce operation.generation -> Some meta
   | Ok (Some _) ->
     Log.Keeper.warn
       "%s: dead tombstone completion coverage meta identity changed"

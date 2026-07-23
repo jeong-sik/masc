@@ -47,7 +47,8 @@ val manual_compaction_followup_failure
     successor without replaying the completed compaction transaction. *)
 
 val run_keeper_cycle
-  :  ?event_bus:Agent_sdk.Event_bus.t
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> ctx:_ Keeper_types_profile.context

@@ -95,6 +95,11 @@ type board_signal = {
   updated_at : float option;
 }
 
+type addressed_board_signal = {
+  signal : board_signal;
+  audience : Board.audience;
+}
+
 type board_sse_event =
   | Post_created of {
       post_id : string;
@@ -242,7 +247,8 @@ let ensure_flusher_actor store =
       loop flusher_start_cas_retries
 
 
-let board_signal_hook : (board_signal -> unit) option Atomic.t = Atomic.make None
+let board_signal_hook : (addressed_board_signal -> unit) option Atomic.t =
+  Atomic.make None
 
 let set_board_signal_hook hook =
   Atomic.set board_signal_hook (Some hook)
@@ -351,18 +357,20 @@ let matching_post_ids_for_comment_author_filter ~needle (comments : Board.commen
     comments;
   matches
 
-let emit_post_created (post : Board.post) =
+let emit_post_created ~(audience : Board.audience) (post : Board.post) =
   let pid = Board.Post_id.to_string post.id in
   let auth = Board.Agent_id.to_string post.author in
   emit_board_signal
-    {
-      kind = Board_post_created;
-      post_id = pid;
-      author = auth;
-      title = post.title;
-      content = post.content;
-      hearth = post.hearth;
-      updated_at = Some post.updated_at;
+    { signal =
+        { kind = Board_post_created
+        ; post_id = pid
+        ; author = auth
+        ; title = post.title
+        ; content = post.content
+        ; hearth = post.hearth
+        ; updated_at = Some post.updated_at
+        }
+    ; audience
     };
   emit_board_sse_event
     (Post_created
@@ -375,7 +383,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
   match backend () with
   | Jsonl store ->
     (match
-       Board.create_post
+       Board.create_post_with_audience
          store
          ~author
          ~content
@@ -390,9 +398,9 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
          ?origin
          ()
      with
-     | Ok post ->
-       emit_post_created post;
-       Ok post
+     | Ok creation ->
+       emit_post_created ~audience:creation.audience creation.post;
+       Ok creation.post
      | Error _ as error -> error)
 
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
@@ -400,13 +408,26 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
   match backend () with
   | Jsonl store ->
     (match
-       Board_core_persist.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
+       Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
-     | Ok (Board_core_persist.Post_created post as outcome) ->
-       emit_post_created post;
+     | Ok (Board.Post_created post as outcome) ->
+       (match
+          Board.audience_for_post
+            ~visibility:post.visibility
+            ~title:post.title
+            ~content:post.content
+        with
+        | Ok audience -> emit_post_created ~audience post
+        | Error error ->
+          (* Unreachable: [create_post_once_by_fusion_run_id] commits through
+             [create_post], which validates this exact audience at the write
+             boundary before persisting. *)
+          Log.BoardLog.error
+            "post-created signal not emitted: audience re-derivation failed: %s"
+            (Board_types.show_board_error error));
        Ok outcome
-     | Ok (Board_core_persist.Post_already_present _ as outcome) -> Ok outcome
+     | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
@@ -518,23 +539,26 @@ let add_comment ~post_id ~author ~content ?parent_id
   match backend () with
   | Jsonl store ->
       (match
-         Board.add_comment store ~post_id ~author ~content ?parent_id
+         Board.add_comment_with_audience store ~post_id ~author ~content ?parent_id
            ~ttl_hours ()
        with
-      | Ok comment ->
+      | Ok creation ->
+          let comment = creation.comment in
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
           | Ok post ->
               emit_board_signal
-                {
-                  kind = Board_comment_added;
-                  post_id;
-                  author = auth;
-                  title = post.title;
-                  content;
-                  hearth = post.hearth;
-                  updated_at = Some post.updated_at;
+                { signal =
+                    { kind = Board_comment_added
+                    ; post_id
+                    ; author = auth
+                    ; title = post.title
+                    ; content
+                    ; hearth = post.hearth
+                    ; updated_at = Some post.updated_at
+                    }
+                ; audience = creation.audience
                 }
           | Error e ->
               Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s"
@@ -609,22 +633,23 @@ let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
   with
   | Ok post ->
       emit_board_signal
-        {
-          kind =
-            Board_reaction_changed
-              {
-                target_type = toggled.target_type;
-                target_id = toggled.target_id;
-                user_id = toggled.user_id;
-                emoji = toggled.emoji;
-                reacted = toggled.reacted;
-              };
-          post_id = Board.Post_id.to_string post.id;
-          author = toggled.user_id;
-          title = post.title;
-          content = post.content;
-          hearth = post.hearth;
-          updated_at = Some post.updated_at;
+        { signal =
+            { kind =
+                Board_reaction_changed
+                  { target_type = toggled.target_type
+                  ; target_id = toggled.target_id
+                  ; user_id = toggled.user_id
+                  ; emoji = toggled.emoji
+                  ; reacted = toggled.reacted
+                  }
+            ; post_id = Board.Post_id.to_string post.id
+            ; author = toggled.user_id
+            ; title = post.title
+            ; content = post.content
+            ; hearth = post.hearth
+            ; updated_at = Some post.updated_at
+            }
+        ; audience = Board.audience_for_reaction
         }
   | Error e ->
       Log.BoardLog.warn

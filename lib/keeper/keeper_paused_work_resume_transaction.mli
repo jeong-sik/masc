@@ -1,7 +1,7 @@
 (** Receipt-first [Resume_owner] transaction for a paused Keeper lane. *)
 
 type request =
-  { owner_generation : int
+  { owner_nonce : int
   ; operator_operation_id : string
   }
 
@@ -19,7 +19,7 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_generation_changed of
+  | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -27,7 +27,7 @@ type failure =
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
   | Registry_owner_missing
-  | Registry_owner_generation_changed of
+  | Registry_owner_nonce_changed of
       { expected : int
       ; actual : int
       }

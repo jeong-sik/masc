@@ -2854,11 +2854,9 @@ module For_testing = struct
   let atomic_staging_dir = atomic_staging_dir
   let load_record = load_record
   let recover_lost_disk_records = recover_lost_disk_records
-  let submit_with_request_id = submit_with_ops
-
   let submit ops ?on_accepted ?on_worker_aborted ?on_worker_settled
       ~background_sw ~base_path ~caller ~f ~keeper_name () =
-    submit_with_request_id ops ?on_accepted ?on_worker_aborted
+    submit_with_ops ops ?on_accepted ?on_worker_aborted
       ?on_worker_settled ~background_sw ~base_path ~caller
       ~f:(fun ~request_id:_ request_sw -> f request_sw)
       ~keeper_name ()
@@ -2871,11 +2869,6 @@ module For_testing = struct
     Eio.Mutex.use_ro mu (fun () -> Request_table.length active_switches)
   ;;
 
-  let persistence_lane_observation () =
-    ( Atomic.get persistence_lane_waits
-    , Atomic.get persistence_lane_pending
-    , Atomic.get persistence_lane_in_flight )
-  ;;
   let persistence_lane_samples = persistence_lane_samples
 
 end

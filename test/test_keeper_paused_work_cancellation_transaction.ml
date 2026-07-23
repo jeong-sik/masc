@@ -52,7 +52,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          { meta with
            paused
          ; latched_reason
-         ; runtime = { meta.runtime with generation }
+         ; runtime = { meta.runtime with nonce = meta.runtime.nonce }
          }
        in
        Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
@@ -114,7 +114,7 @@ let with_lane ?registered ?latched_reason ~paused ~generation f =
        in
        let request : Transaction.request =
          { source_revision
-         ; owner_generation = generation
+         ; owner_nonce = generation
          ; lease
          ; operator_operation_id = "operator-cancel-1"
          ; reason = "operator rejected retained paused work"
@@ -141,7 +141,7 @@ let with_pending_lane ?registered ?latched_reason ~paused ~generation f =
        let request : Transaction.pending_request =
          { source
          ; source_revision
-         ; owner_generation = generation
+         ; owner_nonce = generation
          ; operator_operation_id = "operator-pending-cancel-1"
          ; reason = "operator rejected exact pending paused work"
          ; settled_at = 3.0
@@ -207,7 +207,7 @@ let test_paused_owner_cancellation_commits_once () =
       let resumed = Keeper_meta_contract.mark_resumed current_meta in
       { resumed with
         runtime =
-          { resumed.runtime with generation = resumed.runtime.generation + 1 }
+          { resumed.runtime with nonce = resumed.runtime.nonce + 1 }
       }
     in
     Keeper_meta_store.write_meta config resumed
@@ -340,7 +340,7 @@ let test_pending_cancellation_replays_after_owner_transition () =
          let resumed = Keeper_meta_contract.mark_resumed current_meta in
          { resumed with
            runtime =
-             { resumed.runtime with generation = resumed.runtime.generation + 1 }
+             { resumed.runtime with nonce = resumed.runtime.nonce + 1 }
          }
        in
        Keeper_meta_store.write_meta config resumed
@@ -359,12 +359,12 @@ let test_pending_cancellation_replays_after_owner_transition () =
 
 let test_stale_generation_is_rejected_before_commit () =
   with_lane ~paused:true ~generation:13 (fun config keeper_name request ->
-    let stale = { request with owner_generation = 12 } in
+    let stale = { request with owner_nonce = 12 } in
     (match Transaction.cancel config ~keeper_name stale with
      | Error
          (Transaction.Failed
             { cause =
-                Transaction.Durable_owner_generation_changed
+                Transaction.Durable_owner_nonce_changed
                   { expected = 12; actual = 13 }
             ; reservation_release
             }) ->
@@ -384,7 +384,7 @@ let test_stale_generation_is_rejected_before_commit () =
 ;;
 
 let resume_request generation operation_id : Resume_transaction.request =
-  { owner_generation = generation
+  { owner_nonce = generation
   ; operator_operation_id = operation_id
   }
 ;;
@@ -461,7 +461,7 @@ let test_resume_owner_commits_receipt_and_preserves_pending () =
      | Resume_transaction.Already_committed -> ()
      | Resume_transaction.Committed ->
        Alcotest.fail "Resume_owner replay created a second receipt");
-    let conflicting = { request with owner_generation = 20 } in
+    let conflicting = { request with owner_nonce = 20 } in
     (match Resume_transaction.resume config ~keeper_name conflicting with
      | Error { Resume_transaction.cause = Resume_transaction.Receipt_conflict _; _ } -> ()
      | Error error -> Alcotest.fail (Resume_transaction.error_to_string error)
@@ -496,7 +496,7 @@ let test_resume_owner_completes_prepared_receipt_projection () =
     let prepared : Disposition_receipt.t =
       { keeper_name
       ; expected_trace_id = durable.runtime.trace_id
-      ; expected_generation = request.owner_generation
+      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 5.0
       ; operation = Disposition_receipt.Resume_owner
@@ -573,7 +573,7 @@ let test_resume_owner_rejects_stale_generation_without_receipt () =
     (match Resume_transaction.resume config ~keeper_name request with
      | Error
          { Resume_transaction.cause =
-             Resume_transaction.Durable_owner_generation_changed
+             Resume_transaction.Durable_owner_nonce_changed
                { expected = 22; actual = 23 }
          ; reservation_release = Some release
          } ->

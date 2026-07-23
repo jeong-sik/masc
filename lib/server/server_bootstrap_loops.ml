@@ -269,6 +269,10 @@ type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
   }
 
 type keeper_persistence_failure_phase =
@@ -588,6 +592,38 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       keeper_msg_recovery.staging_files_preserved
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
+  let fusion_delivery_recovery =
+    Fusion_delivery_projector.recover_startup ~base_path
+  in
+  (match fusion_delivery_recovery with
+   | Error error ->
+     Log.Keeper.error
+       "fusion_delivery: startup inventory unavailable error=%s"
+       (Fusion_delivery_obligation.error_to_string error)
+   | Ok report ->
+     if
+       report.staging_cleanup.inspected > 0
+       || report.staging_cleanup.failures <> []
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup staging inspected=%d deleted=%d preserved=%d failures=%d"
+         report.staging_cleanup.inspected
+         report.staging_cleanup.deleted
+         report.staging_cleanup.preserved
+         (List.length report.staging_cleanup.failures);
+     List.iter
+       (fun (error : Fusion_delivery_projector.recovery_record_error) ->
+          Log.Keeper.error
+            "fusion_delivery: startup projection retained request_id=%s error=%s"
+            (* DET-OK: log placeholder for malformed records; never feeds a branch. *)
+            (Option.value error.request_id ~default:"<malformed-record>")
+            error.detail)
+       report.record_errors;
+     if report.projected > 0 || report.pending > 0
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
+         report.examined report.projected report.pending);
   let prepared =
     { base_path = base_path_identity
     ; config
@@ -595,6 +631,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
         { shutdown
         ; queue = queue_recovery
         ; requests = keeper_msg_recovery
+        ; fusion_delivery = fusion_delivery_recovery
         }
     }
   in

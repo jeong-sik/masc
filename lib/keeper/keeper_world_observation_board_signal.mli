@@ -63,6 +63,12 @@ val compare_cursor_token : float * string -> float * string -> int
 val cursor_token_of_post : Board.post -> float * string
 val list_posts_after_cursor : float * string option -> Board.post list
 val text : Board_dispatch.board_signal -> string
+val address_text : Board_dispatch.board_signal -> string
+(** Text authored by the current signal producer and therefore allowed to
+    carry addressing authority. A post uses its title/content (never the
+    category [hearth]), a
+    comment uses only the new comment body, and a reaction carries no textual
+    address. Inherited post display fields never re-address later events. *)
 val mention_ids_of_signal : Board_dispatch.board_signal -> Keeper_identity.Keeper_id.t list
 
 val match_signal
@@ -77,6 +83,7 @@ val check_self_comment_status
 
 type wake_reason =
   | Explicit_mention
+  | Broadcast
   | Thread_reply_after_self_comment
   | Reaction_after_self_activity
 (** Closed set of reasons a keeper wakes for a board signal (RFC-0020).

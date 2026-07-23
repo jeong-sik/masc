@@ -209,7 +209,7 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
-let add_comment
+let add_comment_with_audience
       store
       ~post_id
       ~author
@@ -217,7 +217,7 @@ let add_comment
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
       ()
-  : (comment, board_error) Result.t
+  : (comment_creation, board_error) Result.t
   =
   maybe_sweep store;
   (* Validate all IDs first *)
@@ -243,7 +243,10 @@ let add_comment
           then Error (Validation_error "ttl_hours must be non-negative")
           else if String.length content = 0
           then Error (Validation_error "Content cannot be empty")
-          else (
+          else
+            match Board_audience.audience_for_comment ~content with
+            | Error _ as error -> error
+            | Ok audience ->
             let board_result =
               with_lock store (fun () ->
                 (* Verify post exists *)
@@ -313,11 +316,23 @@ let add_comment
                  with_lock store (fun () ->
                    mark_dirty_post store (Post_id.to_string comment.post_id);
                    mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok comment
+                 Ok { comment; audience }
                | Error e ->
                  rollback_fresh_comment store ~comment ~previous_post;
                  Error e)
-            | Error _ as e -> e)))
+            | Error _ as e -> e))
+;;
+
+let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_audience
+    store
+    ~post_id
+    ~author
+    ~content
+    ?parent_id
+    ?ttl_hours
+    ()
+  |> Result.map (fun creation -> creation.comment)
 ;;
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =
@@ -498,6 +513,100 @@ let list_reactions_batch store ~targets ?user_id () =
   with_lock store (fun () -> reaction_summaries_batch_unlocked store ~targets ?user_id ())
 ;;
 
+type staged_reaction_toggle =
+  { key : string
+  ; previous : reaction option
+  ; desired : reaction option
+  ; snapshot : string
+  ; outcome : reaction_toggle_result
+  }
+
+let set_reaction_unlocked store key = function
+  | None -> Hashtbl.remove store.reactions key
+  | Some reaction -> Hashtbl.replace store.reactions key reaction
+;;
+
+let same_reaction_state left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left = right
+  | None, Some _ | Some _, None -> false
+;;
+
+let stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji =
+  match ensure_reaction_target_unlocked store ~target_type ~target_id with
+  | Error _ as error -> error
+  | Ok () ->
+    let user_id_string = Agent_id.to_string user_id in
+    let key = reaction_key ~target_type ~target_id ~user_id:user_id_string ~emoji in
+    let previous = Hashtbl.find_opt store.reactions key in
+    let desired =
+      match previous with
+      | Some _ -> None
+      | None ->
+        Some
+          { target_type
+          ; target_id
+          ; user_id
+          ; emoji
+          ; created_at = Time_compat.now ()
+          }
+    in
+    set_reaction_unlocked store key desired;
+    Fun.protect
+      ~finally:(fun () -> set_reaction_unlocked store key previous)
+      (fun () ->
+        let reacted = Option.is_some desired in
+        let summary =
+          reaction_summaries_unlocked
+            store
+            ~target_type
+            ~target_id
+            ~user_id:user_id_string
+            ()
+        in
+        let snapshot = reactions_jsonl_unlocked store in
+        Ok
+          { key
+          ; previous
+          ; desired
+          ; snapshot
+          ; outcome =
+              { target_type
+              ; target_id
+              ; user_id = user_id_string
+              ; emoji
+              ; reacted
+              ; summary
+              }
+          })
+;;
+
+let commit_staged_reaction_unlocked store staged =
+  let outcome = staged.outcome in
+  match
+    ensure_reaction_target_unlocked
+      store
+      ~target_type:outcome.target_type
+      ~target_id:outcome.target_id
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    let current = Hashtbl.find_opt store.reactions staged.key in
+    if not (same_reaction_state current staged.previous)
+    then
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "reaction state changed before durable commit: target=%s user=%s emoji=%s"
+              outcome.target_id
+              outcome.user_id
+              outcome.emoji))
+    else (
+      set_reaction_unlocked store staged.key staged.desired;
+      Ok outcome)
+;;
+
 let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
   : (reaction_toggle_result, board_error) Result.t
   =
@@ -506,42 +615,39 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok user_id, Ok emoji ->
-    let user_id_string = Agent_id.to_string user_id in
-    let result =
-      with_lock store (fun () ->
-        match ensure_reaction_target_unlocked store ~target_type ~target_id with
-        | Error e -> Error e
-        | Ok () ->
-          let key = reaction_key ~target_type ~target_id ~user_id:user_id_string ~emoji in
-          let reacted =
-            match Hashtbl.find_opt store.reactions key with
-            | Some _ ->
-              Hashtbl.remove store.reactions key;
-              false
-            | None ->
-              Hashtbl.replace
-                store.reactions
-                key
-                { target_type
-                ; target_id
-                ; user_id
-                ; emoji
-                ; created_at = Time_compat.now ()
-                };
-              true
-          in
-          let summary =
-            reaction_summaries_unlocked
-              store
-              ~target_type
-              ~target_id
-              ~user_id:user_id_string
-              ()
-          in
-          Ok { target_type; target_id; user_id = user_id_string; emoji; reacted; summary })
-    in
-    Result.iter (fun _ -> rewrite_reactions store) result;
-    result
+    with_persist_lock store (fun () ->
+      match
+        with_lock store (fun () ->
+          stage_reaction_toggle_unlocked
+            store
+            ~target_type
+            ~target_id
+            ~user_id
+            ~emoji)
+      with
+      | Error _ as error -> error
+      | Ok staged ->
+        (match save_reactions_jsonl_result staged.snapshot with
+         | Error _ as error -> error
+         | Ok () ->
+           (match with_lock store (fun () -> commit_staged_reaction_unlocked store staged) with
+            | Ok _ as committed -> committed
+            | Error commit_error ->
+              let current_snapshot =
+                with_lock store (fun () -> reactions_jsonl_unlocked store)
+              in
+              (match save_reactions_jsonl_result current_snapshot with
+               | Ok () -> Error commit_error
+               | Error persistence_error ->
+                 (* The durable rollback write also failed, so [persistence_error]
+                    is the error returned to the caller.  Log the superseded
+                    [commit_error] here — otherwise the divergence between the
+                    staged write and the in-memory commit is lost entirely. *)
+                 Log.BoardLog.warn
+                   "reaction commit error superseded by durable rollback failure: commit_error=%s persistence_error=%s"
+                   (Board_types.show_board_error commit_error)
+                   (Board_types.show_board_error persistence_error);
+                 Error persistence_error))))
 ;;
 
 (** {1 SubBoard Operations} *)

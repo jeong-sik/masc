@@ -1176,6 +1176,52 @@ let test_reaction_toggle_and_summary () =
            Alcotest.(check int) "summary empty after untoggle" 0
              (List.length result.summary))
 
+let test_reaction_persistence_failure_returns_error_without_publish () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"reaction-author"
+        ~content:"reaction persistence boundary"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let keeper_signals = ref 0 in
+  let sse_reactions = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Reaction_changed _ -> incr sse_reactions
+    | _ -> ());
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"rewrite_reactions"
+    (Board_dispatch.toggle_reaction
+       ~target_type:Board.Reaction_post
+       ~target_id:post_id
+       ~user_id:"reactor"
+       ~emoji:"🚀");
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "Keeper signal not published" 0 !keeper_signals;
+  Alcotest.(check int) "SSE reaction not published" 0 !sse_reactions;
+  match
+    Board_dispatch.list_reactions
+      ~target_type:Board.Reaction_post
+      ~target_id:post_id
+      ~user_id:"reactor"
+      ()
+  with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok summaries ->
+    Alcotest.(check int) "failed reaction stays absent in memory" 0 (List.length summaries)
+;;
+
 let test_comment_reaction_survives_restart () =
   match
     Board_dispatch.create_post ~author:"reaction-author"
@@ -1448,7 +1494,8 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
   match !seen with
-  | Some signal ->
+  | Some addressed ->
+    let signal = addressed.Board_dispatch.signal in
     (match signal.Board_dispatch.kind with
      | Board_dispatch.Board_reaction_changed
          { target_type; target_id; user_id; emoji; reacted } ->
@@ -1462,6 +1509,9 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
       Alcotest.(check bool) "reacted" true reacted;
       Alcotest.(check string) "parent title" "Reaction parent title" signal.title;
       Alcotest.(check string) "parent content" "reaction parent content @keeper-alpha" signal.content
+      ; (match addressed.audience with
+         | Board.Thread_participants -> ()
+         | _ -> Alcotest.fail "reaction audience must be thread participants")
      | _ -> Alcotest.fail "expected reaction_changed board signal")
   | None -> Alcotest.fail "expected reaction_changed board signal"
 
@@ -1604,6 +1654,65 @@ let test_invalid_author () =
   with
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
+
+let expect_validation_error label = function
+  | Error (Board.Validation_error _) -> ()
+  | Error error -> Alcotest.failf "%s: %s" label (Board.show_board_error error)
+  | Ok _ -> Alcotest.failf "%s: expected Validation_error" label
+;;
+
+let test_direct_post_requires_exact_targets () =
+  expect_validation_error
+    "targetless Direct post"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"private but unaddressed"
+       ~visibility:Board.Direct
+       ~post_kind:Board.Human_post
+       ());
+  expect_validation_error
+    "Direct broadcast"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"@@all private broadcast is contradictory"
+       ~visibility:Board.Direct
+       ~post_kind:Board.Human_post
+       ())
+;;
+
+let test_malformed_target_fails_closed () =
+  expect_validation_error
+    "malformed target"
+    (Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"please inspect @!"
+       ~post_kind:Board.Human_post
+       ())
+;;
+
+let test_write_boundary_emits_typed_audience () =
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun addressed -> seen := Some addressed);
+  (match
+     Board_dispatch.create_post
+       ~author:"validator"
+       ~content:"@MiXeD-Agent inspect this"
+       ~post_kind:Board.Human_post
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match !seen with
+  | None -> Alcotest.fail "typed Board signal was not emitted"
+  | Some addressed ->
+    (match addressed.Board_dispatch.audience with
+     | Board.Targets [ target ] ->
+       Alcotest.(check string)
+         "Board target retains the typed source identity"
+         "MiXeD-Agent"
+         (Board.Agent_id.to_string target)
+     | _ -> Alcotest.fail "expected one exact Board target")
+;;
 
 (** {1 SubBoard CRUD} *)
 
@@ -2013,6 +2122,8 @@ let () =
     "reactions", [
       Alcotest.test_case "toggle and summary" `Quick
         (with_eio test_reaction_toggle_and_summary);
+      Alcotest.test_case "persistence failure returns error without publish" `Quick
+        (with_eio test_reaction_persistence_failure_returns_error_without_publish);
       Alcotest.test_case "comment reaction survives restart" `Quick
         (with_eio test_comment_reaction_survives_restart);
       Alcotest.test_case "summary recent user ids" `Quick
@@ -2044,6 +2155,12 @@ let () =
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
+      Alcotest.test_case "Direct requires exact targets" `Quick
+        (with_eio test_direct_post_requires_exact_targets);
+      Alcotest.test_case "malformed target fails closed" `Quick
+        (with_eio test_malformed_target_fails_closed);
+      Alcotest.test_case "write emits typed audience" `Quick
+        (with_eio test_write_boundary_emits_typed_audience);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

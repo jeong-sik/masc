@@ -5,6 +5,45 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
 
+(* [Keeper_tool_filesystem_runtime.handle_read_file] / [handle_file_write]
+   (the bare string-returning wrappers) were retired: they had zero
+   production callers ([keeper_tool_runtime.ml] calls the [_with_outcome]
+   variants directly). These test-local shims reproduce the [.raw_output]
+   projection so the assertions below keep exercising the real production
+   entry points. *)
+let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
+  (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~args)
+    .raw_output
+;;
+
+let handle_file_write
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~publication_recovery
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~publication_recovery
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ())
+    .raw_output
+;;
+
 let temp_dir () =
   let d = Filename.temp_file "keeper-visible-path-projection-" "" in
   Unix.unlink d;
@@ -212,7 +251,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
   let target = Filename.concat playground "repos/masc/README.md" in
   write_file target "repo readme\n";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_read_file
+    handle_read_file
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -237,7 +276,7 @@ let test_repository_backlog_file_is_readable () =
   let target = Filename.concat playground "repos/masc/docs/backlog.json" in
   write_file target {|{"scope":"repository fixture"}|};
   let raw =
-    Keeper_tool_filesystem_runtime.handle_read_file
+    handle_read_file
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -261,7 +300,7 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
   @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let raw =
-    Keeper_tool_filesystem_runtime.handle_read_file
+    handle_read_file
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -285,7 +324,7 @@ let test_write_visible_mind_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
   @@ fun ~config ~meta ~playground ~publication_recovery ->
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta

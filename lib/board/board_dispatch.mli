@@ -56,6 +56,13 @@ type board_signal = {
   updated_at : float option;
 }
 
+type addressed_board_signal = {
+  signal : board_signal;
+  audience : Board.audience;
+}
+(** Signal payload paired with the audience fixed before the originating Board
+    mutation. The hook must consume this authority, not parse mutable text. *)
+
 type board_sse_event =
   | Post_created of {
       post_id : string;
@@ -88,7 +95,7 @@ type board_sse_event =
       reacted : bool;
     }
 
-val set_board_signal_hook : (board_signal -> unit) -> unit
+val set_board_signal_hook : (addressed_board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post}, {!add_comment},
     and {!toggle_reaction}. *)
 
@@ -158,7 +165,7 @@ val create_post_once_by_fusion_run_id :
   ttl_hours:int ->
   origin:Board.post_origin ->
   unit ->
-  (Board_core_persist.create_post_once_result, Board.board_error) Result.t
+  (Board.create_post_once_result, Board.board_error) Result.t
 (** Emit post-created hooks only for the durable first creation. Exact replays
     return the existing typed-origin post without a duplicate Board signal;
     conflicting replays return [Already_exists]. *)

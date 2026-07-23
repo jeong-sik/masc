@@ -32,10 +32,6 @@ val wakeup_keeper :
   ?stimulus:Keeper_event_queue.stimulus ->
   string -> unit
 
-(** Wake up all running keepers. Used for @@all broadcast mentions
-    or system-wide events. *)
-val wakeup_all_keepers : ?base_path:string -> unit -> unit
-
 val not_in_registry_warn_cooldown_s : float
 val not_in_registry_warn_max_entries : int
 
@@ -72,7 +68,7 @@ val effective_keepalive_meta :
   keeper_meta
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Workspace.config -> Board_dispatch.board_signal -> unit
+  config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)

@@ -86,6 +86,15 @@ let dispatch_failed ~config ~meta reason =
     (Keeper_state_machine.Compaction_failed { reason })
 ;;
 
+let observe_terminal_dispatch_failure ~meta = function
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "manual compaction terminal lifecycle dispatch failed without reopening the affine request: %s"
+      (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
+;;
+
 let run_start_lifecycle ~config ~meta =
   match dispatch_event ~config ~meta Keeper_state_machine.Operator_compact_requested with
   | Error error ->
@@ -106,6 +115,12 @@ let run_start_lifecycle ~config ~meta =
 
 let run_commit ~config ~base_dir ~meta prepared =
   match Keeper_context_runtime.commit_prepared_compaction prepared with
+  | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+    let failure_dispatch =
+      dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
+    in
+    observe_terminal_dispatch_failure ~meta failure_dispatch;
+    Ok (No_compaction no_compaction)
   | Error error ->
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -120,12 +135,31 @@ let run_commit ~config ~base_dir ~meta prepared =
          ~origin:Keeper_registry.Operator_compact
      with
      | Error error ->
-       Error
-         (Lifecycle
-            { stage = Compaction_completed
-            ; checkpoint_applied = true
-            ; error
-            })
+       Log.Keeper.error
+         ~keeper_name:meta.name
+         "manual compaction completion lifecycle dispatch failed after durable commit; closing the lifecycle with an explicit failure: %s"
+         (Keeper_context_runtime.lifecycle_dispatch_error_to_string error);
+       Keeper_unified_metrics.broadcast_compaction ~name:meta.name recovery;
+       let failure_dispatch =
+         dispatch_failed
+           ~config
+           ~meta
+           "compaction_completed_rejected_after_checkpoint"
+       in
+       (match failure_dispatch with
+        | Ok () ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "manual compaction checkpoint remains applied after completion rejection; failure cleanup released the compaction lifecycle";
+          Ok (Compacted { recovery; manifest })
+        | Error _ ->
+          Error
+            (Lifecycle_with_failure_dispatch
+               { stage = Compaction_completed
+               ; checkpoint_applied = true
+               ; error
+               ; failure_dispatch
+               }))
      | Ok () ->
        Keeper_unified_metrics.broadcast_compaction
          ~name:meta.name
@@ -141,9 +175,8 @@ let finish_preparation ~config ~base_dir ~meta = function
         ~meta
         (Keeper_post_turn.compaction_recovery_error_to_tag error)
     in
-    (match failure_dispatch with
-     | Ok () -> Ok (No_compaction no_compaction)
-     | Error _ -> Error (Recovery (error, failure_dispatch)))
+    observe_terminal_dispatch_failure ~meta failure_dispatch;
+    Ok (No_compaction no_compaction)
   | Error error ->
     let failure_dispatch =
       dispatch_failed
@@ -182,18 +215,12 @@ let prepare_with ~prepare_compaction ~config ~meta =
       ~projection_request )
 ;;
 
-let prepare =
-  prepare_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
-;;
-
-let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  (* Planning is outside the lifecycle. Only the deterministic lifecycle and
-     source-CAS commit may set [compaction_active], and they close in this
-     single synchronous section. *)
-  let base_dir, preparation = prepare ~config ~meta in
-  match run_start_lifecycle ~config ~meta with
-  | Error _ as error -> error
-  | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
+let no_compaction_after_prepared_cancellation prepared =
+  Eio.Cancel.protect (fun () ->
+    No_compaction
+      (Keeper_post_turn.no_compaction_of_uncommitted_prepared
+         ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
+         prepared))
 ;;
 
 let observe_manifest ~keeper_name = function
@@ -207,6 +234,16 @@ let observe_manifest ~keeper_name = function
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", keeper_name; "phase", "manual_compaction_manifest" ]
       ()
+;;
+
+let preserve_no_compaction_after_final_admission_busy = function
+  | Keeper_event_queue_state.Exact_execution_terminal _ -> true
+  | Keeper_event_queue_state.Exact_lane_unconfigured
+  | Keeper_event_queue_state.No_eligible_history
+  | Keeper_event_queue_state.Invalid_structural_source
+  | Keeper_event_queue_state.Structurally_unchanged
+  | Keeper_event_queue_state.Checkpoint_not_reduced ->
+    false
 ;;
 
 let run_admitted_with
@@ -227,21 +264,44 @@ let run_admitted_with
   | `Busy block -> `Busy block
   | `Ran () ->
     let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
-    (match
-       Keeper_turn_admission.run_compaction_if_free
-         ~base_path:config.base_path
-         ~keeper_name:meta.name
-         (fun () ->
-           match run_start_lifecycle ~config ~meta with
-           | Error failure -> Error failure
-           | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+    let final_admission () =
+      Keeper_turn_admission.run_compaction_if_free
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        (fun () ->
+          match run_start_lifecycle ~config ~meta with
+          | Error failure ->
+            (match preparation with
+             | Ok prepared ->
+               Ok
+                 (No_compaction
+                    (Keeper_post_turn.no_compaction_of_uncommitted_prepared
+                       ~cause:
+                         Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                       prepared))
+             | Error (Keeper_post_turn.No_compaction no_compaction) ->
+               Ok (No_compaction no_compaction)
+             | Error _ -> Error failure)
+          | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+    in
+    let admitted =
+      match preparation with
+      | Ok prepared ->
+        (try final_admission () with
+         | Eio.Cancel.Cancelled _ ->
+           Eio.Cancel.protect (fun () ->
+             `Ran (Ok (no_compaction_after_prepared_cancellation prepared))))
+      | Error _ -> final_admission ()
+    in
+    (match admitted
      with
      | `Busy block ->
        (match preparation with
         | Ok prepared ->
           `No_compaction
             (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
-        | Error (Keeper_post_turn.No_compaction no_compaction) ->
+        | Error (Keeper_post_turn.No_compaction no_compaction)
+          when preserve_no_compaction_after_final_admission_busy no_compaction.reason ->
           `No_compaction no_compaction
         | Error _ -> `Busy block)
      | `Ran (Error failure) -> `Compaction_failed failure
@@ -252,8 +312,18 @@ let run_admitted_with
 ;;
 
 
-let run_admitted =
-  run_admitted_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
+let run_admitted ?exact_execution_guard ~config ~meta () =
+  run_admitted_with
+    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+      Keeper_context_runtime.prepare_compaction
+        ?exact_execution_guard
+        ~base_dir
+        ~meta
+        ~trigger
+        ~projection_request
+        ())
+    ~config
+    ~meta
 ;;
 
 let lifecycle_stage_to_string = function
@@ -289,3 +359,9 @@ let failure_to_string = function
       (Keeper_post_turn.compaction_recovery_error_to_string error)
       (failure_dispatch_to_string failure_dispatch)
 ;;
+
+module For_testing = struct
+  let preserve_no_compaction_after_final_admission_busy =
+    preserve_no_compaction_after_final_admission_busy
+  ;;
+end

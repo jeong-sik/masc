@@ -251,10 +251,11 @@ val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
     not create an unbounded backlog of otherwise identical stimuli. For a
-    [Fusion_completed] event, [board_post_id] and [channel] are also excluded:
-    the first committed row owns those projections, while a retry may observe
-    Board recovery or route consumption. Result and run must still match
-    exactly. *)
+    [Fusion_completed] event, [channel] is also excluded: the first committed
+    row owns recipient authority, and a replay sources the channel from the
+    durable delivery obligation, so an [Unrouted] first commit followed by a
+    recovered-channel replay must not conflict. Result, run, and Board
+    evidence must still match exactly. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)

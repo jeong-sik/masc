@@ -234,6 +234,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -279,7 +280,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -548,6 +548,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -593,7 +594,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_task_completion_claim
@@ -721,15 +721,7 @@
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
- (libraries masc_test_deps))
-
-; Exact-output registry: credential admission deferred to execution, and
-; runtime.toml saves re-validate + republish lane declarations.
-
-(test
- (name test_runtime_exact_output_registry)
- (modules test_runtime_exact_output_registry)
- (libraries alcotest masc_test_deps))
+ (libraries masc_test_deps compaction_exact_output_fixture))
 
 (test
  (name test_keeper_keepalive_launch_order_ast)
@@ -771,7 +763,7 @@
 (test
  (name test_fusion_delivery_obligation)
  (modules test_fusion_delivery_obligation)
- (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
+ (libraries alcotest masc_test_deps masc.fusion_core))
 
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
@@ -1294,7 +1286,30 @@
 (test
  (name test_compaction_exact_output_conformance)
  (modules test_compaction_exact_output_conformance)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+ (libraries
+  alcotest
+  compaction_exact_output_fixture
+  masc_test_deps
+  masc.keeper_checkpoint_ref
+  eio_main
+  unix))
+
+; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
+(test
+ (name test_keeper_exact_execution_lease_guard)
+ (modules
+  test_keeper_exact_execution_lease_guard
+  test_keeper_exact_execution_lease_guard_fixture)
+ (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
+
+; Process-isolated proof that exact-output bootstrap honors full catalog
+; replacement precedence over deployment overlays and OAS embedded targets.
+(test
+ (name test_exact_output_catalog_precedence)
+ (modules
+  test_exact_output_catalog_precedence
+  test_exact_output_catalog_precedence_fixture)
+ (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 ; Production entrypoint coverage for an intentionally absent Eio clock. This
 ; must remain a separate process because Eio_context clock installation is

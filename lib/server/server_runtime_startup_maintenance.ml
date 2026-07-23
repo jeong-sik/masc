@@ -19,6 +19,35 @@ let prune_children_dirs ~prune_dir root =
       0
       (Sys.readdir root)
 
+(* Trajectory stores are flat [<trace_id>.jsonl] files under
+   [trajectories/<keeper>/] — no [YYYY-MM] month dirs — so
+   [Dated_jsonl.prune] is a provable no-op on them.  Prune by file mtime
+   instead, folded keeper-scoped via [prune_children_dirs]. *)
+let prune_flat_jsonl_older_than ~days dir =
+  if days <= 0 || not (Sys.file_exists dir)
+  then 0
+  else
+    let cutoff =
+      (* NDT-OK: wall clock is the retention boundary for mtime pruning; idempotent cleanup, never feeds deterministic replay. *)
+      Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
+    in
+    Array.fold_left
+      (fun acc name ->
+        if Filename.check_suffix name ".jsonl"
+        then
+          let path = Filename.concat dir name in
+          match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+          | Some (stat : Unix.stats)
+            when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
+            (try
+               Sys.remove path;
+               acc + 1
+             with Sys_error _ -> acc)
+          | _ -> acc
+        else acc)
+      0
+      (Sys.readdir dir)
+
 let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
      let days =
@@ -55,6 +84,13 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_dir (Filename.concat masc "activity-events")
        + prune_recall_injections ()
        + prune_dir (Filename.concat masc "voice_sessions")
+       (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
+          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped.
+          Top-level masc/"execution-receipts" has no writer (canonical layout
+          is keepers/<name>/execution-receipts), so it is not pruned here. *)
+       + prune_children_dirs
+           ~prune_dir:(prune_flat_jsonl_older_than ~days)
+           (Filename.concat masc "trajectories")
        + (let keepers = Filename.concat masc "keepers" in
           if not (Sys.file_exists keepers) then 0
           else
@@ -62,6 +98,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
               acc
               + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
               + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
+              + prune_dir (Filename.concat (Filename.concat keepers name) "execution-receipts")
             ) 0 (Sys.readdir keepers))
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in

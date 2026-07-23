@@ -452,7 +452,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 6
+             [ "version", `Int 7
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -2743,7 +2743,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 6
+             [ "version", `Int 7
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -2837,7 +2837,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 6
+             [ "version", `Int 7
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"

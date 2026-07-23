@@ -259,7 +259,7 @@ module KeeperMemoryOs = struct
          ~default:librarian_max_messages_default)
   ;;
 
-  (** Optional runtime id override for librarian extraction.
+  (** Legacy Memory OS summary runtime override; not used by exact extraction.
       @category Runtime
       @ops_class operator *)
   let librarian_runtime_id () =

@@ -240,13 +240,13 @@ type config =
   ; bindings : binding list
   ; default_runtime_id : string option
   ; librarian_runtime_id : string option
-    (** [\[runtime\].librarian] — runtime id ["provider.model"] for the memory-os
-        librarian (post-turn episode extraction). The librarian now requests
-        provider-native structured output at its call sites; this field is the
-        routing SSOT and load-time validation only rejects unknown ids. [None] =
-        the librarian inherits each keeper's runtime (legacy). An unknown id is
-        rejected at load like [\[runtime\].default]. The
-        [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] env var overrides this. *)
+    (** [\[runtime\].librarian] — legacy runtime id ["provider.model"] for
+        Memory OS LLM summary generation and the consolidation fallback. It
+        does not route post-turn Librarian exact-output extraction. [None] =
+        summary generation inherits each keeper's runtime. An unknown id is
+        rejected at load like [\[runtime\].default].
+        [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides summary
+        generation only. *)
   ; structured_judge_runtime_id : string option
     (** [\[runtime\].structured_judge] — runtime id for provider-native
         structured-output judge calls such as dashboard operator

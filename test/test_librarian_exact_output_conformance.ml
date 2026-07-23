@@ -130,7 +130,7 @@ let exact_journal_state ~keeper_id =
   | _ -> Alcotest.failf "expected one exact journal, got %d" (List.length journals)
 ;;
 
-let write_active_exact_journal ~keeper_id =
+let write_exact_journal ~keeper_id ~state =
   let exact_output_dir =
     Memory_io.episodes_dir ~keeper_id
     |> Filename.dirname
@@ -143,7 +143,7 @@ let write_active_exact_journal ~keeper_id =
       [ "schema_version", `Int 1
       ; "trace_id", `String "prior-trace"
       ; "generation", `Int 41
-      ; "state", `String "candidate_bound"
+      ; "state", `String state
       ]
     |> Yojson.Safe.to_string
   in
@@ -207,6 +207,7 @@ let test_json_only_target_is_admitted_and_persisted () =
 
 let test_missing_json_capability_fails_before_dispatch () =
   with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
     run_eio (fun ~sw ~net ~clock ->
       let response = Fixture.openai_response valid_output in
       let server = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
@@ -231,7 +232,7 @@ let test_missing_json_capability_fails_before_dispatch () =
         Alcotest.failf
           "expected typed exact setup failure, got %s"
           (Librarian_runtime.extraction_error_to_string error)
-      | Ok _ -> Alcotest.fail "target without a JSON guarantee must fail closed"))
+      | Ok _ -> Alcotest.fail "target without a JSON guarantee must fail closed")))
 ;;
 
 let test_domain_invalid_output_does_not_fail_over () =
@@ -304,7 +305,7 @@ let test_unsettled_restart_state_fails_before_dispatch () =
       in
       publish_lane [ slot ];
       let keeper_id = "librarian-restart-guard-keeper" in
-      write_active_exact_journal ~keeper_id;
+      write_exact_journal ~keeper_id ~state:"candidate_bound";
       match
         Librarian_runtime.extract_with_exact_output_classified
           ~clock
@@ -326,6 +327,46 @@ let test_unsettled_restart_state_fails_before_dispatch () =
           "expected typed unsettled-attempt guard, got %s"
           (Librarian_runtime.extraction_error_to_string error)
       | Ok _ -> Alcotest.fail "unsettled prior exact attempt must fail closed")))
+;;
+
+let test_oas_success_restart_state_starts_fresh_flow () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      let slot : Fixture.target_fixture =
+        { id = "librarian-oas-success-restart"; base_url = server.base_url }
+      in
+      publish_lane [ slot ];
+      let keeper_id = "librarian-oas-success-restart-keeper" in
+      write_exact_journal ~keeper_id ~state:"oas_success";
+      match
+        Librarian_runtime.extract_with_exact_output_classified
+          ~clock
+          ~net
+          ~keeper_id
+          ~generation:42
+          (librarian_input "trace-after-oas-success")
+      with
+      | Error error ->
+        Alcotest.failf
+          "oas-success restart should start a fresh flow, got %s"
+          (Librarian_runtime.extraction_error_to_string error)
+      | Ok _ ->
+        Alcotest.(check int)
+          "fresh flow dispatched once"
+          1
+          (Fixture.post_count server);
+        Alcotest.(check string)
+          "fresh flow reached domain-valid terminal"
+          "domain_valid"
+          (exact_journal_state ~keeper_id))))
 ;;
 
 let test_missing_clock_fails_before_dispatch () =
@@ -453,6 +494,10 @@ let () =
             "unsettled restart state fails before dispatch"
             `Quick
             test_unsettled_restart_state_fails_before_dispatch
+        ; Alcotest.test_case
+            "OAS success restart state starts a fresh flow"
+            `Quick
+            test_oas_success_restart_state_starts_fresh_flow
         ; Alcotest.test_case
             "missing clock fails before dispatch"
             `Quick

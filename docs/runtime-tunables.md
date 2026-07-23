@@ -81,7 +81,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS` | typed:int | Runtime | operator | 246 | Turns between librarian extraction attempts per keeper. Default: 3, floored to 1. @category Runtime @ops_class operator |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` | typed:int | Concurrency | operator | 280 | Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0 disables the gate. @category Concurrency @ops... |
 | `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES` | typed:int | Runtime | operator | 258 | Base recent-message window for librarian extraction. Default: 24, floored to 1. @category Runtime @ops_class operator |
-| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` | typed:string | Runtime | operator | 268 | Optional runtime id override for librarian extraction. @category Runtime @ops_class operator |
+| `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID` | typed:string | Runtime | operator | 268 | Legacy Memory OS summary runtime override; not used by exact extraction. @category Runtime @ops_class operator |
 | `MASC_KEEPER_MEMORY_OS_RECALL` | typed:bool | Policies | operator | 222 | Memory OS recall prompt injection kill switch. Default: true; invalid values fail closed to false so malformed operat... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 73 | Maximum metrics file size in bytes before rotation (default: 10MB) |
 | `MASC_KEEPER_METRICS_MAX_ROTATED` | typed:int | unclassified | unclassified | 76 | Number of rotated files to keep (default: 1, i.e. .1 only) |

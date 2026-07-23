@@ -456,9 +456,12 @@ type exact_journal_disposition =
 
 let exact_journal_disposition_of_state = function
   | "candidate_bound"
-  | "candidate_advance_committed"
-  | "oas_success" ->
+  | "candidate_advance_committed" ->
     Ok Journal_active
+  (* The provider response is not resumable because its body is deliberately
+     absent from the journal, but no Memory OS domain write has begun. A later
+     cadence may therefore start a fresh exact-output flow safely. *)
+  | "oas_success"
   | "domain_valid"
   | "domain_invalid"
   | "execution_terminal" ->

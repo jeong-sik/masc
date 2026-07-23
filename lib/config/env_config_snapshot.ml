@@ -380,7 +380,7 @@ let memory_entries =
       ~default:
         (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
       Memory_os_defaults.librarian_runtime_id_env_key
-      "Optional runtime id override for librarian extraction; (none) displays the empty default";
+      "Legacy runtime id override for Memory OS LLM summary generation; does not route post-turn Librarian exact-output extraction; (none) displays the empty default";
     entry
       ~default:(string_of_int Memory_os_defaults.librarian_global_slot_default)
       Memory_os_defaults.librarian_global_slot_env_key

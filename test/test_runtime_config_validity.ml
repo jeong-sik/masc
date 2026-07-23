@@ -2147,7 +2147,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"

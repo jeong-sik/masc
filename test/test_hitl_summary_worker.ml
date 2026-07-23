@@ -4,7 +4,6 @@ module EO = Agent_sdk.Exact_output
 module F = Compaction_exact_output_fixture
 module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue
-module Runtime = Masc.Runtime
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
 

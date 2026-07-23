@@ -279,11 +279,7 @@ type parsed_identity = {
 let parse_json_identity json =
   let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
   let trace_id = Safe_ops.json_string_opt "trace_id" json in
-  let raw_keeper_name =
-    match Safe_ops.json_string_opt "keeper_name" json with
-    | Some v when String.trim v <> "" -> Some v
-    | _ -> Safe_ops.json_string_opt "name" json
-  in
+  let raw_keeper_name = Safe_ops.json_string_opt "name" json in
   let keeper_name =
     match raw_keeper_name with
     | Some value when String.trim value <> "" ->

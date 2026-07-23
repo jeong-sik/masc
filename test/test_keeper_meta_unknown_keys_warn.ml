@@ -131,6 +131,30 @@ let test_removed_goal_is_rejected_before_parse () =
         bytes_before
         (Fs_compat.load_file path))
 
+let test_retired_keeper_name_is_rejected_before_parse () =
+  let path = Filename.temp_file "masc-retired-identity-key-" ".json" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Fs_compat.save_file
+        path
+        {|{"name":"canonical","keeper_name":"retired","agent_name":"canonical","trace_id":"trace-canonical"}|};
+      let bytes_before = Fs_compat.load_file path in
+      (match Keeper_meta_store.read_meta_file_path path with
+       | Error err ->
+         Alcotest.(check string)
+           "retired parser alias is rejected with exact reset remediation"
+           (Printf.sprintf
+              "keeper meta schema is incompatible at %s (unknown keys: keeper_name); runtime reset required"
+              path)
+           err
+       | Ok _ -> Alcotest.fail "retired keeper_name must fail closed");
+      Alcotest.(check string)
+        "rejected retired identity metadata remains byte-for-byte unchanged"
+        bytes_before
+        (Fs_compat.load_file path))
+
 let test_unknown_keys_pure_contract () =
   Alcotest.(check (list string))
     "canonical object has no unknown keys"
@@ -175,6 +199,10 @@ let () =
             "removed goal is rejected before parse"
             `Quick
             test_removed_goal_is_rejected_before_parse
+        ; Alcotest.test_case
+            "retired keeper_name is rejected before parse"
+            `Quick
+            test_retired_keeper_name_is_rejected_before_parse
         ; Alcotest.test_case
             "unknown key classifier preserves pure contract"
             `Quick

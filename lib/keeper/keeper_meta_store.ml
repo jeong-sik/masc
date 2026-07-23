@@ -34,6 +34,10 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
        | unknown :: rest ->
          let unknown = unknown :: rest in
          warn_unknown_keeper_meta_keys ~path json;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string MetaReadFailures)
+           ~labels:[("keeper", "aggregate"); ("site", "meta_schema_unknown_keys")]
+           ();
          Error
            (Printf.sprintf
               "keeper meta schema is incompatible at %s (unknown keys: %s); runtime reset required"

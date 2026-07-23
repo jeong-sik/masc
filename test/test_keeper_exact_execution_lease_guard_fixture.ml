@@ -69,6 +69,12 @@ let claim_manual_lease ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
 ;;
 
+let require_fsync label = function
+  | P.Fsync_completed -> ()
+  | P.Visible_sync_unconfirmed detail ->
+    Alcotest.failf "%s durability unknown: %s" label detail
+;;
+
 let bind_and_quarantine
       ~base_path
       ~keeper_name
@@ -94,15 +100,15 @@ let bind_and_quarantine
    | Ok (P.Visible_sync_unconfirmed detail) ->
      Alcotest.failf "exact execution bind durability unknown: %s" detail
    | Error detail -> Alcotest.failf "exact execution bind failed: %s" detail);
-  let terminal : P.exact_execution_terminal = { cause; slot_id; call_id } in
+  let terminal : P.exact_execution_terminal =
+    { cause; slot_id; call_id; plan_fingerprint; request_body_sha256 }
+  in
   (match
      P.quarantine_exact_execution_result
        ~base_path
        ~keeper_name
        ~lease
        ~terminal
-       ~plan_fingerprint
-       ~request_body_sha256
        ()
    with
    | Ok P.Fsync_completed -> ()
@@ -112,8 +118,28 @@ let bind_and_quarantine
   lease, terminal
 ;;
 
-let terminal_settlement source terminal : P.settlement =
-  P.No_compaction { source; reason = P.Exact_execution_terminal terminal }
+let prepare_terminal_disposition
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~terminal
+      ~prepared_at
+  =
+  match
+    P.prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source:(source_ref ())
+      ~terminal
+      ~semantic:P.Exact_no_compaction
+      ~prepared_at
+      ()
+  with
+  | Error detail -> Alcotest.failf "terminal disposition preparation failed: %s" detail
+  | Ok (disposition, durability) ->
+    require_fsync "terminal disposition preparation" durability;
+    disposition
 ;;
 
 let check_binding ~base_path ~keeper_name ~call_id ~plan_fingerprint =
@@ -133,6 +159,19 @@ let check_binding ~base_path ~keeper_name ~call_id ~plan_fingerprint =
   | Ok (Some _) -> Alcotest.fail "binding was not terminally quarantined"
   | Ok None -> Alcotest.fail "durable exact execution binding disappeared"
   | Error detail -> Alcotest.failf "binding load failed: %s" detail
+;;
+
+let check_prepared_binding ~base_path ~keeper_name ~disposition_id =
+  match P.exact_execution_binding_result ~base_path ~keeper_name with
+  | Ok
+      (Some
+        { status = P.Disposition_prepared disposition
+        ; _
+        })
+    when String.equal disposition.disposition_id disposition_id -> ()
+  | Ok (Some _) -> Alcotest.fail "binding did not retain the prepared disposition"
+  | Ok None -> Alcotest.fail "prepared exact execution binding disappeared"
+  | Error detail -> Alcotest.failf "prepared binding load failed: %s" detail
 ;;
 
 let bind_exact_execution

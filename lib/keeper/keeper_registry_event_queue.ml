@@ -102,6 +102,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason

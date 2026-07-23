@@ -580,6 +580,30 @@ let project_transition_outbox ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
+let exact_terminal_source = function
+  | Keeper_registry_event_queue.No_compaction
+      { source
+      ; reason = Keeper_event_queue_state.Exact_execution_terminal terminal
+      } ->
+    Some (source, terminal)
+  | Keeper_registry_event_queue.Escalate
+      { reason =
+          Keeper_registry_event_queue.Compaction_exact_output_terminal
+            { source; terminal }
+      ; successor = None
+      } ->
+    Some (source, terminal)
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.No_compaction _
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _
+  | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact _
+  | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Escalate _ ->
+    None
+;;
+
 let settle_claimed_lease
       ?(exact_execution = false)
       ~base_path
@@ -602,20 +626,66 @@ let settle_claimed_lease
       match Keeper_registry_event_queue.exact_execution_binding_result ~base_path keeper_name with
       | Error _ as error -> error
       | Ok None ->
-        Keeper_registry_event_queue.settle_result
-          ~base_path
-          keeper_name
-          ~settled_at
-          ~lease
-          ~settlement
+        (match exact_terminal_source settlement with
+         | Some _ ->
+           Error "exact terminal settlement has no durable exact execution binding"
+         | None ->
+           Keeper_registry_event_queue.settle_result
+             ~base_path
+             keeper_name
+             ~settled_at
+             ~lease
+             ~settlement)
       | Ok (Some binding) ->
-        Keeper_registry_event_queue.settle_exact_execution_result
-          ~base_path
-          keeper_name
-          ~settled_at
-          ~lease
-          ~binding
-          ~settlement)
+        (match exact_terminal_source settlement with
+         | None ->
+           Keeper_registry_event_queue.settle_bound_exact_nonterminal_result
+             ~base_path
+             keeper_name
+             ~settled_at
+             ~lease
+             ~binding
+             ~settlement
+         | Some (source, terminal) ->
+           let semantic =
+             match settlement with
+             | Keeper_registry_event_queue.No_compaction _ ->
+               Keeper_registry_event_queue.Exact_no_compaction
+             | Keeper_registry_event_queue.Escalate _ ->
+               Keeper_registry_event_queue.Exact_escalate
+             | Keeper_registry_event_queue.Ack
+             | Keeper_registry_event_queue.Cancel_accepted _
+             | Keeper_registry_event_queue.Transfer_accepted _
+             | Keeper_registry_event_queue.Settle_from_source_terminal _
+             | Keeper_registry_event_queue.Settle_exact _
+             | Keeper_registry_event_queue.Requeue _ ->
+               assert false
+           in
+           (match
+              Keeper_registry_event_queue.prepare_exact_source_disposition_result
+                ~base_path
+                keeper_name
+                ~lease
+                ~source
+                ~terminal
+                ~semantic
+                ~prepared_at:settled_at
+            with
+            | Error _ as error -> error
+            | Ok
+                ( _
+                , Keeper_registry_event_queue.Visible_sync_unconfirmed detail )
+              ->
+              Error
+                ("exact source disposition became visible with unconfirmed sync; restart reconciliation required: "
+                 ^ detail)
+            | Ok (disposition, Keeper_registry_event_queue.Fsync_completed) ->
+              Keeper_registry_event_queue.finalize_exact_source_disposition_result
+                ~base_path
+                keeper_name
+                ~settled_at
+                ~lease
+                ~disposition_id:disposition.disposition_id)))
 ;;
 
 let exact_execution_guard ~base_path ~keeper_name ~lease =
@@ -658,15 +728,18 @@ let exact_execution_guard ~base_path ~keeper_name ~lease =
       binding_arguments observation
     in
     let terminal : Keeper_registry_event_queue.exact_execution_terminal =
-      { cause; slot_id; call_id }
+      { cause
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      }
     in
     Keeper_registry_event_queue.quarantine_exact_execution_result
       ~base_path
       keeper_name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
   in
   Keeper_compaction_llm_summarizer.
     { before_dispatch; release_before_dispatch; quarantine }
@@ -678,6 +751,7 @@ let settlement_is_ack = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
+  | Keeper_registry_event_queue.Settle_exact _ -> true
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -696,6 +770,9 @@ let settlement_is_exact_output_terminal = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
   | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact
+      { outcome = Keeper_registry_event_queue.Terminal _; _ } ->
+    true
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -731,6 +808,15 @@ let settlement_is_exact_output_cancellation = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
   | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact
+      { outcome =
+          Keeper_registry_event_queue.Terminal
+            ( Keeper_event_queue_state.Execution_cancelled_after_dispatch
+            | Keeper_event_queue_state.Terminal_persistence_failed )
+      ; _
+      } ->
+    true
+  | Keeper_registry_event_queue.Settle_exact _
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false

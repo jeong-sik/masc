@@ -20,12 +20,28 @@ module Make (Publish : sig
     { cause : exact_execution_terminal_cause
     ; slot_id : string
     ; call_id : string
+    ; plan_fingerprint : string
+    ; request_body_sha256 : string
     }
+
+  type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+    | Consume_source
+
+  type exact_settlement_semantic =
+    Keeper_event_queue_persistence.exact_settlement_semantic =
+    | Exact_no_compaction
+    | Exact_escalate
+
+  type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+    | Terminal of exact_execution_terminal_cause
+
+  type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
   type exact_execution_lease_status =
     Keeper_event_queue_persistence.exact_execution_lease_status =
     | Dispatch_uncertain
     | Terminal_quarantined of exact_execution_terminal_cause
+    | Disposition_prepared of exact_source_disposition
 
   type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
     { lease_id : string
@@ -66,9 +82,25 @@ module Make (Publish : sig
     string ->
     lease:Keeper_event_queue_persistence.lease ->
     terminal:exact_execution_terminal ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
     (exact_write_outcome, string) result
+
+  val prepare_exact_source_disposition_result :
+    base_path:string ->
+    string ->
+    lease:Keeper_event_queue_persistence.lease ->
+    source:Keeper_checkpoint_ref.t ->
+    terminal:exact_execution_terminal ->
+    semantic:exact_settlement_semantic ->
+    prepared_at:float ->
+    (exact_source_disposition * exact_write_outcome, string) result
+
+  val finalize_exact_source_disposition_result :
+    base_path:string ->
+    string ->
+    settled_at:float ->
+    lease:Keeper_event_queue_persistence.lease ->
+    disposition_id:string ->
+    (Keeper_event_queue_persistence.settle_result, string) result
 
   val active_lease_result :
     base_path:string ->
@@ -86,7 +118,7 @@ module Make (Publish : sig
   val mark_transition_projected_result :
     base_path:string -> string -> transition_id:string -> (unit, string) result
 
-  val settle_exact_execution_result :
+  val settle_bound_exact_nonterminal_result :
     base_path:string ->
     string ->
     settled_at:float ->

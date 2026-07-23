@@ -15,7 +15,13 @@ module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
-  Keeper_event_queue_state.{ cause; slot_id; call_id }
+  Keeper_event_queue_state.
+    { cause
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint = "compaction-plan"
+    ; request_body_sha256 = String.make 64 'c'
+    }
 ;;
 
 let compaction_decision ?summary unit_index action =
@@ -736,6 +742,7 @@ let test_manual_compaction_serializes_owner_lane () =
        | Registry_queue.Cancel_accepted _
        | Registry_queue.Transfer_accepted _
        | Registry_queue.Settle_from_source_terminal _
+       | Registry_queue.Settle_exact _
        | Registry_queue.Escalate _ ->
          fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result

@@ -39,14 +39,44 @@ type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
 (** One OAS-owned affine call that crossed, or can no longer safely be assumed
-    not to have crossed, the dispatch boundary. Both identities are mandatory
-    and survive the queue receipt/WAL codec. *)
+    not to have crossed, the dispatch boundary. The complete producer proof is
+    mandatory and survives the queue receipt/WAL codec. *)
+
+type exact_source_action = Consume_source
+
+type exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
+  ; prepared_at : float
+  }
+(** Immutable terminal source disposition for one exact call. The ID is the
+    SHA-256 of its stable proof, outcome, semantic, and action fields.
+    [prepared_at] is observational and excluded from identity. *)
 
 type exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+      (** Current-schema terminal quarantine before a source disposition is
+          prepared. It has no source authority and can never be finalized or
+          registration-requeued. *)
+  | Disposition_prepared of exact_source_disposition
 
 type exact_execution_binding =
   { lease_id : string
@@ -180,6 +210,7 @@ type settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -288,14 +319,35 @@ val release_exact_execution_before_dispatch :
 val quarantine_exact_execution :
   lease:lease ->
   terminal:exact_execution_terminal ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
   t ->
   (t, string) result
 (** Advance a matching dispatch-uncertain binding to a typed terminal
     quarantine without releasing the lease for replay. *)
 
-val settle_exact_execution :
+val prepare_exact_source_disposition :
+  lease:lease ->
+  source:Keeper_checkpoint_ref.t ->
+  terminal:exact_execution_terminal ->
+  semantic:exact_settlement_semantic ->
+  prepared_at:float ->
+  t ->
+  (t * exact_source_disposition, string) result
+(** Atomically replace a matching dispatch fence or source-less terminal
+    quarantine with one immutable terminal source disposition, after matching
+    the opaque producer proof against the durable binding. Repeating the same
+    stable proof adopts the first durable preparation timestamp. *)
+
+val finalize_exact_source_disposition :
+  settled_at:float ->
+  lease:lease ->
+  disposition_id:string ->
+  t ->
+  (t * settle_result, string) result
+(** Finalize only a validated terminal disposition through [Settle_exact].
+    Its source action is applied exactly once by the canonical receipt
+    transition. *)
+
+val settle_bound_exact_nonterminal :
   settled_at:float ->
   lease:lease ->
   slot_id:string ->
@@ -305,8 +357,10 @@ val settle_exact_execution :
   settlement:settlement ->
   t ->
   (t * settle_result, string) result
-(** Finalize a bound lease through its exact OAS identity. Generic {!settle}
-    rejects bound leases. *)
+(** Settle only the identity-bound nonterminal Ack/retry/floor/failure-judgment
+    cases. Exact terminal outcomes require
+    {!prepare_exact_source_disposition} followed by
+    {!finalize_exact_source_disposition}. *)
 
 val cancel_accepted :
   current_owner_nonce:int ->
@@ -429,5 +483,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v4"]. Only this current schema is accepted.
+(** ["keeper.event_queue.state.v5"]. Only this current schema is accepted.
     Stale or unknown persisted state fails closed and requires a runtime reset. *)

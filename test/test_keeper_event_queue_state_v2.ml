@@ -54,7 +54,13 @@ let no_compaction ~turn_count reason : State.no_compaction =
 ;;
 
 let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
-  State.Exact_execution_terminal { cause; slot_id; call_id }
+  State.Exact_execution_terminal
+    { cause
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint = "plan-terminal"
+    ; request_body_sha256 = String.make 64 'b'
+    }
 ;;
 
 let test_exact_output_terminal_reasons_round_trip () =

@@ -85,19 +85,22 @@ let test_before_dispatch_release_allows_registration_requeue () =
    | Ok (Some _) -> Alcotest.fail "before-dispatch release retained the binding"
    | Error detail -> Alcotest.failf "released binding load failed: %s" detail);
   let terminal : P.exact_execution_terminal =
-    { cause = P.Execution_failed_after_dispatch; slot_id; call_id }
+    { cause = P.Execution_failed_after_dispatch
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    }
   in
   (match
-     P.settle_exact_execution_result
+     P.prepare_exact_source_disposition_result
        ~base_path
        ~keeper_name
-       ~settled_at:3.0
        ~lease
-       ~slot_id
-       ~call_id
-       ~plan_fingerprint
-       ~request_body_sha256
-       ~settlement:(terminal_settlement (source_ref ()) terminal)
+       ~source:(source_ref ())
+       ~terminal
+       ~semantic:P.Exact_no_compaction
+       ~prepared_at:3.0
        ()
    with
    | Error _ -> ()
@@ -181,7 +184,14 @@ let test_restart_recovery_never_requeues_bound_lease () =
       ~request_body_sha256
   in
   check_binding ~base_path ~keeper_name ~call_id ~plan_fingerprint;
-  let settlement = terminal_settlement (source_ref ()) terminal in
+  let disposition =
+    prepare_terminal_disposition
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~terminal
+      ~prepared_at:3.0
+  in
   let wal_path =
     Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
@@ -189,74 +199,61 @@ let test_restart_recovery_never_requeues_bound_lease () =
   in
   Unix.mkdir wal_path 0o700;
   (match
-     P.settle_exact_execution_result
+     P.finalize_exact_source_disposition_result
        ~base_path
        ~keeper_name
-       ~settled_at:3.0
+       ~settled_at:4.0
        ~lease
-       ~slot_id
-       ~call_id
-       ~plan_fingerprint
-       ~request_body_sha256
-       ~settlement
+       ~disposition_id:disposition.disposition_id
        ()
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "poisoned WAL unexpectedly committed settlement");
   Unix.rmdir wal_path;
-  (match P.prepare_registration_result ~base_path ~keeper_name ~settled_at:4.0 () with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "registration recovery requeued a bound exact execution");
-  check_binding ~base_path ~keeper_name ~call_id ~plan_fingerprint;
+  check_prepared_binding
+    ~base_path
+    ~keeper_name
+    ~disposition_id:disposition.disposition_id;
+  (match
+     P.prepare_registration_after_exact_recovery_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:5.0
+       ()
+   with
+   | Ok pending ->
+     Alcotest.(check bool) "terminal recovery created no replay" true (Q.is_empty pending)
+   | Error detail -> Alcotest.failf "prepared terminal recovery failed: %s" detail);
+  (match P.exact_execution_binding_result ~base_path ~keeper_name with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "terminal recovery retained the exact binding"
+   | Error detail -> Alcotest.failf "recovered binding load failed: %s" detail);
   (match P.load_pending_result ~base_path ~keeper_name with
    | Ok pending -> Alcotest.(check bool) "no generic recovery pending row" true (Q.is_empty pending)
    | Error detail -> Alcotest.failf "pending load failed: %s" detail);
   (match
-     P.settle_exact_execution_result
+     P.finalize_exact_source_disposition_result
        ~base_path
        ~keeper_name
-       ~settled_at:5.0
+       ~settled_at:6.0
        ~lease
-       ~slot_id
-       ~call_id:"different-call"
-       ~plan_fingerprint
-       ~request_body_sha256
-       ~settlement
+       ~disposition_id:"different-disposition"
        ()
    with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "mismatched call id finalized a quarantined lease");
+   | Ok _ -> Alcotest.fail "mismatched disposition replay was accepted");
   (match
-    P.settle_exact_execution_result
-      ~base_path
-      ~keeper_name
-      ~settled_at:6.0
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ~settlement
-      ()
-   with
-   | Ok (P.Settled _ | P.Already_settled _ | P.Committed_followup_failed _) -> ()
-   | Error detail -> Alcotest.failf "matching terminal finalization failed: %s" detail);
-  match
-    P.settle_exact_execution_result
+    P.finalize_exact_source_disposition_result
       ~base_path
       ~keeper_name
       ~settled_at:7.0
       ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ~settlement
+      ~disposition_id:disposition.disposition_id
       ()
-  with
-  | Ok (P.Already_settled _) -> ()
-  | Ok _ -> Alcotest.fail "matching receipt replay was not idempotent"
-  | Error detail -> Alcotest.failf "matching receipt replay failed: %s" detail
+   with
+   | Ok (P.Already_settled _) -> ()
+   | Ok _ -> Alcotest.fail "matching receipt replay was not idempotent"
+   | Error detail -> Alcotest.failf "matching receipt replay failed: %s" detail)
 ;;
 
 let test_failure_judgment_settles_exact_execution_atomically () =
@@ -323,7 +320,7 @@ let test_failure_judgment_settles_exact_execution_atomically () =
     | Error detail -> Alcotest.failf "%s pending load failed: %s" label detail
   in
   (match
-     P.settle_exact_execution_result
+     P.settle_bound_exact_nonterminal_result
        ~base_path
        ~keeper_name
        ~settled_at:3.0
@@ -340,7 +337,7 @@ let test_failure_judgment_settles_exact_execution_atomically () =
    | Error detail -> Alcotest.failf "failure judgment settlement failed: %s" detail);
   check_settled_state "first settlement";
   (match
-     P.settle_exact_execution_result
+     P.settle_bound_exact_nonterminal_result
        ~base_path
        ~keeper_name
        ~settled_at:4.0
@@ -377,7 +374,15 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
       ~plan_fingerprint
       ~request_body_sha256
   in
-  let settlement = terminal_settlement (source_ref ()) terminal in
+  let disposition =
+    prepare_terminal_disposition
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~terminal
+      ~prepared_at:6.0
+  in
+  let settlement = P.Settle_exact disposition in
   let context, resolve_context = Eio.Promise.create () in
   let entered, resolve_entered = Eio.Promise.create () in
   let release, resolve_release = Eio.Promise.create () in
@@ -392,16 +397,12 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
             Eio.Promise.resolve resolve_entered ();
             Eio.Promise.await release;
             match
-              P.settle_exact_execution_result
+              P.finalize_exact_source_disposition_result
                 ~base_path
                 ~keeper_name
                 ~settled_at:7.0
                 ~lease
-                ~slot_id
-                ~call_id
-                ~plan_fingerprint
-                ~request_body_sha256
-                ~settlement
+                ~disposition_id:disposition.disposition_id
                 ()
             with
             | Ok (P.Settled _ | P.Already_settled _ | P.Committed_followup_failed _) ->

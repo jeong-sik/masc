@@ -473,11 +473,10 @@ let register_with_state_result
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   match
-    Keeper_event_queue_persistence.prepare_registration_result
+    Keeper_exact_disposition_recovery.prepare_registration_result
       ~base_path
       ~keeper_name:name
       ~settled_at:(Time_compat.now ())
-      ()
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->
@@ -688,11 +687,10 @@ let register_restarting ~base_path name meta
      queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
   match
-    Keeper_event_queue_persistence.prepare_registration_result
+    Keeper_exact_disposition_recovery.prepare_registration_result
       ~base_path
       ~keeper_name:name
       ~settled_at:(Time_compat.now ())
-      ()
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })
   | Ok initial_event_queue ->

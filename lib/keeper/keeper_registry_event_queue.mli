@@ -38,11 +38,26 @@ type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_t
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
+
+type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
+  | Consume_source
+
+type exact_settlement_semantic = Keeper_event_queue_persistence.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = Keeper_event_queue_persistence.exact_source_disposition
 
 type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
 
 type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
   { lease_id : string
@@ -129,6 +144,7 @@ type settlement = Keeper_event_queue_persistence.settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -180,7 +196,7 @@ val settle_result :
   settlement:settlement ->
   (settle_result, string) result
 
-val settle_exact_execution_result :
+val settle_bound_exact_nonterminal_result :
   base_path:string ->
   string ->
   settled_at:float ->
@@ -214,9 +230,25 @@ val quarantine_exact_execution_result :
   string ->
   lease:lease ->
   terminal:exact_execution_terminal ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
   (exact_write_outcome, string) result
+
+val prepare_exact_source_disposition_result :
+  base_path:string ->
+  string ->
+  lease:lease ->
+  source:Keeper_checkpoint_ref.t ->
+  terminal:exact_execution_terminal ->
+  semantic:exact_settlement_semantic ->
+  prepared_at:float ->
+  (exact_source_disposition * exact_write_outcome, string) result
+
+val finalize_exact_source_disposition_result :
+  base_path:string ->
+  string ->
+  settled_at:float ->
+  lease:lease ->
+  disposition_id:string ->
+  (settle_result, string) result
 
 val cancel_accepted_result :
   base_path:string ->

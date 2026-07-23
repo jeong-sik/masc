@@ -421,7 +421,12 @@ let is_before_dispatch_zero observation =
 
 let terminal_of_observation cause (observation : attempt_observation) =
   Keeper_event_queue_state.
-    { cause; slot_id = observation.slot_id; call_id = observation.call_id }
+    { cause
+    ; slot_id = observation.slot_id
+    ; call_id = observation.call_id
+    ; plan_fingerprint = observation.receipt_plan_fingerprint
+    ; request_body_sha256 = observation.receipt_request_body_sha256
+    }
 ;;
 
 type exact_execution_release_result =
@@ -533,6 +538,10 @@ let terminalize_post_success terminalizer cause =
             { cause
             ; slot_id = terminalizer.attempt_observation.slot_id
             ; call_id = terminalizer.attempt_observation.call_id
+            ; plan_fingerprint =
+                terminalizer.attempt_observation.receipt_plan_fingerprint
+            ; request_body_sha256 =
+                terminalizer.attempt_observation.receipt_request_body_sha256
             }
         in
         let completion, resolve_completion = Eio.Promise.create () in

@@ -35,11 +35,36 @@ type exact_execution_terminal = State.exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type exact_source_action = State.exact_source_action = Consume_source
+
+type exact_settlement_semantic = State.exact_settlement_semantic =
+  | Exact_no_compaction
+  | Exact_escalate
+
+type exact_source_outcome = State.exact_source_outcome =
+  | Terminal of exact_execution_terminal_cause
+
+type exact_source_disposition = State.exact_source_disposition =
+  { disposition_id : string
+  ; source : Keeper_checkpoint_ref.t
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; outcome : exact_source_outcome
+  ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
+  ; prepared_at : float
   }
 
 type exact_execution_lease_status = State.exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
+  | Disposition_prepared of exact_source_disposition
 
 type exact_execution_binding = State.exact_execution_binding =
   { lease_id : string
@@ -126,6 +151,7 @@ type settlement = State.settlement =
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer
   | Settle_from_source_terminal of accepted_source_terminal
+  | Settle_exact of exact_source_disposition
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -963,8 +989,6 @@ let quarantine_exact_execution_result
       ~keeper_name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
       ()
   =
   commit_exact_transform
@@ -975,11 +999,34 @@ let quarantine_exact_execution_result
        State.quarantine_exact_execution
          ~lease
          ~terminal
-         ~plan_fingerprint
-         ~request_body_sha256
          state
        |> Result.map (fun next -> next, ()))
   |> Result.map snd
+;;
+
+let prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source
+      ~terminal
+      ~semantic
+      ~prepared_at
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.prepare_exact_source_disposition
+         ~lease
+         ~source
+         ~terminal
+         ~semantic
+         ~prepared_at
+         state
+       |> Result.map (fun (next, disposition) -> next, disposition))
 ;;
 
 let commit_settlement_transition_unlocked owner ~after_commit transition current =
@@ -1098,7 +1145,7 @@ let settle_result
             (Printexc.to_string exn)))
 ;;
 
-let settle_exact_execution_result
+let settle_bound_exact_nonterminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1122,7 +1169,7 @@ let settle_exact_execution_result
            commit_settlement_transition_unlocked
              owner
              ~after_commit
-             (State.settle_exact_execution
+             (State.settle_bound_exact_nonterminal
                 ~settled_at
                 ~lease
                 ~slot_id
@@ -1137,7 +1184,43 @@ let settle_exact_execution_result
      | exn ->
        Error
          (Printf.sprintf
-            "exact execution settlement raised keeper=%s: %s"
+            "bound exact nonterminal settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let finalize_exact_source_disposition_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~disposition_id
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.finalize_exact_source_disposition
+                ~settled_at
+                ~lease
+                ~disposition_id)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "exact source disposition settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;
@@ -1288,7 +1371,7 @@ let settle_pending_from_source_terminal_result
             (Printexc.to_string exn)))
 ;;
 
-let prepare_registration_result
+let prepare_registration_after_exact_recovery_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1303,9 +1386,25 @@ let prepare_registration_result
          match load_state_unlocked owner with
          | Error _ as error -> error
          | Ok state ->
-           (match State.active_lease state with
-            | None -> Ok (State.pending state)
-            | Some lease ->
+           let finish_exact lease disposition state =
+             match
+               commit_settlement_transition_unlocked
+                 owner
+                 ~after_commit
+                 (State.finalize_exact_source_disposition
+                    ~settled_at
+                    ~lease
+                    ~disposition_id:disposition.disposition_id)
+                 state
+             with
+             | Error _ as error -> error
+             | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
+             | Ok (Committed_followup_failed { detail; _ }, _) ->
+               Error
+                 ("exact registration settlement committed with follow-up failure: "
+                  ^ detail)
+           in
+           let recover_generic lease =
               (match
                  commit_settlement_transition_unlocked
                    owner
@@ -1319,7 +1418,26 @@ let prepare_registration_result
                | Error _ as error -> error
                | Ok ((Settled _ | Already_settled _), pending) -> Ok pending
                | Ok (Committed_followup_failed { detail; _ }, _) ->
-                 Error ("registration settlement committed with follow-up failure: " ^ detail))))
+                 Error ("registration settlement committed with follow-up failure: " ^ detail))
+           in
+           (match State.active_lease state, State.exact_execution_binding state with
+            | None, None -> Ok (State.pending state)
+            | Some lease, None -> recover_generic lease
+            | None, Some _ ->
+              Error "exact execution binding has no matching active lease"
+            | Some lease, Some { status = Dispatch_uncertain; _ } ->
+              Error
+                (Printf.sprintf
+                   "dispatch-uncertain exact execution remains fail-closed at registration: %s"
+                   lease.lease_id)
+            | Some lease, Some { status = Terminal_quarantined _; _ } ->
+              Error
+                (Printf.sprintf
+                   "source-less terminal quarantine has no source disposition: %s"
+                   lease.lease_id)
+            | Some lease, Some { status = Disposition_prepared disposition; _ } ->
+              (match disposition.outcome with
+               | Terminal _ -> finish_exact lease disposition state)))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -1328,6 +1446,21 @@ let prepare_registration_result
             "event queue registration settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let prepare_registration_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ()
+  =
+  prepare_registration_after_exact_recovery_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ()
 ;;
 
 let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =

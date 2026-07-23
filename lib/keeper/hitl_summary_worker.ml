@@ -131,6 +131,14 @@ let preparation_error_to_string = function
   | Admission_rejected detail -> detail
 ;;
 
+let preparation_error_retryable = function
+  | Context_unavailable _ -> false
+  | Prompt_unavailable _
+  | Lane_unavailable _
+  | Admission_rejected _ ->
+    true
+;;
+
 let observe_receipt ~slot_id receipt =
   { slot_id
   ; call_id =
@@ -534,9 +542,9 @@ let run_lifecycle ~effects candidates =
             effects.record_outcome "execution_failed_after_dispatch";
             lifecycle_result (quarantine observation Exact_attempt_replay)
           | Lifecycle_before_dispatch_failure { observation; reason } ->
+            effects.record_outcome "execution_failed_before_dispatch";
             (match rest with
              | [] ->
-               effects.record_outcome "execution_failed_before_dispatch";
                (match effects.fail observation ~reason with
                 | Lifecycle_fsync_completed -> lifecycle_result true
                 | Lifecycle_visible_unconfirmed detail ->
@@ -666,7 +674,7 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_failure ~on_finish () 
        finish_before_attempt
          ~outcome
          ~reason:(preparation_error_to_string error)
-         ~retryable:true
+         ~retryable:(preparation_error_retryable error)
      | Ok prepared_lane ->
        (match Eio_context.get_net_opt () with
         | None ->
@@ -829,6 +837,7 @@ module For_testing = struct
   let parse_summary = parse_summary
   let prepare_lane = prepare_lane
   let preparation_error_to_string = preparation_error_to_string
+  let preparation_error_retryable = preparation_error_retryable
   let observations prepared_lane = List.map observe_attempt prepared_lane
   let is_before_dispatch_zero = is_before_dispatch_zero
   let provenance_evidence_matches = provenance_evidence_matches

@@ -150,7 +150,11 @@ let test_missing_request_context_is_terminal_before_admission () =
       "failure is stable and explicit"
       "HITL summary: exact outer-turn request context is unavailable"
       (Worker.For_testing.context_bundle_error_to_string
-         Worker.For_testing.Exact_request_context_unavailable)
+         Worker.For_testing.Exact_request_context_unavailable);
+    check bool "missing exact context is not retryable" false
+      (Worker.For_testing.preparation_error_retryable
+         (Worker.For_testing.Context_unavailable
+            Worker.For_testing.Exact_request_context_unavailable))
 ;;
 
 let test_gate_judgment_prompt_comes_from_registry () =
@@ -264,6 +268,7 @@ type lifecycle_probe =
   ; release_calls : int ref
   ; gate_calls : int ref
   ; quarantines : Q.exact_attempt_quarantine_cause list ref
+  ; outcomes : string list ref
   }
 
 let lifecycle_observation slot_id phase dispatch_count : lifecycle_observation =
@@ -294,6 +299,7 @@ let run_lifecycle_case
   let release_calls = ref 0 in
   let gate_calls = ref 0 in
   let quarantines = ref [] in
+  let outcomes = ref [] in
   let effects : string Worker.For_testing.lifecycle_effects =
     { bind
     ; release =
@@ -317,7 +323,7 @@ let run_lifecycle_case
              ~model_run_id
              output)
     ; on_summary = (fun _ -> incr gate_calls)
-    ; record_outcome = (fun _ -> ())
+    ; record_outcome = (fun outcome -> outcomes := !outcomes @ [ outcome ])
     ; protect = (fun action -> action ())
     ; report_write_issue = (fun ~operation:_ _ ~detail:_ -> ())
     }
@@ -332,7 +338,7 @@ let run_lifecycle_case
       slot_ids
   in
   let result = Worker.For_testing.run_lifecycle ~effects candidates in
-  result, { execute_calls; release_calls; gate_calls; quarantines }
+  result, { execute_calls; release_calls; gate_calls; quarantines; outcomes }
 ;;
 
 let check_exact_cause label expected causes =
@@ -401,7 +407,12 @@ let test_predispatch_release_fsync_runs_next_slot () =
     "ordered execute_once calls"
     [ "slot-a"; "slot-b" ]
     !(probe.execute_calls);
-  check int "release count" 1 !(probe.release_calls)
+  check int "release count" 1 !(probe.release_calls);
+  check
+    (list string)
+    "each failed slot is observed before failover"
+    [ "execution_failed_before_dispatch"; "execution_failed_after_dispatch" ]
+    !(probe.outcomes)
 ;;
 
 let test_release_visible_terminalizes_without_successor () =

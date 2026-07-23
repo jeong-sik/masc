@@ -12,7 +12,9 @@ val readiness : unit -> (unit, string) result
     [on_finish] always releases the owner claim; [continue_owner] is true only
     when it is safe to drain the next owner-FIFO entry. Eio cancellation is a
     caller-directed structured abort, so it terminally quarantines the active
-    attempt regardless of receipt phase/count and never releases or fails over. *)
+    attempt regardless of receipt phase/count and never releases or fails over.
+    Missing exact request context is permanent and reported as non-retryable;
+    transient preparation failures remain retryable. *)
 val spawn
   :  sw:Eio.Switch.t
   -> entry:Keeper_approval_queue.pending_approval
@@ -139,6 +141,7 @@ module For_testing : sig
     -> (prepared_lane, preparation_error) result
 
   val preparation_error_to_string : preparation_error -> string
+  val preparation_error_retryable : preparation_error -> bool
   val observations : prepared_lane -> attempt_observation list
   val is_before_dispatch_zero : Agent_sdk.Exact_output.receipt -> bool
   val provenance_evidence_matches : provenance_evidence -> provenance_evidence -> bool

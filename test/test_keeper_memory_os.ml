@@ -8,7 +8,6 @@ module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Consolidation_runtime = Masc.Keeper_memory_os_consolidation_runtime
-module Structured_schema = Masc.Keeper_structured_output_schema
 (* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
    masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
 module Domain_pool_ref = Domain_pool_ref

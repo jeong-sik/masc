@@ -11,9 +11,6 @@ val librarian_episode_output_schema : Yojson.Safe.t
 val consolidation_plan_output_schema : Yojson.Safe.t
 (** JSON object the per-keeper consolidation provider must return. *)
 
-val memory_bank_summary_output_schema : Yojson.Safe.t
-(** JSON object the memory-bank summary provider must return. *)
-
 (** Wire field names and action tokens for {!compaction_plan_output_schema};
     shared with the compaction-plan codec as the single source of truth. *)
 val compaction_plan_field_decisions : string

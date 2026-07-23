@@ -128,8 +128,8 @@ flowchart TD
 
 ### 개선 P4 — s4 (wire projection — structured-output tier)
 
-- **root:** structured-output tier(native json_schema vs json_object vs prompt)가 `config.kind` 로 선택되며 `validate_output_schema_request` 에 GLM 하드코드 Error(`provider_config.ml:642`: 'Glm supports JSON mode only')가 있다. 이 identity gate 가 HITL context-summary output-mode(`hitl_summary_worker.ml:197 -> Native_structured/Plain_json_text`), compaction/summary tiering(`keeper_structured_output_schema.ml:338-358`), memory-bank durable-summary provider fan-out(json_object-only provider 를 필터 아웃, `keeper_memory_llm_summary.ml:276-283`)로 누출. Confirmed: hitl s4-summary, task-goal-verify s7-adjacent, memory-os Acc2.
-- **fix:** structured-output 지원을 runtime.toml 스펙에서 온 typed model capability 로 표현(kind 하드코드 아님)하고, 세 소비자(HITL summary, compaction summarizer, memory-bank summary)를 하나의 capability-driven tiering 함수로 라우팅. masc 는 이미 delegate 하며 agnostic 유지 — fix 는 결정을 단일 typed leaf 로 localize 하는 것.
+- **root (2026-07-22 당시):** structured-output tier(native json_schema vs json_object vs prompt)가 `config.kind` 로 선택되며 `validate_output_schema_request` 에 GLM 하드코드 Error(`provider_config.ml:642`: 'Glm supports JSON mode only')가 있었다. 이 identity gate 가 HITL context-summary output-mode(`hitl_summary_worker.ml:197 -> Native_structured/Plain_json_text`), compaction/summary tiering(`keeper_structured_output_schema.ml:338-358`), 당시의 memory-bank durable-summary provider fan-out(`keeper_memory_llm_summary.ml:276-283`)으로 누출됐다. Confirmed: hitl s4-summary, task-goal-verify s7-adjacent, memory-os Acc2. **현재 상태(2026-07-24): memory-bank LLM summary lane 은 hard-delete 되어 더 이상 live consumer 가 아니다.**
+- **fix:** structured-output 지원을 runtime.toml 스펙에서 온 typed model capability 로 표현(kind 하드코드 아님)하고, 남은 live 소비자(HITL summary, compaction summarizer)를 하나의 capability-driven tiering 함수로 라우팅. masc 는 이미 delegate 하며 agnostic 유지 — fix 는 결정을 단일 typed leaf 로 localize 하는 것.
 
 ### 개선 P5 — s5 (provider call — transport dispatch) · guard
 
@@ -138,8 +138,8 @@ flowchart TD
 
 ### 개선 P6 — s4 (capability typing — fragmentation) · typed field
 
-- **root:** typed capability 비대칭 + dead compile-coupling. `supports_image/audio/video` 는 typed 필드지만 document 지원은 typed 필드가 없고 overloaded catch-all `supports_multimodal_inputs`(`runtime_schema.ml:102-105`; `runtime_agent.ml:462-464`)로 매핑되어 document 를 독립 표현 불가. 별개로 memory-os librarian Write gate 가 `Provider_kind` 를 exhaustive match(`is_direct_completion_provider`, `keeper_memory_llm_summary.ml:49-52`)하는데 모든 arm 이 `-> true` 라 오늘은 behaviorally dead 지만 memory-os Write 를 provider roster 에 compile-couple 함. Confirmed: multimodal Acc5(파편성), memory-os Acc1(파편성).
-- **fix:** typed `supports_document_input` 필드 추가로 document 지원을 first-class 로. behaviorally-dead `is_direct_completion_provider` kind match 를 capability predicate 로 교체하거나 제거해 새 `Provider_kind` variant 가 memory-os 경로 편집을 강제하지 않게 함.
+- **root:** typed capability 비대칭. `supports_image/audio/video` 는 typed 필드지만 document 지원은 typed 필드가 없고 overloaded catch-all `supports_multimodal_inputs`(`runtime_schema.ml:102-105`; `runtime_agent.ml:462-464`)로 매핑되어 document 를 독립 표현 불가. 2026-07-22 감사 당시에는 memory-bank LLM summary lane 의 `is_direct_completion_provider`(`keeper_memory_llm_summary.ml:49-52`)가 provider roster 에 compile-couple 된 별도 파편성도 있었으나, **2026-07-24 lane 삭제로 이 표면은 현재 코드에 존재하지 않는다.** Historical verdict: multimodal Acc5(파편성), memory-os Acc1(파편성).
+- **fix:** typed `supports_document_input` 필드 추가로 document 지원을 first-class 로. 삭제된 `is_direct_completion_provider` 에는 대체 capability 또는 compatibility path 를 만들지 않는다.
 
 ### 개선 P7 — s4/s5 (pre-send token measurement)
 
@@ -206,13 +206,13 @@ flowchart TD
 - **REFUTED:** config-parse boundary — `provider_kind_for_http_provider` 는 Parse-don't-validate SSOT consolidation(scatter 아님, load-time fail-closed, `runtime_adapter.ml:214-238`)이고 Acc1 실체와 중복. judge/panel output-contract 비대칭 — ROLE-based(judge 는 structured JSON 파싱, panel 은 free-text embed), strip 근거는 provider-agnostic(`keeper_structured_output_schema.ml:277-295`), identity-driven 아님.
 - **Design direction:** reasoning-replay 통합; runtime_id resolution 은 opaque 유지(이미 올바름, provider substring/per-provider 분기 없음).
 
-### 6.7 memory-os — 3 CONFIRMED / 1 REFUTED
+### 6.7 memory-os — 3 CONFIRMED / 1 REFUTED (2026-07-22 historical verdict)
 
-- **Goal:** memory-os Write/Make/wire 경로가 provider-agnostic 이고, coupling 은 OAS 공유 infra 에 갇힌 typed-variant 파편성이지 masc provider-substring guilt 가 아님을 판정.
+- **Goal:** 2026-07-22 시점 memory-os Write/Make/wire 경로가 provider-agnostic 이고, coupling 은 OAS 공유 infra 에 갇힌 typed-variant 파편성이지 masc provider-substring guilt 가 아님을 판정.
 - **Matrix axes:** memory path(librarian Write gate / memory-bank durable summary / thinking-off tuning / shared completion infra) × gate type(identity kind-match / json_schema capability / unconditional tuning / transport dispatch) × provider kind.
-- **Confirmed gaps:** Acc1(CONFIRMED, 파편성) — librarian Write gate 가 `is_direct_completion_provider`(exhaustive `Provider_kind` match, catch-all 없음, `keeper_memory_llm_summary.ml:49-52`)로 identity read + memory-os Write 를 provider roster 에 compile-couple; 오늘은 all arms -> true 라 behaviorally dead. Acc2(CONFIRMED, 파편성) — memory-bank durable-summary chain 이 `is_direct_completion_provider` AND json_schema capability(`summary_schema_supported`)로 fan-out 필터, json_object-only(GLM 등) drop(`keeper_memory_llm_summary.ml:276-283`). Acc4(CONFIRMED, low) — librarian/consolidation 이 shared OAS `Complete.complete` 로 handoff, `config.kind` dispatch 로 URL/response codec 선택(`complete_sync.ml:97-99/183-213`); transport boundary 의 정당한 identity read, typed variant, masc substring 0.
+- **Confirmed gaps:** Acc1(CONFIRMED, 파편성) — 당시 librarian Write gate 가 `is_direct_completion_provider`(exhaustive `Provider_kind` match, catch-all 없음, `keeper_memory_llm_summary.ml:49-52`)로 identity read + memory-os Write 를 provider roster 에 compile-couple; 모든 arm 이 `-> true` 라 behaviorally dead 였다. Acc2(CONFIRMED, 파편성) — 당시 memory-bank durable-summary chain 이 `is_direct_completion_provider` AND json_schema capability(`summary_schema_supported`)로 fan-out 필터, json_object-only(GLM 등) drop(`keeper_memory_llm_summary.ml:276-283`). **Acc1/Acc2의 해당 lane 은 2026-07-24 hard-delete 되었으며 현재 live gap 이 아니다.** Acc4(CONFIRMED, low) — librarian/consolidation 이 shared OAS `Complete.complete` 로 handoff, `config.kind` dispatch 로 URL/response codec 선택(`complete_sync.ml:97-99/183-213`); transport boundary 의 정당한 identity read, typed variant, masc substring 0.
 - **REFUTED:** Acc3(thinking-off tuning) — 모든 provider 에 무조건 set(no kind branch, `keeper_librarian_runtime.ml:225-234`, `keeper_memory_os_consolidation_runtime.ml:74-88`), identity-blind, provider-agnostic.
-- **Design direction:** dead `is_direct_completion_provider` kind-match 를 capability predicate 로 교체(또는 제거); memory-bank structured-summary capability 를 typed runtime 스펙에서; transport dispatch 는 confined boundary 로 수용.
+- **Design direction:** 삭제된 memory-bank LLM summary lane 은 대체하지 않는다. 남은 librarian/consolidation transport dispatch 를 confined OAS boundary 로 수용한다.
 
 ### 6.8 thinking-multiturn — 5 CONFIRMED / 0 REFUTED
 
@@ -232,7 +232,7 @@ flowchart TD
 워크플로우 코드 감사와 별개로, 2026-07-22 라이브 로그가 위 결함들의 실제 발생을 보인다. (아래 사실은 태스크가 제공한 라이브 로그 관측이며 file:line 은 워크플로우 산출물의 코드 앵커와 일치시킨다.)
 
 - **kimi-k2.6 `reasoning_replay_dropped incompatible_source=52`** — 개선 P2 의 라이브 증거. runtime rotation 시 `reasoning_source` identity-equality 가 prior thinking 을 Incompatible 로 drop 하는 경로(`reasoning_history_projection.ml:229-239`)가 실제 52회 발생. 코드 감사의 thinking-multiturn Acc3 / spec-transition Acc1 이 라이브로 재현됨.
-- **memory_os consolidation `kind_mismatch` rejections (garnet 27->27, 0 merged)** — 개선 P4/P6 표면의 라이브 증거. memory-bank durable-summary chain 의 capability/identity 필터(`keeper_memory_llm_summary.ml:276-283`, Acc2)와 librarian Write gate 의 provider roster compile-coupling(`:49-52`, Acc1)이 실제 consolidation 을 0 merge 로 만들고 있음.
+- **memory_os consolidation `kind_mismatch` rejections (garnet 27->27, 0 merged)** — 2026-07-22 당시 개선 P4/P6 표면의 라이브 증거였다. 당시 memory-bank durable-summary chain 의 capability/identity 필터(`keeper_memory_llm_summary.ml:276-283`, Acc2)와 provider roster compile-coupling(`:49-52`, Acc1)에 대응한다. **2026-07-24 해당 lane 이 삭제되었으므로 이 관측을 현재 consolidation 경로의 live 원인으로 사용하지 않는다.**
 - **GLM SSE `malformed_delta_tool_call blank_id` → 70s wasted → auto-recoverable zombie** — overflow silent-fail 경로(개선 P1)와 **동일한 crash-threshold-bypass zombie class** 이나 trigger 는 다르다. overflow 는 non-total 디코드로, 이건 SSE delta 파싱 결함으로 각각 다른 지점에서 keeper 를 crash-threshold 아래로 유지한 채 무한/무의미 시간 소모를 만든다. 즉 "auto-recoverable 하지만 실질 진전 없음" 이라는 좀비 증상이 두 개의 다른 트리거에서 공통으로 나타난다.
 - **breaker #25536 (in-lane retry cap 3)** 이 이 SSE-parse 경로를 커버하는지는 **UNVERIFIED**. overflow 경로와 마찬가지로 SSE-parse 좀비가 in-lane retry cap 에 잡히는지 라이브로 확인되지 않았으므로, 개선 P1 backstop 설계 시 SSE-parse 좀비도 같은 fail-loud 게이트로 잡히는지 별도 검증이 필요하다.
 
@@ -242,9 +242,9 @@ flowchart TD
 
 1. **개선 P1 (correctness) — 별도 진행 중.** s5 overflow 디코드를 total/fail-loud + masc spec-number backstop. OAS 쪽에서 병렬로 수정 중이며(다른 세션/에이전트), masc-side spec-number backstop 은 follow-up 이다. `max_context` 는 이미 turn path telemetry 로 threaded(`keeper_agent_run.ml:418/516/853`)되어 있으므로 gate 화가 masc 단독으로 가능.
 2. **개선 P2 (reasoning-replay single typed capability, RFC-OAS-029 scope).** config-parse 시점 단일 typed reasoning-replay capability record + 두 replay vocabulary 통합 + raw `reasoning_source` identity-equality 를 explicit typed rotation policy 로 대체. 라이브 kimi-k2.6 incompatible_source=52 가 우선순위 근거.
-3. **개선 P3 / P4 (media + structured-output typed capabilities).** per-backend media 지원(개선 P3, `supports_document_input` 포함) + structured-output tier(개선 P4)를 runtime.toml 스펙 기반 typed capability 로. 세 소비자(HITL/compaction/memory-bank)를 단일 tiering 함수로.
+3. **개선 P3 / P4 (media + structured-output typed capabilities).** per-backend media 지원(개선 P3, `supports_document_input` 포함) + structured-output tier(개선 P4)를 runtime.toml 스펙 기반 typed capability 로. 남은 두 소비자(HITL/compaction)를 단일 tiering 함수로.
 4. **개선 P5 (guard).** transport dispatch identity 를 단일 `of_config`/url-build 에 가두고, masc turn path 상류로의 provider-identity 누출 부재를 assert 하는 boundary regression test 추가.
-5. **개선 P6 (typed field).** `supports_document_input` typed 필드 추가 + dead `is_direct_completion_provider` kind-match 를 capability predicate 로 교체 또는 제거.
+5. **개선 P6 (typed field).** `supports_document_input` typed 필드 추가. `is_direct_completion_provider` kind-match 는 memory-bank LLM summary lane 과 함께 삭제 완료했으며 대체하지 않는다.
 6. **개선 P7** 은 masc turn path 가 pre-send admission 을 채택하기 전까지 긴급 변경 불필요, OAS-pipeline-only 로 문서화.
 
 ---

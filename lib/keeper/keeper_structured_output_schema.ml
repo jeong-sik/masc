@@ -95,11 +95,6 @@ let consolidation_plan_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
-let memory_bank_summary_output_schema =
-  let fields = [ "summary", string_schema ] in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 (* Compaction plan codec. Only eligible source units cross the provider
    boundary. Each source-bound decision carries its own optional replacement
    summary, so application preserves source order and never relocates facts

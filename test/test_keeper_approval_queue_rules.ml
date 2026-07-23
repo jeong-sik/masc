@@ -579,9 +579,9 @@ let with_exact_status (entry : AQ.pending_approval) status =
           ; completed
           ])
   in
-  check int "operator recovery queues only two worker-ready entries" 2 (List.length ready);
-  check (list string) "operator recovery predicate preserves owner FIFO"
-    [ not_requested.id; pending.id ]
+  check int "operator recovery exposes only the FIFO head" 1 (List.length ready);
+  check (list string) "operator recovery cannot skip the FIFO head"
+    [ not_requested.id ]
     (List.map (fun (entry : AQ.pending_approval) -> entry.id) ready)
 ;;
 

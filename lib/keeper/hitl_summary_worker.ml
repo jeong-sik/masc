@@ -478,6 +478,13 @@ let settle_current (entry : pending_approval) ~reason ~cause =
     Ok ()
   | Some { exact_attempt = Exact_unbound; _ } ->
     mark_unbound_failure entry reason
+  | Some
+      { exact_attempt =
+          Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
+      ; _
+      } ->
+    record_outcome "exact_source_resolved";
+    Ok ()
   | Some { exact_attempt = Exact_bound binding; _ } ->
     quarantine_identity_result entry (exact_identity_of_binding binding) cause
 ;;

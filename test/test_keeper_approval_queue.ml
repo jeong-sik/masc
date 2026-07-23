@@ -663,11 +663,10 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
            ~keeper_name:"fifo-owner"
            [ second; first ]
        with
-       | [ oldest; newest ] ->
-         Alcotest.(check string) "oldest sequence first" first.id oldest.id;
-         Alcotest.(check string) "next sequence second" second.id newest.id
+       | [ oldest ] ->
+         Alcotest.(check string) "only oldest sequence is ready" first.id oldest.id
        | entries ->
-         Alcotest.failf "two same-owner entries expected, got %d" (List.length entries))
+         Alcotest.failf "one oldest same-owner entry expected, got %d" (List.length entries))
 ;;
 
 let test_different_owners_claim_in_parallel () =

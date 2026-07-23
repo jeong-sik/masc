@@ -489,7 +489,7 @@ let rec spawn_claimed_auto_judge_entry_with
            ()
        with
        | Ok () -> Ok Started
-       | Error reason -> fail_before_worker ~reason ~retryable:false
+       | Error reason -> fail_before_worker ~reason ~retryable:true
      with
      | Eio.Cancel.Cancelled _ as exn ->
        release_auto_judge entry;

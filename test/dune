@@ -1294,6 +1294,12 @@
   eio_main
   unix))
 
+; Provider-neutral Memory OS Librarian exact-output composition proof.
+(test
+ (name test_librarian_exact_output_conformance)
+ (modules test_librarian_exact_output_conformance)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
 ; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
 (test
  (name test_keeper_exact_execution_lease_guard)

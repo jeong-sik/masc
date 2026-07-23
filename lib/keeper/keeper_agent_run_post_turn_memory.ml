@@ -14,7 +14,6 @@ let run
   ~librarian_messages
   ~(memory_extraction_record : Keeper_run_prompt.memory_extraction_record)
   ~post_turn_t0
-  ~runtime_id
   ~inference_telemetry
   ?deliberation_execution
   ()
@@ -122,7 +121,6 @@ let run
       }
     in
     Keeper_librarian_runtime.run_best_effort
-      ~runtime_id
       ~keeper_id:meta.name
       librarian_input
   in

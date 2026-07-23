@@ -401,7 +401,6 @@ let finalize
            ~user_turn_record
            ~tool_calls_made:(actual_keeper_tool_names <> []))
       ~post_turn_t0
-      ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry
       ();
     Ok

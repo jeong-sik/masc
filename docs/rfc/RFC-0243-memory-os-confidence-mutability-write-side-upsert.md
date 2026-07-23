@@ -50,7 +50,7 @@ and failed to find one for each:
 The update-in-place machinery already exists in `Keeper_memory_os_gc.run_gc`
 (`lib/keeper/keeper_memory_os_gc.ml:76-94`: `read_facts_all → dedup → rewrite_facts_atomically`)
 but it too has **zero lib callers** — it is dead. The write path is blind
-append: `extract_and_append_with_provider` (`keeper_librarian_runtime.ml`)
+append: `extract_and_append_with_exact_output` (`keeper_librarian_runtime.ml`)
 calls `append_episode_bundle`, which fans out `List.iter append_fact`
 (`keeper_memory_os_io.ml:170`). A claim re-confirmed across N turns becomes N
 immortal rows, each frozen at its one-shot confidence.
@@ -114,7 +114,7 @@ and a race on `facts_path`.
 
 ### 2.4 Write path (`keeper_librarian_runtime.ml`)
 
-`extract_and_append_with_provider` now writes the episode log
+`extract_and_append_with_exact_output` now writes the episode log
 (`append_episode` + `append_event`, which retain the raw claims) and then upserts
 the facts via `merge_and_cap_facts ~merge:(reobserve_fact ~now)`. Because the
 episode log already records the claims, a fact-merge failure (logged and

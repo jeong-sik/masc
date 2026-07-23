@@ -66,7 +66,6 @@ module KeeperMemoryOs : sig
   val librarian_env_key : string
   val librarian_cadence_turns_env_key : string
   val librarian_max_messages_env_key : string
-  val librarian_max_tokens_env_key : string
   val librarian_runtime_id_env_key : string
   val librarian_global_slot_env_key : string
   val gc_env_key : string
@@ -77,7 +76,6 @@ module KeeperMemoryOs : sig
   val librarian_enabled_default : bool
   val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
-  val librarian_max_tokens_default : int
   val librarian_runtime_id_default : string option
   val librarian_global_slot_default : int
   val gc_enabled_default : bool
@@ -88,10 +86,6 @@ module KeeperMemoryOs : sig
   val librarian_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
-  val librarian_max_tokens : unit -> int
-  (** Output token cap for librarian extraction, applied as min with the
-      provider max_tokens. Default: 4096, floored to 1. *)
-
   val librarian_runtime_id : unit -> string option
   val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool

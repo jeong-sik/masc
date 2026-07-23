@@ -377,10 +377,6 @@ let memory_entries =
       Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";
     entry
-      ~default:(string_of_int Memory_os_defaults.librarian_max_tokens_default)
-      Memory_os_defaults.librarian_max_tokens_env_key
-      "Output token cap for librarian extraction (applied as min with provider max_tokens, floor 1)";
-    entry
       ~default:
         (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
       Memory_os_defaults.librarian_runtime_id_env_key

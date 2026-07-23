@@ -787,6 +787,47 @@ let test_librarian_rejects_invalid_lifetime () =
     ]
 ;;
 
+let test_librarian_accepts_nullable_claim_fields () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-nullable-claim-fields"
+    ; generation = 3
+    ; messages = [ text_message "nullable structured output" ]
+    }
+  in
+  let json =
+    `Assoc
+      [ "episode_summary", `String "nullable fields follow the domain schema"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Nullable claim metadata is accepted."
+                ; "category", `String "fact"
+                ; "source_turn", `Int 0
+                ; "source_tool_call_id", `Null
+                ; "claim_id", `Null
+                ; "claim_kind", `Null
+                ; "valid_for_days", `Null
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+  in
+  match Librarian.episode_of_json_result ~now:1_000_000.0 ~generation:3 inp json with
+  | Error error ->
+    Alcotest.failf
+      "schema-valid nullable fields were rejected: %s"
+      (Librarian.parse_error_to_string error)
+  | Ok episode ->
+    (match episode.Types.claims with
+     | [ claim ] ->
+       Alcotest.(check (option string)) "tool call id" None claim.source.tool_call_id;
+       Alcotest.(check (option string)) "claim id" None claim.claim_id;
+       Alcotest.(check (option (float 0.0001))) "validity" None claim.valid_until
+     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
+;;
+
 let test_librarian_accepts_wrapped_json_output () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-wrapped-json"
@@ -879,14 +920,14 @@ let test_librarian_runtime_override_env () =
        Alcotest.(check string)
          "empty override falls back"
          "keeper-runtime"
-         (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime");
+         (Runtime_resolution.runtime_id_for_librarian ~runtime_id:"keeper-runtime");
        Unix.putenv
          Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
          " runpod_mtp.qwen36-35b-a3b-mtp ";
        Alcotest.(check string)
          "override trims"
          "runpod_mtp.qwen36-35b-a3b-mtp"
-         (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
+         (Runtime_resolution.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
 ;;
 
 let memory_runtime_resolution_toml =
@@ -944,9 +985,6 @@ let test_memory_provider_configs_use_runtime_temperature () =
       let summary =
         Memory_summary.provider_for_summary runtime.Runtime.provider_config
       in
-      let librarian =
-        Librarian_runtime.provider_for_librarian runtime.Runtime.provider_config
-      in
       let consolidation =
         Consolidation_runtime.For_testing.provider_for_consolidation
           runtime.Runtime.provider_config
@@ -956,27 +994,9 @@ let test_memory_provider_configs_use_runtime_temperature () =
         (Some 1.0)
         summary.temperature;
       Alcotest.(check (option (float 0.0001)))
-        "librarian keeps runtime.toml temperature"
-        (Some 1.0)
-        librarian.temperature;
-      Alcotest.(check (option (float 0.0001)))
         "memory consolidation keeps runtime.toml temperature"
         (Some 1.0)
         consolidation.temperature)
-;;
-
-let test_librarian_provider_config_preserves_provider_admission () =
-  let projected max_concurrent_requests =
-    Librarian_runtime.provider_for_librarian
-      { (test_provider_cfg ()) with max_concurrent_requests }
-  in
-  List.iter
-    (fun expected ->
-       Alcotest.(check (option int))
-         "librarian projection preserves OAS provider admission"
-         expected
-         (projected expected).max_concurrent_requests)
-    [ None; Some 5 ]
 ;;
 
 let with_memory_os_env name value f =
@@ -1118,9 +1138,7 @@ let find_config_env env entries =
 (* Introspection-parity SSOT rows: one row per Memory OS knob pairing the
    exported env-key constant with a thunk exercising its compiled reader. A
    snapshot registry entry cannot be added to this list without a reader
-   existing (the phantom MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS
-   regression: registered + tested, zero readers, so setting it was a silent
-   no-op reported as source=env). *)
+   existing. *)
 let memory_os_knob_readers : (string * (unit -> unit)) list =
   [ ( Env_config.KeeperMemoryOs.recall_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.recall_enabled () : bool) )
@@ -1130,8 +1148,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
-  ; ( Env_config.KeeperMemoryOs.librarian_max_tokens_env_key
-    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_tokens () : int) )
   ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
     , fun () ->
         ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
@@ -1213,41 +1229,6 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
     | None -> Alcotest.fail "recall entry value missing")
 ;;
 
-let test_librarian_max_tokens_override_env () =
-  let env = Env_config.KeeperMemoryOs.librarian_max_tokens_env_key in
-  let default = Env_config.KeeperMemoryOs.librarian_max_tokens_default in
-  (* Exercise the cap through [provider_for_librarian] (the consuming site):
-     before the knob was wired to a reader, setting the env var was a silent
-     no-op while the config snapshot reported source=env. *)
-  let effective_cap () =
-    (Librarian_runtime.provider_for_librarian
-       (test_provider_cfg ()))
-      .Llm_provider.Provider_config.max_tokens
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv env "")
-    (fun () ->
-       Unix.putenv env "";
-       Alcotest.(check (option int))
-         "empty max tokens override falls back"
-         (Some default)
-         (effective_cap ());
-       Unix.putenv env "512";
-       Alcotest.(check (option int))
-         "max tokens override caps the librarian provider config"
-         (Some 512)
-         (effective_cap ());
-       Unix.putenv env "0";
-       Alcotest.(check int)
-         "non-positive max tokens override floors at 1"
-         1
-         (Env_config.KeeperMemoryOs.librarian_max_tokens ());
-       Unix.putenv env "bogus";
-       Alcotest.(check (option int))
-         "invalid max tokens override falls back"
-         (Some default)
-         (effective_cap ()))
-;;
 
 let test_librarian_preserves_admission_memory_text () =
   let inp : Librarian.input =
@@ -1532,390 +1513,6 @@ let json_episode_file_count ~keeper_id =
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.length
 ;;
-
-let test_librarian_runtime_appends_episode_bundle () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let keeper_id = "runtime-librarian-keeper" in
-        let captured = ref None in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages () =
-          captured := Some (config, messages);
-          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
-        in
-        let private_msg : Agent_sdk.Types.message =
-          { role = Agent_sdk.Types.Assistant
-          ; content =
-              [ Agent_sdk.Types.Text "visible durable fact"
-              ; Agent_sdk.Types.Thinking
-                  { signature = None; content = "hidden chain of thought" }
-              ; Agent_sdk.Types.ToolResult
-                  { tool_use_id = "call_runtime"
-                  ; content = "secret tool payload"
-                  ; outcome = Agent_sdk.Types.Tool_succeeded
-                  ; json = None
-                  ; content_blocks = None
-                  }
-              ]
-          ; name = None
-          ; tool_call_id = None
-          ; metadata = []
-          }
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime"
-          ; generation = 7
-          ; messages =
-              [ text_message "older message"
-              ; text_message "Please remember the runtime boundary."
-              ; private_msg
-              ]
-          }
-        in
-        (match
-           Librarian_runtime.extract_and_append_with_provider
-             ~complete
-             ~clock
-             ~sw
-             ~net
-             ~keeper_id
-             ~runtime_id:unconfigured_runtime_id
-             ~provider_cfg:(test_provider_cfg ())
-             inp
-         with
-         | Error msg -> Alcotest.fail msg
-         | Ok episode ->
-           Alcotest.(check string) "trace id" "trace-runtime" episode.Types.trace_id;
-           Alcotest.(check int) "generation" 7 episode.Types.generation;
-           Alcotest.(check int) "claim persisted in result" 1 (List.length episode.Types.claims));
-        (match !captured with
-         | None -> Alcotest.fail "expected fake provider to be called"
-         | Some (provider_cfg, messages) ->
-           Alcotest.(check (option bool))
-             "thinking disabled"
-             (Some false)
-             provider_cfg.Llm_provider.Provider_config.enable_thinking;
-           Alcotest.(check (option bool))
-             "thinking preservation disabled"
-             (Some false)
-             provider_cfg.Llm_provider.Provider_config.preserve_thinking;
-           (* The contract lives in the prompt and in
-              [Keeper_librarian.episode_of_json_result], not in a wire format.
-              Reattaching the schema here would resurrect a concrete failure:
-              it marks every claim field required with nullable types, so a
-              conforming provider emits ["claim_id": null], which
-              [optional_string_field_strict] rejects — dropping the whole
-              episode — while the prompt tells the model to omit the key. *)
-           Alcotest.(check bool)
-             "librarian requests no response format"
-             true
-             (match provider_cfg.response_format with
-              | Agent_sdk.Types.Off -> true
-              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
-           Alcotest.(check bool)
-             "librarian attaches no output schema"
-             true
-             (Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema);
-           Alcotest.(check int) "system+user prompt" 2 (List.length messages);
-           let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
-           Alcotest.(check bool)
-             "contains visible prompt"
-             true
-             (contains "visible durable fact" rendered_prompt);
-           Alcotest.(check bool)
-             "scrubs state text"
-             false
-             (contains "runtime secret sentinel" rendered_prompt);
-           Alcotest.(check bool)
-             "scrubs thinking"
-             false
-             (contains "hidden chain of thought" rendered_prompt);
-           Alcotest.(check bool)
-             "scrubs tool payload"
-             false
-             (contains "secret tool payload" rendered_prompt));
-        Alcotest.(check int)
-          "episode file persisted"
-          1
-          (json_episode_file_count ~keeper_id);
-        (match Memory_io.read_events_tail ~keeper_id ~n:1 with
-         | [ episode ] ->
-          Alcotest.(check string)
-            "event persisted"
-            "Strict librarian output should persist"
-            episode.Types.episode_summary
-         | events -> Alcotest.failf "expected one event, got %d" (List.length events));
-        match Memory_io.read_facts_tail ~keeper_id ~n:1 with
-        | [ fact ] ->
-          Alcotest.(check string)
-            "fact persisted"
-            "Strict librarian claim survives parsing"
-            fact.Types.claim
-        | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
-;;
-
-let test_librarian_runtime_falls_back_when_schema_unavailable () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let called = ref false in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          called := true;
-          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-invalid-schema-provider"
-          ; generation = 1
-          ; messages = [ text_message "Please remember schema validation." ]
-          }
-        in
-        match
-          Librarian_runtime.extract_with_provider_classified
-            ~complete
-            ~clock
-            ~sw
-            ~net
-            ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(invalid_schema_provider_cfg ())
-            ~generation:1
-            inp
-        with
-        | Ok _ ->
-          Alcotest.(check bool)
-            "complete called on the prompt-tier fallback path"
-            true
-            !called
-        | Error err ->
-          Alcotest.fail
-            (Printf.sprintf
-               "expected prompt-tier fallback to succeed, got %s"
-               (Librarian_runtime.extraction_error_to_string err)))))
-;;
-
-let test_librarian_runtime_requires_clock_for_provider_call () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock:_ ->
-        let keeper_id = "runtime-librarian-no-clock-keeper" in
-        let called = ref false in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          called := true;
-          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime-no-clock"
-          ; generation = 7
-          ; messages = [ text_message "Please remember the timeout boundary." ]
-          }
-        in
-        let generation_counter =
-          Filename.concat
-            (Memory_io.episodes_dir ~keeper_id)
-            (Printf.sprintf "%s.generation" inp.Librarian.trace_id)
-        in
-        (match
-           Librarian_runtime.extract_and_append_with_provider_classified
-             ~complete
-             ~sw
-             ~net
-             ~keeper_id
-             ~runtime_id:unconfigured_runtime_id
-             ~provider_cfg:(test_provider_cfg ())
-             inp
-         with
-         | Ok _ -> Alcotest.fail "expected missing clock to fail closed"
-         | Error err ->
-           Alcotest.(check string)
-             "explicit missing clock error"
-             Librarian_runtime.librarian_provider_clock_unavailable_error
-             (Librarian_runtime.extraction_error_to_string err));
-        Alcotest.(check bool) "provider not called without clock" false !called;
-        Alcotest.(check bool)
-          "generation counter not created without clock"
-          false
-          (Sys.file_exists generation_counter);
-        Alcotest.(check int)
-          "no event persisted"
-          0
-          (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
-        Alcotest.(check int)
-          "no fact persisted"
-          0
-          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
-;;
-
-let test_librarian_runtime_rejects_unstructured_fallback () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let keeper_id = "runtime-librarian-fallback-keeper" in
-        let calls = ref 0 in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          incr calls;
-          Ok (fake_response "not json, but keep this observation")
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime-fallback"
-          ; generation = 9
-          ; messages = [ text_message "Please remember the fallback path." ]
-          }
-        in
-        Alcotest.(check bool)
-          "production cadence gate is due before provider attempt"
-          true
-          (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id);
-        let fallback_result =
-          Librarian_runtime.extract_and_append_with_provider_classified
-            ~complete
-            ~clock
-            ~sw
-            ~net
-            ~keeper_id
-            ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(test_provider_cfg ())
-            inp
-        in
-        (match fallback_result with
-         | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
-         | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
-           Alcotest.(check int) "single provider attempt" 1 !calls;
-           Alcotest.(check bool)
-             "typed provider error preserves parser reason"
-             true
-             (contains
-                "librarian provider returned invalid structured JSON"
-                reason);
-           Alcotest.(check bool)
-             "typed provider error preserves JSON parser detail"
-             true
-             (contains "JSON parse error" reason);
-           Alcotest.(check bool)
-             "unparseable provider error enters cadence backoff path"
-             true
-             (Librarian_runtime.should_record_cadence_backoff_after_error err);
-           Librarian_runtime.cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-           Alcotest.(check bool)
-             "cadence attempt defers the next provider retry"
-             false
-             (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id)
-         | Error err ->
-           Alcotest.failf
-             "expected Provider_unparseable_response, got %s"
-             (Librarian_runtime.extraction_error_to_string err));
-        Alcotest.(check int)
-          "episode file not persisted"
-          0
-          (json_episode_file_count ~keeper_id);
-        Alcotest.(check int)
-          "event not persisted"
-          0
-          (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
-        Alcotest.(check int)
-          "fact not persisted"
-          0
-          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
-;;
-
-let test_librarian_invalid_output_does_not_write_facts () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let keeper_id = "runtime-librarian-fallback-upsert-keeper" in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime-fallback-upsert"
-          ; generation = 12
-          ; messages = [ text_message "Please remember repeated fallback shape." ]
-          }
-        in
-        let first_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          Ok (fake_response "first invalid librarian payload")
-        in
-        let second_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          Ok (fake_response "second invalid librarian payload with different text")
-        in
-        let run_once complete =
-          match
-            Librarian_runtime.extract_and_append_with_provider
-              ~complete
-              ~clock
-              ~sw
-              ~net
-              ~keeper_id
-              ~runtime_id:unconfigured_runtime_id
-              ~provider_cfg:(test_provider_cfg ())
-              inp
-          with
-          | Ok _ -> Alcotest.fail "unparseable provider output must not persist"
-          | Error msg -> msg
-        in
-        let first = run_once first_complete in
-        let second = run_once second_complete in
-        Alcotest.(check int)
-          "fallback events are not written"
-          0
-          (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
-        let facts = Memory_io.read_facts_all ~keeper_id in
-        Alcotest.(check int) "diagnostic facts are not written" 0 (List.length facts);
-        Alcotest.(check bool)
-          "first error keeps invalid-json reason"
-          true
-          (contains "invalid structured JSON" first);
-        Alcotest.(check bool)
-          "first error keeps JSON parser detail"
-          true
-          (contains "JSON parse error" first);
-        Alcotest.(check bool)
-          "second error keeps invalid-json reason"
-          true
-          (contains "invalid structured JSON" second);
-        Alcotest.(check bool)
-          "second error keeps JSON parser detail"
-          true
-          (contains "JSON parse error" second))))
-;;
-
-let test_librarian_runtime_reports_fact_upsert_failure () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      with_eio (fun ~sw ~net ~clock ->
-        let keeper_id = "runtime-librarian-keeper" in
-        Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o755;
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
-        in
-        let inp : Librarian.input =
-          { Librarian.trace_id = "trace-runtime-upsert-failure"
-          ; generation = 8
-          ; messages = [ text_message "Please remember the runtime boundary." ]
-          }
-        in
-        match
-          Librarian_runtime.extract_and_append_with_provider
-            ~complete
-            ~clock
-            ~sw
-            ~net
-            ~keeper_id
-            ~runtime_id:unconfigured_runtime_id
-            ~provider_cfg:(test_provider_cfg ())
-            inp
-        with
-        | Ok _ -> Alcotest.fail "expected fact upsert failure"
-        | Error msg ->
-          Alcotest.(check bool)
-            "fact upsert error returned to caller"
-            true
-            (contains "memory os fact upsert failed" msg);
-          Alcotest.(check int)
-            "episode file not published on fact failure"
-            0
-            (json_episode_file_count ~keeper_id);
-          Alcotest.(check int)
-            "event not published on fact failure"
-            0
-            (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))))
-;;
-
 
 let test_reference_time_is_observation_only () =
   let now = 1_000_000.0 in
@@ -2570,6 +2167,7 @@ let test_episode_gc_corrupt_store_fails_loud_and_deletes_nothing () =
    from its very first turn. Short-circuiting to "" hid the L1 nudge from
    exactly the keepers that had never written anything. *)
 let test_recall_context_empty_store_renders_gauge () =
+  with_prompt_registry (fun () ->
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
       Recall.render_context
@@ -2586,7 +2184,7 @@ let test_recall_context_empty_store_renders_gauge () =
     Alcotest.(check bool)
       "empty-store recall context carries the zero gauge"
       true
-      (contains ~needle:"facts 0/0 injected, episodes 0/0 injected" ctx))
+      (contains ~needle:"facts 0/0 injected, episodes 0/0 injected" ctx)))
 ;;
 
 (* render_if_enabled — the extra_system_context gate wired into
@@ -2619,6 +2217,7 @@ let test_render_if_enabled_explicit_off () =
 ;;
 
 let test_render_if_enabled_empty_store_still_injects_gauge () =
+  with_prompt_registry (fun () ->
   with_recall_env "true" (fun () ->
     with_temp_keepers_dir (fun keepers_dir ->
       match
@@ -2639,7 +2238,7 @@ let test_render_if_enabled_empty_store_still_injects_gauge () =
            let rec scan i =
              i + nlen <= hlen && (String.sub block i nlen = needle || scan (i + 1))
            in
-           scan 0)))
+           scan 0))))
 ;;
 
 let test_render_if_enabled_surfaces_prompt_render_failure () =
@@ -4949,6 +4548,10 @@ let () =
             `Quick
             test_librarian_rejects_invalid_lifetime
         ; Alcotest.test_case
+            "librarian accepts schema-valid nullable claim fields"
+            `Quick
+            test_librarian_accepts_nullable_claim_fields
+        ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
             test_librarian_accepts_wrapped_json_output
@@ -4989,10 +4592,6 @@ let () =
             `Quick
             test_memory_os_snapshot_registry_parity
         ; Alcotest.test_case
-            "librarian max tokens override env"
-            `Quick
-            test_librarian_max_tokens_override_env
-        ; Alcotest.test_case
             "librarian preserves admission memory text"
             `Quick
             test_librarian_preserves_admission_memory_text
@@ -5020,22 +4619,6 @@ let () =
             "memory llm summary does not invent clock requirement"
             `Quick
             test_memory_llm_summary_does_not_invent_clock_requirement
-        ; Alcotest.test_case
-            "librarian runtime appends episode bundle"
-            `Quick
-            test_librarian_runtime_appends_episode_bundle
-        ; Alcotest.test_case
-            "librarian runtime falls back when schema unavailable"
-            `Quick
-            test_librarian_runtime_falls_back_when_schema_unavailable
-        ; Alcotest.test_case
-            "librarian runtime requires clock for provider call"
-            `Quick
-            test_librarian_runtime_requires_clock_for_provider_call
-        ; Alcotest.test_case
-            "librarian runtime reports fact upsert failure"
-            `Quick
-            test_librarian_runtime_reports_fact_upsert_failure
         ; Alcotest.test_case
             "dashboard fact json omits deleted score keys (RFC-keeper-memory-panel-real-data §4a)"
             `Quick
@@ -5289,14 +4872,6 @@ let () =
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case
-            "unparseable output is rejected instead of persisted"
-            `Quick
-            test_librarian_runtime_rejects_unstructured_fallback
-        ; Alcotest.test_case
-            "unstructured fallback does not write facts"
-            `Quick
-            test_librarian_invalid_output_does_not_write_facts
-        ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick
             test_librarian_provider_slot_gate_caps_at_capacity
@@ -5308,10 +4883,6 @@ let () =
             "provider slot gate isolates keepers (P0-4)"
             `Quick
             test_librarian_provider_slot_gate_is_per_keeper
-        ; Alcotest.test_case
-            "provider projection preserves OAS admission"
-            `Quick
-            test_librarian_provider_config_preserves_provider_admission
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case

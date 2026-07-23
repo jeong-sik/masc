@@ -11,14 +11,14 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# memory-os librarian (post-turn episode extraction) requests provider-native
-# structured output, so it is routed independently of keeper chat to the native
-# Ollama /api/chat binding whose `format` schema path was live-verified. The
-# OpenAI-compatible /v1 path accepts response_format but can still return fenced
-# prose, so do not point this lane at [providers.ollama_cloud]. Override per
-# process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
-# keeper's runtime (legacy).
+# Legacy Memory OS summary/consolidation helpers still consume this runtime
+# role. Post-turn Librarian episode extraction does not: it resolves only the
+# OAS [runtime.exact_output_lanes.librarian_exact] lane.
 librarian = "ollama_cloud_native.minimax-m3-native-structured"
+# Existing deployments must opt in explicitly after the exact-output registry
+# is available:
+# [runtime.exact_output_lanes.librarian_exact]
+# slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 # Provider-native structured-output judges must not inherit the fleet chat
 # default when that default lacks schema support. Keep this lane explicit so
 # structured judgment lanes fail at config load on typo/unsupported

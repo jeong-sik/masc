@@ -169,7 +169,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
@@ -191,7 +190,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
@@ -259,18 +257,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Output token cap for librarian extraction, applied as min with the
-      provider max_tokens. Default: 4096, floored to 1.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_max_tokens () =
-    max
-      1
-      (get_int_logged
-         librarian_max_tokens_env_key
-         ~default:librarian_max_tokens_default)
   ;;
 
   (** Optional runtime id override for librarian extraction.

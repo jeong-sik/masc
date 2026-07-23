@@ -59,7 +59,7 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -67,7 +67,7 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -81,7 +81,7 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -143,7 +143,7 @@ val settle_result :
 val cancel_accepted_result :
   base_path:string ->
   string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   lease:lease ->
   cancellation:accepted_cancellation ->
@@ -154,7 +154,7 @@ val cancel_accepted_result :
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   cancellation:accepted_cancellation ->
   (settle_result, string) result
@@ -164,7 +164,7 @@ val cancel_pending_accepted_result :
 val transfer_pending_accepted_result :
   base_path:string ->
   string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   transfer:accepted_transfer ->
   (settle_result, string) result
@@ -174,7 +174,7 @@ val transfer_pending_accepted_result :
 val settle_pending_from_source_terminal_result :
   base_path:string ->
   string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   (settle_result, string) result

@@ -57,7 +57,7 @@ type no_compaction = State.no_compaction =
 type accepted_cancellation = State.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -65,7 +65,7 @@ type accepted_cancellation = State.accepted_cancellation =
 type accepted_transfer = State.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -79,7 +79,7 @@ type source_terminal_receipt = State.source_terminal_receipt =
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -832,7 +832,7 @@ let cancel_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~lease
       ~cancellation
@@ -850,7 +850,7 @@ let cancel_accepted_result
              owner
              ~after_commit
              (State.cancel_accepted
-                ~current_owner_generation
+                ~current_owner_nonce
                 ~settled_at
                 ~lease
                 ~cancellation)
@@ -870,7 +870,7 @@ let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~cancellation
       ()
@@ -887,7 +887,7 @@ let cancel_pending_accepted_result
              owner
              ~after_commit
              (State.cancel_pending_accepted
-                ~current_owner_generation
+                ~current_owner_nonce
                 ~settled_at
                 ~cancellation)
              state
@@ -906,7 +906,7 @@ let transfer_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~transfer
       ()
@@ -923,7 +923,7 @@ let transfer_pending_accepted_result
              owner
              ~after_commit
              (State.transfer_pending_accepted
-                ~current_owner_generation
+                ~current_owner_nonce
                 ~settled_at
                 ~transfer)
              state
@@ -942,7 +942,7 @@ let settle_pending_from_source_terminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~source_terminal
       ()
@@ -959,7 +959,7 @@ let settle_pending_from_source_terminal_result
              owner
              ~after_commit
              (State.settle_pending_from_source_terminal
-                ~current_owner_generation
+                ~current_owner_nonce
                 ~settled_at
                 ~source_terminal)
              state

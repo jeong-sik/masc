@@ -1921,7 +1921,7 @@ let handle_keeper_get_subroutes state req request reqd =
                `Assoc [
                  ("keeper", `String name);
                  ("trace_id", `String trace_id);
-                 ("generation", `Int m.runtime.generation);
+                 ("generation", `Int m.runtime.nonce);
                  ("total_entries", `Int total);
                  ("total_entries_scope", `String "tail");
                  ("total_entries_exact", `Bool false);

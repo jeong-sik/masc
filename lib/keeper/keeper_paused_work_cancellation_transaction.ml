@@ -1,6 +1,6 @@
 type request =
   { source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; lease : Keeper_registry_event_queue.lease
   ; operator_operation_id : string
   ; reason : string
@@ -10,7 +10,7 @@ type request =
 type pending_request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   ; settled_at : float
@@ -21,12 +21,12 @@ type failure =
   | Durable_meta_missing
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
-  | Durable_owner_generation_changed of
+  | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
   | Registry_owner_not_paused of Keeper_state_machine.phase
-  | Registry_owner_generation_changed of
+  | Registry_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -51,7 +51,7 @@ let failure_to_string = function
   | Durable_meta_missing -> "durable Keeper metadata is missing"
   | Durable_owner_not_paused -> "durable Keeper owner is not paused"
   | Durable_owner_dead_tombstone -> "durable Keeper owner is a terminal dead tombstone"
-  | Durable_owner_generation_changed { expected; actual } ->
+  | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "durable Keeper owner generation changed: expected %d, actual %d"
       expected
@@ -60,7 +60,7 @@ let failure_to_string = function
     Printf.sprintf
       "live Keeper owner is not paused: phase=%s"
       (Keeper_state_machine.phase_to_string phase)
-  | Registry_owner_generation_changed { expected; actual } ->
+  | Registry_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "live Keeper owner generation changed: expected %d, actual %d"
       expected
@@ -98,7 +98,7 @@ let cancellation_of_request (request : request) =
     Ok
       ({ source
        ; source_revision = request.source_revision
-       ; owner_generation = request.owner_generation
+       ; owner_nonce = request.owner_nonce
        ; operator_operation_id = request.operator_operation_id
        ; reason = request.reason
        }
@@ -111,7 +111,7 @@ let cancellation_of_pending_request (request : pending_request) :
   =
   { source = request.source
   ; source_revision = request.source_revision
-  ; owner_generation = request.owner_generation
+  ; owner_nonce = request.owner_nonce
   ; operator_operation_id = request.operator_operation_id
   ; reason = request.reason
   }
@@ -139,11 +139,11 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
      | Keeper_lifecycle_admission.Dead_tombstone ->
        Error Durable_owner_dead_tombstone
      | Keeper_lifecycle_admission.Paused _ ->
-       if meta.runtime.generation <> expected_generation
+       if meta.runtime.nonce <> expected_generation
        then
          Error
-           (Durable_owner_generation_changed
-              { expected = expected_generation; actual = meta.runtime.generation })
+           (Durable_owner_nonce_changed
+              { expected = expected_generation; actual = meta.runtime.nonce })
        else Ok meta)
 ;;
 
@@ -153,22 +153,22 @@ let validate_registry_owner ~base_path ~keeper_name ~expected_generation =
   | Some entry
     when (not entry.meta.paused) || entry.phase <> Keeper_state_machine.Paused ->
     Error (Registry_owner_not_paused entry.phase)
-  | Some entry when entry.meta.runtime.generation <> expected_generation ->
+  | Some entry when entry.meta.runtime.nonce <> expected_generation ->
     Error
-      (Registry_owner_generation_changed
+      (Registry_owner_nonce_changed
          { expected = expected_generation
-         ; actual = entry.meta.runtime.generation
+         ; actual = entry.meta.runtime.nonce
          })
   | Some _ -> Ok ()
 ;;
 
-let run config ~keeper_name ~owner_generation commit =
+let run config ~keeper_name ~owner_nonce commit =
   let base_path = config.Workspace.base_path in
   match
     validate_durable_owner
       config
       ~keeper_name
-      ~expected_generation:owner_generation
+      ~expected_generation:owner_nonce
   with
   | Error _ as error -> error
   | Ok durable_meta ->
@@ -176,18 +176,18 @@ let run config ~keeper_name ~owner_generation commit =
        validate_registry_owner
          ~base_path
          ~keeper_name
-         ~expected_generation:owner_generation
+         ~expected_generation:owner_nonce
      with
      | Error _ as error -> error
      | Ok () ->
-       commit durable_meta.runtime.generation
+       commit durable_meta.runtime.nonce
        |> Result.map_error (fun detail -> Queue_commit_failed detail))
 ;;
 
 let cancel_with_lifecycle
       config
       ~keeper_name
-      ~owner_generation
+      ~owner_nonce
       ~replay
       ~commit
   =
@@ -204,7 +204,7 @@ let cancel_with_lifecycle
       Keeper_lifecycle_reservation.acquire
         ~base_path
         ~keeper_name
-        ~expected_generation:owner_generation
+        ~expected_generation:owner_nonce
         ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
     with
     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
@@ -218,7 +218,7 @@ let cancel_with_lifecycle
          | Ok None ->
            finish
              token
-             (run config ~keeper_name ~owner_generation commit)
+             (run config ~keeper_name ~owner_nonce commit)
        with
        | exn ->
          let release = Keeper_lifecycle_reservation.release token in
@@ -249,16 +249,16 @@ let cancel config ~keeper_name request =
     cancel_with_lifecycle
       config
       ~keeper_name
-      ~owner_generation:request.owner_generation
+      ~owner_nonce:request.owner_nonce
       ~replay:
         (Keeper_event_queue_state.accepted_cancellation_replay
            request.lease
            cancellation)
-      ~commit:(fun current_owner_generation ->
+      ~commit:(fun current_owner_nonce ->
         Keeper_registry_event_queue.cancel_accepted_result
           ~base_path:config.Workspace.base_path
           keeper_name
-          ~current_owner_generation
+          ~current_owner_nonce
           ~settled_at:request.settled_at
           ~lease:request.lease
           ~cancellation)
@@ -269,14 +269,14 @@ let cancel_pending config ~keeper_name request =
   cancel_with_lifecycle
     config
     ~keeper_name
-    ~owner_generation:request.owner_generation
+    ~owner_nonce:request.owner_nonce
     ~replay:
       (Keeper_event_queue_state.accepted_pending_cancellation_replay cancellation)
-    ~commit:(fun current_owner_generation ->
+    ~commit:(fun current_owner_nonce ->
       Keeper_registry_event_queue.cancel_pending_accepted_result
         ~base_path:config.Workspace.base_path
         keeper_name
-        ~current_owner_generation
+        ~current_owner_nonce
         ~settled_at:request.settled_at
         ~cancellation)
 ;;

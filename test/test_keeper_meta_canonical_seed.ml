@@ -54,6 +54,48 @@ let test_meta_to_json_redacts_last_model_used () =
     Alcotest.(check bool) "legacy last_model_used key is redacted on write" false
       has_last_model_used
 
+(* Regression: the persisted identity-counter JSON key stays ["generation"]
+   even though the OCaml field is [nonce] (every other JSON surface — keeper
+   status, dashboard — already keeps this key while reading [rt.nonce]).
+   Renaming the wire key would load every pre-rename on-disk meta file as
+   [nonce = 0] and silently reset the fencing counter. The round-trip pins both
+   sides: a [generation:7] input must load its counter (not default to 0 when a
+   ["nonce"] key is absent) and re-serialise under ["generation"] (not
+   ["nonce"]). *)
+let test_persisted_identity_counter_key_is_generation () =
+  let input =
+    `Assoc
+      [ "name", `String "meta-wire-key"
+      ; "agent_name", `String "meta-wire-key"
+      ; "trace_id", `String "trace-wire-key"
+      ; "generation", `Int 7
+      ]
+  in
+  let meta =
+    match Keeper_meta_json.meta_of_json input with
+    | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+    | Ok meta -> meta
+  in
+  (match Keeper_meta_json.meta_to_json meta with
+   | `Assoc fields ->
+     Alcotest.(check bool)
+       "writer emits the generation key"
+       true
+       (List.mem_assoc "generation" fields);
+     Alcotest.(check bool)
+       "writer does not emit a nonce key"
+       false
+       (List.mem_assoc "nonce" fields);
+     (match List.assoc "generation" fields with
+      | `Int n ->
+        Alcotest.(check int)
+          "generation:7 round-trips (reader did not default the absent nonce key to 0)"
+          7
+          n
+      | _ -> Alcotest.fail "generation value must be a JSON integer")
+   | _ -> Alcotest.fail "meta_to_json must emit an object")
+;;
+
 let () =
   Alcotest.run
     "keeper_meta_canonical_seed"
@@ -66,6 +108,10 @@ let () =
             "meta_to_json redacts last_model_used"
             `Quick
             test_meta_to_json_redacts_last_model_used
+        ; Alcotest.test_case
+            "persisted identity counter key is generation"
+            `Quick
+            test_persisted_identity_counter_key_is_generation
         ] )
     ]
 ;;

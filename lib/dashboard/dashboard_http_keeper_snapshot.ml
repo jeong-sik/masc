@@ -230,7 +230,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let metrics =
         `Assoc [
-          ("generation", `Int m.runtime.generation);
+          ("generation", `Int m.runtime.nonce);
           ("total_turns", `Int m.runtime.usage.total_turns);
           ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
           ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);

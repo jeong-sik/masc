@@ -66,7 +66,7 @@ let handle_keeper_list ctx args : tool_result =
             | [] -> None
           in
           let metrics_overview =
-            summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
+            summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.nonce
           in
           (* RFC-0149 §3.1 — single typed read drives both the structured
              [memory_bank_summary] (consumed by [memory_bank] / counts
@@ -148,7 +148,7 @@ let handle_keeper_list ctx args : tool_result =
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
-              ("generation", `Int m.runtime.generation);
+              ("generation", `Int m.runtime.nonce);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("run_state", run_state_json);
               ("active_model", `String active_model);
@@ -271,7 +271,7 @@ let handle_keeper_trajectory ctx args : tool_result =
         let json = `Assoc [
           ("keeper", `String m.name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
-          ("generation", `Int m.runtime.generation);
+          ("generation", `Int m.runtime.nonce);
           ("total_entries", `Int total);
           ("showing", `Int (List.length recent));
           ("entries", `List json_list);
@@ -330,7 +330,7 @@ let handle_keeper_eval ctx args : tool_result =
         let json = `Assoc [
           ("keeper", `String m.name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
-          ("generation", `Int m.runtime.generation);
+          ("generation", `Int m.runtime.nonce);
           ("total_turns", `Int m.runtime.usage.total_turns);
           ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
           ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);

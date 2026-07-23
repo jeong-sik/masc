@@ -1044,6 +1044,19 @@ let decide ?cycle_grant ~keeper_always_allow request =
 ;;
 
 module For_testing = struct
+  type exact_completion =
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    summary:Keeper_approval_queue.hitl_context_summary ->
+    ( Keeper_approval_queue.exact_attempt_transition
+    , Keeper_approval_queue.exact_attempt_error )
+      result
+
   let auto_judge_entry_ready = auto_judge_entry_ready
 
   let ready_auto_judges_for_owner ~base_path ~keeper_name entries =

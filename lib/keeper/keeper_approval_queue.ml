@@ -531,7 +531,10 @@ let required_string_list ~surface field fields =
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
 ;;
 
-let exact_attempt_identity_matches left right =
+let exact_attempt_identity_matches
+      (left : exact_attempt_binding)
+      (right : exact_attempt_binding)
+  =
   String.equal left.approval_id right.approval_id
   && String.equal left.input_hash right.input_hash
   && Int.equal left.sequence right.sequence

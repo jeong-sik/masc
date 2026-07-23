@@ -1788,6 +1788,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        terminalize_released
          "release-flow-execution-failed"
          AQ.Exact_flow_execution_failed;
+       let quarantine_id, quarantine_identity = prepare "quarantine" in
        check_exact_update
          "bind quarantine fixture"
          true

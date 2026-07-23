@@ -720,7 +720,7 @@ let test_manual_resolution_race_is_conclusive () =
        install_queue base_path;
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
-       let in_flight_entry = ref None in
+       let in_flight_entry : Q.pending_approval option ref = ref None in
        let server =
          F.start_server
            ~on_request_before_reply:(fun () ->

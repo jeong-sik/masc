@@ -158,7 +158,7 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   loop 1 String_set.empty admitted_by_id [] lanes
 ;;
 
-let rec same_slot_ids admitted_slots declared_slot_ids =
+let rec same_slot_ids (admitted_slots : admitted_slot list) declared_slot_ids =
   match admitted_slots, declared_slot_ids with
   | [], [] -> true
   | admitted :: admitted_rest, declared :: declared_rest ->

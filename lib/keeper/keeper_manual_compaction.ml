@@ -196,8 +196,16 @@ let prepare_with ~prepare_compaction ~config ~meta =
       ~projection_request )
 ;;
 
-let prepare =
-  prepare_with ~prepare_compaction:Keeper_context_runtime.prepare_compaction
+let prepare ~config ~meta =
+  prepare_with
+    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+      Keeper_context_runtime.prepare_compaction
+        ~base_dir
+        ~meta
+        ~trigger
+        ~projection_request)
+    ~config
+    ~meta
 ;;
 
 let no_compaction_after_prepared_cancellation prepared =

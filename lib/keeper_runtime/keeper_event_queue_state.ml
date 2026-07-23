@@ -217,7 +217,11 @@ let leases state = state.leases
 let last_settlement state = state.last_settlement
 let transition_outbox state = state.transition_outbox
 let accepted_transfer_projections state = state.accepted_transfer_projections
-let exact_execution_binding state = List.hd_opt state.exact_execution_bindings
+let exact_execution_binding state =
+  match state.exact_execution_bindings with
+  | [] -> None
+  | binding :: _ -> Some binding
+;;
 let lease_kind (lease : lease) = lease.kind
 let active_lease state =
   match state.leases with
